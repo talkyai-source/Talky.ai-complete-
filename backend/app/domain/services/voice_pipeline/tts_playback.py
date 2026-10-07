@@ -465,6 +465,13 @@ class TtsPlayback:
                             await websocket.send_json({"type": "tts_interrupted", "reason": "barge_in"})
                         except Exception as _exc:
                             logger.debug("tts_interrupted WS send failed: %s", _exc)
+                    # Release the voice provider's stream and concurrency slot,
+                    # as the stall and retry exits above already do (stability
+                    # audit 2026-10-02) -- after the caller is already silenced.
+                    try:
+                        await _tts_iter.aclose()
+                    except Exception:  # noqa: BLE001
+                        pass
                     break
                 if first_chunk:
                     if track_latency:

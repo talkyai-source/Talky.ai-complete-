@@ -123,7 +123,7 @@ function DetailRow({
                         type="button"
                         onClick={() => { setDraft(detail.value ?? ""); setEditing(true); }}
                         aria-label={`Edit ${humanise(detail.field_key)}`}
-                        className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+                        className="shrink-0 rounded p-1.5 -m-1.5 text-muted-foreground transition-colors hover:text-foreground"
                     >
                         <Pencil className="h-3.5 w-3.5" />
                     </button>

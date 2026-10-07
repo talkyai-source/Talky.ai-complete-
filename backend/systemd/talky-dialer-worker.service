@@ -29,5 +29,15 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=talky-dialer
 
+# Resources (core-infra review 2026-10-07). Memory limits only catch a
+# runaway leak before it pushes the whole host, and live calls, into swap.
+# Postgres pool: an explicit share of max_connections=100. Budget:
+# API 20 + dialer 10 + voice 10 + reminder 3 = 43 (was up to 20 each).
+# This service: ~40-60 MB in normal use.
+MemoryHigh=512M
+MemoryMax=768M
+Environment=PG_POOL_MIN_SIZE=1
+Environment=PG_POOL_MAX_SIZE=10
+
 [Install]
 WantedBy=multi-user.target

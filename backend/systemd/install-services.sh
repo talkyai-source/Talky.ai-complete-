@@ -25,6 +25,11 @@ for unit in "$SCRIPT_DIR"/*.service "$SCRIPT_DIR"/*.target "$SCRIPT_DIR"/*.timer
   ln -sf "$unit" "$SYSTEMD_DIR/$name"
 done
 
+# The compatibility definition keeps old symlinks resolvable during checkout.
+# Disable the previous timer after linking it, before reloading definitions.
+# Only the service's own loop will refresh runtime evidence after this release.
+systemctl disable --now talky-trunk-status.timer
+
 # 2. Reload systemd
 echo ""
 echo "  Reloading systemd daemon..."
@@ -32,17 +37,21 @@ systemctl daemon-reload
 
 # 3. Enable all services
 #
-# Every unit symlinked in step 1 must be enabled here, or it is present on disk
+# Every active unit symlinked in step 1 must be enabled here, or it is present on disk
 # but dead after a reboot — which is indistinguishable from "still missing" to
 # anyone who runs this installer and moves on.
 #
-# Two deliberate exceptions, both driven by something else rather than by boot:
+# Deliberate exceptions:
+#   * talky-trunk-status.timer — retained only for upgrade compatibility and
+#     disabled above; the long-running service replaces it.
 #   * talky-migrate.service — oneshot, started explicitly by deploy_to_server.sh
 #     before the app restarts. Migrations must never run just because the
 #     machine booted. (See the unit's own header.)
-#   * talky-cleanup.service / talky-healthwatch.service / talky-trunk-status.service / talky-db-backup.service
+#   * talky-cleanup.service / talky-healthwatch.service / talky-db-backup.service
 #     / talky-inbound-synthetic.service — oneshots activated by their .timer,
 #     which IS enabled below.
+#   * talky-trunk-status.service — long-running loop since 2026-10-07 (its
+#     15-second timer was retired), enabled directly.
 echo "  Enabling services..."
 systemctl enable talky-api.service
 systemctl enable talky-voice-worker.service
@@ -51,7 +60,7 @@ systemctl enable talky-reminder-worker.service
 systemctl enable talky-voice-gateway.service   # C++ media gateway; see the unit's header
 systemctl enable talky-cleanup.timer   # activates talky-cleanup.service nightly
 systemctl enable talky-healthwatch.timer   # activates talky-healthwatch.service every 2 min
-systemctl enable talky-trunk-status.timer  # refreshes runtime SIP evidence every 15 sec
+systemctl enable talky-trunk-status.service  # refreshes runtime SIP evidence every 10 sec (loop)
 systemctl enable talky-inbound-synthetic.timer  # hourly carrier-hairpin proof
 systemctl enable talky-db-backup.timer  # nightly verified pg_dump (deploy/db-backup.sh)
 systemctl enable talky.target

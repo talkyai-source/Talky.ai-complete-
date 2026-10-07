@@ -103,8 +103,8 @@ test("Save is disabled until a setting changes, then sends only the diff", async
 
 test("clearing the callback campaign sends clear_callback_campaign", async () => {
     const calls = renderView();
-    // Custom listbox Select: open via its trigger button, then pick the option.
-    fireEvent.click(screen.getByRole("button", { name: "Salesforce callback campaign" }));
+    // Custom listbox Select: open via its combobox trigger, then pick the option.
+    fireEvent.click(screen.getByRole("combobox", { name: "Salesforce callback campaign" }));
     fireEvent.click(await screen.findByRole("option", { name: "— Not set —" }));
     fireEvent.click(screen.getByTestId("salesforce-save"));
     await waitFor(() => assert.equal(calls.save.length, 1));

@@ -239,11 +239,11 @@ def test_deploy_builds_tests_and_restarts_exact_gateway_before_backend():
     assert "VOICE_GATEWAY_BUILD_SHA" in gateway_http
 
 
-def test_trunk_status_one_shot_cannot_abort_an_otherwise_healthy_deploy():
+def test_trunk_status_restart_cannot_abort_an_otherwise_healthy_deploy():
     deploy = (ROOT / "deploy_to_server.sh").read_text(encoding="utf-8")
 
-    assert "if ! sudo systemctl start talky-trunk-status.service; then" in deploy
-    assert "timer remains active and will retry" in deploy
+    assert "if ! sudo systemctl restart talky-trunk-status.service; then" in deploy
+    assert "Restart=always will keep retrying" in deploy
 
 
 def test_drain_manifest_binds_candidate_external_state_and_is_single_use(tmp_path):

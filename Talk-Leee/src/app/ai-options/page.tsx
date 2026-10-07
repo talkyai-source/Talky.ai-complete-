@@ -1,6 +1,7 @@
 "use client";
 
 import { RealtimeControls } from "@/components/realtime/ai-options-controls";
+import { Select } from "@/components/ui/select";
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { ApplyToCampaignsModal } from "@/components/campaigns/apply-to-campaigns-modal";
@@ -435,6 +436,9 @@ function AIOptionsEditor({ scope }: { scope: string }) {
     const sttEngineInfo = sttEngines.find((e) => e.id === config?.stt_engine);
     const ttsModelInfo = ttsModelsForSelectedProvider.find((model) => model.id === config?.tts_model);
     const selectCls = "w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm text-foreground outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40";
+    // Same sizing on the shared Select's trigger: h-auto lets py-2.5 set the
+    // height like the old native control; pr-9 keeps text clear of the chevron.
+    const sharedSelectCls = `${selectCls} h-auto pr-9`;
 
     // Compact Save button — rendered in a card header's `right` slot (top-right
     // of the Test LLM card in cascaded mode, beside the model badge in realtime
@@ -554,26 +558,27 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                         <div className="grid gap-5 lg:grid-cols-[1fr_auto]">
                             <div className="space-y-3">
                                 <label htmlFor="ai-options-llm-model" className="block text-sm font-medium text-muted-foreground">Model</label>
-                                <select
+                                <Select
                                     id="ai-options-llm-model"
+                                    ariaLabel="Model"
                                     value={config.llm_model}
-                                    onChange={(e) => {
-                                        const picked = providers?.llm.models.find((m) => m.id === e.target.value);
-                                        setConfig({ ...config, llm_model: e.target.value, llm_provider: (picked?.provider as typeof config.llm_provider) || config.llm_provider });
+                                    onChange={(next) => {
+                                        const picked = providers?.llm.models.find((m) => m.id === next);
+                                        setConfig({ ...config, llm_model: next, llm_provider: (picked?.provider as typeof config.llm_provider) || config.llm_provider });
                                     }}
-                                    aria-invalid={llmModelUnavailable}
-                                    aria-describedby={llmModelUnavailable ? "ai-options-llm-model-warning" : undefined}
-                                    className={selectCls}
+                                    ariaInvalid={llmModelUnavailable}
+                                    ariaDescribedBy={llmModelUnavailable ? "ai-options-llm-model-warning" : undefined}
+                                    selectClassName={sharedSelectCls}
                                 >
                                     {llmModelUnavailable && (
                                         <option value={config.llm_model} disabled>
-                                            [{config.llm_provider}] {config.llm_model} (currently unavailable)
+                                            {`[${config.llm_provider}] ${config.llm_model} (currently unavailable)`}
                                         </option>
                                     )}
                                     {providers?.llm.models.map((model) => (
                                         <option key={model.id} value={model.id}>{model.provider ? `[${model.provider}] ${model.name}` : model.name}</option>
                                     ))}
-                                </select>
+                                </Select>
                                 {llmModelUnavailable && (
                                     <div id="ai-options-llm-model-warning" role="status" className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
                                         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
@@ -674,17 +679,18 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                         <SectionHeader icon={<Mic className="h-5 w-5" />} title="Speech-to-Text" subtitle="The engine that hears the caller" />
                         <div className="space-y-3">
                             <label htmlFor="ai-options-stt-engine" className="block text-sm font-medium text-muted-foreground">Engine</label>
-                            <select
+                            <Select
                                 id="ai-options-stt-engine"
+                                ariaLabel="Engine"
                                 value={config.stt_engine}
-                                onChange={(e) => setConfig({ ...config, stt_engine: e.target.value })}
-                                className={selectCls}
+                                onChange={(next) => setConfig({ ...config, stt_engine: next })}
+                                selectClassName={sharedSelectCls}
                             >
                                 {sttEngines.length === 0 && <option value={config.stt_engine}>{config.stt_engine}</option>}
                                 {sttEngines.map((eng) => (
-                                    <option key={eng.id} value={eng.id}>{eng.name}{eng.is_preview ? " (beta)" : ""}</option>
+                                    <option key={eng.id} value={eng.id}>{`${eng.name}${eng.is_preview ? " (beta)" : ""}`}</option>
                                 ))}
-                            </select>
+                            </Select>
                             {sttEngineInfo && (
                                 <div className="rounded-lg border border-border bg-muted/40 p-3">
                                     <p className="text-sm text-foreground">{sttEngineInfo.description}</p>
@@ -720,12 +726,12 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                         <div className={`mb-4 grid gap-3 ${showAccentFilter ? "sm:grid-cols-2" : ""}`}>
                             <div>
                                 <label htmlFor="tts-model" className="mb-1.5 block text-sm font-medium text-muted-foreground">TTS Model</label>
-                                <select id="tts-model" value={config.tts_model} onChange={(e) => setConfig({ ...config, tts_model: e.target.value })} className={selectCls}>
+                                <Select id="tts-model" ariaLabel="TTS model" value={config.tts_model} onChange={(next) => setConfig({ ...config, tts_model: next })} selectClassName={sharedSelectCls}>
                                     {!ttsModelsForSelectedProvider.some((model) => model.id === config.tts_model) && (
                                         <option value={config.tts_model}>{config.tts_model} (currently unavailable)</option>
                                     )}
                                     {ttsModelsForSelectedProvider.map((model) => (<option key={model.id} value={model.id}>{model.name}</option>))}
-                                </select>
+                                </Select>
                             </div>
                             {showAccentFilter && (
                                 <div>
@@ -862,7 +868,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                             const eagerExplicit = "stt_eager_eot_threshold" in tuning;
                             const minConf = tuning.turn_0_min_confidence;
                             const minChars = tuning.turn_0_min_alpha_chars;
-                            const resetLink = "text-[11px] text-muted-foreground underline hover:text-foreground";
+                            const resetLink = "inline-block px-1 py-1 -mx-1 -my-1 text-[11px] text-muted-foreground underline hover:text-foreground";
                             const rangeCls = "mt-1 w-full accent-emerald-500";
                             const numCls = "mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground";
                             return (
@@ -883,7 +889,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                                         <div className="flex items-center justify-between text-xs"><span className="font-medium text-foreground">Eager-mode threshold <span className="ml-1 text-muted-foreground">default 0.7</span></span><span className="font-mono text-emerald-500">{!eagerExplicit ? "—" : eager === null ? "disabled" : (eager as number).toFixed(2)}</span></div>
                                         <input aria-label="Flux eager threshold" type="range" min={0.3} max={0.9} step={0.05} value={(eager ?? 0.7) as number} onChange={(e) => updateVoiceTuningField("stt_eager_eot_threshold", parseFloat(e.target.value))} disabled={eager === null} className={`${rangeCls} disabled:opacity-40`} />
                                         <div className="mt-1 flex flex-wrap items-center gap-3">
-                                            <label className="flex items-center gap-1 text-[11px] text-muted-foreground"><input type="checkbox" checked={eager === null} onChange={(e) => updateVoiceTuningField("stt_eager_eot_threshold", e.target.checked ? null : 0.7)} className="accent-emerald-500" />Disable eager mode</label>
+                                            <label className="flex cursor-pointer items-center gap-1 px-1 py-1 -mx-1 -my-1 text-[11px] text-muted-foreground"><input type="checkbox" checked={eager === null} onChange={(e) => updateVoiceTuningField("stt_eager_eot_threshold", e.target.checked ? null : 0.7)} className="accent-emerald-500" />Disable eager mode</label>
                                             {eagerExplicit && <button type="button" onClick={() => resetVoiceTuningField("stt_eager_eot_threshold")} className={resetLink}>Reset to default</button>}
                                         </div>
                                     </div>

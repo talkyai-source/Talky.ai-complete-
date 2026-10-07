@@ -16,6 +16,7 @@ class LLMProvider(str, Enum):
     GEMINI = "gemini"
     CEREBRAS = "cerebras"
     OPENAI = "openai"
+    DEEPSEEK = "deepseek"
 
 
 class STTProvider(str, Enum):
@@ -602,6 +603,26 @@ OPENAI_MODELS = [
     ),
 ]
 
+# DeepSeek V4.1 Flash, on DEEPSEEK_API_KEY (owner request 2026-10-06).
+# Verified on the production key (GET /models) and measured from the prod
+# host: see app/infrastructure/llm/deepseek.py.
+DEEPSEEK_MODELS = [
+    ModelInfo(
+        id="deepseek-flash",
+        name="DeepSeek V4.1 Flash",
+        description=(
+            "DeepSeek's fast V4.1 Flash model, run with thinking off. Measured "
+            "from the prod host on 2026-10-06: first text in 446-613 ms on a "
+            "short prompt and 526-771 ms on a prompt the size of a live call."
+        ),
+        speed="~0.45-0.77 s to first text (measured)",
+        price="from $0.15 in / $0.60 out per 1M tokens",
+        context_window=1_000_000,
+        is_preview=False,
+        provider="deepseek",
+    ),
+]
+
 # Hidden, not forbidden — same reasoning as GROQ_MODELS_HIDDEN above.
 CEREBRAS_MODELS_HIDDEN = [
     "gemma-4-31b",   # p95 1133ms, worst turn 1671ms — too erratic for voice
@@ -614,6 +635,7 @@ def validate_traditional_llm_selection(provider: str, model: str) -> None:
     provider = getattr(provider, "value", provider)
     models_by_provider = {
         "openai": [item.id for item in OPENAI_MODELS],
+        "deepseek": [item.id for item in DEEPSEEK_MODELS],
         "groq": [item.id for item in GROQ_MODELS] + GROQ_MODELS_HIDDEN,
         "gemini": [item.id for item in GEMINI_MODELS],
         "cerebras": [item.id for item in CEREBRAS_MODELS] + CEREBRAS_MODELS_HIDDEN,

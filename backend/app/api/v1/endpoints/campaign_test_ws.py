@@ -806,6 +806,27 @@ async def campaign_test_websocket(
                 getattr(getattr(voice_session, "call_session", None), "knowledge_mode", None),
             )
 
+            # ── Warm the model's prompt cache, as a phone call's prewarm does.
+            #    This endpoint skips prewarm, so every test's first turn ran
+            #    on a cold cache: 2026-10-01 GPT-6 Luna needed 8.5 s cold and
+            #    0.7-1.3 s warm, and the first turn failed over to the backup.
+            #    Background and fail-soft: a warm-up must never stop a test.
+            if not is_realtime and getattr(voice_session, "llm_provider", None) is not None:
+                async def _warm_test_llm():
+                    try:
+                        from app.domain.services.telephony.modes.agent_first import (
+                            warm_llm_stream,
+                        )
+
+                        await warm_llm_stream(voice_session)
+                    except Exception as _warm_exc:  # noqa: BLE001
+                        logger.info(
+                            "campaign_test_llm_warm_failed call=%s err=%s",
+                            str(call_id)[:8], _warm_exc,
+                        )
+
+                asyncio.create_task(_warm_test_llm())
+
             # Rates come off the gateway AFTER create — realtime forces 8 kHz.
             out_rate = getattr(gateway, "_sample_rate", config.gateway_sample_rate)
             in_rate = getattr(gateway, "_input_sample_rate", out_rate)

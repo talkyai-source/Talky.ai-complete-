@@ -21,6 +21,7 @@ import {
     LeadTypeSelect,
     LeadAccentIcon,
 } from "@/components/calls/call-history-workflow-controls";
+import { Select } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { getRecordingCapabilities } from "@/lib/media-permissions";
 import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
@@ -359,7 +360,10 @@ function CallRow({
                 `overflow-x-auto` ancestor (in CampaignSection) scrolls the
                 header and every row together — no per-row scroll container,
                 no scroll-sync JS. */}
-            <div data-call-grid="row" className={`hidden ${DESKTOP_CALL_MIN_WIDTH} md:grid ${DESKTOP_CALL_GRID} items-center gap-2 rounded-xl border border-border bg-background px-3 py-3`}>
+            {/* pr-14 (not px-3): keeps the Actions column's buttons out of the
+                fixed chat launcher's lane at the bottom-right of the viewport
+                (Group C, 2026-10). The header carries the same inset. */}
+            <div data-call-grid="row" className={`hidden ${DESKTOP_CALL_MIN_WIDTH} md:grid ${DESKTOP_CALL_GRID} items-center gap-2 rounded-xl border border-border bg-background pl-3 pr-14 py-3`}>
                 <div className="flex min-w-0 flex-col gap-1.5">
                     <div className="flex min-w-0 items-center gap-2">
                         <LeadAccentIcon leadType={workflow.leadType}>{getStatusIcon(call.status)}</LeadAccentIcon>
@@ -806,8 +810,11 @@ function CampaignSection({
                             rows list's own vertical scroll and needs no `position:
                             sticky` to stay visible — it only ever scrolls horizontally,
                             together with the rows, via this shared ancestor. */}
-                        <div className="mt-4 overflow-x-auto">
-                            <div ref={headerRef} data-call-grid="header" className={`hidden ${DESKTOP_CALL_MIN_WIDTH} md:grid ${DESKTOP_CALL_GRID} gap-2 px-3 pb-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap`}>
+                        {/* mr-5: ends the scroll viewport left of the fixed chat
+                            launcher's lane, so no cell is ever tappable under the
+                            launcher at any horizontal scroll position (Group C). */}
+                        <div className="mt-4 mr-5 overflow-x-auto">
+                            <div ref={headerRef} data-call-grid="header" className={`hidden ${DESKTOP_CALL_MIN_WIDTH} md:grid ${DESKTOP_CALL_GRID} gap-2 pl-3 pr-14 pb-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap`}>
                                 <div>Phone <span className="text-[10px] font-medium normal-case tracking-normal">/ Duration</span></div>
                                 <div>Lead type</div>
                                 <div>Outcome</div>
@@ -1013,25 +1020,29 @@ export default function CallsPage() {
                             ))}
                         </div>
                         <label htmlFor="call-history-did-filter" className="sr-only">Filter calls by DID</label>
-                        <select
+                        <Select
                             id="call-history-did-filter"
+                            ariaLabel="Filter calls by DID"
+                            fitLongestOption
                             value={selectedDid ?? ""}
-                            onChange={(e) => { setSelectedDid(e.target.value || undefined); setPage(1); }}
-                            className="rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
+                            onChange={(next) => { setSelectedDid(next || undefined); setPage(1); }}
+                            selectClassName="h-auto rounded-lg px-3 py-2 pr-9 text-xs font-semibold"
                         >
                             <option value="">All DIDs</option>
                             {didOptions.map((did) => <option key={did} value={did}>{did}</option>)}
-                        </select>
+                        </Select>
                         <label htmlFor="call-history-campaign-filter" className="sr-only">Filter calls by inbound campaign</label>
-                        <select
+                        <Select
                             id="call-history-campaign-filter"
+                            ariaLabel="Filter calls by inbound campaign"
+                            fitLongestOption
                             value={inboundCampaignId ?? ""}
-                            onChange={(e) => { setInboundCampaignId(e.target.value || undefined); setPage(1); }}
-                            className="rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
+                            onChange={(next) => { setInboundCampaignId(next || undefined); setPage(1); }}
+                            selectClassName="h-auto rounded-lg px-3 py-2 pr-9 text-xs font-semibold"
                         >
                             <option value="">All campaigns</option>
                             {campaignOptions.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}
-                        </select>
+                        </Select>
                         </div>
                     </div>
 

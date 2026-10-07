@@ -53,7 +53,7 @@ export function BillingInvoiceList() {
           <div className="overflow-x-auto"><table className="min-w-full text-sm"><caption className="sr-only">Recent saved invoice amounts and status</caption>
             <thead><tr className="border-b text-left"><th scope="col" className="p-3">Invoice</th><th scope="col" className="p-3">Period</th><th scope="col" className="p-3">Invoice total</th><th scope="col" className="p-3">Paid</th><th scope="col" className="p-3">Remaining</th><th scope="col" className="p-3">Status</th></tr></thead>
             <tbody>{query.data?.map((invoice) => <tr key={invoice.id} className="border-b">
-              <td className="p-3"><Link className="font-semibold underline" href={`/billing/invoices/${invoice.id}`}>{invoice.invoice_number ?? invoice.stripe_invoice_id ?? invoice.id}</Link></td>
+              <td className="p-3"><Link className="inline-block py-1 -my-1 font-semibold underline" href={`/billing/invoices/${invoice.id}`}>{invoice.invoice_number ?? invoice.stripe_invoice_id ?? invoice.id}</Link></td>
               <td className="p-3">{invoiceDate(invoice.period_start)} – {invoiceDate(invoice.period_end)}</td>
               <td className="p-3">{formatMinorMoney(invoice.total, invoice.currency, invoice.currency_exponent)}</td>
               <td className="p-3">{formatMinorMoney(invoice.amount_paid, invoice.currency, invoice.currency_exponent)}</td>

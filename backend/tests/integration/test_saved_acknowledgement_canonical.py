@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 import os
+from pathlib import Path
 import re
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -15,6 +16,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import asyncpg
+from alembic.script import ScriptDirectory
 import httpx
 import pytest
 import pytest_asyncio
@@ -52,7 +54,8 @@ async def canonical(monkeypatch):
     try:
         async with pool.acquire() as conn:
             assert not await conn.fetchval("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user")
-            assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0062_saved_acknowledgement"
+            expected_head = ScriptDirectory(str(Path(__file__).resolve().parents[2] / "Alembic")).get_current_head()
+            assert await conn.fetchval("SELECT version_num FROM alembic_version") == expected_head
             assert not await conn.fetchval("SELECT pg_has_role(current_user,relowner,'MEMBER') FROM pg_class WHERE oid='assistant_action_resolutions'::regclass")
         postgres_adapter._TABLE_COLUMN_TYPES_CACHE.clear()
         monkeypatch.setattr(postgres_adapter, "_DATABASE_URL", dsn)

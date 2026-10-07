@@ -364,7 +364,15 @@ function TenantTable({
     onSuspend: (tenant: Tenant) => void;
     onResume: (tenant: Tenant) => void;
 }) {
-    const gridCols = "md:grid-cols-[minmax(0,1fr)_170px_150px_140px_200px]";
+    // One grid at every size (campaigns-table pattern, see
+    // campaign-performance-table.tsx): a 10rem floor on the flexible name
+    // column so tenant names can never be crushed to zero width. Tracks
+    // 10rem (160px) + 130px + 120px + 120px + 200px = 730px, + 4 gap-2
+    // gutters (32px) + the row's px-4 inset (32px) = 794px = 49.625rem.
+    // Narrower viewports scroll the grid sideways inside the card instead
+    // of clipping the Edit/Suspend buttons.
+    const gridCols = "grid-cols-[minmax(10rem,1fr)_130px_120px_120px_200px]";
+    const gridMinWidth = "min-w-[49.625rem]";
 
     if (loading) {
         return (
@@ -386,54 +394,49 @@ function TenantTable({
 
     return (
         <div className="mt-6 overflow-hidden rounded-2xl border border-border bg-background/60">
-            <div className={`hidden md:grid ${gridCols} items-center gap-2 border-b border-border bg-background/70 px-4 py-3 text-xs font-semibold text-muted-foreground`}>
-                <div>Tenant Name</div>
-                <div className="text-right">Allocated Minutes</div>
-                <div className="text-right">Concurrency</div>
-                <div>Status</div>
-                <div className="text-right">Actions</div>
-            </div>
+            {/* max-lg:mr-6: below 1024px the fixed chat launcher overlaps this
+                table's right edge; ending the scroll viewport before its lane
+                keeps every action button tappable (Group C, 2026-10). */}
+            <div className="relative overflow-x-auto max-lg:mr-12">
+                <div className={`grid ${gridCols} ${gridMinWidth} items-center gap-2 border-b border-border bg-background/70 px-4 py-3 text-xs font-semibold text-muted-foreground`}>
+                    <div>Tenant Name</div>
+                    <div className="text-right">Allocated Minutes</div>
+                    <div className="text-right">Concurrency</div>
+                    <div>Status</div>
+                    <div className="text-right">Actions</div>
+                </div>
 
-            <div role="rowgroup" className="divide-y divide-border">
-                {items.map((t) => (
-                    <div key={t.id} role="row" className={`grid grid-cols-1 ${gridCols} gap-3 px-4 py-4 text-sm text-foreground`}>
-                        <div className="min-w-0">
-                            <div className="flex items-center justify-between gap-3 md:block">
-                                <div className="min-w-0">
-                                    <div className="truncate font-semibold">{t.tenantName}</div>
-                                    <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground md:hidden">
-                                        <span className="tabular-nums">{t.allocatedMinutes.toLocaleString()} min</span>
-                                        <span className="text-border">•</span>
-                                        <span className="tabular-nums">{t.subConcurrency.toLocaleString()} concurrent</span>
-                                    </div>
-                                </div>
-                                <div className="md:hidden">{tenantStatusPill(t.status)}</div>
+                <div role="rowgroup" className="divide-y divide-border">
+                    {items.map((t) => (
+                        <div key={t.id} role="row" className={`grid ${gridCols} ${gridMinWidth} gap-2 px-4 py-4 text-sm text-foreground`}>
+                            <div className="min-w-0">
+                                <div className="truncate font-semibold">{t.tenantName}</div>
+                            </div>
+                            <div className="text-right tabular-nums">{t.allocatedMinutes.toLocaleString()}</div>
+                            <div className="text-right tabular-nums">{t.subConcurrency.toLocaleString()}</div>
+                            <div>{tenantStatusPill(t.status)}</div>
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                                <Button type="button" variant="secondary" size="sm" asChild>
+                                    <Link href={`/white-label/${encodeURIComponent(partnerId)}/tenants/${encodeURIComponent(t.id)}/agent-settings`}>
+                                        Agent Settings
+                                    </Link>
+                                </Button>
+                                <Button type="button" variant="outline" size="sm" onClick={() => onEdit(t)}>
+                                    Edit
+                                </Button>
+                                {t.status === "active" ? (
+                                    <Button type="button" variant="destructive" size="sm" onClick={() => onSuspend(t)}>
+                                        Suspend
+                                    </Button>
+                                ) : (
+                                    <Button type="button" variant="secondary" size="sm" onClick={() => onResume(t)}>
+                                        Resume
+                                    </Button>
+                                )}
                             </div>
                         </div>
-                        <div className="hidden text-right tabular-nums md:block">{t.allocatedMinutes.toLocaleString()}</div>
-                        <div className="hidden text-right tabular-nums md:block">{t.subConcurrency.toLocaleString()}</div>
-                        <div className="hidden md:block">{tenantStatusPill(t.status)}</div>
-                        <div className="flex flex-wrap items-center justify-start gap-2 md:justify-end">
-                            <Button type="button" variant="secondary" size="sm" asChild>
-                                <Link href={`/white-label/${encodeURIComponent(partnerId)}/tenants/${encodeURIComponent(t.id)}/agent-settings`}>
-                                    Agent Settings
-                                </Link>
-                            </Button>
-                            <Button type="button" variant="outline" size="sm" onClick={() => onEdit(t)}>
-                                Edit
-                            </Button>
-                            {t.status === "active" ? (
-                                <Button type="button" variant="destructive" size="sm" onClick={() => onSuspend(t)}>
-                                    Suspend
-                                </Button>
-                            ) : (
-                                <Button type="button" variant="secondary" size="sm" onClick={() => onResume(t)}>
-                                    Resume
-                                </Button>
-                            )}
-                        </div>
-                    </div>
-                ))}
+                    ))}
+                </div>
             </div>
         </div>
     );

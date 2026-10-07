@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
+import { Select } from "@/components/ui/select";
 import type { Campaign } from "@/lib/dashboard-api";
 import {
     applyCampaignFilters,
@@ -323,6 +324,7 @@ export function CampaignPerformanceTable({
     const [statusOpen, setStatusOpen] = useState(false);
     const [statusPanelStyle, setStatusPanelStyle] = useState<CSSProperties | null>(null);
     const [suggestOpen, setSuggestOpen] = useState(false);
+    const [suggestPlacement, setSuggestPlacement] = useState<{ openUp: boolean; maxHeight: number } | null>(null);
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
     const [detailsId, setDetailsId] = useState<string | null>(null);
@@ -363,16 +365,28 @@ export function CampaignPerformanceTable({
             left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
 
             let top = rect.bottom + margin;
+            let maxHeight: number | undefined;
 
             const panel = statusPanelRef.current;
             if (panel) {
                 const h = panel.offsetHeight;
-                if (top + h > window.innerHeight - margin) {
-                    top = Math.max(margin, window.innerHeight - h - margin);
+                const spaceBelow = window.innerHeight - rect.bottom - margin * 2;
+                const spaceAbove = rect.top - margin * 2;
+                if (h > spaceBelow) {
+                    // Flip above the trigger instead of sliding down over it;
+                    // whichever side is used, cap the height so the panel
+                    // never leaves the screen or covers its own button.
+                    if (spaceAbove > spaceBelow) {
+                        const capped = Math.min(h, Math.max(margin, spaceAbove));
+                        top = rect.top - margin - capped;
+                        if (capped < h) maxHeight = capped;
+                    } else {
+                        maxHeight = Math.max(margin, spaceBelow);
+                    }
                 }
             }
 
-            setStatusPanelStyle({ left, top, width });
+            setStatusPanelStyle({ left, top, width, maxHeight });
         };
 
         update();
@@ -623,6 +637,9 @@ export function CampaignPerformanceTable({
             )}
         >
             <div className="flex items-center justify-center">
+                {/* Wrapping label: 24px tap target around the 16px box (WCAG 2.5.8);
+                    -m-1 keeps the occupied space identical. */}
+                <label className="-m-1 inline-flex cursor-pointer p-1">
                 <input
                     aria-label="Select all visible campaigns"
                     type="checkbox"
@@ -630,6 +647,7 @@ export function CampaignPerformanceTable({
                     onChange={(e) => toggleAllVisible(e.target.checked)}
                     className="h-4 w-4 rounded border-input bg-background accent-primary"
                 />
+                </label>
             </div>
             <button
                 type="button"
@@ -659,6 +677,35 @@ export function CampaignPerformanceTable({
         </div>
     );
 
+    // Suggestion list placement: open upward when the space under the filter
+    // is too short, and never let the panel run past a screen edge.
+    useLayoutEffect(() => {
+        if (!suggestOpen || nameSuggestions.length === 0) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing stale DOM-measured placement on close, not derivable during render
+            setSuggestPlacement(null);
+            return;
+        }
+        const update = () => {
+            const el = suggestRef.current;
+            if (!el) return;
+            const rect = el.getBoundingClientRect();
+            const margin = 8;
+            const gap = 8; // the panel's mt-2 / mb-2
+            const below = window.innerHeight - rect.bottom - gap - margin;
+            const above = rect.top - gap - margin;
+            const openUp = below < 108 && above > below;
+            const maxHeight = Math.max(36, Math.min(256, openUp ? above : below));
+            setSuggestPlacement({ openUp, maxHeight });
+        };
+        update();
+        window.addEventListener("resize", update);
+        window.addEventListener("scroll", update, true);
+        return () => {
+            window.removeEventListener("resize", update);
+            window.removeEventListener("scroll", update, true);
+        };
+    }, [suggestOpen, nameSuggestions.length]);
+
     return (
         <div className="space-y-4">
             <div className="content-card relative">
@@ -684,7 +731,11 @@ export function CampaignPerformanceTable({
                                 {suggestOpen && nameSuggestions.length > 0 ? (
                                     <div
                                         role="listbox"
-                                        className="absolute left-0 top-full z-50 mt-2 w-full max-h-64 origin-top overflow-auto rounded-xl border border-border bg-popover shadow-xl animate-in fade-in-0 zoom-in-95"
+                                        className={cn(
+                                            "absolute left-0 z-50 w-full overflow-auto rounded-xl border border-border bg-popover shadow-xl animate-in fade-in-0 zoom-in-95",
+                                            suggestPlacement?.openUp ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"
+                                        )}
+                                        style={{ maxHeight: suggestPlacement?.maxHeight ?? 256 }}
                                     >
                                         {nameSuggestions.map((n) => (
                                             <button
@@ -745,7 +796,7 @@ export function CampaignPerformanceTable({
                                               <div
                                                   ref={statusPanelRef}
                                                   role="listbox"
-                                                  className="absolute overflow-hidden rounded-xl border border-border bg-popover p-2 shadow-xl animate-in fade-in-0 zoom-in-95"
+                                                  className="absolute overflow-y-auto rounded-xl border border-border bg-popover p-2 shadow-xl animate-in fade-in-0 zoom-in-95"
                                                   style={statusPanelStyle ?? undefined}
                                               >
                                                   <div className="max-h-[108px] overflow-y-auto overscroll-contain pr-1 scrollbar-gutter-stable">
@@ -888,23 +939,23 @@ export function CampaignPerformanceTable({
                     </div>
                     <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-end">
                         <div className="text-xs font-semibold text-muted-foreground">Rows</div>
-                        <select
-                            aria-label="Rows per page"
-                            value={rowsPerPage}
-                            onChange={(e) => {
-                                const v = e.target.value;
+                        <Select
+                            ariaLabel="Rows per page"
+                            fitLongestOption
+                            value={String(rowsPerPage)}
+                            onChange={(v) => {
                                 const next: RowsPerPage =
                                     v === "All" ? "All" : (Number(v) as RowsPerPage);
                                 setRowsPerPage(next);
                             }}
-                            className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                            selectClassName="h-9 px-2 pr-9"
                         >
                             <option value={10}>10</option>
                             <option value={25}>25</option>
                             <option value={50}>50</option>
                             <option value={100}>100</option>
                             <option value="All">All</option>
-                        </select>
+                        </Select>
                         <div className="flex flex-wrap items-center justify-center gap-1">
                             <Button type="button" variant="outline" size="sm" onClick={() => setPage(1)} disabled={paged.page <= 1}>
                                 First
@@ -957,13 +1008,15 @@ export function CampaignPerformanceTable({
                                         <div key={campaign.id} className={cn("border-b border-border", TABLE_MIN_WIDTH)}>
                                             <div role="row" className={cn("grid items-center gap-2 px-3 py-2 text-sm text-foreground", TABLE_GRID_COLS)}>
                                                 <div className="flex items-center justify-center">
-                                                    <input
-                                                        aria-label={`Select ${campaign.name}`}
-                                                        type="checkbox"
-                                                        checked={isSelected}
-                                                        onChange={(e) => toggleSelected(campaign.id, e.target.checked)}
-                                                        className="h-4 w-4 rounded border-input bg-background accent-primary"
-                                                    />
+                                                    <label className="-m-1 inline-flex cursor-pointer p-1">
+                                                        <input
+                                                            aria-label={`Select ${campaign.name}`}
+                                                            type="checkbox"
+                                                            checked={isSelected}
+                                                            onChange={(e) => toggleSelected(campaign.id, e.target.checked)}
+                                                            className="h-4 w-4 rounded border-input bg-background accent-primary"
+                                                        />
+                                                    </label>
                                                 </div>
                                                 <div className="flex items-center gap-2 px-2">
                                                     <button
@@ -1106,18 +1159,18 @@ export function CampaignPerformanceTable({
                     <div className="rounded-xl border border-border bg-muted/30 p-4">
                         <div className="text-sm font-semibold text-foreground">Date range</div>
                         <div className="mt-3 grid grid-cols-1 gap-3">
-                            <select
-                                aria-label="Export date range preset"
+                            <Select
+                                ariaLabel="Export date range preset"
                                 value={exportPreset}
-                                onChange={(e) => setExportPreset(e.target.value as ExportPreset)}
-                                className="h-10 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                                onChange={(next) => setExportPreset(next as ExportPreset)}
+                                selectClassName="border-border px-2 pr-9"
                             >
                                 <option value="All Time">All Time</option>
                                 <option value="Last 7 Days">Last 7 Days</option>
                                 <option value="Last 30 Days">Last 30 Days</option>
                                 <option value="This Month">This Month</option>
                                 <option value="Custom">Custom</option>
-                            </select>
+                            </Select>
                             {exportPreset === "Custom" ? (
                                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                                     <div>
@@ -1363,34 +1416,36 @@ function ReportScheduleEditor({ storageKey }: { storageKey: string }) {
             <div className={cn("grid grid-cols-1 gap-3 md:grid-cols-2", !enabled ? "opacity-50" : "")} aria-disabled={!enabled}>
                 <div>
                     <label className="text-xs font-semibold text-muted-foreground">Recurrence</label>
-                    <select
+                    <Select
+                        ariaLabel="Report recurrence"
                         value={recurrence}
                         disabled={!enabled}
-                        onChange={(e) => {
-                            const v = e.target.value;
+                        onChange={(v) => {
                             if (v === "Daily" || v === "Weekly" || v === "Monthly") setRecurrence(v);
                         }}
-                        className="mt-1 h-10 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                        className="mt-1"
+                        selectClassName="px-2 pr-9"
                     >
                         <option value="Daily">Daily</option>
                         <option value="Weekly">Weekly</option>
                         <option value="Monthly">Monthly</option>
-                    </select>
+                    </Select>
                 </div>
                 <div>
                     <label className="text-xs font-semibold text-muted-foreground">Delivery</label>
-                    <select
+                    <Select
+                        ariaLabel="Report delivery"
                         value={delivery}
                         disabled={!enabled}
-                        onChange={(e) => {
-                            const v = e.target.value;
+                        onChange={(v) => {
                             if (v === "Email" || v === "Webhook") setDelivery(v);
                         }}
-                        className="mt-1 h-10 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                        className="mt-1"
+                        selectClassName="px-2 pr-9"
                     >
                         <option value="Email">Email</option>
                         <option value="Webhook">Webhook</option>
-                    </select>
+                    </Select>
                 </div>
                 <div>
                     <label className="text-xs font-semibold text-muted-foreground">Time</label>

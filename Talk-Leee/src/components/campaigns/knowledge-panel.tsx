@@ -123,7 +123,7 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
                     <button
                         type="button"
                         onClick={() => hasChildren && props.onToggleCollapse(node.id)}
-                        className={`mt-0.5 shrink-0 text-muted-foreground ${hasChildren ? "" : "invisible"}`}
+                        className={`-mt-0.5 -mb-1 -ml-1 -mr-1 shrink-0 p-1 text-muted-foreground ${hasChildren ? "" : "invisible"}`}
                         aria-label={isCollapsed ? "Expand" : "Collapse"}
                     >
                         {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -186,10 +186,13 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
                     </div>
 
                     {!readOnly && !isEditing && (
-                        <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                            <button type="button" onClick={() => props.onStartEdit(node)} className="rounded p-1 text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-white/10" title="Edit"><Pencil className="h-3.5 w-3.5" /></button>
-                            <button type="button" onClick={() => props.onTogglePin(node)} disabled={isBusy} className={`rounded p-1 hover:bg-gray-100 dark:hover:bg-white/10 ${isPinned ? "text-amber-500" : "text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100"}`} title={isPinned ? "Unpin" : "Pin (source-search priority)"}><Pin className={`h-3.5 w-3.5 ${isPinned ? "fill-amber-500" : ""}`} /></button>
-                            <button type="button" onClick={() => props.onToggleEnabled(node)} disabled={isBusy} className="rounded p-1 text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-white/10" title={node.enabled ? "Disable" : "Enable"}>
+                        /* Always visible (2026-10): hover-revealed actions were
+                           invisible to touch users, who could only tap them blind.
+                           p-2/-m-1 = 30px hit boxes occupying the original 22px. */
+                        <div className="flex shrink-0 items-center gap-0.5">
+                            <button type="button" onClick={() => props.onStartEdit(node)} className="rounded p-2 -m-1 text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-white/10" title="Edit"><Pencil className="h-3.5 w-3.5" /></button>
+                            <button type="button" onClick={() => props.onTogglePin(node)} disabled={isBusy} className={`rounded p-2 -m-1 hover:bg-gray-100 dark:hover:bg-white/10 ${isPinned ? "text-amber-500" : "text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100"}`} title={isPinned ? "Unpin" : "Pin (source-search priority)"}><Pin className={`h-3.5 w-3.5 ${isPinned ? "fill-amber-500" : ""}`} /></button>
+                            <button type="button" onClick={() => props.onToggleEnabled(node)} disabled={isBusy} className="rounded p-2 -m-1 text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-white/10" title={node.enabled ? "Disable" : "Enable"}>
                                 {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : node.enabled ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
                             </button>
                         </div>
@@ -435,7 +438,7 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
                                         <span className="text-muted-foreground">~{s.token_count} tokens</span>
                                         {s.status === "failed" && s.error && <span className="inline-flex items-center gap-1 text-red-600 dark:text-red-400 truncate" title={s.error}><AlertCircle className="h-3 w-3" /> {s.error}</span>}
                                         {!readOnly && (
-                                            <button type="button" onClick={() => void onDeleteSource(s)} disabled={deletingSourceId === s.id} className="ml-auto rounded p-1 text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40" title="Delete this source and its sections">
+                                            <button type="button" onClick={() => void onDeleteSource(s)} disabled={deletingSourceId === s.id} className="ml-auto rounded p-2 -my-1 -mr-1 text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40" title="Delete this source and its sections">
                                                 {deletingSourceId === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                                             </button>
                                         )}
@@ -458,8 +461,8 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
                                         className="w-full rounded-md border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 pl-7 pr-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
                                     />
                                 </div>
-                                <button type="button" onClick={() => setCollapsed(new Set(allIds(data.tree)))} className="inline-flex items-center gap-1 rounded p-1 text-xs text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100" title="Collapse all"><ChevronsDownUp className="h-3.5 w-3.5" /></button>
-                                <button type="button" onClick={() => setCollapsed(new Set())} className="inline-flex items-center gap-1 rounded p-1 text-xs text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100" title="Expand all"><ChevronsUpDown className="h-3.5 w-3.5" /></button>
+                                <button type="button" onClick={() => setCollapsed(new Set(allIds(data.tree)))} className="inline-flex items-center gap-1 rounded p-2 -m-1 text-xs text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100" title="Collapse all"><ChevronsDownUp className="h-3.5 w-3.5" /></button>
+                                <button type="button" onClick={() => setCollapsed(new Set())} className="inline-flex items-center gap-1 rounded p-2 -m-1 text-xs text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100" title="Expand all"><ChevronsUpDown className="h-3.5 w-3.5" /></button>
                             </div>
                             {visibleTree.length === 0 ? (
                                 <p className="px-2 py-4 text-xs text-muted-foreground">No sections match “{search}”.</p>

@@ -1,6 +1,6 @@
 """Write each SIP trunk's REAL Asterisk registration state into the DB.
 
-Run by talky-trunk-status.timer every ~10s (one-shot). Reads
+Run by talky-trunk-status.service every ~10s (one long-running loop). Reads
 `asterisk -rx 'pjsip show registrations'` — the live truth — maps each
 registration to its trunk, and updates tenant_sip_trunks.live_registration_status
 + live_status_checked_at. The Settings trunk card renders this (auto-refresh), so
@@ -22,6 +22,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import asyncpg
@@ -348,5 +349,33 @@ async def main() -> None:
     )
 
 
+async def run_forever(interval_seconds: float) -> None:
+    """One pass every ``interval_seconds`` inside a single long-running process.
+
+    Until 2026-10-07 a systemd timer started a fresh interpreter for every pass
+    (5,760 starts and fresh DB connections a day). A failed pass is logged and
+    the loop carries on; systemd restarts the process if it ever dies.
+    """
+    while True:
+        started = time.monotonic()
+        try:
+            await main()
+        except SystemExit as exc:  # main() refuses to report a zero-row read as success
+            print(f"trunk status pass failed (exit {exc.code}); retrying", file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001 - one bad pass must not stop the updater
+            print(f"trunk status pass failed: {exc!r}; retrying", file=sys.stderr)
+        await asyncio.sleep(max(1.0, interval_seconds - (time.monotonic() - started)))
+
+
+def _loop_interval(argv: list[str]) -> float | None:
+    if "--loop" not in argv:
+        return None
+    return float(argv[argv.index("--loop") + 1])
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    _interval = _loop_interval(sys.argv[1:])
+    if _interval is None:
+        asyncio.run(main())
+    else:
+        asyncio.run(run_forever(_interval))

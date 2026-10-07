@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -163,6 +164,10 @@ function MeetingsContent() {
     const [leadId, setLeadId] = useState<string>("");
     const [leadName, setLeadName] = useState<string>("");
     const leadBoxRef = useRef<HTMLDivElement | null>(null);
+    const leadPanelRef = useRef<HTMLDivElement | null>(null);
+    // Portal placement for the suggestion list: fixed to the viewport so an
+    // open list overlays the modal instead of inflating its inner scroll.
+    const [leadPanelStyle, setLeadPanelStyle] = useState<{ left: number; width: number; maxHeight: number; top?: number; bottom?: number } | null>(null);
 
     const [title, setTitle] = useState("");
     const [whenValue, setWhenValue] = useState("");
@@ -313,6 +318,7 @@ function MeetingsContent() {
             const t = e.target as Node | null;
             if (!t) return;
             if (leadBoxRef.current && leadBoxRef.current.contains(t)) return;
+            if (leadPanelRef.current && leadPanelRef.current.contains(t)) return;
             setLeadOpen(false);
         };
         document.addEventListener("pointerdown", onDown);
@@ -320,6 +326,40 @@ function MeetingsContent() {
             document.removeEventListener("pointerdown", onDown);
         };
     }, [leadOpen]);
+
+    useLayoutEffect(() => {
+        if (!leadOpen || filteredLeads.length === 0) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing stale DOM-measured placement on close, not derivable during render
+            setLeadPanelStyle(null);
+            return;
+        }
+        const update = () => {
+            const box = leadBoxRef.current;
+            if (!box) return;
+            const rect = box.getBoundingClientRect();
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            const MARGIN = 8;
+            const GAP = 8; // matches the old mt-2
+            const left = Math.max(MARGIN, Math.min(rect.left, vw - rect.width - MARGIN));
+            const spaceBelow = vh - rect.bottom - GAP - MARGIN;
+            const spaceAbove = rect.top - GAP - MARGIN;
+            const openUp = spaceBelow < 108 && spaceAbove > spaceBelow;
+            const maxHeight = Math.max(36, Math.min(240, openUp ? spaceAbove : spaceBelow));
+            setLeadPanelStyle(
+                openUp
+                    ? { left, width: rect.width, maxHeight, bottom: vh - rect.top + GAP }
+                    : { left, width: rect.width, maxHeight, top: rect.bottom + GAP }
+            );
+        };
+        update();
+        window.addEventListener("resize", update);
+        window.addEventListener("scroll", update, true);
+        return () => {
+            window.removeEventListener("resize", update);
+            window.removeEventListener("scroll", update, true);
+        };
+    }, [leadOpen, filteredLeads.length]);
 
     useEffect(() => {
         if (!createOpen) return;
@@ -703,8 +743,19 @@ function MeetingsContent() {
                                         {leadsError}
                                     </div>
                                 ) : null}
-                                {leadOpen && filteredLeads.length > 0 ? (
-                                    <div role="listbox" className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border border-white/10 bg-gray-950/95 shadow-xl">
+                                {leadOpen && filteredLeads.length > 0 && leadPanelStyle && typeof document !== "undefined" ? createPortal(
+                                    <div
+                                        ref={leadPanelRef}
+                                        role="listbox"
+                                        className="fixed z-[1000] overflow-y-auto rounded-xl border border-white/10 bg-gray-950/95 shadow-xl"
+                                        style={{
+                                            left: leadPanelStyle.left,
+                                            top: leadPanelStyle.top,
+                                            bottom: leadPanelStyle.bottom,
+                                            width: leadPanelStyle.width,
+                                            maxHeight: leadPanelStyle.maxHeight,
+                                        }}
+                                    >
                                         {filteredLeads.map((opt, idx) => {
                                             const active = idx === leadActiveIndex;
                                             return (
@@ -732,7 +783,8 @@ function MeetingsContent() {
                                                 </button>
                                             );
                                         })}
-                                    </div>
+                                    </div>,
+                                    document.body
                                 ) : null}
                                 {!leadOpen && leadSelectedLabel ? (
                                     <div className="mt-2 text-xs text-gray-300">

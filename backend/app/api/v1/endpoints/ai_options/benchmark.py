@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.api.v1.dependencies import get_current_user
-from app.domain.models.ai_config import AIProviderConfig, CEREBRAS_MODELS, GEMINI_MODELS, OPENAI_MODELS
+from app.domain.models.ai_config import AIProviderConfig, CEREBRAS_MODELS, DEEPSEEK_MODELS, GEMINI_MODELS, OPENAI_MODELS
 from app.domain.models.conversation import Message, MessageRole
 from app.infrastructure.llm.cerebras import CerebrasLLMProvider
 from app.infrastructure.llm.gemini import GeminiLLMProvider
@@ -65,6 +65,15 @@ def _select_benchmark_llm(config: AIProviderConfig, *, openai_key=None):
                 detail="Cerebras API key not configured. Set CEREBRAS_API_KEY in .env.",
             )
         return CerebrasLLMProvider(), key
+    if provider == "deepseek" or model in {m.id for m in DEEPSEEK_MODELS}:
+        key = os.getenv("DEEPSEEK_API_KEY")
+        if not key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="DeepSeek API key not configured. Set DEEPSEEK_API_KEY in .env.",
+            )
+        from app.infrastructure.llm.deepseek import DeepSeekLLMProvider
+        return DeepSeekLLMProvider(), key
     key = os.getenv("GROQ_API_KEY")
     if not key:
         raise HTTPException(

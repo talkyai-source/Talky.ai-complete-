@@ -147,7 +147,7 @@ export default function RecordingsPage() {
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             transition={{ delay: 0.3 }}
-                            className="mt-6 flex items-center justify-between"
+                            className="mt-6 flex items-center justify-between pr-12"
                         >
                             <p className="text-sm text-muted-foreground">
                                 Showing {(page - 1) * PAGE_SIZE + 1} to {Math.min(page * PAGE_SIZE, total)} of {total} recordings

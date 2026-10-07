@@ -1,4 +1,4 @@
-"""The four-model menu, hidden legacy IDs and correct provider routing.
+"""The five-model menu, hidden legacy IDs and correct provider routing.
 
 The benchmark previously sent Cerebras model IDs to Groq and failed with 404.
 Provider identity must be preserved across catalog, save, test and benchmark.
@@ -13,23 +13,26 @@ from app.domain.models.ai_config import AIProviderConfig
 @pytest.mark.asyncio
 async def test_providers_menu_offers_exactly_the_chosen_models(monkeypatch):
     """Owner decisions 2026-10-01: GPT-OSS 120B (Cerebras), GPT-OSS 20B (Groq),
-    from Google Gemini 3.8 Flash only, and GPT-6 Luna on the OpenAI key."""
+    from Google Gemini 3.8 Flash only, and GPT-6 Luna on the OpenAI key.
+    2026-10-06: plus DeepSeek V4.1 Flash on the DeepSeek key."""
     monkeypatch.setenv("GEMINI_API_KEY", "set-on-prod")
     monkeypatch.setenv("CEREBRAS_API_KEY", "set-on-prod")
     monkeypatch.setenv("GROQ_API_KEY", "set-on-prod")
     monkeypatch.setenv("OPENAI_API_KEY", "set-on-prod")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "set-on-prod")
     from app.api.v1.endpoints.ai_options.providers import list_providers
 
     response = await list_providers()
 
-    assert sorted(response.llm["providers"]) == ["cerebras", "gemini", "groq", "openai"]
-    assert len(response.llm["models"]) == 4
+    assert sorted(response.llm["providers"]) == ["cerebras", "deepseek", "gemini", "groq", "openai"]
+    assert len(response.llm["models"]) == 5
     offered = {(m["provider"], m["id"]) for m in response.llm["models"]}
     assert offered == {
         ("cerebras", "gpt-oss-120b"),
         ("groq", "openai/gpt-oss-20b"),
         ("gemini", "gemini-3.8-flash"),
         ("openai", "gpt-6-luna"),
+        ("deepseek", "deepseek-flash"),
     }
 
 
@@ -79,3 +82,14 @@ def test_benchmark_refuses_cerebras_without_a_key(monkeypatch):
         _select_benchmark_llm(config)
     assert exc.value.status_code == 503
     assert "Cerebras" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_without_a_deepseek_key_deepseek_is_not_offered(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setenv("CEREBRAS_API_KEY", "set-on-prod")
+    from app.api.v1.endpoints.ai_options.providers import list_providers
+
+    response = await list_providers()
+
+    assert "deepseek" not in response.llm["providers"]

@@ -9,6 +9,8 @@ import { SipTrunksList } from "./sip-trunks-list";
 
 const request = api.request;
 const clients: QueryClient[] = [];
+// jsdom has no layout engine; the shared Select scrolls its active option.
+if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};
 afterEach(() => { cleanup(); clients.splice(0).forEach((client) => client.clear()); api.request = request; });
 
 function trunk(overrides: Partial<SipTrunkRow> = {}): SipTrunkRow {
@@ -53,7 +55,7 @@ test("switching to IP authentication clears credentials and registration togethe
     const writes: Parameters<typeof api.request>[0][] = [];
     mount(trunk(), async (options) => { writes.push(options); return trunk(); });
     fireEvent.click(await screen.findByRole("button", { name: "Edit Test trunk" }));
-    fireEvent.click(screen.getByRole("button", { name: "Authentication" }));
+    fireEvent.click(screen.getByRole("combobox", { name: "Authentication" }));
     fireEvent.click(screen.getByRole("option", { name: "IP allowlist (no password)" }));
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => assert.equal(writes.length, 1));

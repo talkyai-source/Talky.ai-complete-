@@ -1210,6 +1210,7 @@ class VoiceOrchestrator:
         "groq": "GROQ_API_KEY",
         "gemini": "GEMINI_API_KEY",
         "cerebras": "CEREBRAS_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
     }
 
     # Default secondary model per provider for LLM_FAILOVER_ENABLED. Same-vendor
@@ -1372,6 +1373,11 @@ class VoiceOrchestrator:
             secondary=secondary,
             policy=LLMFailoverPolicy(
                 first_token_deadline_seconds=max(0.3, deadline_ms / 1000.0),
+                # Start the secondary alongside a primary that is still silent
+                # at 0.8 s (stability audit 2026-10-02). 0 disables.
+                hedge_after_seconds=(
+                    float(os.getenv("LLM_HEDGE_AFTER_MS", "800")) / 1000.0 or None
+                ),
             ),
         )
         logger.info(

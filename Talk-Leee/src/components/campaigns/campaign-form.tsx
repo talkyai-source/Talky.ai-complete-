@@ -16,11 +16,12 @@
  * on `mode`.
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { dashboardApi, PersonaType } from "@/lib/dashboard-api";
 import { guidanceBudgetStatus } from "@/lib/campaign-guidance";
 import {
@@ -198,6 +199,36 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
     // Player-style dropdown state.
     const [voicePickerOpen, setVoicePickerOpen] = useState(false);
     const voicePickerRef = useRef<HTMLDivElement | null>(null);
+    const [voicePickerPlacement, setVoicePickerPlacement] = useState<{ openUp: boolean; maxHeight: number } | null>(null);
+
+    // Open the panel upward when the space under the picker is too short,
+    // and cap its height to what actually fits on the chosen side.
+    useLayoutEffect(() => {
+        if (!voicePickerOpen) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing stale DOM-measured placement on close, not derivable during render
+            setVoicePickerPlacement(null);
+            return;
+        }
+        const update = () => {
+            const el = voicePickerRef.current;
+            if (!el) return;
+            const rect = el.getBoundingClientRect();
+            const MARGIN = 8;
+            const GAP = 8; // the panel's mt-2 / mb-2
+            const below = window.innerHeight - rect.bottom - GAP - MARGIN;
+            const above = rect.top - GAP - MARGIN;
+            const openUp = below < 108 && above > below;
+            const maxHeight = Math.max(36, Math.min(320, openUp ? above : below));
+            setVoicePickerPlacement({ openUp, maxHeight });
+        };
+        update();
+        window.addEventListener("resize", update);
+        window.addEventListener("scroll", update, true);
+        return () => {
+            window.removeEventListener("resize", update);
+            window.removeEventListener("scroll", update, true);
+        };
+    }, [voicePickerOpen]);
 
     // Close the dropdown when the user clicks outside of it.
     useEffect(() => {
@@ -818,7 +849,12 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
 
                                     {/* Expanded picker panel */}
                                     {voicePickerOpen && (
-                                        <div className="absolute left-0 right-0 top-full z-20 mt-2 max-h-80 overflow-auto rounded-lg border border-border bg-background p-2 shadow-lg">
+                                        <div
+                                            className={`absolute left-0 right-0 z-20 overflow-auto rounded-lg border border-border bg-background p-2 shadow-lg ${
+                                                voicePickerPlacement?.openUp ? "bottom-full mb-2" : "top-full mt-2"
+                                            }`}
+                                            style={{ maxHeight: voicePickerPlacement?.maxHeight ?? 320 }}
+                                        >
                                             {grouped.map(([provider, list]) => (
                                                 <div key={provider} className="mb-2 last:mb-0">
                                                     <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -1061,17 +1097,19 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                                         Campaign type: Outbound
                                     </span>
                                     <Label className="text-xs">Opening:</Label>
-                                    <select
+                                    <Select
+                                        ariaLabel="Preview opening mode"
+                                        fitLongestOption
                                         value={previewOpening}
-                                        onChange={(e) =>
-                                            setPreviewOpening(e.target.value as "agent_first" | "callee_first")
+                                        onChange={(next) =>
+                                            setPreviewOpening(next as "agent_first" | "callee_first")
                                         }
-                                        className="rounded border border-border bg-background px-2 py-1 text-xs"
+                                        selectClassName="h-auto rounded border-border px-2 py-1 pr-8 text-xs"
                                         disabled={previewLoading}
                                     >
                                         <option value="agent_first">Agent opens</option>
                                         <option value="callee_first">Callee says hello first</option>
-                                    </select>
+                                    </Select>
                                     <Button
                                         type="button"
                                         size="sm"

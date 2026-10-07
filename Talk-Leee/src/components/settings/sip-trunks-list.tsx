@@ -828,27 +828,31 @@ export function SipTrunksList() {
                             </div>
 
                             <div className="flex items-center gap-2">
-                                <input
-                                    id="register"
-                                    type="checkbox"
-                                    checked={form.register}
-                                    disabled={authMode === "ip"}
-                                    onChange={(e) => setForm({ ...form, register: e.target.checked })}
-                                    className="h-4 w-4"
-                                />
+                                <label className="-m-1 inline-flex cursor-pointer p-1">
+                                    <input
+                                        id="register"
+                                        type="checkbox"
+                                        checked={form.register}
+                                        disabled={authMode === "ip"}
+                                        onChange={(e) => setForm({ ...form, register: e.target.checked })}
+                                        className="h-4 w-4"
+                                    />
+                                </label>
                                 <Label htmlFor="register" className="cursor-pointer">
                                     Register with the PBX (leave off for IP-based trunks)
                                 </Label>
                             </div>
 
                             <div className="flex items-center gap-2">
-                                <input
-                                    id="srtp"
-                                    type="checkbox"
-                                    checked={form.srtp}
-                                    onChange={(e) => setForm({ ...form, srtp: e.target.checked })}
-                                    className="h-4 w-4"
-                                />
+                                <label className="-m-1 inline-flex cursor-pointer p-1">
+                                    <input
+                                        id="srtp"
+                                        type="checkbox"
+                                        checked={form.srtp}
+                                        onChange={(e) => setForm({ ...form, srtp: e.target.checked })}
+                                        className="h-4 w-4"
+                                    />
+                                </label>
                                 <Label htmlFor="srtp" className="cursor-pointer">
                                     Enable SRTP media encryption (typically with TLS transport)
                                 </Label>

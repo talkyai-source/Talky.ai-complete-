@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Select } from "@/components/ui/select";
 import { getAssistantModel, setAssistantModel } from "@/lib/assistant-model-api";
 
 interface ModelOption {
@@ -32,8 +33,7 @@ export function AssistantModelPicker() {
 
   if (!loaded || available.length === 0) return null;
 
-  async function handleChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const next = e.target.value;
+  async function handleChange(next: string) {
     const prev = current;
     setCurrent(next); // optimistic
     try {
@@ -44,17 +44,18 @@ export function AssistantModelPicker() {
   }
 
   return (
-    <select
+    <Select
       value={current}
-      onChange={handleChange}
-      aria-label="Assistant model"
-      className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+      onChange={(next) => { void handleChange(next); }}
+      ariaLabel="Assistant model"
+      fitLongestOption
+      selectClassName="h-auto rounded border-border px-1.5 py-0.5 pr-7 text-[10px] text-muted-foreground"
     >
       {available.map((m) => (
         <option key={m.id} value={m.id}>
           {m.name}
         </option>
       ))}
-    </select>
+    </Select>
   );
 }

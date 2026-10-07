@@ -77,13 +77,14 @@ def _declared_context_window(model: str) -> int | None:
             GEMINI_MODELS,
             GROQ_MODELS,
             OPENAI_MODELS,
+            DEEPSEEK_MODELS,
         )
     except Exception:  # pragma: no cover - defensive
         return None
 
     wanted = model.strip().lower()
     bare = wanted.rsplit("/", 1)[-1]
-    for entry in (*GROQ_MODELS, *GEMINI_MODELS, *CEREBRAS_MODELS, *OPENAI_MODELS):
+    for entry in (*GROQ_MODELS, *GEMINI_MODELS, *CEREBRAS_MODELS, *OPENAI_MODELS, *DEEPSEEK_MODELS):
         entry_id = str(getattr(entry, "id", "") or "").strip().lower()
         if not entry_id:
             continue

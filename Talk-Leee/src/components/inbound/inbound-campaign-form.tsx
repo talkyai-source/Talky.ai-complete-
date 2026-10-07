@@ -7,6 +7,7 @@ import { AlertCircle, ArrowLeft, Bot, CalendarClock, Loader2, LockKeyhole, Mic2,
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { useCampaigns } from "@/lib/api-hooks";
 import { DRAFT_POINTER_KEY } from "@/lib/inbound-campaign-draft";
 import { inboundErrorCode, inboundErrorStatus, type InboundCampaign, type InboundCampaignInput, type InboundPhoneNumber } from "@/lib/inbound-api";
@@ -322,12 +323,12 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, loc
                         </Field>
                     ) : (
                         <Field label="AI campaign" htmlFor="inbound-campaign_id" error={errors.campaign_id} hint={mode === "edit" ? "The base AI campaign is locked after creation so edits cannot bypass the audited inbound lifecycle." : "Only inbound campaigns and unused drafts are selectable; the server performs the final activity check."}>
-                            <select id="inbound-campaign_id" value={value.campaign_id} onChange={(event) => update("campaign_id", event.target.value)} disabled={mode === "edit" || dependenciesLoading || eligibleCampaigns.length === 0} aria-invalid={Boolean(errors.campaign_id)} className={selectClass}>
+                            <Select id="inbound-campaign_id" ariaLabel="AI campaign" value={value.campaign_id} onChange={(next) => update("campaign_id", next)} disabled={mode === "edit" || dependenciesLoading || eligibleCampaigns.length === 0} ariaInvalid={Boolean(errors.campaign_id)}>
                                 <option value="">Choose an AI campaign</option>{campaigns.map((campaign) => {
                                     const eligible = isEligibleInboundBaseCampaign(campaign);
-                                    return <option key={campaign.id} value={campaign.id} disabled={!eligible}>{campaign.name} · {campaign.status}{eligible ? "" : " · unavailable"}</option>;
+                                    return <option key={campaign.id} value={campaign.id} disabled={!eligible}>{`${campaign.name} · ${campaign.status}${eligible ? "" : " · unavailable"}`}</option>;
                                 })}
-                            </select>
+                            </Select>
                         </Field>
                     )}
                 </div>
@@ -345,12 +346,12 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, loc
 
                 <div className="grid gap-5 md:grid-cols-2">
                     <Field label="Inbound SIP trunk" htmlFor="inbound-sip_trunk_id" error={errors.sip_trunk_id} hint="Only trunks with fresh Asterisk endpoint or registration proof can be selected; the server rechecks this before every admitted call.">
-                        <select id="inbound-sip_trunk_id" value={value.sip_trunk_id} onChange={(event) => update("sip_trunk_id", event.target.value)} disabled={dependenciesLoading || eligibleInboundTrunks.length === 0 || (mode === "edit" && !canAssignNumber)} aria-invalid={Boolean(errors.sip_trunk_id)} className={selectClass}>
-                            <option value="">Choose an inbound trunk</option>{inboundTrunks.map((trunk) => <option key={trunk.id} value={trunk.id} disabled={!isEligibleInboundTrunk(trunk)}>{trunk.trunk_name} · {isEligibleInboundTrunk(trunk) ? "inbound ready" : "inbound not ready"}</option>)}
-                        </select>
+                        <Select id="inbound-sip_trunk_id" ariaLabel="Inbound SIP trunk" value={value.sip_trunk_id} onChange={(next) => update("sip_trunk_id", next)} disabled={dependenciesLoading || eligibleInboundTrunks.length === 0 || (mode === "edit" && !canAssignNumber)} ariaInvalid={Boolean(errors.sip_trunk_id)}>
+                            <option value="">Choose an inbound trunk</option>{inboundTrunks.map((trunk) => <option key={trunk.id} value={trunk.id} disabled={!isEligibleInboundTrunk(trunk)}>{`${trunk.trunk_name} · ${isEligibleInboundTrunk(trunk) ? "inbound ready" : "inbound not ready"}`}</option>)}
+                        </Select>
                     </Field>
                     <Field label="Business timezone" htmlFor="inbound-timezone" error={errors.timezone}>
-                        <select id="inbound-timezone" value={value.timezone} onChange={(event) => update("timezone", event.target.value)} aria-invalid={Boolean(errors.timezone)} className={selectClass}>{timezoneOptions.map((timezone) => <option key={timezone} value={timezone}>{timezone}</option>)}</select>
+                        <Select id="inbound-timezone" ariaLabel="Business timezone" value={value.timezone} onChange={(next) => update("timezone", next)} ariaInvalid={Boolean(errors.timezone)}>{timezoneOptions.map((timezone) => <option key={timezone} value={timezone}>{timezone}</option>)}</Select>
                     </Field>
                 </div>
             </section>
@@ -370,10 +371,10 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, loc
                             // block campaign creation, and the saved id is
                             // still a plain string on the contract.
                             ? <Input id="inbound-voice_id" value={value.voice_id ?? ""} onChange={(event) => update("voice_id", event.target.value)} maxLength={255} placeholder="Inherit from campaign" />
-                            : <select id="inbound-voice_id" value={value.voice_id ?? ""} onChange={(event) => update("voice_id", event.target.value)} disabled={voicesQuery.isLoading} className={selectClass}>
+                            : <Select id="inbound-voice_id" ariaLabel="Voice override" value={value.voice_id ?? ""} onChange={(next) => update("voice_id", next)} disabled={voicesQuery.isLoading}>
                                 <option value="">Inherit from campaign</option>
-                                {voiceOptions.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}{voice.language ? ` · ${voice.language}` : ""}{voice.provider ? ` · ${voice.provider}` : ""}</option>)}
-                            </select>}
+                                {voiceOptions.map((voice) => <option key={voice.id} value={voice.id}>{`${voice.name}${voice.language ? ` · ${voice.language}` : ""}${voice.provider ? ` · ${voice.provider}` : ""}`}</option>)}
+                            </Select>}
                     </Field>
                 </div>
             </section>
@@ -382,7 +383,7 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, loc
                 <div className="flex items-start gap-3"><Mic2 className="mt-0.5 h-5 w-5 text-primary" aria-hidden /><div><h2 id="inbound-opening-heading" className="text-lg font-semibold text-foreground">Opening and turn-taking</h2><p className="mt-1 text-sm text-muted-foreground">Choose who speaks first and how long a caller-first line waits before checking in.</p></div></div>
                 <div className="grid gap-5 md:grid-cols-2">
                     <Field label="Opening mode" htmlFor="inbound-opening_mode">
-                        <select id="inbound-opening_mode" value={value.opening_mode} onChange={(event) => update("opening_mode", event.target.value as InboundCampaignInput["opening_mode"])} className={selectClass}><option value="caller_first">Caller first</option><option value="agent_first">Agent greeting first</option></select>
+                        <Select id="inbound-opening_mode" ariaLabel="Opening mode" value={value.opening_mode} onChange={(next) => update("opening_mode", next as InboundCampaignInput["opening_mode"])}><option value="caller_first">Caller first</option><option value="agent_first">Agent greeting first</option></Select>
                     </Field>
                     <Field label="Opening silence timeout" htmlFor="inbound-silence_timeout_seconds" error={errors.silence_timeout_seconds} hint="Between 3 and 60 seconds."><Input id="inbound-silence_timeout_seconds" type="number" min={3} max={60} value={value.silence_timeout_seconds} onChange={(event) => update("silence_timeout_seconds", Number(event.target.value))} aria-invalid={Boolean(errors.silence_timeout_seconds)} /></Field>
                 </div>
@@ -415,11 +416,11 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, loc
                     })}
                 </div>
                 <div className="grid gap-5 md:grid-cols-2">
-                    <Field label="Holiday policy" htmlFor="inbound-holiday_policy"><select id="inbound-holiday_policy" value={value.holiday_policy} onChange={(event) => update("holiday_policy", event.target.value as InboundCampaignInput["holiday_policy"])} className={selectClass}><option value="closed">Use after-hours action</option><option value="regular_hours">Follow regular weekly hours</option></select></Field>
-                    <Field label="After-hours action" htmlFor="inbound-after_hours_action" error={errors.after_hours_action}><select id="inbound-after_hours_action" value={value.after_hours_action} onChange={(event) => update("after_hours_action", event.target.value as InboundCampaignInput["after_hours_action"])} className={selectClass} aria-invalid={Boolean(errors.after_hours_action)}>{INBOUND_AFTER_HOURS_OPTIONS.map((option) => {
+                    <Field label="Holiday policy" htmlFor="inbound-holiday_policy"><Select id="inbound-holiday_policy" ariaLabel="Holiday policy" value={value.holiday_policy} onChange={(next) => update("holiday_policy", next as InboundCampaignInput["holiday_policy"])}><option value="closed">Use after-hours action</option><option value="regular_hours">Follow regular weekly hours</option></Select></Field>
+                    <Field label="After-hours action" htmlFor="inbound-after_hours_action" error={errors.after_hours_action}><Select id="inbound-after_hours_action" ariaLabel="After-hours action" value={value.after_hours_action} onChange={(next) => update("after_hours_action", next as InboundCampaignInput["after_hours_action"])} ariaInvalid={Boolean(errors.after_hours_action)}>{INBOUND_AFTER_HOURS_OPTIONS.map((option) => {
                         const available = option.runtimeSupported || (option.value === "transfer" && transferConfigurationAvailable);
                         return <option key={option.value} value={option.value} disabled={!available}>{option.value === "transfer" && available ? "Transfer (controlled proof window)" : option.label}</option>;
-                    })}</select></Field>
+                    })}</Select></Field>
                 </div>
                 <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-3 text-sm text-foreground" role="status"><strong>{transferConfigurationAvailable ? "The controlled transfer proof window is open." : "Two after-hours routes are currently available."}</strong> {transferConfigurationAvailable ? "Transfer is still protected by the campaign allowlist, bidirectional trunk, attempt/hop limits, hard deadline, and server-side admission." : "Reject ends before Answer, while AI message intake stores the response in regular call history. Transfer remains blocked until both server capability gates pass."}</div>
                 {value.after_hours_action === "voicemail" ? <Field label="AI intake opening message" htmlFor="inbound-after_hours_message" hint="The AI says this before collecting the caller's response in the normal call transcript; no dedicated voicemail notification is created."><textarea id="inbound-after_hours_message" value={value.after_hours_message ?? ""} onChange={(event) => update("after_hours_message", event.target.value)} rows={3} placeholder="We are currently unavailable. Please tell our AI your name, number, and a short message." className={textareaClass} /></Field> : null}
@@ -435,7 +436,7 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, loc
                     <>
                         <Field label="Approved transfer destinations" htmlFor="inbound-transfer_destinations" error={errors.transfer_destinations} hint="One E.164 number per line or comma-separated."><textarea id="inbound-transfer_destinations" value={(value.transfer_destinations ?? []).join("\n")} onChange={(event) => update("transfer_destinations", event.target.value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean))} rows={4} placeholder={"+14155550199\n+14155550200"} aria-invalid={Boolean(errors.transfer_destinations)} className={textareaClass} /></Field>
                         <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-4">
-                            <Field label="Failure action" htmlFor="inbound-transfer_failure_action"><select id="inbound-transfer_failure_action" value={value.transfer_failure_action} onChange={(event) => update("transfer_failure_action", event.target.value as InboundCampaignInput["transfer_failure_action"])} className={selectClass}><option value="voicemail">AI message intake</option><option value="return_to_agent">Return to agent</option><option value="hangup">Hang up</option></select></Field>
+                            <Field label="Failure action" htmlFor="inbound-transfer_failure_action"><Select id="inbound-transfer_failure_action" ariaLabel="Failure action" value={value.transfer_failure_action} onChange={(next) => update("transfer_failure_action", next as InboundCampaignInput["transfer_failure_action"])}><option value="voicemail">AI message intake</option><option value="return_to_agent">Return to agent</option><option value="hangup">Hang up</option></Select></Field>
                             <Field label="Maximum attempts" htmlFor="inbound-max_transfer_attempts"><Input id="inbound-max_transfer_attempts" type="number" min={1} max={5} value={value.max_transfer_attempts} onChange={(event) => update("max_transfer_attempts", Number(event.target.value))} /></Field>
                             <Field label="Maximum hops" htmlFor="inbound-max_transfer_hops"><Input id="inbound-max_transfer_hops" type="number" min={1} max={5} value={value.max_transfer_hops} onChange={(event) => update("max_transfer_hops", Number(event.target.value))} /></Field>
                             <Field label="Max call seconds" htmlFor="inbound-max_call_duration"><Input id="inbound-max_call_duration" type="number" min={60} max={14400} step={60} value={value.max_call_duration_seconds} onChange={(event) => update("max_call_duration_seconds", Number(event.target.value))} /></Field>
@@ -507,5 +508,4 @@ function InlineState({ kind, children }: { kind: "loading" | "error"; children: 
     return <div className={cn("flex items-start gap-2 rounded-xl border p-3 text-sm", kind === "error" ? "border-amber-500/30 bg-amber-500/5 text-foreground" : "border-border bg-muted/30 text-muted-foreground")} role={kind === "loading" ? "status" : "alert"}>{kind === "loading" ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" aria-hidden /> : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden />}{children}</div>;
 }
 
-const selectClass = "h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
-const textareaClass = "w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const textareaClass ="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";

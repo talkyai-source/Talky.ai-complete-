@@ -993,18 +993,18 @@ export default function ContactsPage() {
                         </div>
                         <div>
                             <Label htmlFor="contact-preferred-method">Preferred Contact Method</Label>
-                            <select
+                            <Select
                                 id="contact-preferred-method"
+                                ariaLabel="Preferred Contact Method"
                                 value={contactForm.preferred_contact_method}
-                                onChange={(event) => setContactForm((previous) => ({ ...previous, preferred_contact_method: event.target.value }))}
-                                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                onChange={(next) => setContactForm((previous) => ({ ...previous, preferred_contact_method: next }))}
                             >
                                 <option value="">No preference</option>
                                 <option value="phone">Phone</option>
                                 <option value="email">Email</option>
                                 <option value="sms">SMS</option>
                                 <option value="whatsapp">WhatsApp</option>
-                            </select>
+                            </Select>
                         </div>
                         <div className="sm:col-span-2 lg:col-span-3">
                             <Label htmlFor="contact-calling-notes">Calling Notes</Label>
@@ -1227,7 +1227,9 @@ export default function ContactsPage() {
                                                     </span>
                                                 )}
                                             </div>
-                                            <div className="mt-3 flex justify-end gap-2 border-t border-border/60 pt-3">
+                                            {/* pr-12: keeps Edit/Delete clear of the fixed chat
+                                                launcher's lane while scrolling (Group C, 2026-10). */}
+                                            <div className="mt-3 flex justify-end gap-2 border-t border-border/60 pt-3 pr-12">
                                                 <button
                                                     type="button"
                                                     onClick={() => startEditContact(contact)}

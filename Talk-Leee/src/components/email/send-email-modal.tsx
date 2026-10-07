@@ -5,6 +5,7 @@ import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { useCampaignContacts, useOutboundCampaigns, useSendEmail } from "@/lib/api-hooks";
 import type { EmailTemplate } from "@/lib/models";
 import { cn } from "@/lib/utils";
@@ -248,22 +249,23 @@ export function SendEmailModal({
                                 </div>
                                 <div className="mt-4 space-y-2">
                                     <Label htmlFor="template">Template</Label>
-                                    <select
+                                    <Select
                                         id="template"
+                                        ariaLabel="Template"
                                         value={templateId}
-                                        onChange={(e) => {
-                                            setTemplateId(e.target.value);
+                                        onChange={(next) => {
+                                            setTemplateId(next);
                                             setEditingHtml("");
                                             setAllowEditLocked(false);
                                         }}
-                                        className="h-10 w-full rounded-md border border-white/10 bg-white/5 px-2 text-sm text-white"
+                                        selectClassName="border-white/10 bg-white/5 px-2 pr-9 text-white hover:bg-white/10"
                                     >
                                         {templates.map((t) => (
                                             <option key={t.id} value={t.id}>
                                                 {t.name}
                                             </option>
                                         ))}
-                                    </select>
+                                    </Select>
                                 </div>
                                 <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3">
                                     <div className="min-w-0">
@@ -400,14 +402,15 @@ export function SendEmailModal({
                 <div className="space-y-4">
                     <div className="space-y-2">
                         <Label htmlFor="contactsCampaign">Campaign</Label>
-                        <select
+                        <Select
                             id="contactsCampaign"
+                            ariaLabel="Campaign"
                             value={contactsCampaignId}
-                            onChange={(e) => {
-                                setContactsCampaignId(e.target.value);
+                            onChange={(next) => {
+                                setContactsCampaignId(next);
                                 setContactsSelected({});
                             }}
-                            className="h-10 w-full rounded-md border border-white/10 bg-white/5 px-2 text-sm text-white"
+                            selectClassName="border-white/10 bg-white/5 px-2 pr-9 text-white hover:bg-white/10"
                         >
                             <option value="">Select campaign…</option>
                             {(campaignsQ.data ?? []).map((c) => (
@@ -415,7 +418,7 @@ export function SendEmailModal({
                                     {c.name}
                                 </option>
                             ))}
-                        </select>
+                        </Select>
                     </div>
 
                     {!contactsCampaignId ? (

@@ -4,6 +4,7 @@ import { Route, ShieldCheck, Target } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import {
     CAMPAIGN_NEXT_ACTION_OPTIONS,
     campaignBriefValidation,
@@ -213,19 +214,19 @@ export function CampaignBriefFields({
                 </div>
                 <div className="space-y-2">
                     <Label htmlFor={`${idPrefix}-max-objections`}>Maximum objection attempts</Label>
-                    <select
+                    <Select
                         id={`${idPrefix}-max-objections`}
-                        value={value.max_objection_attempts}
-                        onChange={(event) => update({ max_objection_attempts: Number(event.target.value) })}
+                        ariaLabel="Maximum objection attempts"
+                        value={String(value.max_objection_attempts)}
+                        onChange={(next) => update({ max_objection_attempts: Number(next) })}
                         disabled={disabled}
-                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         {[1, 2, 3, 4, 5].map((attempts) => (
                             <option key={attempts} value={attempts}>
-                                {attempts} {attempts === 1 ? "attempt" : "attempts"}
+                                {`${attempts} ${attempts === 1 ? "attempt" : "attempts"}`}
                             </option>
                         ))}
-                    </select>
+                    </Select>
                     <p className="text-xs text-muted-foreground">
                         After this many genuine objections, the agent stops pushing and closes politely.
                     </p>

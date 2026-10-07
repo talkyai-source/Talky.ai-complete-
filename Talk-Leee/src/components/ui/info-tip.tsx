@@ -118,7 +118,10 @@ export function InfoTip({
                             setPinned((p) => !p);
                         }}
                         className={cn(
-                            "inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+                            // 24px hit box via p-1 on a 24px border box, pulled back in
+                            // with -m-1 so the occupied space stays the original 16px
+                            // and the panel's anchor does not move (WCAG 2.5.8).
+                            "-m-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-1 text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
                             className,
                         )}
                     >
@@ -135,7 +138,7 @@ export function InfoTip({
                         // shared component rather than nine hand-placed divs.
                         collisionPadding={12}
                         avoidCollisions
-                        className="z-50 max-w-[min(20rem,calc(100vw-1.5rem))] rounded-lg border border-border bg-popover px-3 py-2 text-xs leading-relaxed text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
+                        className="z-50 max-h-[var(--radix-tooltip-content-available-height)] max-w-[min(20rem,calc(100vw-1.5rem))] overflow-y-auto rounded-lg border border-border bg-popover px-3 py-2 text-xs leading-relaxed text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
                     >
                         <div className="space-y-1.5">
                             <div>{children}</div>

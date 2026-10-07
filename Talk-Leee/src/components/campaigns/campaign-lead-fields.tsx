@@ -171,7 +171,7 @@ export function CampaignLeadFieldsPicker({
                                     </span>
                                 </label>
                                 {current ? (
-                                    <label className="mt-3 flex cursor-pointer items-center gap-2 border-t border-border/60 pt-2 text-xs text-muted-foreground">
+                                    <label className="mt-3 flex cursor-pointer items-center gap-2 border-t border-border/60 pt-2 pb-1 -mb-1 text-xs text-muted-foreground">
                                         <input
                                             type="checkbox"
                                             checked={current.is_required}

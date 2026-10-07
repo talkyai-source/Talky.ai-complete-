@@ -4,7 +4,6 @@ import { useId, useState } from "react";
 import Link from "next/link";
 import {
     CheckCircle2,
-    ChevronDown,
     ClipboardCheck,
     Phone,
     StickyNote,
@@ -12,6 +11,7 @@ import {
 
 import { QuickReviewButtons } from "@/components/calls/quick-review-buttons";
 import { Modal } from "@/components/ui/modal";
+import { Select } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Call } from "@/lib/dashboard-api";
 import type {
@@ -95,22 +95,19 @@ export function LeadTypeSelect({
                 aria-hidden
                 className={`pointer-events-none absolute left-2.5 top-1/2 z-10 h-2 w-2 -translate-y-1/2 rounded-full ${selected.dot}`}
             />
-            <select
+            {/* Shared Select draws its own chevron, replacing the old manual one. */}
+            <Select
                 value={value}
-                onChange={(event) => onChange(event.target.value as CallHistoryLeadType)}
-                aria-label={`Lead type for ${callLabel}`}
-                className={`h-9 w-full appearance-none rounded-lg border py-1.5 pl-6 pr-7 text-xs font-semibold outline-none transition-[background-color,border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-ring/40 ${selected.control}`}
+                onChange={(next) => onChange(next as CallHistoryLeadType)}
+                ariaLabel={`Lead type for ${callLabel}`}
+                selectClassName={`h-9 rounded-lg py-1.5 pl-6 pr-7 text-xs font-semibold focus-visible:ring-ring/40 ${selected.control}`}
             >
                 {(Object.keys(LEAD_TYPE_STYLES) as CallHistoryLeadType[]).map((leadType) => (
-                    <option key={leadType} value={leadType} className="bg-background text-foreground">
+                    <option key={leadType} value={leadType}>
                         {LEAD_TYPE_STYLES[leadType].label}
                     </option>
                 ))}
-            </select>
-            <ChevronDown
-                aria-hidden
-                className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-70"
-            />
+            </Select>
         </div>
     );
 }

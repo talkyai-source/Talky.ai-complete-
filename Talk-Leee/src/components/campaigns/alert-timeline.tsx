@@ -236,7 +236,9 @@ export function AlertTimeline({ campaigns }: { campaigns: Campaign[] }) {
                     <div className="text-sm font-semibold text-foreground">Error & Alert Timeline</div>
                     <div className="mt-1 text-sm text-muted-foreground">Track, triage, and resolve incidents.</div>
                 </div>
-                <div className="flex items-center gap-2">
+                {/* pr-12: keeps the Hide toggle clear of the fixed chat
+                    launcher's lane while scrolling (Group C, 2026-10). */}
+                <div className="flex items-center gap-2 pr-12">
                     <div className="text-sm font-semibold text-muted-foreground">{filtered.length} alerts</div>
                     <Button
                         type="button"

@@ -29,6 +29,7 @@ from app.domain.models.ai_config import (
     GOOGLE_TTS_MODELS,
     GROQ_MODELS,
     OPENAI_MODELS,
+    DEEPSEEK_MODELS,
     ProviderListResponse,
     STT_ENGINES,
 )
@@ -90,6 +91,11 @@ async def list_providers(current_user=Depends(get_current_user)):
         if gemini_offered:
             llm_providers.append("gemini")
             llm_models.extend(model.model_dump() for model in gemini_offered)
+    # DeepSeek V4.1 Flash (owner request 2026-10-06), when its key is set.
+    if os.getenv("DEEPSEEK_API_KEY"):
+        llm_providers.append("deepseek")
+        llm_models.extend(model.model_dump() for model in DEEPSEEK_MODELS)
+
     return ProviderListResponse(
         llm={
             "providers": llm_providers,

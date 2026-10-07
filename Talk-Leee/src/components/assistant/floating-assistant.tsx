@@ -123,6 +123,7 @@ export function FloatingAssistant() {
     const [showHistory, setShowHistory] = useState(false);
     const [conversationEpoch, setConversationEpoch] = useState(0);
     const [input, setInput] = useState("");
+    const panelRef = useRef<HTMLDivElement>(null);
     const wsRef = useRef<WebSocket | null>(null);
     // The ref is authoritative for the async paths (connect, socket handlers);
     // `conversationId` mirrors it for the two child components that need the
@@ -572,6 +573,33 @@ export function FloatingAssistant() {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }, [messages, typing]);
 
+    // Close on any tap/click outside the panel (alongside the header's X
+    // button and Escape). Capture-phase pointerdown
+    // mirrors the shared Select. Taps inside portalled popovers that belong
+    // to the panel — the model picker's listbox renders under document.body
+    // — count as inside, or picking a model would slam the chat shut.
+    useEffect(() => {
+        if (!open) return;
+        const onPointerDown = (e: PointerEvent) => {
+            const panel = panelRef.current;
+            if (!panel || !(e.target instanceof Node)) return;
+            if (panel.contains(e.target)) return;
+            if (e.target instanceof Element && e.target.closest('[role="listbox"]')) return;
+            setOpen(false);
+        };
+        const onKeyDown = (e: KeyboardEvent) => {
+            // A popover that consumed its own Escape (the model picker stops
+            // propagation / prevents default) must not also close the chat.
+            if (e.key === "Escape" && !e.defaultPrevented) setOpen(false);
+        };
+        window.addEventListener("pointerdown", onPointerDown, { capture: true });
+        window.addEventListener("keydown", onKeyDown);
+        return () => {
+            window.removeEventListener("pointerdown", onPointerDown, { capture: true } as AddEventListenerOptions);
+            window.removeEventListener("keydown", onKeyDown);
+        };
+    }, [open]);
+
     const sendMessage = useCallback(() => {
         const trimmed = input.trim();
         if (!trimmed) return;
@@ -701,13 +729,18 @@ export function FloatingAssistant() {
             {/* Expanded chat panel — same anchor as the launcher. */}
             {open && (
                 <div
+                    ref={panelRef}
                     role="dialog"
                     aria-label="AI Assistant"
                     className="fixed bottom-5 right-4 sm:bottom-6 sm:right-6 z-50 flex h-[min(42rem,calc(100vh-5rem))] w-[30rem] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background text-foreground shadow-2xl"
                 >
-                    {/* Header */}
-                    <div className="flex items-center justify-between gap-2 border-b border-border bg-cyan-600/10 px-4 py-3">
-                        <div className="flex items-center gap-2 text-sm">
+                    {/* Header. Below sm it wraps to two rows — title + X on the
+                        first, model picker + history/new/mic on the second —
+                        because one row cannot hold all of it on narrow phones
+                        (~363px of content vs 264px at a 320px viewport). At sm+
+                        it is the original single row with the X at the end. */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-cyan-600/10 px-4 py-3 sm:flex-nowrap">
+                        <div className="-order-3 flex items-center gap-2 text-sm sm:order-none">
                             <Bot className="h-5 w-5 text-cyan-600 dark:text-cyan-400" />
                             <div className="flex flex-col leading-tight">
                                 <span className="font-semibold text-foreground">Assistant</span>
@@ -764,10 +797,14 @@ export function FloatingAssistant() {
                             type="button"
                             onClick={() => setOpen(false)}
                             aria-label="Close assistant"
-                            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            className="-order-2 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:order-none"
                         >
                             <X className="h-4 w-4" />
                         </button>
+                        {/* Zero-height full-width break: forces the two-row wrap
+                            below sm deterministically (title + X above it, the
+                            controls after it); hidden at sm+. */}
+                        <div aria-hidden className="-order-1 h-0 basis-full sm:hidden" />
                     </div>
 
                     {voiceMode ? (
@@ -784,7 +821,7 @@ export function FloatingAssistant() {
                     ) : (
                     <>
                     {/* Messages */}
-                    <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
+                    <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-3 space-y-2">
                         {messages.map((msg) => (
                             <MessageRow key={msg.id} msg={msg} onProposalAction={sendProposalAction} />
                         ))}
@@ -873,7 +910,7 @@ function MessageRow({
     }
     if (msg.role === "system") {
         return (
-            <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-300">
+            <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-700 [overflow-wrap:anywhere] dark:text-amber-300">
                 {msg.content}
             </div>
         );
@@ -882,7 +919,7 @@ function MessageRow({
     return (
         <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
             <div
-                className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
+                className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm [overflow-wrap:anywhere] ${
                     isUser
                         ? "whitespace-pre-wrap bg-cyan-600 text-white"
                         : "bg-muted text-foreground"

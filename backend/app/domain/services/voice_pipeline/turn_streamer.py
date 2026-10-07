@@ -613,6 +613,17 @@ class TurnStreamer:
                 buf = "I'm sorry, I had trouble processing that. Could you say it again?"
                 all_tokens.clear()
                 all_tokens.append(buf)
+        finally:
+            # Release the provider stream now. A barge-in breaks the loop above,
+            # and an abandoned async generator keeps its HTTP stream and its
+            # provider concurrency slot until garbage collection (stability
+            # audit 2026-10-02). Closing a finished stream is a no-op.
+            _aclose = getattr(_token_iter, "aclose", None)
+            if _aclose is not None:
+                try:
+                    await _aclose()
+                except Exception as _close_exc:  # noqa: BLE001
+                    logger.debug("llm stream close failed call=%s: %s", call_id[:12], _close_exc)
 
         t_llm_done = time.monotonic()
         self._p.latency_tracker.mark_llm_end(call_id)

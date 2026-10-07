@@ -1,12 +1,20 @@
 [Unit]
 Description=Talky SIP-trunk live endpoint and registration status updater
-After=asterisk.service postgresql.service
+After=asterisk.service docker.service
+StartLimitIntervalSec=0
 
 [Service]
-Type=oneshot
+# Long-running since 2026-10-07: one process, one pass every 10 s (was a
+# oneshot started by talky-trunk-status.timer, 5,760 interpreter starts a day).
+Type=simple
 # root: needs the asterisk CLI + reads /opt/talky/backend/.env for DATABASE_URL
 User=root
 WorkingDirectory=/opt/talky/backend
 EnvironmentFile=/opt/talky/backend/.env
-ExecStart=/opt/talky/backend/venv/bin/python /opt/talky/backend/scripts/trunk_live_status_updater.py
-TimeoutStartSec=30
+ExecStart=/opt/talky/backend/venv/bin/python /opt/talky/backend/scripts/trunk_live_status_updater.py --loop 10
+Restart=always
+RestartSec=5
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

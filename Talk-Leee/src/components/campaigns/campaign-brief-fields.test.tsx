@@ -41,7 +41,8 @@ test("campaign brief fields expose every structured control with accessible name
     assert.equal((screen.getByRole("checkbox", { name: /schedule callback/i }) as HTMLInputElement).checked, true);
     assert.equal((screen.getByRole("checkbox", { name: /transfer to a human/i }) as HTMLInputElement).checked, true);
     assert.equal((screen.getByLabelText(/transfer destination/i) as HTMLInputElement).disabled, false);
-    assert.equal((screen.getByLabelText(/maximum objection attempts/i) as HTMLSelectElement).value, "3");
+    // Shared Select: the closed trigger shows the selected option's label.
+    assert.match(screen.getByRole("combobox", { name: /maximum objection attempts/i }).textContent ?? "", /3 attempts/);
     assert.ok(screen.getByRole("list", { name: /required lead fields/i }));
     assert.ok(screen.getByText("Email address"));
 });

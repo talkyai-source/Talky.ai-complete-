@@ -32,9 +32,9 @@ export default function EducationIndustryPage() {
   const pillClassName =
     "rounded-full border border-border/70 bg-background/60 dark:bg-white/5 backdrop-blur-sm px-4 py-2 text-xs sm:text-sm font-medium text-gray-700 dark:text-muted-foreground";
   const primaryButtonClassName =
-    "rounded-full px-8 bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400";
+    "rounded-full min-h-12 h-auto whitespace-normal text-center max-w-full px-8 bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400";
   const outlineButtonClassName =
-    "rounded-full px-8 bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900";
+    "rounded-full min-h-12 h-auto whitespace-normal text-center max-w-full px-8 bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900";
   const centeredCtaClassName = "mt-10 flex justify-center";
   const ctaPairClassName = "mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4";
 
@@ -257,7 +257,7 @@ export default function EducationIndustryPage() {
         "Custom AI automation",
         "Dedicated success manager",
       ],
-      ctaLabel: "Talk to an AI Expert",
+      ctaLabel: "Talk to an Expert",
       ctaHref: "/#contact",
       ctaVariant: "outline" as const,
       ctaIcon: false,
