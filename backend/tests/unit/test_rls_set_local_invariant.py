@@ -210,6 +210,7 @@ _RLS_TABLES = (
     "admin_media_deletion_intents",
     "admin_media_deletion_request_keys",
     "ai_config_migrations",
+    "assistant_action_resolutions",
     "assistant_actions",
     "assistant_conversations",
     "audit_logs",
