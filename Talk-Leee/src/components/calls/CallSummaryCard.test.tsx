@@ -58,3 +58,43 @@ test("a failed summary offers no retry when the caller cannot re-run it", () => 
     assert.ok(screen.getByText("upstream timed out"));
     assert.equal(screen.queryByRole("button", { name: "Retry" }), null);
 });
+
+for (const state of ["partial", "failed", "unknown", "complete"] as const) {
+    test(`the summary shows its ${state} durable source independently of analysis`, () => {
+        render(<CallSummaryCard isLoading={false} isError={false} data={{
+            available: true, summary: summary(), source_evidence: {
+                transcript_save_state: state, summary_current: true,
+                review_required: state !== "complete", revision: "a".repeat(64),
+            },
+        }} />);
+        assert.ok(screen.getByText("Call recap"));
+        if (state === "complete") assert.equal(screen.queryByRole("status"), null);
+        else assert.match(screen.getByRole("status").textContent ?? "", {
+            partial: /partial transcript/, failed: /final transcript save failed/,
+            unknown: /completeness has not been verified/,
+        }[state]);
+    });
+}
+
+test("an unavailable summary offers review and explicit reload without claiming no conversation", () => {
+    let reloaded = 0;
+    render(<CallSummaryCard isLoading={false} isError={false} onRetry={() => { reloaded += 1; }} data={{
+        available: false, summary: null, source_evidence: {
+            transcript_save_state: "partial", summary_current: false, review_required: true, revision: null,
+        },
+    }} />);
+    assert.match(screen.getByRole("status").textContent ?? "", /saved evidence/);
+    assert.doesNotMatch(document.body.textContent ?? "", /no conversation/);
+    screen.getByRole("button", { name: "Reload summary" }).click();
+    assert.equal(reloaded, 1);
+});
+
+test("a contradictory stale envelope cannot display its old summary", () => {
+    render(<CallSummaryCard isLoading={false} isError={false} data={{
+        available: true, summary: summary({ headline: "Obsolete result" }), source_evidence: {
+            transcript_save_state: "complete", summary_current: false, review_required: true, revision: "a".repeat(64),
+        },
+    }} />);
+    assert.equal(screen.queryByText("Obsolete result"), null);
+    assert.ok(screen.getByRole("status"));
+});

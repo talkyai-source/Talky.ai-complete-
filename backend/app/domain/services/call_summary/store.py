@@ -25,6 +25,42 @@ from app.domain.services.call_summary.summarizer import (
 logger = logging.getLogger(__name__)
 
 
+async def summary_response(pool, tenant_id: str, call_id: str, summary: Optional[dict]) -> dict:
+    """Bind a response to one current durable source read after processing.
+
+    Processing may outlive a transcript correction or a replacement analysis.
+    Never return that superseded result as current, or equate saved partial
+    evidence with a complete call. This read is an observation, not a lock on
+    future revisions and not recovery of words that were never committed.
+    """
+    async with acquire_with_tenant(pool, tenant_id) as conn:
+        row = await conn.fetchrow(
+            "SELECT transcript, transcript_json, action_results, transcript_save_state, "
+            "summary_json, summary_transcript_hash FROM calls "
+            "WHERE id=$1::uuid AND tenant_id=$2::uuid",
+            call_id, tenant_id,
+        )
+    revision = transcript_revision(row) if row is not None else None
+    saved_summary = row.get("summary_json") if row is not None else None
+    if isinstance(saved_summary, str):
+        try:
+            saved_summary = json.loads(saved_summary)
+        except ValueError:
+            saved_summary = None
+    current = bool(
+        isinstance(summary, dict) and isinstance(saved_summary, dict)
+        and "business_details" in saved_summary and summary == saved_summary
+        and row.get("summary_transcript_hash") == revision
+    )
+    save_state = row.get("transcript_save_state") if row is not None else None
+    if save_state not in {"partial", "failed", "complete"}:
+        save_state = "unknown"
+    return {"available": current, "summary": summary if current else None,
+            "source_evidence": {"transcript_save_state": save_state,
+                "summary_current": current, "review_required": not current or save_state != "complete",
+                "revision": revision}}
+
+
 async def _confirmed_contacts_for_call(pool, tenant_id: str, call_id: str) -> dict[str, str]:
     """Confirmed contacts after the shared current-transcript evidence check.
 

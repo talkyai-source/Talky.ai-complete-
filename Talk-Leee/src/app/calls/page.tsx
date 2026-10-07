@@ -9,7 +9,7 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { useCalls, useCallTranscript, useCallSummary } from "@/lib/api-hooks";
 import type { Call, CallSummaryEnvelope } from "@/lib/dashboard-api";
-import { CallSummaryCard } from "@/components/calls/CallSummaryCard";
+import { CallSummaryCard, summarySourceMessage } from "@/components/calls/CallSummaryCard";
 import { CallsLoadError, distinctDidOptions, inboundCampaignFilterOptions } from "@/components/calls/call-panels";
 import { statusPillClass } from "@/lib/status-colors";
 import { extendedApi } from "@/lib/extended-api";
@@ -189,10 +189,15 @@ function SummaryPreview({
 
     if (isError) return <p className="text-xs text-destructive">Could not load the AI summary.</p>;
 
+    const sourceMessage = summarySourceMessage(data);
+    if (data && (!data.available || !data.summary || data.source_evidence?.summary_current === false)) {
+        return <p role="status" className="text-xs text-muted-foreground">{sourceMessage}</p>;
+    }
     const summary = data?.summary;
     const keyPoints = summary?.key_points?.filter(Boolean).slice(0, 4) ?? [];
     return (
         <div className="space-y-2.5">
+            {sourceMessage ? <p role="status" className="text-xs text-muted-foreground">{sourceMessage}</p> : null}
             <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">AI Summary</p>
                 <p className="mt-1 text-sm font-semibold leading-snug text-foreground">

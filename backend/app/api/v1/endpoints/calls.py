@@ -1783,21 +1783,21 @@ async def get_call_summary(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
-    """AI call summary (structured). Generates on first request if missing
-    (lazy backfill) and caches it; returns {available:false} when the call has
-    no transcript to summarize."""
+    """Process saved evidence and return a revision-bound summary observation.
+
+    Partial transcripts remain reviewable without claiming that missing words
+    were recovered. A superseded or unsaved summary is unavailable.
+    """
     if not current_user.tenant_id:
         raise HTTPException(status_code=400, detail="Tenant ID required")
-    from app.domain.services.call_summary.store import generate_and_store
+    from app.domain.services.call_summary.store import generate_and_store, summary_response
 
     try:
         summary = await generate_and_store(db_client.pool, str(current_user.tenant_id), call_id)
+        return await summary_response(db_client.pool, str(current_user.tenant_id), call_id, summary)
     except Exception:
         logger.error("get_call_summary failed call=%s", call_id[:12], exc_info=True)
         raise HTTPException(status_code=500, detail="Could not generate summary")
-    if summary is None:
-        return {"available": False, "summary": None}
-    return {"available": True, "summary": summary}
 
 
 # =============================================================================

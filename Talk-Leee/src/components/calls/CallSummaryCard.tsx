@@ -343,6 +343,18 @@ type CallSummaryCardProps = {
     onRetry?: () => void;
 };
 
+export function summarySourceMessage(data?: CallSummaryEnvelope): string | null {
+    if (!data) return null;
+    if (!data.available || !data.summary || data.source_evidence?.summary_current === false) {
+        return "No current summary is available from the saved evidence. Review the call history or reload.";
+    }
+    const state = data.source_evidence?.transcript_save_state;
+    if (state === "partial") return "This summary uses a partial transcript. Unsaved words could not be recovered; review the call history before using it.";
+    if (state === "failed") return "The final transcript save failed. This summary uses earlier saved text and may be incomplete.";
+    if (state !== "complete") return "Transcript completeness has not been verified. This summary describes only the saved evidence.";
+    return null;
+}
+
 export function CallSummaryCard({ isLoading, isError, error, data, onRetry }: CallSummaryCardProps) {
     if (isLoading) {
         return (
@@ -374,13 +386,18 @@ export function CallSummaryCard({ isLoading, isError, error, data, onRetry }: Ca
 
     if (!data) return null;
 
-    if (!data.available || !data.summary) {
+    const sourceMessage = summarySourceMessage(data);
+    if (!data.available || !data.summary || data.source_evidence?.summary_current === false) {
         return (
-            <p className="text-sm text-muted-foreground">
-                No summary — this call had no conversation to summarize.
-            </p>
+            <div className="space-y-2 text-sm text-muted-foreground">
+                <p role="status">{sourceMessage}</p>
+                {onRetry ? <button type="button" onClick={onRetry} className="underline">Reload summary</button> : null}
+            </div>
         );
     }
 
-    return <SummaryBody summary={data.summary} />;
+    return <div className="space-y-3">
+        {sourceMessage ? <p role="status" className="text-sm text-muted-foreground">{sourceMessage}</p> : null}
+        <SummaryBody summary={data.summary} />
+    </div>;
 }

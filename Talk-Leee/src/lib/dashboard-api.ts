@@ -309,6 +309,12 @@ export interface CallSummaryObj {
 export interface CallSummaryEnvelope {
     available: boolean;
     summary: CallSummaryObj | null;
+    source_evidence?: {
+        transcript_save_state: "complete" | "partial" | "failed" | "unknown";
+        summary_current: boolean;
+        review_required: boolean;
+        revision: string | null;
+    };
 }
 
 export interface CallDetail extends Call {
