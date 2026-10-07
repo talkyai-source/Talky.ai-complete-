@@ -29,3 +29,20 @@ Three additional actual-PostgreSQL controls are supplied in `backend/tests/integ
 ## Limits
 
 Discarding process-local state models a restart boundary; the unit run is not an operating-system crash experiment. Durable-source recovery is demonstrated, not recovery of audio/text that never committed. A live contact interpretation that never reached storage cannot be reconstructed as a confirmed value from its transcript. Source warnings and existing review/reprocessing remain the honest route. Real database transaction/RLS results, deployed UI, provider/model comprehension, audio, customer acceptance and release remain separately qualified work. No push or deployment occurred.
+
+## Frontend follow-up — 8 October 2026
+
+Source: `396335f0788af3e0db5d968e87c77b5d90fc7beb`. Root's first two-module frontend run preserved **32 passes / 4 failures**: the same new assertion failed for all four transcript states because it expected a headline which the summary card intentionally does not render. The DOM already contained the correct body and source warning. The tests now assert the rendered `what_happened` body and retain each exact source-warning assertion. The stale-result negative also uses that displayed field, so it cannot pass merely because headlines are never shown.
+
+The Calls page's `SummaryPreview` moved unchanged into existing `call-panels.tsx`, following the repository's existing testable-presentational-component convention. Its body was compared to the prior source and matched exactly after adding `export`; both existing page uses import it. Seven real React DOM controls exercise this actual preview: unavailable, missing and stale results suppress the old list headline and current body, while partial/failed/unknown/complete results show current content with the appropriate independent warning. No API, query key, props or product behavior changed.
+
+Owner checks in the isolated worktree, using Node **v25.8.1** and a newly created junction to the existing integration tree's `Talk-Leee/node_modules` (no install or shared dependency changes):
+
+```text
+node --test --import tsx --import ./src/test-utils/setup.ts src/components/calls/CallSummaryCard.test.tsx src/app/calls/page.test.tsx
+node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
+node node_modules/eslint/bin/eslint.js src/app/calls/page.tsx src/app/calls/page.test.tsx src/components/calls/call-panels.tsx src/components/calls/CallSummaryCard.test.tsx
+git diff --check
+```
+
+**24 tests passed**, none skipped, 14.90s; TypeScript, scoped ESLint and diff check exited 0 without diagnostics. Logs: [tests](artifacts/agent-capture-recovery/frontend-followup.txt), [types](artifacts/agent-capture-recovery/frontend-followup-typecheck.txt), [lint](artifacts/agent-capture-recovery/frontend-followup-lint.txt). Independent CRM review cleared the move and assertions without execution. These results close the owner frontend checks left pending above; they do not replace root's separate database/integration qualification or establish browser, deployed UI or model acceptance.

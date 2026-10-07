@@ -1,0 +1,32 @@
+✔ the unavailable current preview cannot fall back to a cached list headline (361.3224ms)
+✔ the missing current preview cannot fall back to a cached list headline (24.0395ms)
+✔ the stale current preview cannot fall back to a cached list headline (25.9726ms)
+✔ the partial preview renders current source content with an independent source warning (40.6469ms)
+✔ the failed preview renders current source content with an independent source warning (32.0299ms)
+✔ the unknown preview renders current source content with an independent source warning (27.9041ms)
+✔ the complete preview renders current source content with an independent source warning (19.2332ms)
+✔ a failed call-history load offers a retry that re-runs the request (119.7494ms)
+✔ a failed call-history load offers no retry when the caller cannot re-run it (10.23ms)
+✔ the DID filter lists only the DIDs the wire actually sent, deduplicated and sorted (5.6665ms)
+✔ an outbound call with no DID contributes nothing to the filter (0.9253ms)
+✔ the campaign filter is labeled by the wire's own campaign_name (2.6538ms)
+✔ a campaign with no name falls back to its own id, never an invented label (1.2361ms)
+✔ no campaign filter option renders without the wire carrying an inbound campaign id (0.8998ms)
+✔ actionable AI classifications receive a visible needs-review signal (677.5557ms)
+✔ a summary with no actionable classification does not invent confidence (100.6442ms)
+✔ a failed summary offers a retry that re-runs the request (65.1727ms)
+✔ a failed summary offers no retry when the caller cannot re-run it (10.4883ms)
+✔ the summary shows its partial durable source independently of analysis (75.6007ms)
+✔ the summary shows its failed durable source independently of analysis (78.1341ms)
+✔ the summary shows its unknown durable source independently of analysis (68.2636ms)
+✔ the summary shows its complete durable source independently of analysis (84.7719ms)
+✔ an unavailable summary offers review and explicit reload without claiming no conversation (40.6978ms)
+✔ a contradictory stale envelope cannot display its old summary (22.4773ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 14900.4257
