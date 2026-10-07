@@ -112,6 +112,8 @@ def _matches_schema(value, schema):
         return False
     if "allOf" in schema and not all(_matches_schema(value, s) for s in schema["allOf"]):
         return False
+    if "not" in schema and _matches_schema(value, schema["not"]):
+        return False
     kinds = schema.get("type")
     if kinds:
         kinds = kinds if isinstance(kinds, list) else [kinds]

@@ -659,8 +659,8 @@ def test_assistant_schema_uses_same_exact_reader_arguments_and_not_query_search(
     from app.services.scripts.knowledge.sections import SECTION_TOOL_PARAMETERS
     schema = next(tool["function"] for tool in GROQ_TOOL_SCHEMAS if tool["function"]["name"] == "retrieve_knowledge")
     params = schema["parameters"]
-    assert set(params["properties"]) == {"campaign_id", "section_ids", "catalog_offset"}
+    assert set(params["properties"]) == {"campaign_id", "section_ids", "catalog_offset", "catalog_parent", "source_offset"}
     assert params["oneOf"] == SECTION_TOOL_PARAMETERS["oneOf"]
     assert params["additionalProperties"] is False and params["required"] == ["campaign_id"]
     assert "what the agent would pull" not in schema["description"]
-    assert "catalog_offset=0" in agent.SYSTEM_PROMPT
+    assert 'catalog_parent=""' in agent.SYSTEM_PROMPT

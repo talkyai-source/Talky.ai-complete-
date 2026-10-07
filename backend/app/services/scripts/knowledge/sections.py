@@ -1,7 +1,8 @@
 """Call-scoped, model-selected source sections. No semantic search or ranking.
 
 The catalog is navigation, never factual evidence. A read returns the complete
-selected authored section and its actual ancestors, or explicitly withholds it.
+selected authored section and its actual ancestors, explicitly incomplete
+contiguous source pages, or a bounded unavailability result.
 Outbound calls pin a snapshot at setup; inbound calls keep admission's snapshot.
 """
 from __future__ import annotations
@@ -18,14 +19,18 @@ from app.services.scripts.prompts.prompt_safety import scan_for_injection
 CATALOG_MAX_CHARS = 8000
 CATALOG_LABEL_MAX_CHARS = 160
 SECTIONS_MAX_CHARS = 12000
+SOURCE_PAGE_MAX_BYTES = 12000
+SOURCE_CONTEXT_MAX_BYTES = 48000
 MAX_SELECTED_SECTIONS = 3
 _PATH = re.compile(r"[1-9][0-9]*(?:\.[1-9][0-9]*){0,5}\Z")
 
 SECTION_TOOL_DESCRIPTION = (
     "Read exact company source sections selected from the catalog. Send "
-    "section_ids to read up to three sections, OR catalog_offset to see another "
-    "catalog page. Catalog labels may be shortened and are navigation, not answers. "
-    "Use returned next_offset to continue, including after a skipped oversized entry."
+    "section_ids to read up to three sections; source_offset continues an oversized "
+    "source. Send catalog_parent='' for roots or an exact section ID for its children; "
+    "catalog_offset pages that list. Catalog labels are navigation, not answers. "
+    "source_page is incomplete: read every contiguous part of the same context_digest "
+    "before answering from it, including its conditions. The last part alone is not the whole source."
 )
 SECTION_TOOL_PARAMETERS = {
     "type": "object",
@@ -39,9 +44,21 @@ SECTION_TOOL_PARAMETERS = {
             "type": "integer", "minimum": 0,
             "description": "The next_offset returned by a catalog page; zero shows the first page.",
         },
+        "catalog_parent": {
+            "type": "string",
+            "description": "Empty string lists roots; an exact section_id lists only its direct children.",
+        },
+        "source_offset": {
+            "type": "integer", "minimum": 0,
+            "description": "Exact next_source_offset (character offset) from a source_page for the same section_ids.",
+        },
     },
     "additionalProperties": False,
-    "oneOf": [{"required": ["section_ids"]}, {"required": ["catalog_offset"]}],
+    "oneOf": [
+        {"required": ["section_ids"], "not": {"anyOf": [{"required": ["catalog_offset"]}, {"required": ["catalog_parent"]}]}},
+        {"anyOf": [{"required": ["catalog_offset"]}, {"required": ["catalog_parent"]}],
+         "not": {"anyOf": [{"required": ["section_ids"]}, {"required": ["source_offset"]}]}},
+    ],
 }
 
 
@@ -124,8 +141,18 @@ def _result(catalog, status: str, *, reason: str | None = None, **values) -> dic
     return {**result, **values}
 
 
-def _chain(catalog: SectionCatalog, selected: dict) -> list[dict] | None:
+def _path_index(catalog: SectionCatalog) -> dict:
+    by_path = {}
+    for row in catalog.nodes:
+        if isinstance(row.get("path"), str):
+            by_path.setdefault((row["source_id"], row["path"]), []).append(row)
+    return by_path
+
+
+def _chain(catalog: SectionCatalog, selected: dict, *, by_path: dict | None = None) -> list[dict] | None:
     """Path and parent must agree; Markdown heading depths need not be consecutive."""
+    if by_path is None:
+        by_path = _path_index(catalog)
     chain, seen, current = [], set(), selected
     while current is not None:
         path, depth = current.get("path"), current.get("depth")
@@ -137,8 +164,7 @@ def _chain(catalog: SectionCatalog, selected: dict) -> list[dict] | None:
         if (current["id"] in seen or len(chain) >= 6 or not isinstance(path, str)
                 or not _PATH.fullmatch(path) or type(depth) is not int or not 0 <= depth <= 6):
             return None
-        if sum(row["source_id"] == current["source_id"] and row.get("path") == path
-               for row in catalog.nodes) != 1:
+        if len(by_path.get((current["source_id"], path), ())) != 1:
             return None
         seen.add(current["id"])
         chain.append(current)
@@ -147,8 +173,8 @@ def _chain(catalog: SectionCatalog, selected: dict) -> list[dict] | None:
             if current.get("parent_id") is not None:
                 return None
             break
-        parents = [row for row in catalog.nodes if row["source_id"] == current["source_id"]
-                   and row["source_version"] == current["source_version"] and row.get("path") == parent_path]
+        parents = [row for row in by_path.get((current["source_id"], parent_path), ())
+                   if row["source_version"] == current["source_version"]]
         if len(parents) != 1:
             return None
         parent = parents[0]
@@ -160,36 +186,56 @@ def _chain(catalog: SectionCatalog, selected: dict) -> list[dict] | None:
 
 
 def render_catalog_page(catalog: SectionCatalog | None, offset: int = 0,
-                        *, max_chars: int = CATALOG_MAX_CHARS) -> dict:
+                        *, max_chars: int = CATALOG_MAX_CHARS, parent: str | None = None) -> dict:
     if not isinstance(catalog, SectionCatalog):
         return _result(catalog, "unavailable", reason="knowledge_unavailable")
-    if type(offset) is not int or offset < 0 or offset > len(catalog.nodes):
+    rows = list(catalog.nodes)
+    by_path = _path_index(catalog)
+    chains = {row["id"]: _chain(catalog, row, by_path=by_path) for row in rows}
+    child_counts = {}
+    for chain in chains.values():
+        if chain is not None and len(chain) > 1:
+            key = chain[-2]["id"]
+            child_counts[key] = child_counts.get(key, 0) + 1
+    if parent is not None:
+        if not isinstance(parent, str):
+            return _result(catalog, "unavailable", reason="invalid_catalog_parent")
+        if parent:
+            selected = next((row for row in rows if row["section_id"] == parent), None)
+            if selected is None or chains[selected["id"]] is None:
+                return _result(catalog, "unavailable", reason="invalid_catalog_parent")
+        rows = [row for row in rows if (
+            (chains[row["id"]] is None or len(chains[row["id"]]) == 1) if not parent else
+            chains[row["id"]] is not None and len(chains[row["id"]]) > 1
+            and chains[row["id"]][-2]["section_id"] == parent)]
+    if type(offset) is not int or offset < 0 or offset > len(rows):
         return _result(catalog, "unavailable", reason="invalid_catalog_offset")
     entries, used = [], 0
-    for row in catalog.nodes[offset:]:
-        chain = _chain(catalog, row)
+    for row in rows[offset:]:
+        chain = chains[row["id"]]
         labels = [row["heading"], *[item["heading"] for item in chain or ()]]
         shortened = [label if len(label) <= CATALOG_LABEL_MAX_CHARS
                      else label[:CATALOG_LABEL_MAX_CHARS - 1] + "…" for label in labels]
         entry = {"section_id": row["section_id"], "source_id": row["source_id"],
                  "heading": shortened[0], "path": shortened[1:],
                  "labels_truncated": labels != shortened,
+                 "child_count": child_counts.get(row["id"], 0),
                  "readable": chain is not None}
         size = len(json.dumps(entry, ensure_ascii=False)) + 1
         if used + size > max_chars:
             if not entries:
-                complete = offset + 1 == len(catalog.nodes)
+                complete = offset + 1 == len(rows)
                 return _result(catalog, "too_large", reason="catalog_entry_too_large",
-                               offset=offset, total_sections=len(catalog.nodes),
+                               offset=offset, total_sections=len(rows), catalog_parent=parent,
                                skipped_offset=offset, complete=complete,
                                next_offset=None if complete else offset + 1)
             break
         entries.append(entry)
         used += size
     next_offset = offset + len(entries)
-    complete = next_offset == len(catalog.nodes)
+    complete = next_offset == len(rows)
     return _result(catalog, "catalog", entries=entries, complete=complete,
-                   offset=offset, total_sections=len(catalog.nodes),
+                   offset=offset, total_sections=len(rows), catalog_parent=parent,
                    next_offset=None if complete else next_offset)
 
 
@@ -228,11 +274,43 @@ def read_sections(catalog: SectionCatalog | None, section_ids, *, max_chars: int
 
 def run_section_request(catalog: SectionCatalog | None, arguments: Any) -> dict:
     """Shared traditional/native argument boundary; no caller scope parameters."""
-    if not isinstance(arguments, dict) or set(arguments) not in ({"section_ids"}, {"catalog_offset"}):
+    if not isinstance(arguments, dict) or set(arguments) not in (
+        {"section_ids"}, {"section_ids", "source_offset"}, {"catalog_offset"},
+        {"catalog_parent"}, {"catalog_parent", "catalog_offset"},
+    ):
         return _result(catalog, "unavailable", reason="invalid_arguments")
-    if "catalog_offset" in arguments:
-        return render_catalog_page(catalog, arguments["catalog_offset"])
-    return read_sections(catalog, arguments["section_ids"])
+    if "section_ids" not in arguments:
+        return render_catalog_page(catalog, arguments.get("catalog_offset", 0), parent=arguments.get("catalog_parent"))
+    offset = arguments.get("source_offset", 0)
+    if type(offset) is not int or offset < 0:
+        return _result(catalog, "unavailable", reason="invalid_source_offset")
+    # Validate the entire authored context, including every ancestor and the
+    # injection check, before exposing any fragment. This does not rank facts.
+    result = read_sections(catalog, arguments["section_ids"], max_chars=SOURCE_CONTEXT_MAX_BYTES)
+    if result["status"] != "available":
+        return result
+    text = result["text"]
+    if len(text.encode("utf-8")) > SOURCE_CONTEXT_MAX_BYTES:
+        return _result(catalog, "too_large", reason="section_context_too_large")
+    if offset >= len(text):
+        return _result(catalog, "unavailable", reason="invalid_source_offset")
+    if offset == 0 and len(text.encode("utf-8")) <= SOURCE_PAGE_MAX_BYTES:
+        return {**result, "context_complete": True}
+    # Character offsets avoid breaking a Unicode code point. The byte ceiling
+    # bounds each body on the wire independently of the tool-round ceiling.
+    part = text[offset:].encode("utf-8")[:SOURCE_PAGE_MAX_BYTES].decode("utf-8", errors="ignore")
+    end = offset + len(part)
+    sources, start = [], 0
+    for passage in result["passages"]:
+        sources.append({**{key: value for key, value in passage.items() if key != "text"},
+                        "start": start, "end": start + len(passage["text"])})
+        start += len(passage["text"]) + 2
+    digest = hashlib.sha256(json.dumps([catalog.tenant_id, catalog.campaign_id, sources, text],
+                                      ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    return _result(catalog, "source_page", source_text=part, sources=sources,
+                   context_digest=digest, context_complete=False, source_offset=offset,
+                   source_end=end, total_chars=len(text), total_bytes=len(text.encode("utf-8")),
+                   end_of_context=end == len(text), next_source_offset=end if end < len(text) else None)
 
 
 def serialize_section_result(result: dict) -> str:

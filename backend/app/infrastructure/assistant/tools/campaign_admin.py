@@ -216,6 +216,8 @@ async def retrieve_knowledge(
     campaign_id: str,
     section_ids: Optional[List[str]] = None,
     catalog_offset: Optional[int] = None,
+    catalog_parent: Optional[str] = None,
+    source_offset: Optional[int] = None,
     actor_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Browse or read exact authored sections under a fresh campaign read lease.
@@ -228,7 +230,12 @@ async def retrieve_knowledge(
         arguments["section_ids"] = section_ids
     if catalog_offset is not None:
         arguments["catalog_offset"] = catalog_offset
-    if len(arguments) != 1:
+    if catalog_parent is not None:
+        arguments["catalog_parent"] = catalog_parent
+    if source_offset is not None:
+        arguments["source_offset"] = source_offset
+    if set(arguments) not in ({"section_ids"}, {"section_ids", "source_offset"},
+                              {"catalog_offset"}, {"catalog_parent"}, {"catalog_parent", "catalog_offset"}):
         return {"status": "unavailable", "reason": "invalid_arguments"}
     try:
         async with campaign_knowledge_access_lease(

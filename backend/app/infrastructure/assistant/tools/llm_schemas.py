@@ -401,8 +401,10 @@ GROQ_TOOL_SCHEMAS = [
         "function": {
             "name": "retrieve_knowledge",
             "description": (
-                "Browse campaign source sections with catalog_offset=0, then choose exact "
-                "section_ids to read authored facts. Use next_offset for later catalog pages. "
+                "Browse campaign roots with catalog_parent='', then browse a section's children "
+                "with its section ID or read section_ids for authored facts. Use next_offset "
+                "for catalog pages and next_source_offset for incomplete source pages. Read "
+                "all contiguous source parts with the same digest, including conditions. "
                 "Headings and generated metadata are navigation, not answers. Available means "
                 "source was read, not that it answers the original question. If references "
                 "become unavailable after an edit, list the catalog again."

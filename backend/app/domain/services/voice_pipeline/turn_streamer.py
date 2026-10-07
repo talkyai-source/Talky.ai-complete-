@@ -123,6 +123,15 @@ def _readback_protected_values(session) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _history_context_budget(*, model: str | None, system_prompt: str,
+                            tools: list, max_tokens: int) -> int:
+    window = context_window_for(model)
+    overhead = estimate_tokens(system_prompt + _HISTORY_OMISSION_NOTICE)
+    overhead += estimate_tokens(json.dumps(tools, ensure_ascii=False)) + 1024
+    continuation = min(20_000, window // 3) if tools else 0
+    return window - overhead - max_tokens - continuation
+
+
 def _history_for_context(history: list, *, model: str | None, system_prompt: str,
                          tools: list, max_tokens: int) -> tuple[list, int]:
     """Keep verbatim history while it fits; omit whole oldest exchanges only.
@@ -132,12 +141,8 @@ def _history_for_context(history: list, *, model: str | None, system_prompt: str
     This is a context estimate, not an exact provider tokenizer. Never shorten
     the current caller's words or mutate the canonical stored conversation.
     """
-    window = context_window_for(model)
-    overhead = estimate_tokens(system_prompt + _HISTORY_OMISSION_NOTICE)
-    overhead += estimate_tokens(json.dumps(tools, ensure_ascii=False)) + 1024
-    # Catalog pages and source reads append results during this same turn.
-    continuation = min(20_000, window // 3) if tools else 0
-    budget = max(0, window - overhead - max_tokens - continuation)
+    budget = max(0, _history_context_budget(model=model, system_prompt=system_prompt,
+                                          tools=tools, max_tokens=max_tokens))
     costs = [estimate_tokens(message.content) + 8 for message in history]
     remaining = sum(costs)
     if remaining <= budget or not history:
@@ -159,8 +164,8 @@ def _history_for_context(history: list, *, model: str | None, system_prompt: str
         remaining -= sum(costs[start:boundary])
         start = boundary
     # The newest complete exchange stays intact even if one huge utterance
-    # exceeds the estimate; corrupting a quote/contact would be worse than the
-    # existing explicit provider-error handling for an oversized request.
+    # exceeds the estimate. The request preflight asks for a narrower question
+    # without dispatching or corrupting the canonical quote/contact.
     return list(history[start:]), start
 
 
@@ -308,6 +313,14 @@ class TurnStreamer:
             system_prompt += "\n\n" + _HISTORY_OMISSION_NOTICE
             logger.info("voice_history_context_limited call_id=%s omitted_messages=%d retained_messages=%d",
                         call_id, omitted, len(llm_messages))
+        remaining_budget = _history_context_budget(model=model, system_prompt=system_prompt,
+                                                    tools=offered_tools, max_tokens=output_tokens)
+        context_failure = "setup_over_budget" if remaining_budget <= 0 else (
+            "current_exchange_over_budget" if sum(estimate_tokens(m.content) + 8 for m in llm_messages)
+            > remaining_budget else None
+        )
+        # Diagnostic only: no contact, caller text, or prompt content is logged.
+        session._context_failure = context_failure
 
         from app.domain.services.voice_pipeline.profile import turn_profile
         logger.info("voice_turn_profile %s", json.dumps(
@@ -364,7 +377,14 @@ class TurnStreamer:
         t_tts_end: Optional[float] = None
 
         # One conversational model owns wording and chooses its available tools.
-        if offered_tools:
+        if context_failure:
+            logger.warning("voice_context_unavailable call_id=%s reason=%s", call_id, context_failure)
+            async def _context_recovery():
+                yield ("I'm sorry, this conversation is temporarily unavailable. Please try again later."
+                       if context_failure == "setup_over_budget" else
+                       "That's more than I can process at once. Could you ask one specific question in a shorter message?")
+            _token_iter = _context_recovery()
+        elif offered_tools:
             async def _voice_tool_runner(_name: str, _args: dict) -> str:
                 if _name == KB_TOOL_NAME:
                     result = await run_knowledge_lookup(session, _args)
