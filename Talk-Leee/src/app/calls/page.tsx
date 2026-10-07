@@ -8,9 +8,9 @@ import { Phone, PhoneOff, PhoneIncoming, PhoneOutgoing, Clock, CalendarClock, Ch
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { useCalls, useCallTranscript, useCallSummary } from "@/lib/api-hooks";
-import type { Call, CallSummaryEnvelope } from "@/lib/dashboard-api";
-import { CallSummaryCard, summarySourceMessage } from "@/components/calls/CallSummaryCard";
-import { CallsLoadError, distinctDidOptions, inboundCampaignFilterOptions } from "@/components/calls/call-panels";
+import type { Call } from "@/lib/dashboard-api";
+import { CallSummaryCard } from "@/components/calls/CallSummaryCard";
+import { CallsLoadError, SummaryPreview, distinctDidOptions, inboundCampaignFilterOptions } from "@/components/calls/call-panels";
 import { statusPillClass } from "@/lib/status-colors";
 import { extendedApi } from "@/lib/extended-api";
 import { CallIssuesBanner } from "@/components/calls/call-issues-banner";
@@ -165,63 +165,6 @@ function CallParties({ call }: { call: Call }) {
         return <><span className="truncate text-sm font-semibold text-foreground">{call.from_number || "Private caller"}</span><span className="truncate text-xs text-muted-foreground">to {call.to_number || "assigned DID"}</span><CapturedContact call={call} /><CallHighlight call={call} /></>;
     }
     return <><span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span><span className="truncate text-xs text-muted-foreground">From {call.from_number || "not recorded"}</span><CapturedContact call={call} /><CallHighlight call={call} /></>;
-}
-
-function SummaryPreview({
-    fallback,
-    isLoading,
-    isError,
-    data,
-}: {
-    fallback?: string;
-    isLoading: boolean;
-    isError: boolean;
-    data?: CallSummaryEnvelope;
-}) {
-    if (isLoading) {
-        return (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                Loading key points…
-            </div>
-        );
-    }
-
-    if (isError) return <p className="text-xs text-destructive">Could not load the AI summary.</p>;
-
-    const sourceMessage = summarySourceMessage(data);
-    if (data && (!data.available || !data.summary || data.source_evidence?.summary_current === false)) {
-        return <p role="status" className="text-xs text-muted-foreground">{sourceMessage}</p>;
-    }
-    const summary = data?.summary;
-    const keyPoints = summary?.key_points?.filter(Boolean).slice(0, 4) ?? [];
-    return (
-        <div className="space-y-2.5">
-            {sourceMessage ? <p role="status" className="text-xs text-muted-foreground">{sourceMessage}</p> : null}
-            <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">AI Summary</p>
-                <p className="mt-1 text-sm font-semibold leading-snug text-foreground">
-                    {summary?.headline || fallback || "No summary is available for this call."}
-                </p>
-            </div>
-            {keyPoints.length > 0 ? (
-                <ul className="space-y-1.5">
-                    {keyPoints.map((point, index) => (
-                        <li key={`${point}-${index}`} className="flex gap-2 text-xs leading-relaxed text-popover-foreground">
-                            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary/60" aria-hidden />
-                            <span>{point}</span>
-                        </li>
-                    ))}
-                </ul>
-            ) : null}
-            {summary?.next_step?.trim() ? (
-                <div className="rounded-lg bg-muted/70 px-2.5 py-2 text-xs leading-relaxed">
-                    <span className="font-semibold text-foreground">Next:</span>{" "}
-                    <span className="text-muted-foreground">{summary.next_step}</span>
-                </div>
-            ) : null}
-        </div>
-    );
 }
 
 type CallWorkflowPatch = Partial<Omit<CallHistoryWorkflowEntry, "updatedAt">>;

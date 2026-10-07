@@ -67,7 +67,7 @@ for (const state of ["partial", "failed", "unknown", "complete"] as const) {
                 review_required: state !== "complete", revision: "a".repeat(64),
             },
         }} />);
-        assert.ok(screen.getByText("Call recap"));
+        assert.ok(screen.getByText("The caller asked about the service."));
         if (state === "complete") assert.equal(screen.queryByRole("status"), null);
         else assert.match(screen.getByRole("status").textContent ?? "", {
             partial: /partial transcript/, failed: /final transcript save failed/,
@@ -91,7 +91,7 @@ test("an unavailable summary offers review and explicit reload without claiming 
 
 test("a contradictory stale envelope cannot display its old summary", () => {
     render(<CallSummaryCard isLoading={false} isError={false} data={{
-        available: true, summary: summary({ headline: "Obsolete result" }), source_evidence: {
+        available: true, summary: summary({ what_happened: "Obsolete result" }), source_evidence: {
             transcript_save_state: "complete", summary_current: false, review_required: true, revision: "a".repeat(64),
         },
     }} />);

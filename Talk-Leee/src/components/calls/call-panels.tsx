@@ -1,10 +1,11 @@
 "use client";
 
-import { Clock, Phone, PhoneForwarded, PhoneIncoming, Receipt, Route, RefreshCw, ShieldCheck } from "lucide-react";
+import { Clock, Loader2, Phone, PhoneForwarded, PhoneIncoming, Receipt, Route, RefreshCw, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 
+import { summarySourceMessage } from "@/components/calls/CallSummaryCard";
 import { Button } from "@/components/ui/button";
-import { transferLegTerminalReason, type TransferLeg } from "@/lib/dashboard-api";
+import { transferLegTerminalReason, type CallSummaryEnvelope, type TransferLeg } from "@/lib/dashboard-api";
 import {
     billingHoldReasonLabel,
     billingStatusLabel,
@@ -67,6 +68,63 @@ export function CallsLoadError({ message, onRetry }: { message: string; onRetry?
                     <RefreshCw className="h-3.5 w-3.5" aria-hidden />
                     Try again
                 </button>
+            ) : null}
+        </div>
+    );
+}
+
+export function SummaryPreview({
+    fallback,
+    isLoading,
+    isError,
+    data,
+}: {
+    fallback?: string;
+    isLoading: boolean;
+    isError: boolean;
+    data?: CallSummaryEnvelope;
+}) {
+    if (isLoading) {
+        return (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                Loading key points…
+            </div>
+        );
+    }
+
+    if (isError) return <p className="text-xs text-destructive">Could not load the AI summary.</p>;
+
+    const sourceMessage = summarySourceMessage(data);
+    if (data && (!data.available || !data.summary || data.source_evidence?.summary_current === false)) {
+        return <p role="status" className="text-xs text-muted-foreground">{sourceMessage}</p>;
+    }
+    const summary = data?.summary;
+    const keyPoints = summary?.key_points?.filter(Boolean).slice(0, 4) ?? [];
+    return (
+        <div className="space-y-2.5">
+            {sourceMessage ? <p role="status" className="text-xs text-muted-foreground">{sourceMessage}</p> : null}
+            <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">AI Summary</p>
+                <p className="mt-1 text-sm font-semibold leading-snug text-foreground">
+                    {summary?.headline || fallback || "No summary is available for this call."}
+                </p>
+            </div>
+            {keyPoints.length > 0 ? (
+                <ul className="space-y-1.5">
+                    {keyPoints.map((point, index) => (
+                        <li key={`${point}-${index}`} className="flex gap-2 text-xs leading-relaxed text-popover-foreground">
+                            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary/60" aria-hidden />
+                            <span>{point}</span>
+                        </li>
+                    ))}
+                </ul>
+            ) : null}
+            {summary?.next_step?.trim() ? (
+                <div className="rounded-lg bg-muted/70 px-2.5 py-2 text-xs leading-relaxed">
+                    <span className="font-semibold text-foreground">Next:</span>{" "}
+                    <span className="text-muted-foreground">{summary.next_step}</span>
+                </div>
             ) : null}
         </div>
     );
