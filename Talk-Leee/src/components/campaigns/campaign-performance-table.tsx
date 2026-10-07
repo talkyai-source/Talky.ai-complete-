@@ -635,6 +635,9 @@ export function CampaignPerformanceTable({
             )}
         >
             <div className="flex items-center justify-center">
+                {/* Wrapping label: 24px tap target around the 16px box (WCAG 2.5.8);
+                    -m-1 keeps the occupied space identical. */}
+                <label className="-m-1 inline-flex cursor-pointer p-1">
                 <input
                     aria-label="Select all visible campaigns"
                     type="checkbox"
@@ -642,6 +645,7 @@ export function CampaignPerformanceTable({
                     onChange={(e) => toggleAllVisible(e.target.checked)}
                     className="h-4 w-4 rounded border-input bg-background accent-primary"
                 />
+                </label>
             </div>
             <button
                 type="button"
@@ -1005,13 +1009,15 @@ export function CampaignPerformanceTable({
                                         <div key={campaign.id} className={cn("border-b border-border", TABLE_MIN_WIDTH)}>
                                             <div role="row" className={cn("grid items-center gap-2 px-3 py-2 text-sm text-foreground", TABLE_GRID_COLS)}>
                                                 <div className="flex items-center justify-center">
-                                                    <input
-                                                        aria-label={`Select ${campaign.name}`}
-                                                        type="checkbox"
-                                                        checked={isSelected}
-                                                        onChange={(e) => toggleSelected(campaign.id, e.target.checked)}
-                                                        className="h-4 w-4 rounded border-input bg-background accent-primary"
-                                                    />
+                                                    <label className="-m-1 inline-flex cursor-pointer p-1">
+                                                        <input
+                                                            aria-label={`Select ${campaign.name}`}
+                                                            type="checkbox"
+                                                            checked={isSelected}
+                                                            onChange={(e) => toggleSelected(campaign.id, e.target.checked)}
+                                                            className="h-4 w-4 rounded border-input bg-background accent-primary"
+                                                        />
+                                                    </label>
                                                 </div>
                                                 <div className="flex items-center gap-2 px-2">
                                                     <button

@@ -50,7 +50,12 @@ export function Breadcrumbs({ className }: { className?: string }) {
                     {c.isLast ? (
                         <span className="text-foreground/80">{c.label}</span>
                     ) : (
-                        <Link href={c.href} className="hover:text-foreground transition-colors">
+                        /* p-1/-m-1 grows the tap box to 24px tall (and +8px wide, so
+                           even one-word crumbs pass 24px) while the occupied space —
+                           and therefore the whole header — stays exactly as it was.
+                           The horizontal overspill only overlaps the non-interactive
+                           "/" separators, never the neighbouring link. */
+                        <Link href={c.href} className="hover:text-foreground transition-colors px-1 py-1 -mx-1 -my-1">
                             {c.label}
                         </Link>
                     )}

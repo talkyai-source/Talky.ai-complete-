@@ -394,7 +394,10 @@ function TenantTable({
 
     return (
         <div className="mt-6 overflow-hidden rounded-2xl border border-border bg-background/60">
-            <div className="relative overflow-x-auto">
+            {/* max-lg:mr-6: below 1024px the fixed chat launcher overlaps this
+                table's right edge; ending the scroll viewport before its lane
+                keeps every action button tappable (Group C, 2026-10). */}
+            <div className="relative overflow-x-auto max-lg:mr-12">
                 <div className={`grid ${gridCols} ${gridMinWidth} items-center gap-2 border-b border-border bg-background/70 px-4 py-3 text-xs font-semibold text-muted-foreground`}>
                     <div>Tenant Name</div>
                     <div className="text-right">Allocated Minutes</div>

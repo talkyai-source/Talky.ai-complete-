@@ -288,7 +288,9 @@ export function RecordingMediaControls({
                 }}
             />
 
-            <div className="flex flex-wrap items-center gap-3">
+            {/* pr-12: keeps Download/Delete clear of the fixed chat launcher's
+                lane while scrolling the recordings list (Group C, 2026-10). */}
+            <div className="flex flex-wrap items-center gap-3 pr-12">
                 {playbackAllowed ? (
                     <button
                         type="button"
