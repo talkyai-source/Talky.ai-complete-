@@ -2,12 +2,13 @@
 import json
 
 from app.services.scripts.call_state_tracker import CallState, contact_entries
+from app.domain.services.voice_pipeline.contact_capture import CAPTURE_FIELD_TYPES
 
 
 def compose_system_prompt(base_prompt: str, state: CallState, *, has_callback_executor: bool = False) -> str:
     """Render known contact values/statuses without prescribing a dialogue."""
     facts = {}
-    for kind in ("email", "phone"):
+    for kind in CAPTURE_FIELD_TYPES:
         entries = contact_entries(state, kind)
         current_key = next(reversed(entries))
         capture = entries[current_key]

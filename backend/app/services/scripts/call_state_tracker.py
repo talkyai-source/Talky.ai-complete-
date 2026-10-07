@@ -28,6 +28,12 @@ class CallState:
     # Source, validation and confirmation metadata belongs to each contact.
     email_capture: Optional[ContactCaptureState] = None
     phone_capture: Optional[ContactCaptureState] = None
+    full_name: Optional[str] = None
+    full_name_confirmed: bool = False
+    full_name_capture: Optional[ContactCaptureState] = None
+    company_name: Optional[str] = None
+    company_name_confirmed: bool = False
+    company_name_capture: Optional[ContactCaptureState] = None
     earlier_email_captures: tuple = ()
     earlier_phone_captures: tuple = ()
     # Historical context fields are retained for existing snapshots/persistence.

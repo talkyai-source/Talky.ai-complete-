@@ -55,6 +55,8 @@ VALID_TYPES = frozenset({
     "single_select", "multi_select", "notes",
 })
 
+IDENTITY_FIELDS = frozenset({"full_name", "company_name"})
+
 MAX_VALUE_CHARS = 4000
 CONTACT_VALIDATION_STATUSES = frozenset({
     "needs_clarification",
@@ -82,10 +84,13 @@ def project_contact_evidence(row: dict, transcript_json) -> dict:
             evidence = {}
     evidence = dict(evidence) if isinstance(evidence, dict) else {}
     result["evidence"] = evidence
-    if result.get("field_type") not in {"email", "phone"} or result.get("source") != "caller_stated":
+    identity = result.get("field_key") in IDENTITY_FIELDS and result.get("field_type") == "text"
+    if (result.get("field_type") not in {"email", "phone"} and not identity) or result.get("source") != "caller_stated":
         return result
     owners = {name: evidence.get(name) for name in ("value_source", "confirmation_source", "status_source")}
     if not any(owner is not None for owner in owners.values()):
+        if identity:
+            return result  # Preserve generic historical/imported identity semantics.
         evidence["provenance_status"] = "unversioned"
         return result
     if isinstance(transcript_json, str):
@@ -256,8 +261,16 @@ class LeadCaptureService:
         if contact_key and field_type != contact_key.group(1):
             raise InvalidCaptureError("contact field_key requires its matching email/phone type")
 
+        identity = key in IDENTITY_FIELDS
+        if identity and field_type != "text":
+            raise InvalidCaptureError("identity field_key requires text type")
         stored = normalise_value(value, field_type)
-        is_contact = field_type in {"email", "phone"}
+        # Generic historical/imported identity writes retain their prior behavior.
+        # Live identities opt in with status/source evidence and the existing CAS.
+        managed_identity = identity and (validation_status is not None or expected_contact is not None
+            or any((evidence or {}).get(name) is not None
+                   for name in ("value_source", "confirmation_source", "status_source")))
+        is_contact = field_type in {"email", "phone"} or managed_identity
         if expected_contact is not None and (not is_contact or source != "caller_stated"):
             raise InvalidCaptureError("contact compare-and-set requires a caller-stated contact")
         manual_withdrawal = (is_contact and source == "manual_edit" and value is None
@@ -336,7 +349,7 @@ class LeadCaptureService:
                     raise InvalidCaptureError(
                         "confirmed phone must be a valid +E.164 number"
                     ) from exc
-            else:
+            elif field_type == "email":
                 from email_validator import EmailNotValidError, validate_email
 
                 try:
@@ -479,8 +492,9 @@ class LeadCaptureService:
         """
         key = str(field_key or "").strip()
         match = re.fullmatch(r"(email|phone)(?:_([2-9]|[1-9][0-9]+))?", key)
-        if not match:
-            raise InvalidCaptureError("only email/phone can be revoked")
+        if not match and key not in IDENTITY_FIELDS:
+            raise InvalidCaptureError("only recorded contact or identity fields can be revoked")
+        field_type = match.group(1) if match else "text"
         if validation_status not in CONTACT_VALIDATION_STATUSES - {"confirmed"}:
             raise InvalidCaptureError("contact revocation requires a pending status")
         if revocation_source is not None:
@@ -521,7 +535,7 @@ class LeadCaptureService:
                 str(call_id),
                 key,
                 validation_status,
-                match.group(1),
+                field_type,
                 json.dumps(expected_contact) if expected_contact is not None else None,
                 json.dumps(marker),
             )
@@ -698,5 +712,6 @@ class LeadCaptureService:
         details = {row["field_key"]: row for row in await self.details_for_call(tenant_id, call_id)}
         return [row["field_key"] for row in rows
                 if (saved := details.get(row["field_key"])) is None or saved.get("value") is None
-                or (row["field_type"] in {"email", "phone"}
+                or ((row["field_type"] in {"email", "phone"}
+                     or (row["field_key"] in IDENTITY_FIELDS and saved.get("validation_status") is not None))
                     and (not saved.get("confirmed") or saved.get("validation_status") != "confirmed"))]

@@ -14,8 +14,8 @@ or a factual no does not necessarily end the conversation.
 GENERIC_GUARDRAILS_REST = """\
 ## CONTACT DETAILS
 Collect only what the caller agrees is needed. When record_contact is available, use it
-for their own email or phone details and corrections. A new value is pending; confirm its accuracy naturally
-before requesting confirmation through the tool. Use the current candidate as expected_value.
+for their own name, company, email or phone details and corrections. A new value is pending; confirm its accuracy naturally
+before requesting confirmation through the tool. Use the selected candidate as expected_value.
 Report a detail as saved only when its persistence result says saved. Confirmation of a
 value does not mean an email was sent or an appointment booked. A known line number is
 context, not automatically the caller's preferred contact.

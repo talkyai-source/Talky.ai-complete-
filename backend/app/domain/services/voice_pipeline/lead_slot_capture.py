@@ -13,10 +13,11 @@ WHAT COUNTS AS AN ESTABLISHED FACT
 The shared record_contact tool stores the model's interpretation of caller
 words with server-owned source/revision evidence. That attribution is not
 proof that the interpretation is correct. Pending caller-owned email/phone
-values are visible with confirmed=FALSE; later caller confirmation is separate.
+and identity values are visible with confirmed=FALSE; later caller confirmation is separate.
 Clarification, invalid and cancelled transitions retain NULL values and status
 rather than disappearing. Current and earlier contacts use the same rules.
-Other lead fields remain handled by post-call extraction.
+Full name and company use the same live tool and text storage; business notes
+remain handled by post-call extraction.
 
 WHAT MUST NOT HAPPEN
 --------------------
@@ -53,6 +54,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from app.services.scripts.call_state_tracker import contact_entries
+from app.domain.services.voice_pipeline.contact_capture import CAPTURE_FIELD_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -226,9 +228,9 @@ def snapshot_slots(captured_slots: Any) -> dict[str, dict]:
     out: dict[str, dict] = {}
     if captured_slots is None:
         return out
-    for kind in ("email", "phone"):
+    for kind in CAPTURE_FIELD_TYPES:
         for key, capture in contact_entries(captured_slots, kind).items():
-            if capture is not None and (row := _capture_row(capture, kind)) is not None:
+            if capture is not None and (row := _capture_row(capture, CAPTURE_FIELD_TYPES[kind])) is not None:
                 out[key] = row
     for attr, field_key, field_type, confirmed_attr in SLOT_FIELDS:
         capture = (
@@ -291,7 +293,7 @@ def pending_contact_revocations(session: Any) -> dict[str, str]:
 
     revocations: dict[str, str] = {}
     capture_keys = set()
-    for kind in ("email", "phone"):
+    for kind in CAPTURE_FIELD_TYPES:
         for field_key, capture in contact_entries(captured_slots, kind).items():
             capture_keys.add(field_key)
             previous = written.get(field_key)

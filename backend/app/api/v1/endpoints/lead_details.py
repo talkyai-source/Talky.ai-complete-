@@ -23,14 +23,13 @@ import io
 import logging
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import get_current_user
 from app.core.container import get_container
 from app.core.security.rbac import Permission, require_permission
 from app.domain.services.contact_fields import (
-    BY_KEY,
     CONTACT_FIELDS,
     csv_template_headers,
     dedupe_key,
@@ -38,6 +37,7 @@ from app.domain.services.contact_fields import (
     validate_row,
 )
 from app.domain.services.lead_capture_service import (
+    IDENTITY_FIELDS,
     InvalidCaptureError,
     LeadCaptureService,
 )
@@ -378,7 +378,8 @@ async def correct_lead_detail(
     the trust ordering.
     """
     try:
-        withdrawn = body.value is None and body.field_type in {"email", "phone"}
+        withdrawn = body.value is None and (body.field_type in {"email", "phone"}
+            or (field_key in IDENTITY_FIELDS and body.field_type == "text"))
         written = await _service().capture(
             tenant_id=_tenant(current_user), call_id=call_id,
             field_key=field_key, value=body.value,

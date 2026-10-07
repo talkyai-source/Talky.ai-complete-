@@ -616,19 +616,26 @@ async def test_native_confirmation_revision_reaches_actual_lead_and_transcript_r
     try:
         await replay.step({"kind": "caller", "item": "source",
                            "text": "My email is alex at example dot com."})
+        await replay.step({"kind": "tool", "name": "record_contact", "arguments": {
+            "kind": "email", "operation": "set", "value": "alex@example.com", "expected_value": None,
+            "source_quote": "My email is alex at example dot com."}})
         await drain_writes()
         pending_response = await details(lead_db)
         pending = pending_response["details"][0]
         assert pending["value"] == "alex@example.com" and not pending["confirmed"]
         await replay.step({"kind": "response", "text": "Your email is alex@example.com, correct?"})
         await replay.step({"kind": "caller", "item": "confirmation", "text": "Yes, that is correct."})
+        await replay.step({"kind": "tool", "name": "record_contact", "arguments": {
+            "kind": "email", "operation": "confirm", "value": "alex@example.com",
+            "expected_value": "alex@example.com", "source_quote": "Yes, that is correct."}})
         await drain_writes()
         confirmed_response = await details(lead_db)
         confirmed = confirmed_response["details"][0]
         assert confirmed["confirmed"] and confirmed["validation_status"] == "confirmed"
         assert confirmed["evidence"]["value_source"]["provider_item_id"] == "source"
         assert confirmed["evidence"]["confirmation_source"]["provider_item_id"] == "confirmation"
-        assert confirmed["evidence"]["readback"]["evidence"] == "transport_played"
+        assert confirmed["evidence"]["readback"] is None
+        assert confirmed["evidence"]["confirmation_evidence"] == "model_interpreted_caller_confirmation"
         await replay.step({"kind": "caller", "item": "confirmation", "revision": True,
                            "text": "No, that is wrong."})
         await drain_writes()
@@ -646,7 +653,7 @@ async def test_native_confirmation_revision_reaches_actual_lead_and_transcript_r
             for state_name, response in (("pending", pending_response), ("confirmed", confirmed_response), ("revised", revised)):
                 record_example(lead_db, "native_" + state_name, response,
                     {"pending": "Caller-stated value is saved without confirmation.",
-                     "confirmed": "Independent value/confirmation turns and synthetic matching receipt are retained.",
+                     "confirmed": "Independent value/confirmation turns from the actual shared tool are retained; no hearing proof is inferred.",
                      "revised": "Replacing the yes final removes its confirmation; transcript remains partial."}[state_name],
                     scope="Actual native event parser, bridge, PostgreSQL and direct API; synthetic wire/receipt, no provider/hearing proof")
     finally:
@@ -901,9 +908,15 @@ async def test_durable_revision_invalidates_confirmation_when_contact_revoke_can
     try:
         await replay.step({"kind": "caller", "item": "source",
                            "text": "My email is alex at example dot com."})
+        await replay.step({"kind": "tool", "name": "record_contact", "arguments": {
+            "kind": "email", "operation": "set", "value": "alex@example.com", "expected_value": None,
+            "source_quote": "My email is alex at example dot com."}})
         await drain_writes()
         await replay.step({"kind": "response", "text": "Your email is alex@example.com, correct?"})
         await replay.step({"kind": "caller", "item": "confirmation", "text": "Yes, that is correct."})
+        await replay.step({"kind": "tool", "name": "record_contact", "arguments": {
+            "kind": "email", "operation": "confirm", "value": "alex@example.com",
+            "expected_value": "alex@example.com", "source_quote": "Yes, that is correct."}})
         await drain_writes()
         before = (await details(lead_db))["details"][0]
         assert before["confirmed"]

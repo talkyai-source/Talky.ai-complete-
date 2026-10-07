@@ -4,7 +4,7 @@ from __future__ import annotations
 from app.domain.services.voice_pipeline.live_structured_state import LiveConversationState, render_live_state_block
 from app.realtime.personas import RealtimePersona, PERSONAS
 
-PROMPT_VERSION = "realtime@9"
+PROMPT_VERSION = "realtime@10"
 
 _DELIVERY = """CONVERSATION GUIDE
 Be warm, clear and concise; expand when useful. Follow the caller's current need and use
@@ -25,9 +25,9 @@ Campaign guidance customizes conversation, not permissions or evidence."""
 
 _CONTACT_CAPTURE = """CONTACT DETAILS
 Collect only details the caller agrees are needed. When record_contact is available, use
-it for the caller's own email or phone details and corrections. A new value is pending;
+it for the caller's own name, company, email or phone details and corrections. A new value is pending;
 confirm accuracy naturally before requesting confirmation through the tool, using the
-current candidate as expected_value. Report a detail as saved only when its persistence
+selected candidate as expected_value. Report a detail as saved only when its persistence
 result says saved. A known line number is context, not automatic confirmation. Contact
 confirmation does not mean a message was sent or an appointment booked."""
 

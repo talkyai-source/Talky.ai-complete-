@@ -96,7 +96,9 @@ function DetailRow({
     });
 
     const empty = detail.value === null;
-    const contact = detail.field_type === "email" || detail.field_type === "phone";
+    const contact = detail.field_type === "email" || detail.field_type === "phone"
+        || (detail.field_type === "text" && ["full_name", "company_name"].includes(detail.field_key)
+            && detail.validation_status != null);
     const statusLabel = CONTACT_STATUS_LABEL[detail.validation_status ?? ""];
     const confirmed = !empty && detail.confirmed
         && (!contact || detail.validation_status === "confirmed");

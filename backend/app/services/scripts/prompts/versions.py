@@ -125,9 +125,10 @@ _VERSIONS: Final[Mapping[str, str]] = {
     # @12: the sales closing example requires an explicit caller goodbye.
     # @13 / @11: explicit-secret privacy and only available secure routes.
     # @14 / @12: model-led conversation guide and contact recording tools.
-    "lead_gen": "lead_gen@14",
-    "customer_support": "customer_support@12",
-    "receptionist": "receptionist@12",
+    # @15 / @13: source-bound name/company recording through the existing tool.
+    "lead_gen": "lead_gen@15",
+    "customer_support": "customer_support@13",
+    "receptionist": "receptionist@13",
 }
 
 #: Fallback for a persona that is not in the registry yet. Deliberately visible

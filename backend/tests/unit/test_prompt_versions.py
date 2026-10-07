@@ -132,6 +132,9 @@ _EXPECTED_HASHES: dict[str, str] = {
     "lead_gen@14": "6727620cfd202e38",
     "customer_support@12": "99594e61c35a143c",
     "receptionist@12": "7da2fd3873eaab15",
+    'lead_gen@15': 'e778d2b7b3272481',
+    'customer_support@13': '4d7836c06686f48f',
+    'receptionist@13': 'b9b180664d9d9daa',
 }
 
 

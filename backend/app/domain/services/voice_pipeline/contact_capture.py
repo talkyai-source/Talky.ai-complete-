@@ -11,7 +11,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Literal, Optional
 
-CaptureKind = Literal["email", "phone"]
+CaptureKind = Literal["email", "phone", "full_name", "company_name"]
+CAPTURE_FIELD_TYPES = {"email": "email", "phone": "phone", "full_name": "text", "company_name": "text"}
 
 
 class CaptureStatus(str, Enum):

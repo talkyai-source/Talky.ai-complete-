@@ -2,10 +2,42 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { LeadDetailsPanel } from "@/components/calls/lead-details-panel";
+import { ContactCapturedDetails, LeadDetailsPanel } from "@/components/calls/lead-details-panel";
 import { leadDetailsApi } from "@/lib/lead-details-api";
 
 afterEach(cleanup);
+
+for (const [key, label, value] of [["full_name", "Full Name", "Siân O’Neill"], ["company_name", "Company Name", "Élan & Sons Ltd"]]) {
+    for (const status of ["awaiting_confirmation", "confirmed", "cancelled"]) {
+        test(`captured ${key} displays ${status} without changing imported identity`, () => {
+            const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: 0 } } });
+            client.setQueryData(["contact-lead-details", "lead-identity"], {
+                processing_status: "complete", transcript_save_state: "complete", missing_required: [], details: [{
+                    call_id: "call-1", field_key: key, field_type: "text", value: status === "cancelled" ? null : value,
+                    source: "caller_stated", confirmed: status === "confirmed", validation_status: status,
+                    evidence: { value_source: { provider_item_id: "caller-1", caller_turn_order: 1, revision_sha256: "a".repeat(64) } },
+                }],
+            });
+            render(<QueryClientProvider client={client}><ContactCapturedDetails leadId="lead-identity" /></QueryClientProvider>);
+            fireEvent.click(screen.getByRole("button", { name: "View captured details" }));
+            assert.ok(screen.getByText(label));
+            assert.ok(screen.getByText(/Captured from caller turn 1/));
+            if (status === "confirmed") assert.ok(screen.getByText("confirmed on the call"));
+            else {
+                assert.equal(screen.queryByText("confirmed on the call"), null);
+                assert.ok(screen.getByText(status === "cancelled" ? "Withdrawn or replaced — do not use" : "Awaiting caller confirmation"));
+            }
+            if (status !== "cancelled") assert.ok(screen.getByText(value));
+        });
+    }
+}
+
+test("inconsistent pending identity flags are never shown confirmed", () => {
+    show({ details: [{ field_key: "full_name", field_type: "text", value: "Alex", source: "caller_stated",
+        confirmed: true, validation_status: "awaiting_confirmation" }], missing_required: [], processing_status: "complete" });
+    assert.equal(screen.queryByText("confirmed on the call"), null);
+    assert.ok(screen.getByText("Awaiting caller confirmation"));
+});
 
 function show(data: unknown) {
     const client = new QueryClient({ defaultOptions: {
