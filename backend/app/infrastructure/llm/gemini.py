@@ -209,8 +209,18 @@ class GeminiLLMProvider(LLMProvider):
             logger.warning("gemini_warmup_failed model=%s: %s", self._model, exc)
 
     async def cleanup(self) -> None:
-        """Release client reference for GC."""
-        self._client = None
+        """Release both SDK transports, including when async closure fails."""
+        client, self._client = self._client, None
+        if client is None:
+            return
+        async_close = getattr(getattr(client, "aio", None), "aclose", None)
+        sync_close = getattr(client, "close", None)
+        try:
+            if callable(async_close):
+                await async_close()
+        finally:
+            if callable(sync_close):
+                sync_close()
 
     @staticmethod
     def _is_gemini_3(model: str) -> bool:

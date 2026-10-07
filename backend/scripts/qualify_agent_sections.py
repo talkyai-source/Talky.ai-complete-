@@ -145,9 +145,6 @@ async def provider_for(args, transport, key):
         from app.infrastructure.llm.gemini import GeminiLLMProvider
         provider = GeminiLLMProvider()
         await provider.initialize(config)
-        # Close this evaluation-owned construction before installing its guarded client.
-        await provider._client.aio.aclose()
-        provider._client.close()
         await provider.cleanup()
         provider._client = genai.Client(api_key=key, http_options=types.HttpOptions(
             api_version="v1beta", httpx_async_client=client, retry_options=types.HttpRetryOptions(attempts=1)))
@@ -268,9 +265,6 @@ async def run(args):
             if transport.refusals or any(r["response_status"] != 200 for r in transport.records):
                 report["error"] = report["error"] or "IncompleteProviderRun"
             try:
-                if args.provider == "gemini" and getattr(provider, "_client", None) is not None:
-                    await provider._client.aio.aclose()
-                    provider._client.close()
                 if hasattr(provider, "cleanup"):
                     await provider.cleanup()
             except Exception as exc:
