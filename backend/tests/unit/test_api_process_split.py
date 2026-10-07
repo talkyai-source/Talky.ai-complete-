@@ -99,6 +99,8 @@ def _route(method: str, uri: str) -> str:
 
 
 CALL = [
+    ("GET", "/api/v1/healthz/ready"),                 # call capacity/drain, not dashboard state
+    ("GET", "/api/v1/healthz/deep"),                  # call-process dependency probe
     ("POST", "/api/v1/sip/telephony/audio/7f3a"),        # gateway audio (if ever proxied)
     ("POST", "/api/v1/sip/telephony/call"),              # dialer origination via API_BASE_URL
     ("POST", "/api/v1/sip/telephony/hangup/abc"),

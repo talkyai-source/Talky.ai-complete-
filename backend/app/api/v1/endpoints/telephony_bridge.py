@@ -40,6 +40,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from app.core.process_role import telephony_enabled
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
 from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory
 from app.domain.services.call_guard import CallGuard, GuardDecision, GuardResult
@@ -108,6 +109,16 @@ from app.core.security.rbac import (  # noqa: E402
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sip/telephony", tags=["Telephony Bridge (generic)"])
+
+
+def _require_call_process() -> None:
+    """The dashboard role must not trust an unclaimed backend's default owner."""
+    if not telephony_enabled():
+        raise HTTPException(
+            status_code=503,
+            headers={"Retry-After": "2"},
+            detail={"error": "telephony_disabled_on_node"},
+        )
 
 
 async def _require_telephony_control(
@@ -363,6 +374,8 @@ async def start_telephony(
     Use adapter_type='auto' to let the system choose based on health checks.
     """
     global _adapter
+
+    _require_call_process()
 
     from app.core.container import get_container
     from app.core.inbound_startup import (
@@ -1665,6 +1678,7 @@ async def make_call(request: Request, body: MakeCallRequest):
                 ),
             },
         )
+    _require_call_process()
     effective_tenant_id = resolve_call_tenant(request, body.tenant_id, ctx=caller_ctx)
     has_internal_dialer_intent = _dialer_intent_contract(
         body,
