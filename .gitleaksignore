@@ -131,3 +131,158 @@
 2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2965
 2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:3029
 2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:sentry-access-token:2655
+
+# === 2026-10-08: verified readiness evidence checksums (114 false positives) ===
+# CI run 37679822522 / job 112992639844 reported these generic-api-key matches.
+# Every value was recomputed from its referenced Git source/artifact file:
+# 91 exact Git blobs, 1 LF-normalized file, and 22 CRLF checkout representations.
+# These are file SHA-256 digests in OP01-03, CP08, AG05, and AG06 evidence,
+# not credentials or synthetic credential exemptions. Exceptions pin the exact
+# commit, artifact path, rule, and line; no directory or rule is excluded.
+# Historical real-credential warnings above remain commented and unchanged.
+
+# docs/sessions/artifacts/ag05/source-integrity.json
+8b0c77866fe9539ad557a811ee4a3280d03835c3:docs/sessions/artifacts/ag05/source-integrity.json:generic-api-key:8
+
+# docs/sessions/artifacts/ag05/verification.json
+8b0c77866fe9539ad557a811ee4a3280d03835c3:docs/sessions/artifacts/ag05/verification.json:generic-api-key:49
+
+# docs/sessions/artifacts/ag06/source-integrity.json
+d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/source-integrity.json:generic-api-key:6
+d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/source-integrity.json:generic-api-key:7
+d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/source-integrity.json:generic-api-key:18
+d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/source-integrity.json:generic-api-key:19
+d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/source-integrity.json:generic-api-key:20
+d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/source-integrity.json:generic-api-key:22
+
+# docs/sessions/artifacts/ag06/verification.json
+d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/verification.json:generic-api-key:101
+d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/verification.json:generic-api-key:102
+d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/verification.json:generic-api-key:103
+d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/verification.json:generic-api-key:104
+d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/verification.json:generic-api-key:105
+
+# docs/sessions/artifacts/cp08/backend-integrated-final-command.json
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-final-command.json:generic-api-key:187
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-final-command.json:generic-api-key:199
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-final-command.json:generic-api-key:203
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-final-command.json:generic-api-key:211
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-final-command.json:generic-api-key:213
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-final-command.json:generic-api-key:217
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-final-command.json:generic-api-key:221
+
+# docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json:generic-api-key:187
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json:generic-api-key:199
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json:generic-api-key:203
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json:generic-api-key:211
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json:generic-api-key:213
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json:generic-api-key:217
+
+# docs/sessions/artifacts/cp08/backend-lint-final-command.json
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-lint-final-command.json:generic-api-key:65
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-lint-final-command.json:generic-api-key:77
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-lint-final-command.json:generic-api-key:81
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-lint-final-command.json:generic-api-key:89
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-lint-final-command.json:generic-api-key:91
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-lint-final-command.json:generic-api-key:95
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-lint-final-command.json:generic-api-key:99
+
+# docs/sessions/artifacts/cp08/frontend-lint-final-command.json
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:43
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:44
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:46
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:47
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:48
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:53
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:54
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:57
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:59
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:60
+
+# docs/sessions/artifacts/cp08/postgres-integrated-final-command.json
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/postgres-integrated-final-command.json:generic-api-key:27
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/postgres-integrated-final-command.json:generic-api-key:39
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/postgres-integrated-final-command.json:generic-api-key:43
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/postgres-integrated-final-command.json:generic-api-key:51
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/postgres-integrated-final-command.json:generic-api-key:53
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/postgres-integrated-final-command.json:generic-api-key:57
+
+# docs/sessions/artifacts/cp08/source-integrity.json
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:7
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:16
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:17
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:19
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:20
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:21
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:26
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:27
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:30
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:32
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:33
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:43
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:55
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:59
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:67
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:69
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:73
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:77
+
+# docs/sessions/artifacts/cp08/verification.json
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:127
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:128
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:129
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:132
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:137
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:138
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:140
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:149
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:150
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:151
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:154
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:175
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:176
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:177
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:179
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:180
+59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:181
+
+# docs/sessions/artifacts/op01-03-integration/backend-command.json
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/backend-command.json:generic-api-key:13
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/backend-command.json:generic-api-key:14
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/backend-command.json:generic-api-key:16
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/backend-command.json:generic-api-key:20
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/backend-command.json:generic-api-key:22
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/backend-command.json:generic-api-key:35
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/backend-command.json:generic-api-key:53
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/backend-command.json:generic-api-key:69
+
+# docs/sessions/artifacts/op01-03-integration/frontend-command.json
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/frontend-command.json:generic-api-key:13
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/frontend-command.json:generic-api-key:14
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/frontend-command.json:generic-api-key:16
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/frontend-command.json:generic-api-key:20
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/frontend-command.json:generic-api-key:22
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/frontend-command.json:generic-api-key:35
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/frontend-command.json:generic-api-key:53
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/frontend-command.json:generic-api-key:69
+
+# docs/sessions/artifacts/op01-03-integration/postgres-command.json
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/postgres-command.json:generic-api-key:13
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/postgres-command.json:generic-api-key:14
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/postgres-command.json:generic-api-key:16
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/postgres-command.json:generic-api-key:20
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/postgres-command.json:generic-api-key:22
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/postgres-command.json:generic-api-key:35
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/postgres-command.json:generic-api-key:53
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/postgres-command.json:generic-api-key:69
+
+# docs/sessions/artifacts/op01-03-integration/verification.json
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/verification.json:generic-api-key:91
+
+# docs/sessions/artifacts/op01/frontend-integrated-command.json
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01/frontend-integrated-command.json:generic-api-key:45
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01/frontend-integrated-command.json:generic-api-key:46
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01/frontend-integrated-command.json:generic-api-key:48
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01/frontend-integrated-command.json:generic-api-key:52
+b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01/frontend-integrated-command.json:generic-api-key:53
