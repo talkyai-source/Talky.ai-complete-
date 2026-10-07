@@ -1,0 +1,33 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+____ test_late_topic_branch_does_not_require_scanning_all_earlier_children ____
+
+    def test_late_topic_branch_does_not_require_scanning_all_earlier_children():
+        markdown = "# Earlier product\nEarlier conditions.\n" + "\n".join(
+            f"## Earlier topic {i}\nUnrelated detail {i}." for i in range(350)
+        ) + "\n# Target product\nCAD only.\n## Price\n$20, excluding tax."
+        context = catalog(rows_from_markdown(markdown))
+        roots = run_section_request(context, {"catalog_parent": ""})
+>       assert roots["status"] == "catalog"
+E       AssertionError: assert 'unavailable' == 'catalog'
+E         - catalog
+E         + unavailable
+
+tests\unit\test_knowledge_limits.py:12: AssertionError
+_ test_oversized_authored_context_is_contiguously_readable_without_false_completion _
+
+    def test_oversized_authored_context_is_contiguously_readable_without_false_completion():
+        context = catalog(rows_from_markdown("# Contract\nCAD only. " + "Original terms. " * 900
+            + "\n## Price\n$20. Minimum twelve months; taxes excluded."))
+        refs = [ref_for(context, "Price")]
+        first = run_section_request(context, {"section_ids": refs})
+>       assert first["status"] == "source_page"
+E       AssertionError: assert 'too_large' == 'source_page'
+E         - source_page
+E         + too_large
+
+tests\unit\test_knowledge_limits.py:26: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_knowledge_limits.py::test_late_topic_branch_does_not_require_scanning_all_earlier_children
+FAILED tests/unit/test_knowledge_limits.py::test_oversized_authored_context_is_contiguously_readable_without_false_completion
+2 failed in 2.19s

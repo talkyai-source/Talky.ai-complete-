@@ -1,0 +1,54 @@
+...........F............................................................ [ 35%]
+........................................................................ [ 70%]
+.............................................................            [100%]
+================================== FAILURES ===================================
+____ test_actual_native_and_dashboard_partial_result_never_claims_complete ____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000256A6DD64B0>
+
+    async def test_actual_native_and_dashboard_partial_result_never_claims_complete(monkeypatch):
+        from app.realtime.bridge import RealtimeBridge
+        from tests.unit.test_assistant_knowledge_authorization import _Conn, _read_sections
+        context = catalog(rows_from_markdown("# Terms\n" + "Original terms. " * 900 + " Taxes excluded."))
+        bridge = RealtimeBridge(call_id="native-pages", realtime_session=SimpleNamespace(), media_gateway=object(),
+                               tenant_id=context.tenant_id, campaign_id=context.campaign_id)
+        bridge._knowledge_catalog = context
+        result = await bridge._lookup_knowledge({"section_ids": [context.nodes[0]["section_id"]]})
+        assert result["status"] == "source_page" and bridge._verified_knowledge == []
+        assert '"context_complete": false' in result["text"]
+        conn = _Conn()
+        conn.node["content"] = "Original terms. " * 900 + " Taxes excluded."
+        roots = await _read_sections(conn, catalog_parent="")
+>       args = {"section_ids": [roots["entries"][0]["section_id"]]}
+E       KeyError: 'entries'
+
+tests\unit\test_knowledge_limits.py:128: KeyError
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.campaign_knowledge_access:campaign_knowledge_access.py:279 campaign_knowledge_access_unavailable tenant=10000000 campaign=2aaaaaaa-000 actor=40000000 err_type=AttributeError
+============================== warnings summary ===============================
+tests/unit/test_knowledge_limits.py: 6 warnings
+tests/unit/test_agent_context_window.py: 4 warnings
+tests/unit/test_catalog_navigation.py: 2 warnings
+tests/unit/test_model_driven_voice_turn.py: 24 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_assistant_knowledge_authorization.py::test_streaming_dispatch_threads_authenticated_actor
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-knowledge-limits-20261007\backend\app\infrastructure\assistant\streaming.py:340: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    system_prompt = SYSTEM_PROMPT.format(current_time=datetime.utcnow().isoformat())
+
+tests/unit/test_realtime_profile_contract.py: 18 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-knowledge-limits-20261007\backend\app\realtime\runtime.py:188: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started_at=datetime.utcnow(),
+
+tests/unit/test_realtime_profile_contract.py: 18 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-knowledge-limits-20261007\backend\app\realtime\runtime.py:189: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    last_activity_at=datetime.utcnow(),
+
+tests/unit/test_realtime_profile_contract.py: 18 warnings
+  <string>:17: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_knowledge_limits.py::test_actual_native_and_dashboard_partial_result_never_claims_complete
+1 failed, 204 passed, 91 warnings in 5.65s
