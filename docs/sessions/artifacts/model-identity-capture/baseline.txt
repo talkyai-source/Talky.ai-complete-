@@ -1,0 +1,45 @@
+FFFFFFFF                                                                 [100%]
+================================== FAILURES ===================================
+_ test_model_identity_is_saved_pending_then_confirmed_corrected_and_withdrawn[full_name-Si\xe2n O\u2019Neill] _
+tests\unit\test_model_identity_recording.py:25: in test_model_identity_is_saved_pending_then_confirmed_corrected_and_withdrawn
+    assert pending["saved"] and pending["validation_status"] == "awaiting_confirmation"
+E   assert (False)
+_ test_model_identity_is_saved_pending_then_confirmed_corrected_and_withdrawn[company_name-\xc9lan & Sons Ltd] _
+tests\unit\test_model_identity_recording.py:25: in test_model_identity_is_saved_pending_then_confirmed_corrected_and_withdrawn
+    assert pending["saved"] and pending["validation_status"] == "awaiting_confirmation"
+E   assert (False)
+_ test_identity_projection_withholds_superseded_caller_name_or_company[full_name-Si\xe2n O\u2019Neill] _
+tests\unit\test_model_identity_recording.py:55: in test_identity_projection_withholds_superseded_caller_name_or_company
+    assert result["value"] is None and result["validation_status"] == "needs_clarification"
+E   AssertionError: assert ('Siân O’Neill' is None)
+_ test_identity_projection_withholds_superseded_caller_name_or_company[company_name-\xc9lan & Sons Ltd] _
+tests\unit\test_model_identity_recording.py:55: in test_identity_projection_withholds_superseded_caller_name_or_company
+    assert result["value"] is None and result["validation_status"] == "needs_clarification"
+E   AssertionError: assert ('Élan & Sons Ltd' is None)
+_ test_manual_identity_removal_is_cancelled_not_confirmed[full_name-Si\xe2n O\u2019Neill] _
+tests\unit\test_model_identity_recording.py:72: in test_manual_identity_removal_is_cancelled_not_confirmed
+    assert captured[0]["confirmed"] is False and captured[0]["validation_status"] == "cancelled"
+E   assert (True is False)
+_ test_manual_identity_removal_is_cancelled_not_confirmed[company_name-\xc9lan & Sons Ltd] _
+tests\unit\test_model_identity_recording.py:72: in test_manual_identity_removal_is_cancelled_not_confirmed
+    assert captured[0]["confirmed"] is False and captured[0]["validation_status"] == "cancelled"
+E   assert (True is False)
+_ test_native_shared_tool_exposes_and_records_identity_without_parsing[openai] _
+tests\unit\test_model_identity_recording.py:88: in test_native_shared_tool_exposes_and_records_identity_without_parsing
+    assert snapshot_slots(s.captured_slots)[kind]["value"] == value
+E   KeyError: 'full_name'
+__ test_native_shared_tool_exposes_and_records_identity_without_parsing[xai] __
+tests\unit\test_model_identity_recording.py:88: in test_native_shared_tool_exposes_and_records_identity_without_parsing
+    assert snapshot_slots(s.captured_slots)[kind]["value"] == value
+E   KeyError: 'full_name'
+=========================== short test summary info ===========================
+FAILED tests/unit/test_model_identity_recording.py::test_model_identity_is_saved_pending_then_confirmed_corrected_and_withdrawn[full_name-Si\xe2n O\u2019Neill]
+FAILED tests/unit/test_model_identity_recording.py::test_model_identity_is_saved_pending_then_confirmed_corrected_and_withdrawn[company_name-\xc9lan & Sons Ltd]
+FAILED tests/unit/test_model_identity_recording.py::test_identity_projection_withholds_superseded_caller_name_or_company[full_name-Si\xe2n O\u2019Neill]
+FAILED tests/unit/test_model_identity_recording.py::test_identity_projection_withholds_superseded_caller_name_or_company[company_name-\xc9lan & Sons Ltd]
+FAILED tests/unit/test_model_identity_recording.py::test_manual_identity_removal_is_cancelled_not_confirmed[full_name-Si\xe2n O\u2019Neill]
+FAILED tests/unit/test_model_identity_recording.py::test_manual_identity_removal_is_cancelled_not_confirmed[company_name-\xc9lan & Sons Ltd]
+FAILED tests/unit/test_model_identity_recording.py::test_native_shared_tool_exposes_and_records_identity_without_parsing[openai]
+FAILED tests/unit/test_model_identity_recording.py::test_native_shared_tool_exposes_and_records_identity_without_parsing[xai]
+8 failed, 2 warnings in 2.16s
+OFFLINE_TRANSPORT_COUNTS {'internal_socketpairs': 13, 'prohibited': 0}

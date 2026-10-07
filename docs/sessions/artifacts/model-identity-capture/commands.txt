@@ -1,0 +1,37 @@
+Working directory: C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/agent-identity-capture-20261007
+Interpreter: C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe
+
+Unit run environment (explicitly set):
+$env:PYTHONUTF8='1'
+$env:PYTHONDONTWRITEBYTECODE='1'
+$env:ENVIRONMENT='test'
+$env:DATABASE_URL='postgresql://test:test@127.0.0.1:1/unavailable_test'
+$env:PYTHONPATH="$PWD/backend"
+
+Existing offline runner appends -q --tb=short --disable-warnings -o addopts= and denies external sockets/async transports.
+Executed module sets:
+& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B docs/sessions/artifacts/agent-dead-code-cleanup/check.py tests/unit/test_model_identity_recording.py *> docs/sessions/artifacts/model-identity-capture/baseline.txt
+& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B docs/sessions/artifacts/agent-dead-code-cleanup/check.py tests/unit/test_model_identity_recording.py tests/unit/test_contact_target_recording.py tests/unit/test_model_contact_recording.py tests/unit/test_live_call_lead_capture.py tests/unit/test_lead_capture_service.py *> docs/sessions/artifacts/model-identity-capture/first.txt
+& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B docs/sessions/artifacts/agent-dead-code-cleanup/check.py tests/unit/test_model_identity_recording.py tests/unit/test_contact_target_recording.py tests/unit/test_model_contact_recording.py tests/unit/test_live_call_lead_capture.py tests/unit/test_lead_capture_service.py tests/unit/test_ag05_contact_projection.py tests/unit/test_prompt_versions.py tests/unit/test_true_inbound_prompt_separation.py tests/unit/test_realtime_profile_contract.py tests/unit/test_prompt_builder.py tests/unit/test_voice_action_contract.py *> docs/sessions/artifacts/model-identity-capture/unit-initial-fixture.txt
+& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B docs/sessions/artifacts/agent-dead-code-cleanup/check.py tests/unit/test_model_identity_recording.py tests/unit/test_contact_target_recording.py tests/unit/test_model_contact_recording.py tests/unit/test_live_call_lead_capture.py tests/unit/test_lead_capture_service.py tests/unit/test_ag05_contact_projection.py tests/unit/test_prompt_versions.py tests/unit/test_true_inbound_prompt_separation.py tests/unit/test_realtime_profile_contract.py tests/unit/test_prompt_builder.py tests/unit/test_voice_action_contract.py *> docs/sessions/artifacts/model-identity-capture/unit-final.txt
+The first full unit run originally redirected to unit-final.txt and was moved intact to unit-initial-fixture.txt before the corrected run. It failed only because its new service fixture used tenant/call instead of UUIDs.
+
+Actual PG command (root designated this disposable endpoint and reserved the slot):
+$env:PYTHONUTF8='1'
+$env:PYTHONDONTWRITEBYTECODE='1'
+& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B docs/sessions/artifacts/model-identity-capture/pg_check.py docs/sessions/artifacts/model-identity-capture/pg-final.json *> docs/sessions/artifacts/model-identity-capture/pg-final.txt
+The committed wrapper strips environment key names containing API_KEY/SECRET/TOKEN/DATABASE_URL/DSN/PASSWORD without recording their values, then sets only explicit test configuration and the designated TEST_DATABASE_URL. DATABASE_URL remains dead localhost:1. It reuses the prior canonical socket/Proactor async transport/DNS guard and read-only public snapshot helper. The original fixture creates and cleans only its synthetic UUID rows/roles.
+
+Frontend commands from Talk-Leee:
+node --test --import tsx --import ./src/test-utils/setup.ts src/components/calls/lead-details-panel.test.tsx src/lib/lead-details-api.test.ts
+node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
+node node_modules/eslint/bin/eslint.js src/components/calls/lead-details-panel.tsx src/components/calls/lead-details-panel.test.tsx
+Outputs are frontend.txt, typecheck.txt, eslint.txt respectively. TypeScript and ESLint exited0. Existing node_modules was linked to the parent integration's Talk-Leee/node_modules; no package/lock/install changes. No deployed browser or server launched.
+
+Static backend command:
+$identityFiles = git diff --name-only -- '*.py'
+& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -m ruff check --select F $identityFiles backend/tests/unit/test_model_identity_recording.py backend/tests/integration/test_model_identity_lead_evidence.py
+git diff --check
+Initial Ruff found two pre-existing unused API imports and four F811 fixture-import diagnostics. Their removal/equivalent fixture alias was followed by a passing full-F check. No blanket F ignores added. No actual SQL behavior changed after the passing PG run.
+
+Legacy PG baseline: legacy-pg-baseline.txt is copied verbatim from parent's docs/sessions/artifacts/agent-limitations/leads-postgres-baseline.txt, executed by root at the stated base. Its exact parent invocation is outside this owner's command capture; it is historical evidence, not a second owner execution.

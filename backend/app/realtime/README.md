@@ -21,7 +21,7 @@ independent `realtime_prompt`. No database migration is needed. Switching
 engines preserves the other engine's saved settings. Old campaigns without
 an engine selection inherit the account setting; saving explicitly pins it.
 
-## Prompt policy (`realtime@9`)
+## Prompt policy (`realtime@10`)
 
 The essential instruction is: represent the configured company, pursue the
 campaign goal with short natural turns, verify company claims through campaign

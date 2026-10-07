@@ -1,0 +1,84 @@
+{
+  "base_commit": "6c9eed991a7c69afd70536379427933f099052d9",
+  "source_commit": "1b6f4a8ab0090298b18234e2cb85dd1126f66b73",
+  "source_lf_sha256": {
+    "Talk-Leee/src/components/calls/lead-details-panel.test.tsx": "1067569544867e00b6f3b178a30f25af9cead5c229130614045c9a7dc98731b4",
+    "Talk-Leee/src/components/calls/lead-details-panel.tsx": "eaac25f2776c098eec19a45eed03f149b1f57c03608fa50f40fa90df28485932",
+    "backend/app/api/v1/endpoints/lead_details.py": "b004c2413587af9ca4f26b0d827a2b2183d1d2fd08cf0bf7a2225a4075e089bc",
+    "backend/app/domain/services/lead_capture_service.py": "062977f8c95a4454d24f341d8d890a5f46807da6d05c91f7da551d58945d4488",
+    "backend/app/domain/services/voice_pipeline/contact_capture.py": "62b18f9c27cb3219a92323ffa1aea2cea186b579bae36f7714677a01d28c2bfa",
+    "backend/app/domain/services/voice_pipeline/contact_recording.py": "6e4f6044ddfbc1c735d44a2715a243b6e185d1c978428305b3698c8a50d091c6",
+    "backend/app/domain/services/voice_pipeline/lead_slot_capture.py": "180368ca0164f430df56aa375f60e9ff0d8bccc79d44fab938de0a2f902567d4",
+    "backend/app/realtime/prompts.py": "2c0ec549a872f5b863e945f74b1c9ece1e2629d0753b677b552889a4339b2263",
+    "backend/app/services/scripts/call_state_tracker.py": "9473e4df8502733b54241ad380d3336d699ec5cf950e64c123da64cb9dfe336e",
+    "backend/app/services/scripts/prompt_builder.py": "60fad740007f3ee8de1d8678a9c7e42ade175be5d9fa82cacdfc0cf4d9e0d994",
+    "backend/app/services/scripts/prompts/guardrails.py": "4f69f1bf054504353a134b233787a0dc7e1ac6b1f9b1128f79e92c72dd5dfc1c",
+    "backend/app/services/scripts/prompts/versions.py": "93072e067dc8168598739c6ccda809c8b7ec46a17eb19cda36ced759b851f474",
+    "backend/tests/integration/test_ag05_lead_evidence.py": "0c7a0a73b072f6046cb05470a6ad54a8bbe053937cc58ca2564cd27850146952",
+    "backend/tests/integration/test_model_identity_lead_evidence.py": "afc7a026a357e6d3a00fc14990c724a37e282dccb72b4b9398577ede47fd45f9",
+    "backend/tests/unit/test_model_identity_recording.py": "dc8662e3f40951ce42fabf8ce3d2c1f95012b11432303e75685e8c32afc82f6a",
+    "backend/tests/unit/test_prompt_versions.py": "5d1473e55d63668fd9d15ee53a75e7a099fb2bcfaef6168b6bc7a84858dddbf2",
+    "backend/tests/unit/test_true_inbound_prompt_separation.py": "9ec5b3f4e4085c475d3170000ccf6ca53f5e438b806864817162bd142a13cb27"
+  },
+  "artifact_lf_sha256": {
+    "backend/app/realtime/README.md": "500e445e564d3746b4194268058fe15afabad741f16ce20a7049579c02f384f2",
+    "docs/sessions/2026-10-07-model-identity-capture.md": "a7203c4984161b5ef7022cbc295ca535c5a31020f2544e5b39fe0cc722a47372",
+    "docs/sessions/artifacts/model-identity-capture/baseline-test.py": "f7537f8fbf76c3b3f3b21e407288d7bdfddadcaa2de71c5906e7bfd9a8885ebe",
+    "docs/sessions/artifacts/model-identity-capture/baseline.txt": "cf53b486c8153d11de26496ff0ace6b24253b8bcf22a9a4218372a3492fecc15",
+    "docs/sessions/artifacts/model-identity-capture/checks.json": "0e59af7648735846271b5701c24ddfb99c76ea2573661281d99f6010070c0fa8",
+    "docs/sessions/artifacts/model-identity-capture/commands.txt": "6401136b0674affbe025570f7bcadb8b5e64af502a9dff4a3eb0e57b00289843",
+    "docs/sessions/artifacts/model-identity-capture/diff-check.txt": "58730e9c8fa711968ba5902db13d51e699fdf1706681a660245480c80a1595f9",
+    "docs/sessions/artifacts/model-identity-capture/eslint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/sessions/artifacts/model-identity-capture/final-source.json": "09383b3d1128a8367f3cbb8553980cddf8949f1be1415ef48c96458eb2586e29",
+    "docs/sessions/artifacts/model-identity-capture/first.txt": "efcf985bd42a82604c8746587117bd06921ee6f1b46245941548b81820c1cf4e",
+    "docs/sessions/artifacts/model-identity-capture/frontend.txt": "27801c9876aa6d7664b7d3ee8911eef89b05f5dbefeacd08a8830b19bd4cf05b",
+    "docs/sessions/artifacts/model-identity-capture/legacy-pg-baseline.txt": "1cad26736fd400557c89871fe4dc3f1c67d6825d2b8e15424b287e056d3d1e0f",
+    "docs/sessions/artifacts/model-identity-capture/pg-final.json": "94118deeb48d085cf833db1cfdb13373d62a2136b36711b1a5393c45b9ac3ee0",
+    "docs/sessions/artifacts/model-identity-capture/pg-final.txt": "047c4661bcc6ddc85003d88b96cf3c427961bc6190d204755ac9b9d2305621ea",
+    "docs/sessions/artifacts/model-identity-capture/pg_check.py": "21672f3d66fa50d9753cafd591042361db4318b6f50657a975b79b0cd7088556",
+    "docs/sessions/artifacts/model-identity-capture/ruff.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/sessions/artifacts/model-identity-capture/typecheck.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/sessions/artifacts/model-identity-capture/unit-final.txt": "4f375a3ddc68ec453eebd0f1f2847ed85f03b34d959cc68718fc74948d44aa5d",
+    "docs/sessions/artifacts/model-identity-capture/unit-initial-fixture.txt": "b89892dcc209f974293d7f0178874e1c5498ca5e3227ad791f809674409c185c"
+  },
+  "post_pg_deltas": {
+    "backend/app/api/v1/endpoints/lead_details.py": "Removed unused imports status and BY_KEY for unignored Ruff F.",
+    "backend/tests/integration/test_model_identity_lead_evidence.py": "Aliased the module import and assigned its same lead_db fixture to avoid Ruff F811; no fixture or test behavior changed.",
+    "backend/tests/unit/test_model_identity_recording.py": "Corrected the new missing_required control to valid UUID tenant/call identifiers after initial server validation correctly rejected fixture strings."
+  },
+  "qualification": {
+    "unit": {
+      "passed": 296,
+      "failed": 0,
+      "skipped": 0,
+      "modules": 11,
+      "warnings": 181,
+      "new_included": 20
+    },
+    "postgres": {
+      "passed": 38,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 41,
+      "new_included": 8,
+      "migrated_existing": 4,
+      "database": "cp04_acceptance_test",
+      "protected_tables": 108,
+      "source_helpers_stable": 19,
+      "prohibited_attempts": 0
+    },
+    "frontend": {
+      "passed": 27,
+      "failed": 0,
+      "skipped": 0,
+      "new_included": 7
+    },
+    "counts_overlap": true
+  },
+  "limits": [
+    "No live model/provider, production grants/deployment/browser/audio comprehension qualification.",
+    "Existing shared dependencies; no clean exact-lock install.",
+    "Post-PG final-source deltas are explicitly recorded; no second SQL execution claimed.",
+    "No generated leads.full_name synchronization or name splitting."
+  ]
+}

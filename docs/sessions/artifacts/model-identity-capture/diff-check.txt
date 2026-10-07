@@ -1,0 +1,14 @@
+warning: in the working copy of 'Talk-Leee/src/components/calls/lead-details-panel.tsx', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/app/api/v1/endpoints/lead_details.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/app/domain/services/lead_capture_service.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/app/domain/services/voice_pipeline/contact_capture.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/app/domain/services/voice_pipeline/contact_recording.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/app/domain/services/voice_pipeline/lead_slot_capture.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/app/realtime/prompts.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/app/services/scripts/call_state_tracker.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/app/services/scripts/prompt_builder.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/app/services/scripts/prompts/guardrails.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/app/services/scripts/prompts/versions.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/tests/integration/test_ag05_lead_evidence.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/tests/unit/test_prompt_versions.py', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'backend/tests/unit/test_true_inbound_prompt_separation.py', CRLF will be replaced by LF the next time Git touches it

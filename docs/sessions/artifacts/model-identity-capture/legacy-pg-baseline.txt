@@ -1,0 +1,24 @@
+...................FF.......FF                                           [100%]
+================================== FAILURES ===================================
+_ test_native_confirmation_revision_reaches_actual_lead_and_transcript_reads[openai] _
+tests\integration\test_ag05_lead_evidence.py:621: in test_native_confirmation_revision_reaches_actual_lead_and_transcript_reads
+    pending = pending_response["details"][0]
+E   IndexError: list index out of range
+_ test_native_confirmation_revision_reaches_actual_lead_and_transcript_reads[xai] _
+tests\integration\test_ag05_lead_evidence.py:621: in test_native_confirmation_revision_reaches_actual_lead_and_transcript_reads
+    pending = pending_response["details"][0]
+E   IndexError: list index out of range
+_ test_durable_revision_invalidates_confirmation_when_contact_revoke_cannot_commit[False] _
+tests\integration\test_ag05_lead_evidence.py:908: in test_durable_revision_invalidates_confirmation_when_contact_revoke_cannot_commit
+    before = (await details(lead_db))["details"][0]
+E   IndexError: list index out of range
+_ test_durable_revision_invalidates_confirmation_when_contact_revoke_cannot_commit[True] _
+tests\integration\test_ag05_lead_evidence.py:908: in test_durable_revision_invalidates_confirmation_when_contact_revoke_cannot_commit
+    before = (await details(lead_db))["details"][0]
+E   IndexError: list index out of range
+=========================== short test summary info ===========================
+FAILED tests/integration/test_ag05_lead_evidence.py::test_native_confirmation_revision_reaches_actual_lead_and_transcript_reads[openai]
+FAILED tests/integration/test_ag05_lead_evidence.py::test_native_confirmation_revision_reaches_actual_lead_and_transcript_reads[xai]
+FAILED tests/integration/test_ag05_lead_evidence.py::test_durable_revision_invalidates_confirmation_when_contact_revoke_cannot_commit[False]
+FAILED tests/integration/test_ag05_lead_evidence.py::test_durable_revision_invalidates_confirmation_when_contact_revoke_cannot_commit[True]
+4 failed, 26 passed, 19 warnings in 18.85s
