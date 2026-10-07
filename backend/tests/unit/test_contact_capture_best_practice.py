@@ -67,7 +67,7 @@ def test_the_line_number_is_only_used_when_it_is_a_real_number():
 
 def test_the_shared_rules_accept_complete_contacts_and_clarify_only_unclear_parts():
     text = " ".join(guardrails.GENERIC_GUARDRAILS.split())
-    assert "record_contact" in text and "own email or phone" in text
+    assert "record_contact" in text and "own name, company, email or phone" in text
     assert "confirm its accuracy naturally" in text
     assert "known line number is context, not automatically" in text
 

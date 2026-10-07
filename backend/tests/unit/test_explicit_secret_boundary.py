@@ -96,10 +96,28 @@ async def test_actual_incremental_and_final_sql_payloads_never_retain_explicit_s
 
 
 async def test_traditional_handler_fanout_and_actual_turn_capture_share_safe_source():
+    from app.domain.services.voice_pipeline.contact_recording import record_contact
     from tests.unit.test_ag03_caller_dispatch_order import pipeline
     service, session = pipeline()
     service.transcript_service = TranscriptService()
-    service._stream_llm_and_tts = AsyncMock(return_value=("Thanks for explaining.", 1.0, 1.0))
+    session._lead_capture_binding = {"call_id": None, "tenant_id": None,
+        "campaign_id": None, "lead_id": None}
+
+    async def model_turn(current, _websocket):
+        # Synthetic model decisions; real handler/TurnRunner bind the safe source.
+        assert snapshot_slots(current.captured_slots) == {}
+        turn = current._contact_turn
+        assert_safe(turn.text)
+        assert turn.source.revision_sha256 == hashlib.sha256(turn.text.encode()).hexdigest()
+        for kind, value in (("email", "alex@example.com"), ("phone", "+14155552671")):
+            result = await record_contact(current, {"kind": kind, "operation": "set",
+                "value": value, "expected_value": None, "source_quote": turn.text},
+                turn=turn, pool=object())
+            assert result["validation_status"] == "awaiting_confirmation"
+            assert not result["saved"]  # no durable store is configured in this fixture
+        return "Thanks for explaining.", 1.0, 1.0
+
+    service._stream_llm_and_tts = AsyncMock(side_effect=model_turn)
     service._supports_llm_end_session_action = lambda _session: False
     session._line_phone_checked = True
     websocket = AsyncMock()
@@ -110,12 +128,15 @@ async def test_traditional_handler_fanout_and_actual_turn_capture_share_safe_sou
     assert_safe(websocket.send_json.call_args.args[0])
     await service.handle_transcript(session, TranscriptChunk(text="", is_final=True))
     await asyncio.wait_for(service._pending_llm_tasks[session.call_id], 2)
+    service._stream_llm_and_tts.assert_awaited_once()
     rows = snapshot_slots(session.captured_slots)
     assert rows["email"]["value"] == "alex@example.com"
     assert rows["phone"]["value"] == "+14155552671"
     assert_safe([m.content for m in session.conversation_history])
     assert "4111" not in json.dumps(rows, default=str)
     for row in rows.values():
+        assert row["evidence"]["value_source"]["caller_turn_order"] == 1
+        assert row["evidence"]["value_source"]["revision_sha256"] == session._contact_turn.source.revision_sha256
         projected = project_contact_evidence({**row, "source": "caller_stated"},
             service.transcript_service.get_transcript_json(session.call_id))
         assert projected["evidence"]["provenance_status"] == "matched"
@@ -124,11 +145,25 @@ async def test_traditional_handler_fanout_and_actual_turn_capture_share_safe_sou
 @pytest.mark.parametrize("provider", ["openai", "xai"])
 @pytest.mark.parametrize("revision", [False, True])
 async def test_actual_native_fanout_contact_and_revision_keep_matching_safe_source(provider, revision):
-    from tests.unit.test_ag05_native_contact_revision import replay
+    from tests.unit.test_ag05_native_contact_revision import replay, record
     r = replay(provider)
     if revision:
         await r.step({"kind": "caller", "item": "source", "text": "My email is old@example.com."})
+        await record(r, "old@example.com")
+        assert snapshot_slots(r.session.captured_slots)["email"]["value"] == "old@example.com"
     await r.step({"kind": "caller", "item": "source", "text": MIXED, "revision": revision})
+    before_tool = snapshot_slots(r.session.captured_slots)
+    if revision:
+        assert before_tool["email"]["value"] is None
+        assert before_tool["email"]["validation_status"] == "needs_clarification"
+    else:
+        assert before_tool == {}
+    await record(r, "alex@example.com")
+    await record(r, "+14155552671", kind="phone")
+    results = [json.loads(row["item"]["output"]) for row in r.socket.sent
+        if row.get("item", {}).get("type") == "function_call_output"]
+    assert all(result["validation_status"] == "awaiting_confirmation"
+        and not result["saved"] for result in results[-2:])
     rows = snapshot_slots(r.session.captured_slots)
     assert rows["email"]["value"] == "alex@example.com"
     assert rows["phone"]["value"] == "+14155552671"
@@ -137,6 +172,9 @@ async def test_actual_native_fanout_contact_and_revision_keep_matching_safe_sour
     assert_safe(r.transcripts.get_transcript_json(r.call_id))
     assert "4111" not in json.dumps(rows, default=str)
     for row in rows.values():
+        source = row["evidence"]["value_source"]
+        assert source["provider_item_id"] == "source" and source["caller_turn_order"] == 1
+        assert source["revision_sha256"] == hashlib.sha256(r.session._contact_turn.text.encode()).hexdigest()
         projected = project_contact_evidence({**row, "source": "caller_stated"},
             r.transcripts.get_transcript_json(r.call_id))
         assert projected["evidence"]["provenance_status"] == "matched"
@@ -271,14 +309,18 @@ def test_both_composed_prompt_engines_keep_privacy_scope_and_available_route_con
     from tests.unit.test_prompt_versions import compose
     realtime = build_realtime_instructions(RealtimePersona())
     traditional = compose("lead_gen")
-    assert PROMPT_VERSION == "realtime@8"
+    assert PROMPT_VERSION == "realtime@10"
     for prompt in (realtime, traditional):
-        for text in ("passwords", "PINs", "backend", "removed text"):
-            assert text in prompt
-        assert "legal or financial advice" in prompt
-    assert "only when the backend provides one" in realtime
-    assert "require explicit backend availability" in traditional
-    assert "Decline unrelated regulated advice" in realtime
+        text = " ".join(prompt.split())
+        assert "Never request, repeat or retain card numbers" in text
+        for secret in ("CVV", "PINs", "full bank or national ID numbers", "passwords", "one-time codes"):
+            assert secret in text
+        assert "If offered, ask them to stop" in text
+        assert "approved business scope" in text
+        assert "available, approved help routes" in text
+    assert "a secure route must actually be available" in " ".join(realtime.split())
+    assert "use a secure route only when provided" in " ".join(traditional.split())
+    assert "not unrelated regulated advice" in traditional
 
 
 @pytest.mark.parametrize("text", [
