@@ -60,11 +60,15 @@ def test_swappiness_is_lowered_for_a_latency_sensitive_host():
 def test_trunk_status_is_a_long_running_service_not_a_timer():
     text = _unit("talky-trunk-status.service")
     assert "Type=simple" in text and "Type=oneshot" not in text
-    assert "trunk_live_status_updater.py --loop 15" in text
+    assert "trunk_live_status_updater.py --loop 10" in text
     assert "Restart=always" in text and "StartLimitIntervalSec=0" in text
     assert "WantedBy=multi-user.target" in text
     assert "postgresql.service" not in text  # Postgres runs under Docker
-    assert not (SYSTEMD / "talky-trunk-status.timer").exists()
+    # The retired definition keeps installed symlinks resolvable during an
+    # upgrade. It must be disabled; only the service is enabled afterward.
+    installer = (SYSTEMD / "install-services.sh").read_text(encoding="utf-8")
+    assert "systemctl disable --now talky-trunk-status.timer" in installer
+    assert "systemctl enable talky-trunk-status.timer" not in installer
 
 
 def _updater_module():
