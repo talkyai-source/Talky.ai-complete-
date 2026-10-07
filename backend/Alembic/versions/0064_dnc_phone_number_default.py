@@ -35,18 +35,24 @@ END
 $function$
 """
 
-TRIGGER_SQL = """
-DROP TRIGGER IF EXISTS trg_dnc_entries_fill_phone_number ON public.dnc_entries;
+# One statement per op.execute: Alembic runs through SQLAlchemy's asyncpg
+# dialect, whose prepared statements refuse multiple commands (the 2026-10-08
+# rehearsal on a restored production backup failed on exactly that).
+DROP_TRIGGER_SQL = (
+    "DROP TRIGGER IF EXISTS trg_dnc_entries_fill_phone_number ON public.dnc_entries"
+)
+CREATE_TRIGGER_SQL = """
 CREATE TRIGGER trg_dnc_entries_fill_phone_number
     BEFORE INSERT OR UPDATE OF phone_number, normalized_number ON public.dnc_entries
-    FOR EACH ROW EXECUTE FUNCTION public.dnc_entries_fill_phone_number();
+    FOR EACH ROW EXECUTE FUNCTION public.dnc_entries_fill_phone_number()
 """
+UPGRADE_STATEMENTS = (FUNCTION_SQL, DROP_TRIGGER_SQL, CREATE_TRIGGER_SQL)
 
 
 def upgrade() -> None:
     op.execute("SET LOCAL lock_timeout = '5s'")
-    op.execute(FUNCTION_SQL)
-    op.execute(TRIGGER_SQL)
+    for statement in UPGRADE_STATEMENTS:
+        op.execute(statement)
 
 
 def downgrade() -> None:
