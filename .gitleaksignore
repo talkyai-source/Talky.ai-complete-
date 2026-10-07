@@ -286,3 +286,27 @@ b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01/frontend-i
 b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01/frontend-integrated-command.json:generic-api-key:48
 b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01/frontend-integrated-command.json:generic-api-key:52
 b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01/frontend-integrated-command.json:generic-api-key:53
+
+# Exact release evidence SHA-256 entries independently recomputed from Git.
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-process-split/manifest.json:generic-api-key:6
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-process-split/manifest.json:generic-api-key:7
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined-first.json:generic-api-key:161
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined-first.json:generic-api-key:232
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined-first.json:generic-api-key:293
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined.json:generic-api-key:165
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined.json:generic-api-key:229
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined.json:generic-api-key:239
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined.json:generic-api-key:240
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined.json:generic-api-key:269
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined.json:generic-api-key:303
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-migration-merge/result.json:generic-api-key:49
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-migration-merge/result.json:generic-api-key:52
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-migration-merge/result.json:generic-api-key:74
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-migration-merge/result.json:generic-api-key:1144
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-migration-merge/result.json:generic-api-key:1147
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-migration-merge/result.json:generic-api-key:1169
+
+# Exact public PyJWT 2.15.1 README examples in captured PyPI resolver metadata.
+# Independently verified against https://pypi.org/pypi/PyJWT/2.15.1/json.
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-langgraph-security/resolver.json:jwt:1690
+e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-langgraph-security/rejected-1.2.3-resolver.json:jwt:1690

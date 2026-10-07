@@ -17,6 +17,8 @@ The requested agent repairs are pushed to `codex/production-ready-20261004` at `
 
 The [release artifacts](artifacts/release-20261008/) retain the combined manifest/output, frontend output, dependency audit results, safe checksum classification, retired-timer reproduction and sanitized server observations. Raw secret-scanner reports, server credentials and customer records are excluded.
 
+A later broader `origin/main..HEAD` history scan reported 1,484 findings. Nineteen belong to the new evidence commit: seventeen source checksums were recomputed against their recorded Git versions, and two JWT matches are public [PyJWT 2.15.1 README examples](https://pypi.org/pypi/PyJWT/2.15.1/json), independently verified against public metadata. Only those nineteen exact fingerprints were added. The remaining 1,465 older-history findings have not been classified by this release and must not be described as clean or assumed to be credentials. This wider scan is distinct from the previously cleared 114-finding CI range; complete history/CI qualification remains open.
+
 ## Actual server state and activation requirements
 
 At **2026-10-07 20:26 UTC**, `/opt/talky` was clean at `ea2b83a61435d170147b941453f1b112b0d597eb`. Main/server advanced independently during preparation; none of those production changes were performed by this release. API, gateway and worker services were active and all three health endpoints returned 200. The user reports that the system is not in use; that statement is not a measured carrier/PBX drain record.
