@@ -60,7 +60,7 @@ def test_deploy_proves_required_units_loaded_and_persistent_units_enabled():
         "for required_unit in talky-migrate.service talky-inbound-synthetic.service"
     )
     enabled_at = deploy.index(
-        "for enabled_unit in talky-api.service talky-dialer-worker.service"
+        "for enabled_unit in talky-api.service talky-api-web.service talky-dialer-worker.service"
     )
     gateway_restart_at = deploy.index("sudo systemctl restart talky-voice-gateway")
 
@@ -68,6 +68,7 @@ def test_deploy_proves_required_units_loaded_and_persistent_units_enabled():
     assert 'systemctl show \\"\\$required_unit\\" --property=LoadState --value' in deploy
     assert 'systemctl is-enabled --quiet \\"\\$enabled_unit\\"' in deploy
     for required in (
+        "talky-api-web.service",
         "talky-voice-worker.service",
         "talky-reminder-worker.service",
         "talky-voice-gateway.service",

@@ -574,35 +574,43 @@ async def lifespan(app: FastAPI):
         configured_backend=os.getenv("TELEPHONY_STATE_BACKEND", "memory"),
         state_backend=_state_backend,
     )
-    try:
-        if strict_validation and _production_inbound_enabled:
-            _is_owner = await _state_backend.acquire_telephony_ownership_strict()
-        else:
-            _is_owner = await _state_backend.acquire_telephony_ownership()
-    except Exception as e:
-        if telephony_ownership_failure_is_fatal(strict_validation, _production_inbound_enabled):
-            logger.critical(
-                "telephony_ownership_ambiguous production startup refused err_type=%s",
-                type(e).__name__,
-            )
-            raise RuntimeError("Production telephony ownership could not be proven") from e
-        logger.warning(f"Telephony ownership acquire raised (assuming owner in dev): {e}")
-        _is_owner = True
+    # The dashboard process (TELEPHONY_ENABLED=false) never claims the owner
+    # lock, never connects ARI and never runs orphan recovery: live calls
+    # stay on the call process. See app/core/process_role.py.
+    from app.core.process_role import telephony_enabled
 
-    # Heartbeat renews both this process's liveness marker and the owner
-    # lock; start it regardless of role (harmless for a non-owner) so an
-    # owner's lock never lapses under a live call. No-op on memory backend.
-    try:
-        if strict_validation and _production_inbound_enabled:
-            await _state_backend.start_heartbeat_strict()
-        else:
-            await _state_backend.start_heartbeat()
-    except Exception as e:
-        if _is_owner and telephony_ownership_failure_is_fatal(
-            strict_validation, _production_inbound_enabled
-        ):
-            raise RuntimeError("Production telephony ownership heartbeat could not start") from e
-        logger.warning(f"Telephony heartbeat start failed (non-fatal): {e}")
+    _telephony_enabled = telephony_enabled()
+    _is_owner = False
+    if _telephony_enabled:
+        try:
+            if strict_validation and _production_inbound_enabled:
+                _is_owner = await _state_backend.acquire_telephony_ownership_strict()
+            else:
+                _is_owner = await _state_backend.acquire_telephony_ownership()
+        except Exception as e:
+            if telephony_ownership_failure_is_fatal(strict_validation, _production_inbound_enabled):
+                logger.critical(
+                    "telephony_ownership_ambiguous production startup refused err_type=%s",
+                    type(e).__name__,
+                )
+                raise RuntimeError("Production telephony ownership could not be proven") from e
+            logger.warning(f"Telephony ownership acquire raised (assuming owner in dev): {e}")
+            _is_owner = True
+
+        # Heartbeat renews both this process's liveness marker and the owner
+        # lock; start it regardless of role (harmless for a non-owner) so an
+        # owner's lock never lapses under a live call. No-op on memory backend.
+        try:
+            if strict_validation and _production_inbound_enabled:
+                await _state_backend.start_heartbeat_strict()
+            else:
+                await _state_backend.start_heartbeat()
+        except Exception as e:
+            if _is_owner and telephony_ownership_failure_is_fatal(
+                strict_validation, _production_inbound_enabled
+            ):
+                raise RuntimeError("Production telephony ownership heartbeat could not start") from e
+            logger.warning(f"Telephony heartbeat start failed (non-fatal): {e}")
 
     async def _auto_connect_telephony() -> None:
         """Connect the bridge to Asterisk and wire the FULL callback set.
@@ -687,7 +695,13 @@ async def lifespan(app: FastAPI):
         # /sip/telephony/start turned them on. (audit #9)
         _tb.ensure_session_management_started()
 
-    if not _is_owner:
+    if not _telephony_enabled:
+        logger.info(
+            "telephony_disabled_on_this_process (TELEPHONY_ENABLED=false): "
+            "no ARI connection, no owner lock, no orphan recovery; "
+            "telephony routes are served by the call process"
+        )
+    elif not _is_owner:
         owner = None
         try:
             owner = await _state_backend.telephony_owner_id()
