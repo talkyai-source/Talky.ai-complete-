@@ -21,9 +21,11 @@ from fastapi import WebSocket
 from app.domain.models.conversation import Message, MessageRole
 from app.domain.models.session import CallSession
 from app.domain.services.end_session_action import (
+    DEFAULT_FAREWELL,
     parse_end_session_action,
     should_honor_end_session,
     previous_assistant_turn,
+    verified_opt_out,
 )
 from app.services.scripts.call_state_tracker import CallState as CapturedSlotsState
 from app.domain.services.voice_pipeline.contact_recording import bind_contact_turn
@@ -197,8 +199,12 @@ class TurnRunner:
                 if self._p._supports_llm_end_session_action(session)
                 else None
             )
-            if ask_ai_end_action and ask_ai_end_action.get("do_not_call") and not contains_dnc(full_transcript):
-                ask_ai_end_action = {**ask_ai_end_action, "do_not_call": False}
+            if (ask_ai_end_action and ask_ai_end_action.get("do_not_call")
+                    and not verified_opt_out(ask_ai_end_action, full_transcript)):
+                # The model's farewell was written for an opt-out ("I'll take
+                # you off our list"); nothing is recorded, so it must not play.
+                ask_ai_end_action = {**ask_ai_end_action, "do_not_call": False,
+                                     "farewell": DEFAULT_FAREWELL}
 
             # Deny unauthorized effects without adding scripted speech or retries.
             if ask_ai_end_action:
@@ -222,14 +228,15 @@ class TurnRunner:
                 # the session so the call-end teardown runs the opt-out purge
                 # (DNC + cancel scheduled jobs + mark lead DNC). We only set
                 # the flag here; the side effects run once, at hangup.
-                if ask_ai_end_action.get("do_not_call") and contains_dnc(full_transcript):
+                if ask_ai_end_action.get("do_not_call") and verified_opt_out(ask_ai_end_action, full_transcript):
                     try:
                         session._caller_opted_out = True
                     except Exception:
                         pass
                     logger.info(
-                        "caller_opt_out_detected call_id=%s — will purge at hangup",
+                        "caller_opt_out_detected call_id=%s evidence=%s — will purge at hangup",
                         getattr(session, "call_id", "?"),
+                        "phrase" if contains_dnc(full_transcript) else "model_quote",
                     )
                 session._end_session_action_handled = True
                 await self._p._shutdown_session_for_end_action(

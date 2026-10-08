@@ -1,6 +1,7 @@
 """Model-selected exact campaign sections through the conversational model."""
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 
 from app.services.scripts.knowledge.sections import (
@@ -12,6 +13,8 @@ from app.services.scripts.knowledge.sections import (
     serialize_section_result,
 )
 from app.services.scripts.prompts.prompt_safety import DATA_ONLY_NOTE, fence_untrusted
+
+logger = logging.getLogger(__name__)
 
 KB_TOOL_NAME = "lookup_company_knowledge"
 KB_FENCE_TAG = "company_knowledge"
@@ -183,4 +186,14 @@ async def run_knowledge_lookup(session, arguments: dict) -> str:
     result = run_section_request(_session_catalog(session), arguments)
     session._knowledge_evidence = result
     session._knowledge_grounding = [p["text"] for p in result["passages"]] if result["status"] == "available" else []
+    # One line per lookup: what the model asked for and what it got (ids and
+    # sizes only, never source text). Diagnosing call c8df9107 needed probes.
+    args = arguments if isinstance(arguments, dict) else {}
+    logger.info(
+        "knowledge_lookup call_id=%s args=%s status=%s reason=%s passages=%d chars=%d",
+        str(getattr(session, "call_id", "?"))[:12],
+        {k: args[k] for k in ("section_ids", "catalog_parent", "catalog_offset", "source_offset") if k in args},
+        result.get("status"), result.get("reason"),
+        len(result.get("passages") or ()), len(result.get("text") or ""),
+    )
     return fence_kb_result(serialize_section_result(result), with_note=False)

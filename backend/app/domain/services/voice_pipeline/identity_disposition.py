@@ -2,8 +2,10 @@
 
 Ordinary identity interpretation and spoken responses belong to the model.
 """
+import re
+
 from app.domain.services.caller_assertions import (
-    continuation_after, last_asserted_position, phrase_pattern,
+    assertion_matches, continuation_after, last_asserted_position, phrase_pattern,
 )
 
 _DNC_PHRASES = (
@@ -17,6 +19,11 @@ _DNC_PHRASES = (
     "lose my number", "delete my number",
     "opt me out", "unsubscribe",
     "never call me", "never call us", "never call again", "never contact",
+    # UK wording; paraphrases beyond this floor are the model's verified quote.
+    "stop ringing me", "stop ringing us", "stop ringing this number", "dont ring me", "dont ring us",
+    "do not ring me", "do not ring us",
+    "never ring me", "never ring us", "never ring again", "never ring this number again",
+    "dont phone me", "do not phone me", "do not call list",
 )
 
 _EXPLICIT_GOODBYE_PHRASES = (
@@ -36,8 +43,21 @@ def contains_dnc(transcript: str) -> bool:
     return dnc_assertion_position(transcript) >= 0
 
 
+# "Don't call me tomorrow" / "don't call me at work" is a scheduling
+# preference, not an opt-out: a phrase followed at once by a time or place.
+_SCHEDULING_AFTER = re.compile(
+    r"^\W*(?:\w+\W+){0,2}?(?:tomorrow|today|tonight|later|right now|at the moment|at work|"
+    r"this (?:week|morning|afternoon|evening|weekend)|until|before|after|in the (?:morning|evening)|"
+    r"on (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b",
+    re.I,
+)
+
+
 def dnc_assertion_position(transcript: str) -> int:
-    return last_asserted_position(transcript, _DNC_PATTERN)
+    for match in reversed(assertion_matches(transcript, _DNC_PATTERN)):
+        if not _SCHEDULING_AFTER.match(str(transcript or "")[match.end():]):
+            return match.start()
+    return -1
 
 
 def contains_explicit_goodbye(transcript: str) -> bool:

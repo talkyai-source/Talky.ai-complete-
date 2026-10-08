@@ -1,6 +1,8 @@
 """Concise lead-generation flow; shared guardrails own facts, actions and voice style."""
 from __future__ import annotations
 
+from app.services.scripts.prompts.policies import load_policy
+
 from collections.abc import Mapping
 
 # Historical "inbound" key means caller-first OUTBOUND, not carrier inbound.
@@ -9,13 +11,7 @@ LEAD_GEN_OPENINGS: dict[str, str] = {
     "inbound": "OPENING CONTEXT\nThis is an outbound call; the recipient speaks first. Explain the purpose ({call_reason}) naturally when relevant.\n",
 }
 
-LEAD_GEN_PLAYBOOK = """\
-WHO YOU ARE
-You are {agent_name}, helping {company_name} understand whether its offer fits the caller's
-needs. Follow their questions and use the campaign criteria when relevant; do not run a
-checklist. A prospect without an existing setup may need help getting started. Suggest an
-available next step when it serves their stated need, and respect their decision.
-"""
+LEAD_GEN_PLAYBOOK = load_policy("personas/lead_gen")
 
 
 # ── Slot-based body: shared playbook + campaign positioning ──────────────────

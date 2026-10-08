@@ -60,7 +60,8 @@ ALL_PERSONAS = (
 def test_each_persona_path_gets_one_natural_conversation_guide(persona, slots, knowledge_driven):
     prompt = compose_prompt(persona, "Alex", "Acme", slots, knowledge_driven=knowledge_driven)
     assert prompt.count(COMMUNICATION_PRINCIPLES.strip()) == 1
-    assert "Be warm, clear and concise; expand when the caller needs detail." in prompt
+    # Answer-first wording since 2026-10-08 (standard REL-1).
+    assert "Be warm, clear and concise: answer what they asked first" in prompt
     assert "Use your own natural" in prompt
     assert "Ask one useful question at a time" in prompt
     assert "internal\nreasoning, tool names, markdown or stage directions" in prompt

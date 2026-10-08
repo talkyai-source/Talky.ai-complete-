@@ -75,3 +75,15 @@ def test_a_section_id_is_never_spoken():
     assert guard_spoken_sentence(session, "Let me check that now. k11a07977_13") == "Let me check that now."
     assert guard_spoken_sentence(session, "k11a07977_13") == ""
     assert guard_spoken_sentence(session, "The Sleeper fare is 8,550 rupees.") == "The Sleeper fare is 8,550 rupees."
+
+
+async def test_every_lookup_logs_its_arguments_and_outcome_without_source_text(caplog):
+    session, catalog = _fare_sheet_session()
+    session.call_id = "call-kb-log"
+    route = _id_for(catalog, "Lahore to Karachi and Karachi to Lahore")
+    with caplog.at_level("INFO", logger="app.domain.services.voice_pipeline.knowledge_tool"):
+        await kt.run_knowledge_lookup(session, {"section_ids": [route]})
+    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("knowledge_lookup "))
+    # A section read carries its ancestors' context: section + 2 parents.
+    assert route in line and "status=available" in line and "passages=3" in line
+    assert "8,550" not in line

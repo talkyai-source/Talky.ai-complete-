@@ -52,8 +52,9 @@ _ACTION_DESCRIPTIONS = {
     ),
     ACTION_END_CALL: (
         "Request that this live call end after a short goodbye. Use only when "
-        "the caller clearly ended the conversation; do not claim the line is "
-        "already disconnected while you are still speaking."
+        "the caller clearly ended the conversation or asked not to be contacted "
+        "again; do not claim the line is already disconnected while you are "
+        "still speaking."
     ),
 }
 
@@ -109,7 +110,15 @@ _ACTION_PARAMETERS = {
             "reason": {
                 "type": "string",
                 "description": "A short reason the caller clearly ended the conversation.",
-            }
+            },
+            "do_not_call": {
+                "type": "boolean",
+                "description": "True only when the caller asked not to be contacted again, in any wording.",
+            },
+            "opt_out_quote": {
+                "type": "string",
+                "description": "With do_not_call: the caller's exact words asking not to be contacted.",
+            },
         },
         "additionalProperties": False,
     },
@@ -229,10 +238,27 @@ async def run_voice_action(
         from app.domain.services.voice_pipeline.action_execution import execute_connected_voice_action
         result = await execute_connected_voice_action(session, action, dict(arguments or {}), user_text)
     elif action == ACTION_END_CALL:
+        from app.domain.services.end_session_action import verified_opt_out
         if previous_assistant_text is None:
             from app.domain.services.end_session_action import previous_assistant_turn
             previous_assistant_text = previous_assistant_turn(getattr(session, "conversation_history", ()))
-        if not end_call_intent_present(user_text, previous_assistant_text=previous_assistant_text):
+        call_args = dict(arguments or {})
+        opted_out = call_args.get("do_not_call") is True and verified_opt_out(call_args, user_text)
+        opt_out_recorded = False
+        if opted_out:
+            # Do it before the goodbye can say it was done (same rule as the
+            # end-session path). Teardown retries an unconfirmed write.
+            from app.domain.services.dialer.opt_out import purge_opt_out_before_farewell
+            try:
+                session._caller_opted_out = True
+            except Exception:
+                pass
+            opt_out_recorded = await purge_opt_out_before_farewell(session)
+            logger.info(
+                "caller_opt_out_detected call_id=%s evidence=end_call_tool recorded=%s",
+                str(getattr(session, "call_id", "?"))[:12], opt_out_recorded,
+            )
+        if not opted_out and not end_call_intent_present(user_text, previous_assistant_text=previous_assistant_text):
             result = _result(
                 action,
                 success=False,
@@ -264,8 +290,19 @@ async def run_voice_action(
                     # The request is accepted, but a speaking agent cannot truthfully
                     # claim the line is already disconnected.
                     confirmation_allowed=False,
-                    message="End-call request accepted; say one short goodbye now.",
+                    message="End-call request accepted; say one short goodbye now." + (
+                        " Opt-out recorded; you may say they won't be contacted again."
+                        if opted_out and opt_out_recorded else
+                        " Opt-out not yet confirmed; do not say they were removed."
+                        if opted_out else
+                        " No opt-out was recorded; do not say they were removed."
+                        if call_args.get("do_not_call") is True else ""
+                    ),
                 )
+                if opted_out:
+                    result["opt_out"] = "recorded" if opt_out_recorded else "unconfirmed"
+                elif call_args.get("do_not_call") is True:
+                    result["opt_out"] = "not_recorded"
     else:
         result = _result(
             str(action or "unknown"),

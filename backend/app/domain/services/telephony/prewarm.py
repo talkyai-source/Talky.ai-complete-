@@ -54,6 +54,19 @@ class PrewarmResult:
     failure_reason: Optional[str]
 
 
+CALLEE_FIRST_MIN_EOT_TIMEOUT_MS = 1000
+
+
+def callee_first_eot_timeout(tuned_ms) -> int:
+    """At least 1000 ms when the callee speaks first, never below the tenant's
+    own tuning (standard TT-3: one source of truth for turn timing)."""
+    try:
+        tuned = int(tuned_ms)
+    except (TypeError, ValueError):
+        tuned = 0
+    return max(tuned, CALLEE_FIRST_MIN_EOT_TIMEOUT_MS)
+
+
 def _resolve_first_speaker(first_speaker: Optional[str]) -> str:
     """Per-call first-speaker choice (explicit value > env default).
 
@@ -339,7 +352,7 @@ async def prepare_prewarmed_session(
         # tighter 500ms because that mode's first turn is the agent's
         # greeting and the callee's reply is short and back-and-forth.
         if effective_first_speaker == "user":
-            config.stt_eot_timeout_ms = 1000
+            config.stt_eot_timeout_ms = callee_first_eot_timeout(getattr(config, "stt_eot_timeout_ms", None))
         # Prepare before creation: native instructions are sent during connect.
         from app.services.scripts.knowledge.session_inject import apply_campaign_knowledge
         await apply_campaign_knowledge(
@@ -358,9 +371,21 @@ async def prepare_prewarmed_session(
             # caller-speaks-first mode.
             select_inbound_base_prompt(pre_warm_session)
             logger.info(
-                "stt_eot_timeout_user_first_relaxed call_id=%s timeout_ms=1000",
-                pre_warm_session.call_id[:12],
+                "stt_eot_timeout_user_first_relaxed call_id=%s timeout_ms=%s",
+                pre_warm_session.call_id[:12], getattr(config, "stt_eot_timeout_ms", None),
             )
+        # One line per call with the policy values actually in force, so a
+        # guard wired to a constant or missing input shows up in the logs.
+        # Diagnostics only: it must never be able to fail call setup.
+        from app.domain.services.voice_pipeline.figure_grounding import figure_grounding_mode
+        logger.info(
+            "voice_policy_wiring call_id=%s first_speaker=%s eot=%s eager=%s timeout_ms=%s "
+            "figure_grounding=%s policy_overrides=%s",
+            str(getattr(pre_warm_session, "call_id", "?"))[:12], effective_first_speaker,
+            getattr(config, "stt_eot_threshold", None), getattr(config, "stt_eager_eot_threshold", None),
+            getattr(config, "stt_eot_timeout_ms", None),
+            figure_grounding_mode(), bool(os.getenv("PROMPT_POLICY_DIR", "").strip()),
+        )
         if agent_name:
             pre_warm_session._agent_name = agent_name
 

@@ -126,9 +126,12 @@ _VERSIONS: Final[Mapping[str, str]] = {
     # @13 / @11: explicit-secret privacy and only available secure routes.
     # @14 / @12: model-led conversation guide and contact recording tools.
     # @15 / @13: source-bound name/company recording through the existing tool.
-    "lead_gen": "lead_gen@15",
-    "customer_support": "customer_support@13",
-    "receptionist": "receptionist@13",
+    # @16 / @14 (2026-10-08): voice standards, now in policies/*.md: answer
+    # first, stop after a question, grouped read-back with a two-try limit,
+    # figures exactly as sourced (docs/standards/voice-agent-standards.md).
+    "lead_gen": "lead_gen@16",
+    "customer_support": "customer_support@14",
+    "receptionist": "receptionist@14",
 }
 
 #: Fallback for a persona that is not in the registry yet. Deliberately visible

@@ -1024,3 +1024,31 @@ async def test_live_turn_prompt_carries_current_boundaries_once():
     assert "Call UK retailers about card terminals." in sp
     assert "failed work" in sp and "is not complete" in sp
     assert "## THIS TURN" not in sp
+
+
+@pytest.mark.asyncio
+async def test_unbacked_json_opt_out_does_not_play_a_removal_farewell(monkeypatch):
+    # The caller said goodbye (the call may end), but the model's do_not_call
+    # has no quote of the caller: its "I'll take you off our list" must not play.
+    from app.domain.services.end_session_action import DEFAULT_FAREWELL
+    service = _make_service_for_disposition(
+        ['{"action":"end_session","reason":"user_done","do_not_call":true,'
+         '"farewell":"Understood, I will take you off our list."}']
+    )
+    spoken = []
+    original = service.synthesize_and_send_audio
+
+    async def record(session, text, *args, **kwargs):
+        spoken.append(text)
+        return await original(session, text, *args, **kwargs)
+
+    monkeypatch.setattr(service, "synthesize_and_send_audio", record)
+    session = _make_session()
+    session.campaign_id = "campaign-123"
+    session.current_user_input = "Okay, goodbye."
+    await service.handle_turn_end(session, AsyncMock())
+
+    assert getattr(session, "_caller_opted_out", False) is False
+    assert session.state == CallState.ENDED
+    assert DEFAULT_FAREWELL in spoken
+    assert not any("off our list" in text for text in spoken)

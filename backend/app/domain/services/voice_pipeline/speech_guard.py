@@ -65,6 +65,15 @@ _RELATIONSHIP_CLAIM = re.compile(
     re.IGNORECASE,
 )
 
+# "I've removed you from our list", "You've been taken off". Spoken only once
+# the opt-out write landed on this call (session._opt_out_recorded).
+_REMOVED_CLAIM = re.compile(
+    r"\b(?:(?:i|we)(?:'ve|\s+have)|you(?:'ve|\s+have)\s+been|you'?re|you\s+are)\s+"
+    r"(?:now\s+|just\s+|already\s+)?(?:removed|taken\s+(?:you\s+)?off|unsubscribed|opted\s+out)\b",
+    re.IGNORECASE,
+)
+OPT_OUT_PENDING_LINE = "I've noted your request."
+
 # Internal knowledge section ids (sections.py: f"k{digest[:8]}_{n}"). Test call
 # c8df9107 (2026-10-08) spoke "k11a0797713" aloud when the agent ran out of
 # lookup rounds mid-navigation.
@@ -112,6 +121,8 @@ def guard_spoken_sentence(session: Any, sentence: str) -> str:
             return ""
     if claims_completed_action(sentence) and not _confirmation_allowed(session):
         return UNBACKED_ACTION_LINE
+    if _REMOVED_CLAIM.search(sentence) and getattr(session, "_opt_out_recorded", False) is not True:
+        return OPT_OUT_PENDING_LINE
     if _RELATIONSHIP_CLAIM.search(sentence) and caller_denied_relationship(
         getattr(session, "conversation_history", ())
     ):

@@ -140,6 +140,30 @@ OPT_OUT_UNCONFIRMED_FAREWELL = (
 
 
 async def purge_opt_out_before_farewell(session, *, timeout_s: float = 2.5) -> bool:
+    """Write the opt-out before the agent says it has; see the helper below.
+
+    On success the live session is marked ``_opt_out_recorded`` so a spoken
+    "you've been removed" is allowed (speech_guard.py); otherwise it is not.
+    One in-call attempt per call: after a failure, later in-call callers get
+    False at once instead of another 2.5 s of dead air each; the teardown
+    purge (lifecycle.py) retries the write.
+    """
+    # No early return on success: a written DNC row with incomplete cleanup
+    # (queued jobs, lead status) must be retried by the next caller.
+    if getattr(session, "_opt_out_inline_failed", False) is True:
+        return False
+    recorded = await _purge_opt_out_before_farewell(session, timeout_s=timeout_s)
+    try:
+        if recorded:
+            session._opt_out_recorded = True
+        else:
+            session._opt_out_inline_failed = True
+    except Exception:  # noqa: BLE001 - foreign session doubles
+        pass
+    return recorded
+
+
+async def _purge_opt_out_before_farewell(session, *, timeout_s: float = 2.5) -> bool:
     """Write the opt-out BEFORE the agent says it has.
 
     Called from the end-action shutdown path with the live ``CallSession``.

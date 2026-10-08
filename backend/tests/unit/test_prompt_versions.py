@@ -135,6 +135,12 @@ _EXPECTED_HASHES: dict[str, str] = {
     'lead_gen@15': 'e778d2b7b3272481',
     'customer_support@13': '4d7836c06686f48f',
     'receptionist@13': 'b9b180664d9d9daa',
+    # Voice standards (policies/*.md), never deployed before these pins:
+    # answer first, wait after a question,
+    # grouped read-back with a two-try limit, never derive figures.
+    "lead_gen@16": "68405527842825ba",
+    "customer_support@14": "93f966fe8e6d8086",
+    "receptionist@14": "6cbdc03860144273",
 }
 
 

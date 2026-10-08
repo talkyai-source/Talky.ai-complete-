@@ -34,6 +34,7 @@ from app.domain.services.end_session_action import (
     parse_end_session_action,
 )
 from app.domain.services.voice_pipeline.speech_guard import guard_spoken_sentence
+from app.domain.services.voice_pipeline.figure_grounding import guard_figures
 from app.domain.services.voice_pipeline.end_call import strip_and_flag
 from app.domain.services.llm_guardrails import get_guardrails
 from app.domain.services.voice_pipeline import expressive_caps
@@ -54,6 +55,7 @@ from app.domain.services.voice_pipeline.contact_recording import (
     CONTACT_TOOL_NAME, CONTACT_TOOL_SPEC, record_contact,
 )
 from app.domain.services.voice_pipeline.action_tools import (
+    action_results_for_session,
     action_tool_system_addendum,
     action_tools_for_turn,
     execution_failure_result,
@@ -337,6 +339,16 @@ class TurnStreamer:
         suppressed_for_action = False
         # Source hosts help sentence segmentation keep URLs intact.
         turn_grounding: list[str] = []
+
+        def _figure_sources():
+            # Everything the model was given or heard this turn (HAL-2).
+            evidence = getattr(session, "_knowledge_evidence", None) or {}
+            return (
+                system_prompt, evidence.get("text"),
+                *getattr(session, "_knowledge_grounding", []), *turn_grounding,
+                *(m.content for m in session.conversation_history),
+                *(json.dumps(r, default=str) for r in action_results_for_session(session).values()),
+            )
         # Canonical history source: TTS submissions that returned without
         # interruption. Raw generation can include unsent text after interruption or a provider error. Submission is not a heard/playback receipt;
         # action confirmation separately requires correlated playout below.
@@ -558,6 +570,8 @@ class TurnStreamer:
                     # Unbacked "done" claims and denied-relationship claims
                     # never reach the caller (speech_guard.py).
                     sentence = guard_spoken_sentence(session, sentence)
+                    if sentence:
+                        sentence = guard_figures(session, sentence, _figure_sources)
                     if not sentence:
                         continue
 
@@ -670,6 +684,8 @@ class TurnStreamer:
                     protected_values=_protected_readback,
                 )
                 sentence = guard_spoken_sentence(session, sentence)
+                if sentence:
+                    sentence = guard_figures(session, sentence, _figure_sources)
                 if sentence:
                     if t_tts_first is None:
                         t_tts_first = time.monotonic()

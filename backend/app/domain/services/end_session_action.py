@@ -118,6 +118,95 @@ def repeated_decline_allows_end(text: Optional[str], declined_count: int, *, pre
     return position >= 0 and not continuation_after(text, position)
 
 
+_FILLER = frozenset("please um uh erm just look so ok okay well and".split())
+_DETERMINER = frozenset("the a an your my our this that".split())
+
+
+def _quote_tokens(text: object) -> list[tuple[str, int]]:
+    """Normalised words with the end offset of each in the original text.
+
+    Case, apostrophes and "do not"/"don't" are ignored because STT varies
+    them; filler is dropped and determiners are interchangeable, so "take me
+    off the list" matches "take me off your list".
+    """
+    raw = str(text or "").replace("\u2019", "'")
+    out: list[tuple[str, int]] = []
+    for match in re.finditer(r"[A-Za-z0-9']+", raw):
+        word = match.group(0).lower().replace("'", "")
+        if word in _FILLER:
+            continue
+        if word == "not" and out and out[-1][0] == "do":
+            out[-1] = ("dont", match.end())
+            continue
+        out.append(("<det>" if word in _DETERMINER else word, match.end()))
+    return out
+
+
+def _quote_end(quote: object, caller_text: Optional[str]) -> int:
+    """End offset of the quote inside the caller's words, or -1."""
+    words = [w for w, _ in _quote_tokens(quote)]
+    said = _quote_tokens(caller_text)
+    n = len(words)
+    if n < 2:
+        return -1
+    for i in range(len(said) - n + 1):
+        if [w for w, _ in said[i:i + n]] == words:
+            return said[i + n - 1][1]
+    return -1
+
+
+def caller_quote_verified(quote: object, caller_text: Optional[str]) -> bool:
+    """The model's quote is a run of at least two words the caller really said."""
+    return _quote_end(quote, caller_text) >= 0
+
+
+# What the quoted words must express for a permanent suppression: a refusal of
+# future contact. The model decides; this only checks its quote is such a
+# refusal, so "not interested", "I'm busy" or "call me tomorrow" cannot become
+# a do-not-call. "Don't call me tomorrow" is a scheduling preference.
+_REMOVAL = re.compile(r"\b(?:remove|removed|delete|unsubscribe|opt out|take (?:me|us|<det> number|my number) off)\b")
+_REFUSAL = re.compile(r"\b(?:stop|never|dont|no more|quit|cease|not to)\b")
+_CONTACT = re.compile(
+    r"\b(?:call|calls|calling|called|ring|rings|ringing|rang|phone|phoning|phoned|contact|"
+    r"contacting|number|list|message|messages|messaging|text|texts|texting|bother|bothering)\b")
+_TEMPORAL = re.compile(
+    r"\b(?:tomorrow|today|tonight|now|later|moment|until|week|morning|afternoon|evening|"
+    r"weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b")
+
+
+# A later "wait", "actually" or "never mind" walks the opt-out back. A later
+# question ("why do you keep calling?") does not.
+_WALK_BACK = re.compile(r"\b(?:wait|hold on|hang on|actually|never ?mind|i mean|just kidding|on second thought)\b", re.I)
+
+
+def _refuses_contact(quote: object) -> bool:
+    text = " ".join(w for w, _ in _quote_tokens(quote))
+    if _TEMPORAL.search(text):
+        return False
+    return bool(_REMOVAL.search(text) or (_REFUSAL.search(text) and _CONTACT.search(text)))
+
+
+def verified_opt_out(action: Optional[dict], caller_text: Optional[str]) -> bool:
+    """A caller opt-out backed by the caller's own words.
+
+    Either a directed opt-out phrase (the deterministic floor), or the model's
+    do_not_call judgement carrying a quote that (a) the caller really said,
+    (b) refuses future contact, and (c) the caller did not walk back ("wait, actually...")
+    later in the same turn. The model understands paraphrases the phrase list cannot
+    ("never bother this number again"); the checks stop it turning a decline
+    or a scheduling preference into a permanent suppression.
+    """
+    from app.domain.services.voice_pipeline.identity_disposition import contains_dnc
+
+    if contains_dnc(caller_text):
+        return True
+    if not (action and action.get("do_not_call")):
+        return False
+    quote = action.get("opt_out_quote")
+    end = _quote_end(quote, caller_text)
+    return end >= 0 and _refuses_contact(quote) and not _WALK_BACK.search(str(caller_text or "")[end:])
+
+
 def should_honor_end_session(
     action: Optional[dict],
     last_user_text: Optional[str],
@@ -129,12 +218,16 @@ def should_honor_end_session(
     """Decide whether to actually hang up on an LLM end-session action, or treat
     it as a phantom goodbye and keep the call going.
 
-    Honor the caller's end intent or the recorded repeated-decline policy.
-    Model-only completion/DNC labels and conversation length are not evidence.
+    Honor the caller's end intent, a verified opt-out, or the recorded
+    repeated-decline policy. Model-only completion labels and conversation
+    length are not evidence; a do_not_call label counts only with a verified
+    quote of the caller (verified_opt_out).
     """
     if not action:
         return False
     if caller_signaled_end(last_user_text, previous_assistant_text=previous_assistant_text):
+        return True
+    if action.get("do_not_call") and verified_opt_out(action, last_user_text):
         return True
     if repeated_decline_allows_end(last_user_text, declined_count, previous_assistant_text=previous_assistant_text):
         return True
@@ -163,12 +256,14 @@ def build_end_session_tool_instructions(*, action_name: str = END_SESSION_ACTION
         "Set farewell to one short natural sentence that matches the user's goodbye "
         "style: if they say goodbye, say goodbye; if they say see you, say see you; "
         "if they say take care, answer in that same friendly closing style. "
-        "If — and only if — the user asks NOT to be called again (\"stop calling me\", "
-        "\"remove me from your list\", \"take me off\", \"do not call me\", \"unsubscribe\"), "
-        'add "do_not_call":true to the same JSON and set the farewell to a brief, '
-        "respectful confirmation that they won't be contacted again, e.g. "
+        "If — and only if — the user asks NOT to be contacted again, in any wording or "
+        "language (\"stop calling me\", \"never ring this number again\", \"take me off your list\"), "
+        'add "do_not_call":true and "opt_out_quote" with their exact words to the same JSON, '
+        "and set the farewell to a brief, respectful confirmation that they won't be "
+        "contacted again, e.g. "
         f'{{"action":"{action_name}","reason":"user_done","farewell":"Understood — I\'ll '
-        'remove you from our list. Sorry to bother you, take care.","do_not_call":true}}. '
+        'remove you from our list. Sorry to bother you, take care.","do_not_call":true,'
+        '"opt_out_quote":"never ring this number again"}}. '
         "Do NOT set do_not_call for ordinary goodbyes, objections, or \"I\'m busy right "
         "now\" — only a genuine request never to be called again. "
         "For all other messages, answer normally. Do not use this action when the "
@@ -282,8 +377,12 @@ def parse_end_session_action(text: str) -> Optional[dict[str, object]]:
         isinstance(raw_dnc, str) and raw_dnc.strip().lower() in {"true", "yes", "1"}
     )
 
-    return {
+    action = {
         "reason": reason,
         "farewell": farewell.strip(),
         "do_not_call": do_not_call,
     }
+    quote = payload.get("opt_out_quote")
+    if do_not_call and isinstance(quote, str) and quote.strip():
+        action["opt_out_quote"] = quote.strip()[:300]
+    return action

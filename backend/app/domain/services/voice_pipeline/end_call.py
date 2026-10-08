@@ -30,6 +30,8 @@ Pure helpers — no I/O — so the stripping logic is unit-testable.
 """
 from __future__ import annotations
 
+from app.services.scripts.prompts.policies import load_policy
+
 import re
 
 END_CALL_TOKEN = "[[END_CALL]]"
@@ -95,6 +97,9 @@ def model_end_call_allowed(session, user_text=None) -> bool:
             if getattr(getattr(message, "role", None), "value", getattr(message, "role", None)) == "user"
         ), "")
     previous = previous_assistant_turn(getattr(session, "conversation_history", ()))
+    # Set only from caller evidence (phrase floor or a verified quote).
+    if getattr(session, "_caller_opted_out", False) is True:
+        return True
     if caller_signaled_end(user_text, previous_assistant_text=previous):
         return True
     if continuation_after(user_text):
@@ -140,28 +145,10 @@ def model_end_call_allowed(session, user_text=None) -> bool:
 # exists to prevent. Now scoped to the first real reply and deferred to LIVE
 # STATE. The lesson generalises: any sentence in this file that describes a
 # SPECIFIC TURN must name which turn, or recency makes it describe every turn.
-CALL_CONTROL_RULES = f"""\
-## ENDING THE CALL
-- When the caller clearly stops, says goodbye, or confirms a wrong destination,
-  give one brief closing line. Use `end_call` when offered; otherwise finish
-  with {END_CALL_TOKEN}. Words like "hangs up" do not end a call.
-- VOICEMAIL or an answering machine: use `end_call` or {END_CALL_TOKEN} alone;
-  do not leave a message. Do not promise a later callback.
-- WRONG PERSON at the right business is a redirect, not a wrong destination.
-  Not knowing your company or not being its customer is not a wrong number.
-"""
+CALL_CONTROL_RULES = load_policy("ending_the_call").format(end_call_token=END_CALL_TOKEN)
 
 
-INBOUND_CALL_CONTROL_RULES = f"""\
-## ENDING THE CALL
-- When the caller clearly says goodbye, asks to end, or confirms they want no
-  further help, say at most one short closing line. If an `end_call` tool is
-  offered this turn, call it; otherwise finish with the exact token {END_CALL_TOKEN} .
-- A tool result or the token is required; words like "hangs up" do nothing.
-- A request for support, a different department, or a human is not a reason to
-  abandon the caller. Follow the approved assistance or transfer policy.
-- Do not promise a callback or another external action without runtime confirmation.
-"""
+INBOUND_CALL_CONTROL_RULES = load_policy("ending_the_call_inbound").format(end_call_token=END_CALL_TOKEN)
 
 
 def call_control_rules(*, direction: str = "outbound") -> str:

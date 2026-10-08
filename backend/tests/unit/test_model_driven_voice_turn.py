@@ -77,6 +77,9 @@ async def test_model_selects_section_without_backend_question_matching(monkeypat
 ])
 async def test_model_wording_and_qualifiers_reach_speech_without_rule_rewrite(monkeypatch, answer):
     service, session, rounds = setup_turn(monkeypatch, "Thanks for your help.", [answer])
+    # Qualifiers pass unrewritten; the price itself must be sourced (HAL-2,
+    # test_figure_grounding.py covers the unsourced case).
+    session.system_prompt += " Approved price: $19 excluding VAT."
     response, _, _ = await service._stream_llm_and_tts(session)
     assert response == answer
     assert len(rounds) == 1
