@@ -120,7 +120,10 @@ function DescriptionSlideshow({ paragraphs }: { paragraphs: string[]; intervalMs
     const isSlideVisible = phase === "typing" || phase === "holding";
 
     return (
-        <div className="relative grid" style={{ minHeight: containerHeight }}>
+        // overflow-x-clip: the enter/exit transition slides the paragraph
+        // 30px sideways; the section no longer clips its own overflow, so the
+        // excursion must be contained here or it widens the page mid-animation.
+        <div className="relative grid overflow-x-clip" style={{ minHeight: containerHeight }}>
             {/* Hidden measurement elements. They share one grid cell with the
                 active paragraph, so the block is already as tall as the tallest
                 paragraph in the server HTML and nothing shifts on hydration. */}
@@ -163,12 +166,7 @@ function DescriptionSlideshow({ paragraphs }: { paragraphs: string[]; intervalMs
 }
 
 export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustForNavbar = false }) => {
-    const [mobileTitleFontPx, setMobileTitleFontPx] = useState<number | null>(null);
-
     const heroContentRef = useRef<HTMLDivElement | null>(null);
-    const mobileTitleRef = useRef<HTMLHeadingElement | null>(null);
-    const mobileTitleMeasureARef = useRef<HTMLSpanElement | null>(null);
-    const mobileTitleMeasureBRef = useRef<HTMLSpanElement | null>(null);
 
     const titleParts = title.split(/\s+/).filter(Boolean);
     const firstTitleToken = titleParts[0] ?? "";
@@ -209,64 +207,18 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
             .filter(Boolean);
     }, [description]);
 
-    useLayoutEffect(() => {
-        const titleEl = mobileTitleRef.current;
-        const measureAEl = mobileTitleMeasureARef.current;
-        const measureBEl = mobileTitleMeasureBRef.current;
-        if (!titleEl || !measureAEl || !measureBEl) return;
-
-        if (!window.matchMedia("(max-width: 767px)").matches) return;
-
-        const measureFits = (candidatePx: number, availablePx: number) => {
-            measureAEl.style.fontSize = `${candidatePx}px`;
-            measureBEl.style.fontSize = `${candidatePx}px`;
-            const wA = measureAEl.getBoundingClientRect().width;
-            const wB = measureBEl.getBoundingClientRect().width;
-            return wA <= availablePx && wB <= availablePx;
-        };
-
-        const update = () => {
-            const availablePx = Math.max(0, titleEl.getBoundingClientRect().width - 10);
-            if (availablePx <= 0) return;
-
-            const minPx = 20;
-            const maxPx = 34;
-
-            let lo = minPx;
-            let hi = maxPx;
-            let best = minPx;
-
-            while (lo <= hi) {
-                const mid = Math.floor((lo + hi) / 2);
-                if (measureFits(mid, availablePx)) {
-                    best = mid;
-                    lo = mid + 1;
-                } else {
-                    hi = mid - 1;
-                }
-            }
-
-            const next = Math.max(minPx, best - 2);
-            setMobileTitleFontPx((prev) => (prev === next ? prev : next));
-        };
-
-        update();
-        const ro = new ResizeObserver(() => update());
-        ro.observe(titleEl);
-        return () => ro.disconnect();
-    }, [headlineA, headlineB]);
-
-    // Until the layout effect above has measured the real fit, size the mobile
-    // title with the same rule in CSS (widest line ~0.645em per character, 10px
-    // of slack, 2px under the fit, clamped to 20-32px) so the server-rendered
-    // heading fits the viewport instead of overflowing at a fixed 32px.
+    // The mobile title is sized purely in CSS: the widest line measures
+    // 0.645em per character in Orbitron (verified against the rendered glyphs),
+    // with 10px of slack and 2px under the exact fit. The 14px floor keeps the
+    // two-line layout down to a 320px viewport; wrapping stays allowed below
+    // as a safety net only, in case the title text ever changes.
     const widestHeadlineChars = Math.max(headlineA.length, headlineB.length);
-    const mobileTitleFontSize =
-        mobileTitleFontPx !== null
-            ? `${mobileTitleFontPx}px`
-            : `clamp(20px, calc((100vw - 42px) / ${(widestHeadlineChars * 0.645).toFixed(2)} - 2px), 32px)`;
+    const mobileTitleFontSize = `clamp(14px, calc((100vw - 42px) / ${(widestHeadlineChars * 0.645).toFixed(2)} - 2px), 32px)`;
 
-    const heroHeightClass = adjustForNavbar ? "h-[calc(100vh-var(--home-navbar-height))]" : "h-screen";
+    // Fills the screen when the content fits, grows (and lets the page
+    // scroll) when it does not. svh, not dvh: the mobile URL bar collapsing
+    // must not re-layout the hero mid-scroll.
+    const heroHeightClass = adjustForNavbar ? "min-h-[calc(100svh-var(--home-navbar-height))]" : "min-h-[100svh]";
     // Fluid vertical rhythm is opt-in and reaches only the homepage hero — the
     // sole caller that passes adjustForNavbar. See the ".heroFluidSpacing"
     // block in globals.css.
@@ -274,29 +226,28 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
 
     return (
         <section
-            className={`heroSectionRoot ${heroFluidClass} relative ${heroHeightClass} w-full font-sans tracking-tight text-foreground bg-transparent overflow-hidden select-none dark`}
+            className={`heroSectionRoot ${heroFluidClass} relative ${heroHeightClass} w-full flex font-sans tracking-tight text-foreground bg-transparent select-none dark`}
         >
             <VoiceAgentPopup />
 
             {/* Hero content */}
             <div
                 ref={heroContentRef}
-                className="heroContentWrap absolute inset-0 z-10 flex items-center justify-center px-4 md:px-16"
+                className="heroContentWrap relative z-10 flex w-full items-center justify-center px-4 py-8 md:px-16 md:py-10"
             >
                 <div className="w-full max-w-4xl text-center">
                     <div className="heroHeadlineContainer flex flex-col items-center gap-0 mb-6">
                         <h1
-                            ref={mobileTitleRef}
                             className="heroMobileTitle md:hidden w-full text-center"
                             style={{ fontFamily: "var(--font-orbitron)", fontSize: mobileTitleFontSize, lineHeight: 1.02 }}
                         >
                             <span
-                                className="heroTitleGlow block font-bold tracking-tighter text-foreground leading-none whitespace-nowrap"
+                                className="heroTitleGlow block font-bold tracking-tighter text-foreground leading-none"
                             >
                                 {headlineA}
                             </span>
                             <span
-                                className="heroTitleGlow mt-2 block font-extrabold tracking-tighter text-foreground leading-none whitespace-nowrap"
+                                className="heroTitleGlow mt-2 block font-extrabold tracking-tighter text-foreground leading-none"
                             >
                                 {headlineB}
                             </span>
@@ -307,17 +258,17 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
                                     text={headlineA}
                                     hoverText={headlineA}
                                     className="mx-auto"
-                                    textSpanClassName="!text-4xl lg:!text-5xl font-bold tracking-tighter text-foreground whitespace-nowrap"
-                                    hoverTextSpanClassName="!text-4xl lg:!text-5xl font-bold tracking-tighter text-primary-foreground dark:text-background whitespace-nowrap"
+                                    textSpanClassName="!text-4xl lg:!text-5xl font-bold tracking-tighter text-foreground"
+                                    hoverTextSpanClassName="!text-4xl lg:!text-5xl font-bold tracking-tighter text-primary-foreground dark:text-background"
                                 />
                             </span>
-                            <span className="heroTitleGlow mt-3 block whitespace-nowrap" style={{ fontFamily: "var(--font-orbitron)" }}>
+                            <span className="heroTitleGlow mt-3 block" style={{ fontFamily: "var(--font-orbitron)" }}>
                                 <MagneticText
                                     text={headlineB}
                                     hoverText={headlineB}
                                     className="mx-auto"
-                                    textSpanClassName="!text-4xl lg:!text-5xl font-extrabold tracking-tighter text-foreground whitespace-nowrap"
-                                    hoverTextSpanClassName="!text-4xl lg:!text-5xl font-extrabold tracking-tighter text-primary-foreground dark:text-background whitespace-nowrap"
+                                    textSpanClassName="!text-4xl lg:!text-5xl font-extrabold tracking-tighter text-foreground"
+                                    hoverTextSpanClassName="!text-4xl lg:!text-5xl font-extrabold tracking-tighter text-primary-foreground dark:text-background"
                                 />
                             </span>
                         </h1>
@@ -338,11 +289,11 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
                         </div>
                     </div>
                     {stats && stats.length > 0 && (
-                        <div className="heroStatsGrid mx-auto grid w-full max-w-[820px] grid-cols-1 gap-4 max-[420px]:grid-cols-2 max-[420px]:gap-3 sm:grid-cols-3 sm:gap-6">
+                        <div className="heroStatsGrid mx-auto grid w-full max-w-[820px] grid-cols-2 gap-3 min-[540px]:grid-cols-3 min-[540px]:gap-6">
                             {stats.map((stat, index) => (
                                 <div
                                     key={index}
-                                    className={`heroStatBox stats-card rounded-2xl px-6 py-5 max-[420px]:px-4 max-[420px]:py-4 shadow-[0_18px_60px_rgba(0,0,0,0.35)] border border-white/10 bg-white/5 backdrop-blur-md flex flex-col items-center justify-center text-center transition-transform duration-200 ease-out hover:scale-[1.05] ${index === 2 ? "max-[420px]:col-span-2" : ""}`}
+                                    className={`heroStatBox stats-card rounded-2xl px-6 py-5 max-[420px]:px-4 max-[420px]:py-4 shadow-[0_18px_60px_rgba(0,0,0,0.35)] border border-white/10 bg-white/5 backdrop-blur-md flex flex-col items-center justify-center text-center transition-transform duration-200 ease-out hover:scale-[1.05] ${index === 2 ? "col-span-2 min-[540px]:col-span-1" : ""}`}
                                 >
                                     <div className="text-3xl md:text-4xl max-[420px]:text-2xl font-bold text-foreground" style={{ fontFamily: "var(--font-manrope)" }}>
                                         {stat.value}
@@ -361,23 +312,6 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
                         <TrustedByMarquee animate={false} transparentContainer heroTypography />
                     </div>
                 </div>
-            </div>
-
-            <div className="pointer-events-none absolute -left-[10000px] top-0 opacity-0 whitespace-nowrap">
-                <span
-                    ref={mobileTitleMeasureARef}
-                    className="font-bold tracking-tighter leading-none"
-                    style={{ fontFamily: "var(--font-orbitron)" }}
-                >
-                    {headlineA}
-                </span>
-                <span
-                    ref={mobileTitleMeasureBRef}
-                    className="font-extrabold tracking-tighter leading-none"
-                    style={{ fontFamily: "var(--font-orbitron)" }}
-                >
-                    {headlineB}
-                </span>
             </div>
 
         </section>

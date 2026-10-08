@@ -48,7 +48,7 @@ export function TrustedByMarquee({
     };
   }, [heroTypography]);
 
-  const containerClassName = `group relative w-full h-10 md:h-10 overflow-hidden rounded-full px-3 max-[420px]:px-2 transition-colors duration-300 ease-out mx-auto ${transparentContainer ? "border border-transparent bg-transparent dark:bg-transparent" : "border border-border/60 bg-card/50 dark:bg-white/5 backdrop-blur-sm"}`;
+  const containerClassName = `group relative w-full ${isHeroStatic ? "min-h-10 flex items-center" : "h-10 md:h-10 overflow-hidden"} rounded-full px-3 max-[420px]:px-2 transition-colors duration-300 ease-out mx-auto ${transparentContainer ? "border border-transparent bg-transparent dark:bg-transparent" : "border border-border/60 bg-card/50 dark:bg-white/5 backdrop-blur-sm"}`;
 
   return (
     <div
@@ -65,14 +65,14 @@ export function TrustedByMarquee({
       )}
 
       <div
-        className={`relative z-10 trustedByMarqueeTrack flex h-full ${isHeroStatic ? "w-full justify-center gap-2 max-[420px]:gap-1.5" : "w-max gap-3 md:gap-4"} items-center`}
+        className={`relative z-10 trustedByMarqueeTrack flex h-full ${isHeroStatic ? "w-full flex-wrap justify-center gap-2 max-[420px]:gap-1.5" : "w-max gap-3 md:gap-4"} items-center`}
         style={animate ? undefined : { animation: "none", transform: "translateX(0)" }}
       >
         {(animate ? [0, 1] : [0]).map((dup) => (
           <div
             key={dup}
             ref={dup === 0 ? firstGroupRef : undefined}
-            className={`flex items-center ${isHeroStatic ? "gap-2 max-[420px]:gap-1.5" : "gap-3 md:gap-4"}`}
+            className={`flex items-center ${isHeroStatic ? "flex-wrap justify-center gap-2 max-[420px]:gap-1.5" : "gap-3 md:gap-4"}`}
           >
             {industries.map((name) => (
               <div
