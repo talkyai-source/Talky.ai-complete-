@@ -702,6 +702,12 @@ async def campaign_test_websocket(
                 voice_tuning_override=vt,
                 allow_browser_barge_in=allow_barge_in,
             )
+            # Same end-of-turn floor as a caller-first phone call (TT-3,
+            # telephony/prewarm.py). At 500 ms test call 6b9cd4c4 cut "Who is
+            # this?" / "Hello? Can you listen?" into separate turns.
+            if fs == "user":
+                from app.domain.services.telephony.prewarm import callee_first_eot_timeout
+                config.stt_eot_timeout_ms = callee_first_eot_timeout(getattr(config, "stt_eot_timeout_ms", None))
 
             orchestrator = container.voice_orchestrator
             from app.services.scripts.knowledge.session_inject import apply_campaign_knowledge
@@ -777,6 +783,17 @@ async def campaign_test_websocket(
                     # Real phone calls never set this, so it defaults False
                     # there — telephony keeps mute_during_tts False by design.
                     _cs._mute_during_tts = bool(config.mute_during_tts)
+                    # The test call's own row and the fact that it is a test:
+                    # contact capture then knows at once never to write lead
+                    # data, and tells the model the detail is recorded as it
+                    # would be on a real call (contact_recording,
+                    # "saved_test_call"). Before this, the binding was only set
+                    # at teardown, so every in-call save looked like a failure.
+                    if test_call_id:
+                        _cs._dialer_call_id = str(test_call_id)
+                        _cs._dialer_tenant_id = str(tenant_id)
+                        _cs._dialer_campaign_id = str(campaign_id)
+                        _cs._lead_capture_is_test = True
             except Exception:  # noqa: BLE001
                 pass
 

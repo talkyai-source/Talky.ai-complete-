@@ -228,7 +228,9 @@ async def test_target_cas_source_quote_and_add_current_only_boundaries():
     before, count = s.captured_slots, len(pool.writes)
     cases = [
         ({"expected_value": VALUES["email"][1]}, "contact_changed"),
-        ({"source_quote": "Words the caller did not say."}, "invalid_arguments"),
+        # An invented quote is refused as quote_not_found (it is checked against
+        # every caller turn of the call since 2026-10-08, not only the current one).
+        ({"source_quote": "Words the caller did not say."}, "quote_not_found"),
         ({"operation": "add"}, "additional_contact_not_ready"),
     ]
     for change, status in cases:

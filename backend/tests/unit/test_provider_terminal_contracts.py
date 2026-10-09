@@ -119,13 +119,20 @@ async def test_valid_nullable_end_tool_with_preamble_executes_once_then_continue
     assert create.await_count == 2
     assert closed == [True, True]
     continuation = create.await_args_list[1].kwargs
-    assert not (continuation.get("tools") if name == "cerebras" else getattr(continuation["config"], "tools", None))
+    # The answer round cannot call tools: Cerebras keeps the definitions with
+    # tool_choice "none" (the history holds the calls); Gemini drops them.
+    if name == "cerebras":
+        assert continuation.get("tool_choice") == "none"
+    else:
+        assert not getattr(continuation["config"], "tools", None)
     profiles = [json.loads(record.args[0]) for record in caplog.records
                 if record.name == "app.infrastructure.llm.request_profile"]
     assert len(profiles) == 2
     assert profiles[0]["instructions_sha256"] == profiles[1]["instructions_sha256"]
     assert profiles[0]["request_envelope_sha256"] != profiles[1]["request_envelope_sha256"]
-    assert profiles[0]["tool_names"] == ["end_call"] and profiles[1]["tool_names"] == []
+    # Cerebras's answer round still lists the tool (tool_choice "none" above).
+    assert profiles[0]["tool_names"] == ["end_call"]
+    assert profiles[1]["tool_names"] == (["end_call"] if name == "cerebras" else [])
 
 
 @pytest.mark.parametrize("name", ["cerebras", "gemini"])

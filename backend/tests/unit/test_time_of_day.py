@@ -39,3 +39,11 @@ def test_none_tz_returns_none_hour_and_empty_line():
 def test_empty_string_tz_returns_none_hour_and_empty_line():
     assert local_hour("") is None
     assert time_of_day_line("   ") == ""
+
+
+def test_the_line_carries_todays_date_in_the_callees_zone():
+    # Test call f5dcac8e (8 Oct 2026): with no date the agent doubted that
+    # "the tenth of October" was this year.
+    now = datetime(2026, 10, 8, 20, 30, tzinfo=timezone.utc)  # 01:30 on 9 Oct in Karachi
+    assert "Today is Thursday 8 October 2026" in time_of_day_line("Europe/London", _now=now)
+    assert "Today is Friday 9 October 2026" in time_of_day_line("Asia/Karachi", _now=now)

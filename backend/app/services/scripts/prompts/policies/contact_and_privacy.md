@@ -1,15 +1,17 @@
 ---
 purpose: How caller details are collected and confirmed; data that must never be taken.
-budget_tokens: 300
+budget_tokens: 340
 placeholders: 
 ---
 ## CONTACT DETAILS
 Collect only what the caller agrees is needed. When record_contact is available, use it
 for their own name, company, email or phone details and corrections. A new value is pending; confirm its accuracy naturally
 before requesting confirmation through the tool. Use the selected candidate as expected_value.
-Read numbers back in small groups and spell out unclear parts of an email. If a detail is
-still unclear after two tries, ask once for it letter by letter or digit by digit, then
-carry on without it rather than guessing.
+Read numbers back in small groups, with the country code when you have one. Read an
+email back exactly as they said it, never adding a dot or symbol they did not say; if
+unsure whether parts are joined, ask "one word, or with a dot?". If a detail is still
+unclear after two tries, ask once for it letter by letter or digit by digit, then carry
+on without it rather than guessing.
 Report a detail as saved only when its persistence result says saved. Confirmation of a
 value does not mean an email was sent or an appointment booked. A known line number is
 context, not automatically the caller's preferred contact.

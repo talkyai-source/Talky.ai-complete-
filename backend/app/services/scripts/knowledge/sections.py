@@ -26,7 +26,9 @@ _PATH = re.compile(r"[1-9][0-9]*(?:\.[1-9][0-9]*){0,5}\Z")
 
 SECTION_TOOL_DESCRIPTION = (
     "Read exact company source sections selected from the catalog. Send "
-    "section_ids to read up to three sections; source_offset continues an oversized "
+    "section_ids to read up to three sections; a heading that only groups others "
+    "returns the sections under it, and more_section_ids names any that did not fit. "
+    "source_offset continues an oversized "
     "source. Send catalog_parent='' for roots or an exact section ID for its children; "
     "catalog_offset pages that list. Catalog labels are navigation, not answers. "
     "source_page is incomplete: read every contiguous part of the same context_digest "
@@ -239,37 +241,86 @@ def render_catalog_page(catalog: SectionCatalog | None, offset: int = 0,
                    next_offset=None if complete else next_offset)
 
 
+def _readable_targets(catalog: SectionCatalog, row: dict, chains: dict) -> list[dict]:
+    """What a request for ``row`` means: the section itself when it has text;
+    for a heading that only groups others, the sections under it that do.
+
+    Test calls 6b9cd4c4 and 08b2791d (2026-10-08): the model asked for a group
+    heading together with its children, the whole read failed on the heading,
+    and it spent its lookup rounds retrying combinations; two turns read
+    nothing and one ended with the reply "0".
+    """
+    if row["content"].strip():
+        return [row]
+    return [other for other in catalog.nodes
+            if other is not row and other["content"].strip()
+            and (chain := chains.get(other["id"]))
+            and any(item["id"] == row["id"] for item in chain[:-1])]
+
+
 def read_sections(catalog: SectionCatalog | None, section_ids, *, max_chars: int = SECTIONS_MAX_CHARS) -> dict:
+    """Read selected sections with their ancestors.
+
+    A group heading expands to the sections under it (in document order, up to
+    one page of text); whatever did not fit is named in ``more_section_ids``,
+    so a further read can fetch it. Readable selections are never discarded
+    because another selection was only a heading.
+    """
     if not isinstance(catalog, SectionCatalog):
         return _result(catalog, "unavailable", reason="knowledge_unavailable")
     if (not isinstance(section_ids, list) or not 1 <= len(section_ids) <= MAX_SELECTED_SECTIONS
             or any(not isinstance(ref, str) for ref in section_ids) or len(set(section_ids)) != len(section_ids)):
         return _result(catalog, "unavailable", reason="invalid_section_ids")
     by_ref = {row["section_id"]: row for row in catalog.nodes}
-    passages, included, used = [], set(), 0
+    by_path = _path_index(catalog)
+    chains = {row["id"]: _chain(catalog, row, by_path=by_path) for row in catalog.nodes}
+    targets, expanded, empty, seen = [], {}, [], set()
     for ref in section_ids:
         row = by_ref.get(ref)
-        chain = _chain(catalog, row) if row is not None else None
-        if not chain:
+        if row is None or not chains.get(row["id"]):
             return _result(catalog, "unavailable", reason="section_context_unavailable")
-        if not row["content"].strip():
-            return _result(catalog, "unavailable", reason="section_has_no_body")
-        for section in chain:
-            text = f"{section['heading']}\n{section['content']}".strip()
-            # Do not remove a malicious ancestor while retaining its child's price.
-            if scan_for_injection(text):
-                return _result(catalog, "unavailable", reason="unsafe_source")
-            if section["id"] in included:
-                continue
-            used += len(text) + 2
-            if used > max_chars:
+        found = _readable_targets(catalog, row, chains)
+        if not found:
+            empty.append(ref)
+            continue
+        if found[0] is not row:
+            expanded[ref] = [item["section_id"] for item in found]
+        for item in found:
+            if item["id"] not in seen:
+                seen.add(item["id"])
+                targets.append((item, found[0] is not row))
+    if not targets:
+        return _result(catalog, "unavailable", reason="section_has_no_body", empty_section_ids=empty)
+    expansion_budget = min(max_chars, SECTIONS_MAX_CHARS)
+    passages, included, used, remaining = [], set(), 0, []
+    for index, (target, from_heading) in enumerate(targets):
+        chain = chains[target["id"]]
+        texts = [(section, f"{section['heading']}\n{section['content']}".strip()) for section in chain]
+        # Do not remove a malicious ancestor while retaining its child's price.
+        if any(scan_for_injection(text) for _, text in texts):
+            return _result(catalog, "unavailable", reason="unsafe_source")
+        new = [(section, text) for section, text in texts if section["id"] not in included]
+        cost = sum(len(text) + 2 for _, text in new)
+        if used + cost > (expansion_budget if from_heading else max_chars):
+            if not passages:
                 return _result(catalog, "too_large", reason="section_context_too_large")
+            remaining = [item["section_id"] for item, _ in targets[index:]]
+            break
+        for section, text in new:
             included.add(section["id"])
             passages.append({"node_id": section["id"], "version": section["version"],
                              "source_id": section["source_id"], "source_version": section["source_version"],
                              "section_id": section["section_id"], "text": text})
+        used += cost
+    extras = {}
+    if expanded:
+        extras["expanded"] = expanded
+    if remaining:
+        extras["more_section_ids"] = remaining
+    if empty:
+        extras["empty_section_ids"] = empty
     return _result(catalog, "available", passages=passages,
-                   text="\n\n".join(passage["text"] for passage in passages))
+                   text="\n\n".join(passage["text"] for passage in passages), **extras)
 
 
 def run_section_request(catalog: SectionCatalog | None, arguments: Any) -> dict:

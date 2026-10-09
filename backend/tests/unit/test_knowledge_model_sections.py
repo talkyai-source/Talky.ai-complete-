@@ -133,9 +133,16 @@ def test_oversized_catalog_entry_is_explicit_and_not_truncated():
 
 
 def test_heading_only_selection_is_not_factual_success():
+    # A heading's own label is never an answer: selecting it returns the
+    # authored sections under it (2026-10-08, calls 6b9cd4c4 / 08b2791d), and
+    # a heading with nothing beneath it is still not a success.
     context = catalog(rows_from_markdown("# Topic\n## Child\nAuthored answer."))
-    assert read_sections(context, [ref_for(context, "Topic")])["reason"] == "section_has_no_body"
+    result = read_sections(context, [ref_for(context, "Topic")])
+    assert result["status"] == "available" and "Authored answer." in result["text"]
+    assert result["expanded"] == {ref_for(context, "Topic"): [ref_for(context, "Child")]}
     assert read_sections(context, [ref_for(context, "Child")])["status"] == "available"
+    bare = catalog(rows_from_markdown("# Topic\n## Empty child"))
+    assert read_sections(bare, [ref_for(bare, "Topic")])["reason"] == "section_has_no_body"
 
 
 def test_wire_payload_includes_source_body_once_and_keeps_provenance():

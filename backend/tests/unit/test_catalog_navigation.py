@@ -161,7 +161,8 @@ def make_loop_provider(adapter, steps, rich):
         provider = {"groq": GroqLLMProvider, "cerebras": CerebrasLLMProvider, "openai": OpenAILLMProvider}[adapter]()
         async def model(messages, **kwargs):
             requests.append(kwargs)
-            if kwargs.get("tools") and len(requests) <= len(steps):
+            # A real model given tool_choice="none" cannot call a tool.
+            if kwargs.get("tools") and kwargs.get("tool_choice") != "none" and len(requests) <= len(steps):
                 for index, (name, args) in enumerate(steps[len(requests) - 1]):
                     kwargs["tool_calls_sink"].append({"id": f"{len(requests)}-{index}", "name": name,
                         "arguments": args, "arguments_raw": json.dumps(args)})
@@ -212,7 +213,10 @@ async def test_actual_provider_navigation_is_bounded_and_does_not_replay_writes(
         if adapter == "gemini":
             assert not getattr(requests[-1]["config"], "tools", None)
         else:
-            assert not requests[-1].get("tools")
+            # The answer round cannot call tools: tool_choice "none" and no
+            # tool channel (dropping the tools made DeepSeek answer "0").
+            assert requests[-1].get("tool_choice") == "none"
+            assert "tool_calls_sink" not in requests[-1]
     assert writes == (["save_fixture"] if scenario == "mixed_write" else [])
     if adapter == "gemini":
         final_parts = [part for content in requests[-1]["contents"] if content.role == "model" for part in content.parts]

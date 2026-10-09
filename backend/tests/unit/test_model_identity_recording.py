@@ -155,7 +155,7 @@ async def test_identity_quote_and_source_cannot_be_invented():
     pool, s = SQLPort(), session()
     caller(s, "Tell me about your company.", 1)
     result = await record_contact(s, args("My company is Northwind.", kind="company_name", value="Northwind"), pool=pool)
-    assert result["status"] == "invalid_arguments" and not pool.writes
+    assert result["status"] == "quote_not_found" and not pool.writes  # never said in this call
     old = s._contact_turn
     caller(s, "My name is Alex.", 2)
     result = await record_contact(s, args("Tell me about your company.", kind="company_name", value="Northwind"),

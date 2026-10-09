@@ -156,6 +156,25 @@ def normalize_phone_for_capture(phone: str, region: str | None = None) -> str:
     return normalized
 
 
+def region_of_e164(number: str | None) -> str | None:
+    """ISO-3166 region of a valid E.164 number, or None.
+
+    Lets voice capture read a caller's national-format number in the country of
+    the line the call is on, which is evidence about the caller, not a guess.
+    """
+    if not number or not is_strict_e164(str(number)):
+        return None
+    import phonenumbers
+
+    try:
+        parsed = phonenumbers.parse(str(number), None)
+    except phonenumbers.NumberParseException:
+        return None
+    if not phonenumbers.is_valid_number(parsed):
+        return None
+    return phonenumbers.region_code_for_number(parsed) or None
+
+
 def normalize_phone_number_lenient(phone: str) -> str:
     """Lenient normalization that NEVER rejects on length/format.
 

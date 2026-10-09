@@ -78,12 +78,17 @@ async def test_lat4_lookups_are_bounded_and_the_last_round_must_answer(monkeypat
     service, session, rounds = setup_turn(monkeypatch, "Tell me everything.", steps)
     refund = next(row["section_id"] for row in session._knowledge_catalog.nodes if row["id"] == "refund")
     # The model would keep looking things up; three rounds are allowed, then
-    # the fourth call has no tools (no tool channel at all) and must answer.
+    # the fourth call must answer: tools stay defined (the history holds tool
+    # calls) but tool_choice is "none" and there is no tool channel, and the
+    # last result says the lookups are over (test call 6b9cd4c4 answered "0"
+    # when the tools were dropped from that request).
     steps.extend([{"section_ids": [refund]}] * 3 + ["Refunds take five working days."])
     await service._stream_llm_and_tts(session)
     assert len(rounds) == 4
-    assert all(r[1].get("tools") for r in rounds[:3])
-    assert not rounds[-1][1].get("tools") and "tool_calls_sink" not in rounds[-1][1]
+    assert all(r[1].get("tools") and r[1].get("tool_choice") == "auto" for r in rounds[:3])
+    final = rounds[-1][1]
+    assert final.get("tools") and final.get("tool_choice") == "none" and "tool_calls_sink" not in final
+    assert "No more tool calls are available" in final["extra_messages"][-1]["content"]
     assert session._spoken_sentences == ["Refunds take five working days."]
 
 

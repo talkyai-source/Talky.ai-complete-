@@ -47,7 +47,8 @@ async def test_preamble_does_not_discard_tool_and_second_round_has_receipt(provi
     runner.assert_awaited_once_with("lookup", {"query": "price"})
     assert "confirmed price" in "".join(result)
     assert ("Let me check" not in "".join(result)) == strict
-    assert len(rounds) == 2 and "tools" not in rounds[1]
+    # The answer round cannot call tools (tool_choice "none", no tool channel).
+    assert len(rounds) == 2 and rounds[1].get("tool_choice") == "none" and "tool_calls_sink" not in rounds[1]
     receipt = rounds[1]["extra_messages"][-1]
     assert receipt["role"] == "tool" and receipt["tool_call_id"] == "call-1"
     assert json.loads(receipt["content"])["success"] is True
@@ -81,7 +82,7 @@ async def test_repeated_tool_across_rounds_executes_once_and_has_finite_budget()
 
     async def stream(messages, **kwargs):
         rounds.append(kwargs)
-        if "tools" in kwargs:
+        if "tools" in kwargs and kwargs.get("tool_choice") != "none":
             kwargs["tool_calls_sink"].append({**CALL, "id": f"call-{len(rounds)}"})
         else:
             yield "The request was already handled."
@@ -91,7 +92,7 @@ async def test_repeated_tool_across_rounds_executes_once_and_has_finite_budget()
     result = [t async for t in provider.stream_chat_with_tools(
         MESSAGES, tools=TOOLS, tool_runner=runner, max_tool_rounds=3)]
     runner.assert_awaited_once()
-    assert len(rounds) == 4 and "tools" not in rounds[-1]
+    assert len(rounds) == 4 and rounds[-1].get("tool_choice") == "none" and "tool_calls_sink" not in rounds[-1]
     assert len(rounds[-1]["extra_messages"]) == 6
     assert result == ["The request was already handled."]
 
@@ -166,7 +167,7 @@ async def test_cerebras_wire_reassembles_fragmented_calls_and_continues():
     runner.assert_awaited_once_with("lookup", {"query": "price"})
     assert create.await_args_list[0].kwargs["tools"] == TOOLS
     second_request = create.await_args_list[1].kwargs
-    assert "tools" not in second_request
+    assert second_request.get("tool_choice") == "none"  # the answer round cannot call tools
     assert second_request["messages"][-1]["role"] == "tool"
 
 
@@ -236,7 +237,7 @@ async def test_luna_request_stream_and_tool_followup_use_compatible_parameters()
         assert body["temperature"] == .2 and body["max_completion_tokens"] == 80
         assert "max_tokens" not in body and "thinking_budget" not in body
     assert requests[0]["parallel_tool_calls"] is False
-    assert "tools" not in requests[1]
+    assert requests[1].get("tool_choice") == "none"  # the answer round cannot call tools
     runner.assert_awaited_once()
 
 

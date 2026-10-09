@@ -170,6 +170,32 @@ async def execute_tool_call(call, tools, runner, *, timeout_seconds=8.0):
 
 MAX_NAVIGATION_ROUNDS = 4
 
+TOOL_BUDGET_NOTE = (
+    "No more tool calls are available in this reply. Answer the caller now from the "
+    "results you have; if they do not contain the answer, say plainly what you cannot "
+    "confirm. Do not say you will check again."
+)
+
+
+def _with_budget_note(content):
+    """Attach the end-of-budget note to the last tool result, keeping its JSON."""
+    try:
+        payload = json.loads(content) if isinstance(content, str) else None
+    except (TypeError, ValueError):
+        payload = None
+    if isinstance(payload, dict):
+        return json.dumps({**payload, "tool_budget": TOOL_BUDGET_NOTE}, ensure_ascii=False)
+    return f"{content}\n{TOOL_BUDGET_NOTE}" if content else TOOL_BUDGET_NOTE
+
+
+def ends_turn(result):
+    """True when a tool result finishes the reply (an end_call decision)."""
+    try:
+        payload = json.loads(result) if isinstance(result, str) else result
+    except (TypeError, ValueError):
+        return False
+    return isinstance(payload, dict) and payload.get("ends_turn") is True
+
 
 class ToolRoundBudget:
     """Keep ordinary decisions bounded while crediting verified navigation only."""
@@ -241,9 +267,24 @@ async def stream_tool_turn(provider, messages, *, tools=None, tool_runner=None,
             extra.append({"role": "tool", "tool_call_id": call["id"], "content": results[key]})
             round_results.append((call, results[key]))
         budget.finish_round(round_results)
+        # Words spoken with an end_call were the model's closing; another round
+        # only repeats them ("Goodbye, Uzair! Take care. Goodbye, and thank
+        # you!", test call f5dcac8e). Nothing spoken yet: it still gets a round.
+        if (not require_tool_result_before_content and "".join(content).strip()
+                and any(ends_turn(result) for _, result in round_results)):
+            return
+    # The answer round keeps the tool definitions with tool_choice="none": the
+    # history holds tool calls and results, and a request that drops the tools
+    # while showing those calls is malformed for OpenAI-compatible models.
+    # DeepSeek answered it with the single token "0" (test call 6b9cd4c4).
+    # The last result says the lookups are over, so the model answers from
+    # what it has instead of promising to check again.
+    if extra and extra[-1].get("role") == "tool":
+        extra[-1] = {**extra[-1], "content": _with_budget_note(extra[-1].get("content"))}
     answer = []
     async with aclosing(provider.stream_chat_with_timeout(
-        messages, timeout_seconds=timeout_seconds, extra_messages=extra, **kwargs,
+        messages, timeout_seconds=timeout_seconds, extra_messages=extra,
+        tools=tools, tool_choice="none", **kwargs,
     )) as stream:
         async for token in stream:
             if require_tool_result_before_content:

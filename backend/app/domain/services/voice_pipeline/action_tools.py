@@ -266,6 +266,9 @@ async def run_voice_action(
                 confirmation_allowed=False,
                 message="The caller has not clearly ended the conversation.",
             )
+            # Words the model spoke with this decision were its closing; the
+            # call stays open and the caller answers them (stream_tool_turn).
+            result["ends_turn"] = True
         else:
             try:
                 session._end_call_requested = True
@@ -303,6 +306,9 @@ async def run_voice_action(
                     result["opt_out"] = "recorded" if opt_out_recorded else "unconfirmed"
                 elif call_args.get("do_not_call") is True:
                     result["opt_out"] = "not_recorded"
+                # A goodbye spoken with the request is not said twice (test
+                # call f5dcac8e); with nothing spoken, the message asks for one.
+                result["ends_turn"] = True
     else:
         result = _result(
             str(action or "unknown"),

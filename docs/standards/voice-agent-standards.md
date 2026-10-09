@@ -18,10 +18,10 @@ Status key: **MEETS** · **PARTIAL** · **GAP** (open) · **DEVIATION** (deliber
 | LAT-1 | Voice-to-voice latency (caller end of speech to first agent audio) | p50 ≤ 800 ms, p95 ≤ 1,200 ms; tool turns p95 ≤ 2,000 ms | `latency_tracker.py:117-143` measures it per turn | PARTIAL: measured; the p95 alert fires at 1,500 ms (`latency_alerter.py:35`), above target |
 | LAT-2 | Per-stage budget at p95 | Flux end-of-turn ≤ 300 ms · LLM first token ≤ 400 ms · TTS first byte ≤ 250 ms · gateway ≤ 100 ms | `voice_metrics.py:102` (TTFT histogram), `latency_tracker.py` | PARTIAL: measured, no per-stage alert |
 | LAT-3 | Prompt size is the main lever on first-token time | Always-on guidance ≤ 1,100 tokens; whole turn prompt for a standard campaign ≤ 2,600 tokens before tool schemas | `test_prompt_policies.py`, `test_voice_standards_conformance.py` | MEETS: about 2,040 tokens measured for a 6-section campaign |
-| LAT-4 | Bounded tool rounds; the last round must answer | ≤ 3 lookup rounds; the final call carries no tools | `streaming.py:177-245`, `turn_streamer.py` (`max_tool_rounds=3`) | MEETS |
+| LAT-4 | Bounded tool rounds; the last round must answer | ≤ 3 lookup rounds; the answer round keeps the tool definitions with `tool_choice="none"` and says no more lookups are available; a result that ends the turn (end_call) stops the loop once words were spoken | `streaming.py:173-290`, `gemini.py:640-680`, `turn_streamer.py` (`max_tool_rounds=3`) | MEETS (since 2026-10-09: dropping the tools made DeepSeek answer "0", test call 6b9cd4c4) |
 | LAT-5 | Connections warm before the callee answers | STT, TTS and LLM pre-connected | `telephony/prewarm.py:40-65` (refuses to ring if warm-up fails) | MEETS |
 | LAT-6 | Stream end to end; first sentence to TTS as soon as it completes | sentence or clause chunking | `turn_streamer.py` per-sentence flush | MEETS |
-| LAT-7 | Knowledge reachable in one lookup | whole catalog outline in the prompt when ≤ 6,000 chars | `knowledge_tool.py` `section_outline` | MEETS for running campaigns; 8 stopped campaigns exceed it |
+| LAT-7 | Knowledge reachable in one lookup | whole catalog outline in the prompt when ≤ 6,000 chars; a heading returns the sections under it; the last read stays visible for the next two turns | `knowledge_tool.py` `section_outline`, `remember_recent_knowledge`; `sections.py` `_readable_targets` | MEETS for running campaigns; 8 stopped campaigns exceed it |
 
 ## TT — Turn-taking (Deepgram Flux)
 
@@ -29,7 +29,7 @@ Status key: **MEETS** · **PARTIAL** · **GAP** (open) · **DEVIATION** (deliber
 |---|---|---|---|---|
 | TT-1 | Thresholds inside Deepgram's ranges | eot 0.5-1.0 · eager 0.3-0.9 and ≤ eot · timeout 500-60,000 ms | `voice_tuning.py:78-80` (0.85 / 0.7 / 500), validated `deepgram_flux.py:248-268` | MEETS |
 | TT-2 | Patience while the caller spells or reads digits | timeout ≥ 7,000 ms, eot ≥ 0.85 during capture, restored after | `deepgram_flux.py:86-87, 443-468` (8,000 ms / 0.9) | MEETS |
-| TT-3 | One source of truth for turn timing, logged per call | the per-tenant resolver; the values in force logged once per call | `voice_tuning.py` (DB, env, defaults); `prewarm.py` `callee_first_eot_timeout` and the `voice_policy_wiring` log line | PARTIAL: callee-first calls now keep a tenant's longer timeout (they used to be forced to 1,000 ms). `providers.yaml` and `telephony_settings.py` still declare values the phone path never uses |
+| TT-3 | One source of truth for turn timing, logged per call | the per-tenant resolver; the values in force logged once per call | `voice_tuning.py` (DB, env, defaults); `prewarm.py` `callee_first_eot_timeout` and the `voice_policy_wiring` log line | PARTIAL: callee-first calls now keep a tenant's longer timeout (they used to be forced to 1,000 ms), and the browser Test Agent applies the same floor (`campaign_test_ws.py:709`; it ran at 500 ms until 2026-10-09). `providers.yaml` and `telephony_settings.py` still declare values the phone path never uses |
 | TT-4 | Speculative replies never reach the caller before end of turn | draft cancelled on TurnResumed | `transcript_handler.py:360` | DEVIATION: eager drafts are disabled entirely (safety containment), so the 150-250 ms head start is not taken. Deepgram calls EndOfTurn-only "ideal for the majority" |
 | TT-5 | Audio frame size | 20-80 ms (Deepgram recommends 80) | `deepgram_flux.py:74-75` (40 ms) | MEETS (measured choice; comment says 80 ms in one place) |
 | TT-6 | Campaign keyterms | company, agent and product names, within Deepgram's 500-token cap | `telephony_session_config._build_call_keyterms` | MEETS |
@@ -44,14 +44,15 @@ Turn timing is aggressive by design: a 500 ms timeout ends a turn quickly but ca
 | BI-2 | Backchannels ("uh-huh") and echo don't interrupt | text-level backchannel and disfluency filter, echo gate | `backchannel.py:25-60`, `deepgram_flux.py:835`, `audio_ingest.py:396` | PARTIAL: no minimum voice-duration guard; no acoustic echo cancellation |
 | BI-3 | History holds only what was actually spoken | interrupted replies keep the submitted sentences plus a marker | `turn_streamer.py` (`_spoken_sentences`) | MEETS (sentence granularity) |
 | BI-4 | Resume after a false interruption | resume the cut reply | `voice_pipeline_service.py` `_resume_after_false_barge_in` | MEETS |
+| BI-5 | A caller turn that stops the agent is answered | the words that end a turn while the agent speaks reach that turn; never an empty turn | `transcript_handler.py:219-243` | MEETS (since 2026-10-09: the stop cleared the input before it was read, and 14 of 133 Test Agent caller turns since 1 Oct were dropped) |
 
 ## IC — Information collection
 
 | ID | Standard | Target | Where | Status |
 |---|---|---|---|---|
 | IC-1 | Fields to collect come from the campaign | `required_lead_fields` per campaign | `schemas/campaigns.py:41` | PARTIAL: key and label only, no type or validator |
-| IC-2 | The model extracts; the server validates | typed `record_contact` tool; email syntax check; E.164 through the one phone normaliser; the caller quote must be in the caller's turn | `contact_recording.py:39-51, 138-181` | MEETS |
-| IC-3 | Caller-stated values stay pending until confirmed by read-back | `AWAITING_CONFIRMATION` until a later caller turn confirms | `contact_recording.py:207-233` | MEETS |
+| IC-2 | The model extracts; the server validates | typed `record_contact` tool; email syntax check, and every `.` `_` `-` in an email's name part must have been said; E.164 through the one phone normaliser (a national number takes the country of the call's line); a set quotes the caller's own words from any of their last 20 turns, confirm and withdraw quote the current turn | `contact_recording.py:157-215, 296-330` | MEETS |
+| IC-3 | Caller-stated values stay pending until confirmed by read-back | `AWAITING_CONFIRMATION` until a later caller turn confirms; a confirmation sent before its set in the same reply applies when the set lands | `contact_recording.py:232-252, 336-395` | MEETS (whether the model sends the confirm is its judgement; when it does not, the value is saved unconfirmed) |
 | IC-4 | Read-back style and a bounded number of attempts | numbers in small groups, unclear email parts spelled; stop after two failed tries | `policies/contact_and_privacy.md` | MEETS (guidance; no code loop by design) |
 | IC-5 | Collect only what is needed; never take payment or secret data | data minimisation | `policies/contact_and_privacy.md` | MEETS |
 
@@ -60,7 +61,7 @@ Turn timing is aggressive by design: a 500 ms timeout ends a turn quickly but ca
 | ID | Standard | Target | Where | Status |
 |---|---|---|---|---|
 | HAL-1 | Facts come only from the knowledge or the prompt; otherwise say you can't confirm | grounding rule in every prompt | `policies/company_knowledge.md` | MEETS |
-| HAL-2 | Money and percentages spoken must appear in what the agent was given or heard | per-sentence value check before TTS; derived figures withheld; bare numbers logged only | `figure_grounding.py`, wired in `turn_streamer.py` | MEETS |
+| HAL-2 | Money and percentages spoken must appear in what the agent was given or heard | per-sentence value check before TTS, for digits and for numbers written as words (cardinals, lakh/crore, "point" decimals); derived figures withheld; bare numbers logged only | `figure_grounding.py`, wired in `turn_streamer.py` | MEETS (words since 2026-10-09; DeepSeek speaks every price as words) |
 | HAL-3 | No claim that an action happened without a result that allows it | sentence replaced unless `confirmation_allowed` | `speech_guard.py` | MEETS |
 | HAL-4 | Internal identifiers are never spoken | section ids stripped | `speech_guard.py` `_SECTION_ID` | MEETS |
 | HAL-5 | Every knowledge lookup is traceable | one log line: arguments, status, passage count, size (never source text) | `knowledge_tool.py` `run_knowledge_lookup` | MEETS |
@@ -73,6 +74,7 @@ Turn timing is aggressive by design: a 500 ms timeout ends a turn quickly but ca
 | REL-2 | One question at a time | | `policies/how_to_speak.md` | MEETS |
 | REL-3 | Off-topic: brief, kind, then back to how you can help | | `policies/how_to_speak.md` | MEETS |
 | REL-4 | Knowledge reaches the model only for sections it chose | model-selected section reads | `knowledge_tool.py` | MEETS |
+| REL-5 | One goodbye | words spoken with end_call are the closing; no second round asks for another | `action_tools.py` (`ends_turn`), `streaming.py:191-275`, `gemini.py:672-678` | MEETS (since 2026-10-09; test call f5dcac8e said goodbye twice) |
 
 ## CMP — Compliance (deterministic)
 

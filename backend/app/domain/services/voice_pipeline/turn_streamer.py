@@ -49,7 +49,7 @@ from app.services.scripts.prompts.live_state import build_live_state_block
 from app.services.scripts.knowledge.budget import context_window_for, estimate_tokens
 from app.domain.services.voice_pipeline.knowledge_tool import (
     KB_TOOL_NAME, knowledge_tools_for, knowledge_system_addendum, run_knowledge_lookup,
-    knowledge_navigation_continuation,
+    knowledge_navigation_continuation, remember_recent_knowledge,
 )
 from app.domain.services.voice_pipeline.contact_recording import (
     CONTACT_TOOL_NAME, CONTACT_TOOL_SPEC, record_contact,
@@ -189,6 +189,8 @@ class TurnStreamer:
         Returns (full_response_text, llm_latency_ms, tts_latency_ms).
         """
         call_id = session.call_id
+        # What the previous turn read stays visible for a follow-up.
+        remember_recent_knowledge(session, getattr(session, "_knowledge_evidence", None))
         # Track the current tool result separately from persistent source history.
         session._knowledge_grounding = []
         session._knowledge_evidence = {"status": "unavailable", "passages": []}

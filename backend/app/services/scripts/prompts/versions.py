@@ -129,9 +129,11 @@ _VERSIONS: Final[Mapping[str, str]] = {
     # @16 / @14 (2026-10-08): voice standards, now in policies/*.md: answer
     # first, stop after a question, grouped read-back with a two-try limit,
     # figures exactly as sourced (docs/standards/voice-agent-standards.md).
-    "lead_gen": "lead_gen@16",
-    "customer_support": "customer_support@14",
-    "receptionist": "receptionist@14",
+    # @17 / @15 (2026-10-09): read an email back exactly as said (no added
+    # dot), and numbers with their country code (test calls 43020665, f5dcac8e).
+    "lead_gen": "lead_gen@17",
+    "customer_support": "customer_support@15",
+    "receptionist": "receptionist@15",
 }
 
 #: Fallback for a persona that is not in the registry yet. Deliberately visible

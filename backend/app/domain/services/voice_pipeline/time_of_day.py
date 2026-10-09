@@ -60,8 +60,14 @@ def time_of_day_line(tz_name: Optional[str], *, _now: Optional[datetime] = None)
     if hour is None:
         return ""
     word = greeting_for_hour(hour)
+    # The date too: without it the model cannot tell whether "the tenth of
+    # October" is inside an offer window (test call f5dcac8e, 8 Oct 2026, asked
+    # "is that October this year, or did you mean November?").
+    from zoneinfo import ZoneInfo
+    local = (_now or datetime.now(timezone.utc)).astimezone(ZoneInfo(tz_name.strip()))
+    today = f"{local:%A} {local.day} {local:%B %Y}"
     return (
-        f"- It is currently {word} for the person you're calling (their local "
-        f"time, ~{hour:02d}:00). If you greet by time of day, say \"{word}\" — "
+        f"- Today is {today}. It is currently {word} for the person you're calling "
+        f"(their local time, ~{hour:02d}:00). If you greet by time of day, say \"{word}\" — "
         f"never a greeting that contradicts their clock."
     )

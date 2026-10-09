@@ -527,7 +527,7 @@ class GeminiLLMProvider(LLMProvider):
         parts (including thought signatures) are preserved in every continuation.
         Repeated writes share a receipt; read-only tools rerun to refresh evidence.
         """
-        from app.infrastructure.llm.streaming import ToolRoundBudget
+        from app.infrastructure.llm.streaming import ToolRoundBudget, ends_turn
         budget = ToolRoundBudget(max_tool_rounds, navigation_round_allowed)
         if not tools or tool_runner is None:
             async with aclosing(self.stream_chat_with_timeout(
@@ -636,12 +636,11 @@ class GeminiLLMProvider(LLMProvider):
             model_parts, fcalls, decision_tokens = [], [], []
             async with aclosing(_stream(decision_cfg, fcalls, model_parts)) as stream:
                 async for tok in stream:
-                    if require_tool_result_before_content:
-                        decision_tokens.append(tok)
-                    else:
+                    decision_tokens.append(tok)
+                    if not require_tool_result_before_content:
                         yield tok
             if not fcalls:
-                if decision_tokens:
+                if require_tool_result_before_content and decision_tokens:
                     yield "".join(decision_tokens)
                 return
 
@@ -671,6 +670,11 @@ class GeminiLLMProvider(LLMProvider):
             contents.append(genai_types.Content(role="model", parts=model_parts))
             contents.append(genai_types.Content(role="user", parts=resp_parts))
             budget.finish_round(round_results)
+            # Same rule as stream_tool_turn: words spoken with an end_call were
+            # the closing, so another round would only repeat the goodbye.
+            if (not require_tool_result_before_content and "".join(decision_tokens).strip()
+                    and any(ends_turn(result) for _, result in round_results)):
+                return
 
         round1_cfg = genai_types.GenerateContentConfig(**base_cfg)  # no tools
         if require_tool_result_before_content:

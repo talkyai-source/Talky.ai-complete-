@@ -182,9 +182,16 @@ async def test_unacknowledged_writes_never_claim_saved(mode):
     pool, s = SQLPort(fail=mode == "fail", conflict=mode == "conflict", is_test=mode == "test"), session()
     caller(s, "alex@example.com", 1)
     result = await record_contact(s, args("alex@example.com"), pool=pool)
+    assert s.captured_slots.email == "alex@example.com"
+    if mode == "test":
+        # A browser test call never writes lead data by policy, which is not a
+        # failure: the model is told it is recorded, as on a real call, so the
+        # test shows real behaviour (2026-10-08: "not_saved" made the agent
+        # retry and apologise in every test). Still nothing is written.
+        assert result["saved"] and result["status"] == "saved_test_call" and pool.writes == []
+        return
     assert not result["saved"] and not result["success"] and not result["confirmation_allowed"]
     assert result["status"] == ("save_failed" if mode == "fail" else "not_saved")
-    assert s.captured_slots.email == "alex@example.com"
 
 
 @pytest.mark.asyncio

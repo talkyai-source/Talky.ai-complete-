@@ -27,11 +27,14 @@ async def test_original_call_dot_correction_is_pending_until_later_model_confirm
     pool, state = SQLPort(), session()
     first = "Allstate estimation at Gmail dot com."
     caller(state, first, 1)
-    await record_contact(state, args(first, value="allstate.estimation@gmail.com"), pool=pool)
+    # The original call's first reading added a dot the caller never said.
+    # That reading is now refused where it is made (separator_not_said, test
+    # call 43020665, 2026-10-08), so no wrong candidate is ever stored.
+    dotted = await record_contact(state, args(first, value="allstate.estimation@gmail.com"), pool=pool)
+    assert dotted["status"] == "separator_not_said" and state.captured_slots.email_capture is None
     correction = "Remove the dot."
     caller(state, correction, 2)
-    result = await record_contact(state, args(correction, value="allstateestimation@gmail.com",
-        expected="allstate.estimation@gmail.com"), pool=pool)
+    result = await record_contact(state, args(correction, value="allstateestimation@gmail.com"), pool=pool)
     assert result["saved"] and result["validation_status"] == "awaiting_confirmation"
     assert not state.captured_slots.email_confirmed
     # The fixture models interpretation; no scripted assistant readback proves correctness.

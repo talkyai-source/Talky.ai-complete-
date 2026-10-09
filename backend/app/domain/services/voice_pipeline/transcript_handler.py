@@ -217,12 +217,30 @@ class TranscriptHandler:
                 return
 
         if _is_turn_end:
+            # Capture the transcript NOW and carry it into the turn, before the
+            # stop below: interrupt._do_interrupt clears current_user_input, and
+            # reading it afterwards dispatched an empty turn that turn_ender
+            # skipped without a word (test calls 08b2791d "Okay. Thank you.
+            # Bye." and 6b9cd4c4 "No", 2026-10-08). The same capture keeps a
+            # later barge-in from stranding the detached task.
+            _user_text = session.current_user_input
+            # F-05(ii): confidence is captured at this SAME synchronous point —
+            # a later transcript event can overwrite it before the detached
+            # task body (turn_ender.handle) reads it, feeding the turn-0
+            # rejection floor a stale value.
+            _confidence = getattr(session, "_last_transcript_confidence", None)
+            _alternatives = tuple(
+                getattr(session, "_last_transcript_alternatives", ()) or ()
+            )
             # Grow case: a turn that began as a backchannel (so the StartOfTurn
             # audio barge-in was suppressed) but turned into real speech. The
             # agent's TTS may still be playing — stop it now before we respond.
             # No-op if it already stopped (normal interruptions clear it).
             if getattr(session, "tts_active", False):
                 await self._p.handle_barge_in(session, websocket)
+                # The stop resets input for a new utterance; this one has ended
+                # and is about to be answered, exactly as on the normal path.
+                session.current_user_input = _user_text
 
             # Run as a task (not awaited) so the consumer stays unblocked and
             # can process a TurnResumed that arrives before the LLM completes.
@@ -260,7 +278,7 @@ class TranscriptHandler:
                 _current_seq = self._p._utterance_seq.get(call_id, 0)
                 _existing_seq = getattr(existing, "_utterance_seq", _current_seq)
                 _existing_text = (getattr(existing, "_source_text", None) or "").strip()
-                _new_text = (session.current_user_input or "").strip()
+                _new_text = (_user_text or "").strip()
                 _is_distinct = (_current_seq != _existing_seq) or (
                     _new_text and _new_text != _existing_text
                 )
@@ -303,16 +321,12 @@ class TranscriptHandler:
                 if _queued_duplicate:
                     _bind_caller_turn(session, self._p.transcript_service, _caller_order)
                 session._queued_next_turn = {
-                    "text": session.current_user_input,
+                    "text": _user_text,
                     "seq": _current_seq,
                     "caller_turn_order": _caller_order,
                     "queued_monotonic": time.monotonic(),
-                    "confidence": getattr(
-                        session, "_last_transcript_confidence", None
-                    ),
-                    "alternatives": tuple(
-                        getattr(session, "_last_transcript_alternatives", ()) or ()
-                    ),
+                    "confidence": _confidence,
+                    "alternatives": _alternatives,
                 }
                 logger.info(
                     "turn_queued_behind_pending call=%s seq=%d",
@@ -320,20 +334,6 @@ class TranscriptHandler:
                 )
                 return
             session._speculative_history_len = len(session.conversation_history)
-            # Capture the transcript NOW and carry it into the turn. A barge-in
-            # can reset session.current_user_input to "" before this task reads
-            # it, which would strand the turn ("Empty transcript, skipping") and
-            # drop the caller's words — the dropped-turn half of the silence bug.
-            _user_text = session.current_user_input
-            # F-05(ii): capture confidence at this SAME synchronous point, for
-            # the same reason as _user_text above — session._last_transcript_
-            # confidence can be overwritten by a later transcript event before
-            # the detached task body (turn_ender.handle) reads it, feeding the
-            # turn-0 rejection floor a stale value.
-            _confidence = getattr(session, "_last_transcript_confidence", None)
-            _alternatives = tuple(
-                getattr(session, "_last_transcript_alternatives", ()) or ()
-            )
             _caller_order = _accept_caller_turn(session, self._p.transcript_service)
             task = asyncio.create_task(
                 self._p.handle_turn_end(
