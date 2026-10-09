@@ -165,17 +165,28 @@ class TurnRunner:
         if not isinstance(getattr(session, "captured_slots", None), CapturedSlotsState):
             session.captured_slots = CapturedSlotsState()
         from app.domain.services.voice_pipeline.contact_capture import ContactSource
-        order = getattr(asyncio.current_task(), "_caller_turn_order", None)
-        source, source_text = None, ""
-        if isinstance(order, int) and not isinstance(order, bool):
-            resolver = getattr(self._p.transcript_service, "caller_evidence", None)
-            evidence = resolver(call_id, order) if callable(resolver) else None
+        task = asyncio.current_task()
+        order = getattr(task, "_caller_turn_order", None)
+        resolver = getattr(self._p.transcript_service, "caller_evidence", None)
+
+        def caller_evidence(turn_order):
+            if not isinstance(turn_order, int) or isinstance(turn_order, bool) or not callable(resolver):
+                return None, ""
+            evidence = resolver(call_id, turn_order)
             if isinstance(evidence, dict):
                 try:
-                    source = ContactSource(**evidence["source"])
-                    source_text = evidence["text"]
+                    return ContactSource(**evidence["source"]), evidence["text"]
                 except (KeyError, TypeError, ValueError):
                     pass
+            return None, ""
+
+        # Words that waited behind an earlier reply are part of this turn too;
+        # each keeps its own evidence so record_contact can quote any of them.
+        for prior in getattr(task, "_prior_caller_turn_orders", ()) or ():
+            prior_source, prior_text = caller_evidence(prior)
+            if prior_source is not None:
+                bind_contact_turn(session, prior_text, prior_source)
+        source, source_text = caller_evidence(order)
         # Echo cleanup changes the model's message, not the saved caller row.
         # Bind the canonical bundle so its source hash still verifies exactly.
         bind_contact_turn(session, source_text, source)
@@ -321,8 +332,19 @@ class TurnRunner:
                 # Only discard what THIS cancelled task appended after the
                 # user's own message.
                 session.conversation_history = session.conversation_history[:history_snapshot + 1]
-                # Nothing was heard. If this keeps happening on the opening, stop
-                # looping the intro (issue #23).
+                if getattr(session, "_reply_audio_started", False) is True:
+                    # The caller heard the reply begin, then cut in during its
+                    # first sentence. Without a trace the model saw its own
+                    # question unanswered and answered it after the caller's
+                    # "Okay. Thank you. Bye." (synthetic caller, 2026-10-09).
+                    # Same bare marker as turn_streamer's soft-interrupt path;
+                    # the unfinished words are never recorded as said.
+                    session.conversation_history.append(
+                        Message(role=MessageRole.ASSISTANT, content="[interrupted by caller]")
+                    )
+                    session._speculative_history_len = None
+                # No full sentence was heard. If this keeps happening on the
+                # opening, stop looping the intro (issue #23).
                 _note_unheard_greeting_bargein(session)
             raise
         except Exception as e:

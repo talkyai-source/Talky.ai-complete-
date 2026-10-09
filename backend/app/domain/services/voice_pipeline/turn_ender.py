@@ -901,5 +901,8 @@ class TurnEnder:
                         _next_task._turn_type = "final"
                         _next_task._utterance_seq = _queued.get("seq")
                         _next_task._caller_turn_order = _queued.get("caller_turn_order")
+                        _next_task._prior_caller_turn_orders = tuple(
+                            _queued.get("prior_caller_turn_orders") or ())
                         _next_task._source_text = _queued.get("text")
+                        _next_task._latest_text = _queued.get("latest_text") or _queued.get("text")
                         self._p._pending_llm_tasks[call_id] = _next_task

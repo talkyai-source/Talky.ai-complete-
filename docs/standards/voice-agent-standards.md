@@ -33,6 +33,7 @@ Status key: **MEETS** · **PARTIAL** · **GAP** (open) · **DEVIATION** (deliber
 | TT-4 | Speculative replies never reach the caller before end of turn | draft cancelled on TurnResumed | `transcript_handler.py:360` | DEVIATION: eager drafts are disabled entirely (safety containment), so the 150-250 ms head start is not taken. Deepgram calls EndOfTurn-only "ideal for the majority" |
 | TT-5 | Audio frame size | 20-80 ms (Deepgram recommends 80) | `deepgram_flux.py:74-75` (40 ms) | MEETS (measured choice; comment says 80 ms in one place) |
 | TT-6 | Campaign keyterms | company, agent and product names, within Deepgram's 500-token cap | `telephony_session_config._build_call_keyterms` | MEETS |
+| TT-7 | Every completed caller utterance reaches the model, in order | words waiting behind a reply join the next turn, newest last; each keeps its own contact evidence | `transcript_handler.py`, `turn_ender.py` (queued dispatch), `turn_runner.py` | MEETS (since 2026-10-09: a third utterance overwrote the queued one, and a goodbye could wait 20 s behind an answer to older words). Words that arrive while a reply is still being composed are still answered after it (F-08) |
 
 Turn timing is aggressive by design: a 500 ms timeout ends a turn quickly but can split a hesitant caller's sentence. That trade is tuned per tenant (`voice_tuning`), not changed here.
 
@@ -42,7 +43,7 @@ Turn timing is aggressive by design: a 500 ms timeout ends a turn quickly but ca
 |---|---|---|---|---|
 | BI-1 | Agent stops when the caller starts speaking | TTS cancelled and gateway buffer cleared, target < 60 ms | `interrupt.py:15, 189, 368`; `voice_metrics.py:115-125` | MEETS |
 | BI-2 | Backchannels ("uh-huh") and echo don't interrupt | text-level backchannel and disfluency filter, echo gate | `backchannel.py:25-60`, `deepgram_flux.py:835`, `audio_ingest.py:396` | PARTIAL: no minimum voice-duration guard; no acoustic echo cancellation |
-| BI-3 | History holds only what was actually spoken | interrupted replies keep the submitted sentences plus a marker | `turn_streamer.py` (`_spoken_sentences`) | MEETS (sentence granularity) |
+| BI-3 | History holds only what was actually spoken | interrupted replies keep the submitted sentences plus a marker; a reply cut off during its first sentence leaves the bare marker | `turn_streamer.py` (`_spoken_sentences`), `turn_runner.py` (cancellation path, `_reply_audio_started`) | MEETS (sentence granularity; since 2026-10-09 a cut-off first sentence no longer erases the reply, which had made the model answer stale questions over a goodbye) |
 | BI-4 | Resume after a false interruption | resume the cut reply | `voice_pipeline_service.py` `_resume_after_false_barge_in` | MEETS |
 | BI-5 | A caller turn that stops the agent is answered | the words that end a turn while the agent speaks reach that turn; never an empty turn | `transcript_handler.py:219-243` | MEETS (since 2026-10-09: the stop cleared the input before it was read, and 14 of 133 Test Agent caller turns since 1 Oct were dropped) |
 
@@ -95,6 +96,7 @@ Turn timing is aggressive by design: a 500 ms timeout ends a turn quickly but ca
 | ARC-3 | Static prefix first, dynamic content last | cache-friendly order | `build.py:131-157` | MEETS (the current models report no cache hits, so the gain is latent) |
 | ARC-4 | No business or market specifics in code, and no invented defaults | empty campaign slots stay empty | `composer.py` receptionist defaults (no more "24 hours" notice, "See website" or "patient") | PARTIAL: a Europe/London fallback timezone remains in `turn_streamer.py:261` |
 | ARC-5 | Every standard has a test | | `tests/unit/test_voice_standards_conformance.py` and the tests named above | MEETS |
+| ARC-6 | Turn-taking is tested with real speech, end to end | a synthetic caller drives the real STT, pipeline, model and voice through the browser gateway; read-only database | `scripts/synthetic_caller.py` (cues: at, after, during) | MEETS (since 2026-10-09; run before releases that touch turn-taking) |
 
 ## Sources
 

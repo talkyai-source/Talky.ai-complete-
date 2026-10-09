@@ -355,6 +355,9 @@ class TurnStreamer:
         # interruption. Raw generation can include unsent text after interruption or a provider error. Submission is not a heard/playback receipt;
         # action confirmation separately requires correlated playout below.
         session._spoken_sentences = []
+        # Whether this reply's audio has started: a cancellation before its
+        # first sentence finishes still leaves a marker (turn_runner).
+        session._reply_audio_started = False
         _action_delivered_sentences = []
 
         def _record_action_playback(sentence, interrupted):
@@ -586,6 +589,7 @@ class TurnStreamer:
                         self._p.latency_tracker.mark_tts_start(call_id)
 
                     session.tts_active = True
+                    session._reply_audio_started = True
                     session._voice_action_delivered_text = ""
                     tts_was_interrupted = await self._p.synthesize_and_send_audio(
                         session, sentence, websocket, track_latency=first_sentence,
@@ -693,6 +697,7 @@ class TurnStreamer:
                         t_tts_first = time.monotonic()
                         self._p.latency_tracker.mark_tts_start(call_id)
                     session.tts_active = True
+                    session._reply_audio_started = True
                     session._voice_action_delivered_text = ""
                     tts_was_interrupted = await self._p.synthesize_and_send_audio(
                         session, sentence, websocket, track_latency=first_sentence,
@@ -727,6 +732,7 @@ class TurnStreamer:
                 call_id,
             )
             session.tts_active = True
+            session._reply_audio_started = True
             t_tts_first = time.monotonic()
             self._p.latency_tracker.mark_tts_start(call_id)
             session._voice_action_delivered_text = ""

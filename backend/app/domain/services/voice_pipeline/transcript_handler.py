@@ -43,6 +43,11 @@ def _bind_caller_turn(session, transcript_service, order) -> None:
              caller_turn_order=order)
 
 
+def _join_words(*parts) -> str:
+    """Caller words in the order they were said, as one turn."""
+    return " ".join(part.strip() for part in parts if part and part.strip())
+
+
 def _accept_caller_turn(session: CallSession, transcript_service=None) -> int:
     """Stamp accepted finals, independently of suppressed/reused media seqs.
 
@@ -236,7 +241,15 @@ class TranscriptHandler:
             # audio barge-in was suppressed) but turned into real speech. The
             # agent's TTS may still be playing — stop it now before we respond.
             # No-op if it already stopped (normal interruptions clear it).
+            _held = None
             if getattr(session, "tts_active", False):
+                # Words still waiting behind the reply being stopped belong with
+                # these. Left queued, the stopped reply would release them as a
+                # turn of their own and these would wait behind its answer
+                # (synthetic caller, 2026-10-09: "Okay. Thank you. Bye." waited
+                # 20 s behind an answer to the earlier "What do you do?").
+                _held = getattr(session, "_queued_next_turn", None)
+                session._queued_next_turn = None
                 await self._p.handle_barge_in(session, websocket)
                 # The stop resets input for a new utterance; this one has ended
                 # and is about to be answered, exactly as on the normal path.
@@ -277,7 +290,8 @@ class TranscriptHandler:
                 # duplicate — zero behavior change for that case.
                 _current_seq = self._p._utterance_seq.get(call_id, 0)
                 _existing_seq = getattr(existing, "_utterance_seq", _current_seq)
-                _existing_text = (getattr(existing, "_source_text", None) or "").strip()
+                _existing_text = (getattr(existing, "_latest_text", None)
+                                  or getattr(existing, "_source_text", None) or "").strip()
                 _new_text = (_user_text or "").strip()
                 _is_distinct = (_current_seq != _existing_seq) or (
                     _new_text and _new_text != _existing_text
@@ -297,6 +311,8 @@ class TranscriptHandler:
                     #    no-op and we simply skip the duplicate.
                     # Either way we must NOT drop the turn into silence.
                     existing._turn_type = "final"
+                    if _held is not None and getattr(session, "_queued_next_turn", None) is None:
+                        session._queued_next_turn = _held  # still waiting on that task
                     logger.debug(
                         "turn_end: existing task kept as final for %s", call_id[:12]
                     )
@@ -304,15 +320,15 @@ class TranscriptHandler:
                 # F-08: a genuinely different utterance finished while turn 1
                 # is still running (LLM in flight / thinking). Don't drop it —
                 # queue it depth-1 so turn_ender dispatches it the instant
-                # turn 1 releases the turn slot. A 3rd distinct utterance
-                # simply overwrites the queued slot (coalesces onto the
-                # latest, matching how a live caller would expect their most
-                # recent words to be the ones answered).
-                _previous_queue = getattr(session, "_queued_next_turn", None)
+                # turn 1 releases the turn slot. A 3rd distinct utterance joins
+                # the queued words, newest last: it used to overwrite them, so
+                # the caller's earlier words never reached the model.
+                _previous_queue = getattr(session, "_queued_next_turn", None) or _held
                 _queued_duplicate = (
                     _previous_queue is not None
                     and _previous_queue.get("seq") == _current_seq
-                    and (_previous_queue.get("text") or "").strip() == _new_text
+                    and (_previous_queue.get("latest_text")
+                         or _previous_queue.get("text") or "").strip() == _new_text
                 )
                 _caller_order = (
                     _previous_queue.get("caller_turn_order") if _queued_duplicate
@@ -320,10 +336,20 @@ class TranscriptHandler:
                 )
                 if _queued_duplicate:
                     _bind_caller_turn(session, self._p.transcript_service, _caller_order)
+                    _waiting_text = _previous_queue.get("text") or _user_text
+                    _prior_orders = tuple(_previous_queue.get("prior_caller_turn_orders") or ())
+                elif _previous_queue is not None:
+                    _waiting_text = _join_words(_previous_queue.get("text"), _user_text)
+                    _prior_orders = (*(_previous_queue.get("prior_caller_turn_orders") or ()),
+                                     _previous_queue.get("caller_turn_order"))
+                else:
+                    _waiting_text, _prior_orders = _user_text, ()
                 session._queued_next_turn = {
-                    "text": _user_text,
+                    "text": _waiting_text,
+                    "latest_text": _user_text,
                     "seq": _current_seq,
                     "caller_turn_order": _caller_order,
+                    "prior_caller_turn_orders": _prior_orders,
                     "queued_monotonic": time.monotonic(),
                     "confidence": _confidence,
                     "alternatives": _alternatives,
@@ -335,6 +361,11 @@ class TranscriptHandler:
                 return
             session._speculative_history_len = len(session.conversation_history)
             _caller_order = _accept_caller_turn(session, self._p.transcript_service)
+            _latest_text, _prior_orders = _user_text, ()
+            if _held is not None and (_held.get("text") or "").strip():
+                _user_text = _join_words(_held.get("text"), _user_text)
+                _prior_orders = (*(_held.get("prior_caller_turn_orders") or ()),
+                                 _held.get("caller_turn_order"))
             task = asyncio.create_task(
                 self._p.handle_turn_end(
                     session, websocket, source="final", user_text=_user_text,
@@ -352,7 +383,9 @@ class TranscriptHandler:
             # branch above).
             task._utterance_seq = self._p._utterance_seq.get(call_id, 0)
             task._caller_turn_order = _caller_order
+            task._prior_caller_turn_orders = _prior_orders
             task._source_text = _user_text
+            task._latest_text = _latest_text
             self._p._pending_llm_tasks[call_id] = task
             return
 

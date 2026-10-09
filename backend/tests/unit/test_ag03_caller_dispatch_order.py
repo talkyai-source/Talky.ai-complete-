@@ -78,7 +78,11 @@ async def test_real_queue_keeps_acceptance_order_with_reused_media_seq_and_dupli
             await asyncio.wait_for(second, 2)
         assert len(observed) == 2
         assert [row[1] for row in observed] == [1, 3 if coalesce else 2]
-        assert observed[-1][0] == ("Actually, I am your customer." if coalesce else "What are the opening hours?")
+        # A third utterance joins the queued one, newest last. It used to
+        # replace it, and "What are the opening hours?" never reached the model
+        # (2026-10-09, test_waiting_words_are_answered_together).
+        assert observed[-1][0] == ("What are the opening hours? Actually, I am your customer." if coalesce
+                                   else "What are the opening hours?")
         assert service._utterance_seq.get(session.call_id, 0) == 0
         assert session._queued_next_turn is None
     finally:

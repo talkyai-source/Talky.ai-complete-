@@ -53,7 +53,8 @@ _ACTION_DESCRIPTIONS = {
     ACTION_END_CALL: (
         "Request that this live call end after a short goodbye. Use only when "
         "the caller clearly ended the conversation or asked not to be contacted "
-        "again; do not claim the line is already disconnected while you are "
+        "again, and then in the same reply as your goodbye: without it the line "
+        "stays open. Do not claim the line is already disconnected while you are "
         "still speaking."
     ),
 }
