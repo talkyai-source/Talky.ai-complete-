@@ -860,9 +860,18 @@ export function VoiceAgentPopup() {
         };
     }, [handleMessage, endSession, cleanupAudioPlayer, startMicrophone, stopMicrophone, initializeAudioPlayer, playTessaIntro, prefetchTessaIntro, router, pathname]);
 
+    // Pending signed-out redirect; held in a ref so unmount can cancel it.
+    const signInRedirectTimerRef = useRef<number | null>(null);
+
     const handleMainButtonClick = useCallback(() => {
         if (!isAuthed) {
-            router.push(`/auth/login?next=${encodeURIComponent(pathname)}`);
+            setError("Sign in to talk to the agent");
+            if (signInRedirectTimerRef.current === null) {
+                signInRedirectTimerRef.current = window.setTimeout(() => {
+                    signInRedirectTimerRef.current = null;
+                    router.push(`/auth/login?next=${encodeURIComponent(pathname)}`);
+                }, 1800);
+            }
             return;
         }
         if (!isActive) {
@@ -912,6 +921,10 @@ export function VoiceAgentPopup() {
         isMountedRef.current = true;
         return () => {
             isMountedRef.current = false;
+            if (signInRedirectTimerRef.current !== null) {
+                clearTimeout(signInRedirectTimerRef.current);
+                signInRedirectTimerRef.current = null;
+            }
             endSession();
         };
     }, [endSession]);
@@ -927,15 +940,16 @@ export function VoiceAgentPopup() {
     };
 
     return (
-        <div className="pointer-events-auto fixed bottom-5 left-2 sm:bottom-6 sm:left-3 z-50 flex items-center gap-2">
+        <div className="pointer-events-auto fixed bottom-5 right-2 sm:bottom-6 sm:right-3 z-50 flex items-center gap-2">
             <div className="relative">
                 <button
                     onClick={handleMainButtonClick}
                     onPointerEnter={warmTessaIntro}
                     onPointerDown={warmTessaIntro}
                     onFocus={warmTessaIntro}
+                    aria-label="Ask AI"
                     className={`relative rounded-full transition-[background-color,border-color,box-shadow,transform] duration-500 ease-out cursor-pointer group ${isActive ? "overflow-visible" : "overflow-hidden"} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${!isActive
-                        ? "stats-card inline-flex items-center justify-center h-10 w-10 px-0 bg-cyan-50/70 border border-cyan-200/80 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.15)] backdrop-blur-sm transition-[background-color,border-color,box-shadow,transform,width,padding] hover:scale-105 md:justify-start md:gap-2 md:px-3 md:w-[150px] dark:bg-cyan-950/60 dark:border-cyan-200/35 dark:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.55),0_0_0_1px_rgba(34,211,238,0.16),0_0_24px_rgba(34,211,238,0.14)]"
+                        ? "stats-card inline-flex items-center justify-center h-11 w-[72px] px-0 bg-cyan-50/70 border border-cyan-200/80 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.15)] backdrop-blur-sm transition-[background-color,border-color,box-shadow,transform,width,padding] hover:scale-105 md:justify-start md:gap-2 md:px-3 md:w-[150px] dark:bg-cyan-950/60 dark:border-cyan-200/35 dark:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.55),0_0_0_1px_rgba(34,211,238,0.16),0_0_24px_rgba(34,211,238,0.14)]"
                         : "flex items-center justify-center w-20 h-20 lg:w-40 lg:h-40 bg-background/70 border-2 border-indigo-400/40 backdrop-blur-md transition-[width,height]"
                         }`}
                     style={{
@@ -954,7 +968,8 @@ export function VoiceAgentPopup() {
 
                     {!isActive ? (
                         <div className="relative z-10 flex items-center gap-2">
-                            <span className="relative inline-flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-500 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.35)]">
+                            <span className="md:hidden text-sm font-semibold leading-none text-primary dark:text-white">ASK AI</span>
+                            <span className="relative hidden md:inline-flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-500 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.35)]">
                                 <MessageCircle className="h-4 w-4 text-white" />
                                 <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-white/90" />
                             </span>
@@ -1018,7 +1033,7 @@ export function VoiceAgentPopup() {
             {error && (
                 <div
                     role="alert"
-                    className="absolute -top-2 right-12 -translate-y-full max-w-[260px] rounded-lg bg-red-600/95 text-white text-xs px-3 py-2 shadow-lg shadow-red-500/30 leading-snug"
+                    className="absolute -top-2 right-0 -translate-y-full w-max max-w-[min(260px,calc(100vw-24px))] rounded-lg bg-red-600/95 text-white text-xs px-3 py-2 shadow-lg shadow-red-500/30 leading-snug"
                 >
                     <div className="flex items-start gap-2">
                         <span className="flex-1">{error}</span>
@@ -1026,7 +1041,7 @@ export function VoiceAgentPopup() {
                             type="button"
                             onClick={(e) => { e.stopPropagation(); setError(null); }}
                             aria-label="Dismiss"
-                            className="opacity-80 hover:opacity-100 -mt-0.5"
+                            className="-m-2.5 p-2.5 opacity-80 hover:opacity-100"
                         >
                             ×
                         </button>
