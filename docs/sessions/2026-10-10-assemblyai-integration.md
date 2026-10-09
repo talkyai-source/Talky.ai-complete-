@@ -88,3 +88,19 @@ existing paid-use readiness freeze and broader acceptance gates remain unchanged
 The new PostgreSQL integration module is explicitly included in CI. Production
 activation must use the existing supported deployment procedure and its measured
 drain evidence; this integration does not bypass those requirements.
+
+## Published review and CI
+
+[Draft PR 20](https://github.com/talkyai-source/Talky.ai-complete-/pull/20) publishes
+the integration. Initial head `4dc5d746` passed the Vercel preview deployment,
+secret scanning, telephony ingress checks, Admin checks and fast voice suite.
+The full unit/security run passed 12,311 checks with 152 skips and 18 subtests,
+but failed one migration-head assertion that still expected 0064. The assertion
+is updated to require 0065 and explicitly preserve its parent and both released
+histories; this is not recorded as a green full suite until CI reruns it.
+
+The general Backend and SQL jobs could not start PostgreSQL because Docker Hub
+returned a pull-rate limit and authentication-endpoint timeouts. The frontend
+audit failed on the already recorded `braces` advisory (11 dependency paths).
+These failures remain visible; no workflow gate or vulnerability is suppressed.
+The PR checks provide final-head status separately from these initial results.
