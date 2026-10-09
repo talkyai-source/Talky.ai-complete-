@@ -1179,8 +1179,25 @@ def _lead_context_lines(lead_context: Optional[dict]) -> str:
 def resolve_stt_selection(config, *, campaign_id="telephony") -> dict:
     """Reuse the selected engine/language policy across existing transports."""
     engine = str(getattr(config, "stt_engine", None) or "deepgram_flux").strip().lower()
+    if engine == "assemblyai":
+        from app.domain.models.assemblyai_config import AssemblyAISettings
+
+        language = str(getattr(config, "stt_language", None) or "en").strip().lower()
+        if language not in {"en", "en-us", "en-gb", "en-au", "en-in", "en-nz"}:
+            raise ValueError("AssemblyAI 3.6 Pro is configured for English only")
+        raw_settings = getattr(config, "assemblyai_settings", None)
+        settings = (
+            raw_settings if isinstance(raw_settings, AssemblyAISettings)
+            else AssemblyAISettings.model_validate(raw_settings or {})
+        )
+        return {
+            "stt_provider_type": "assemblyai",
+            "stt_model": "universal-3-6-pro",
+            "stt_language": "en",
+            "assemblyai_settings": settings.model_dump(mode="json"),
+        }
     if engine not in {"deepgram_flux", "deepgram_nova", "deepgram-nova", "nova", "nova-3"}:
-        raise ValueError("Unsupported STT engine; select deepgram_flux or deepgram_nova")
+        raise ValueError("Unsupported STT engine; select deepgram_flux, deepgram_nova or assemblyai")
     language = str(getattr(config, "stt_language", None) or "en").strip().lower() or "en"
     english = language in ("en", "en-us", "en-gb", "en-au", "en-in", "en-nz")
     nova = engine in ("deepgram_nova", "deepgram-nova", "nova", "nova-3")

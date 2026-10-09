@@ -25,6 +25,7 @@ sentence the agent says.
 from __future__ import annotations
 
 import types
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -123,6 +124,52 @@ async def _speak(provider, text="Thursday it is."):
     pb = TtsPlayback(pipeline=pipe)
     interrupted = await pb.synthesize_and_send(_session(), text, None, track_latency=False)
     return pipe, interrupted
+
+
+@pytest.mark.asyncio
+async def test_stt_context_receives_successfully_submitted_sentence():
+    pipe = _Pipeline(_Provider([[b"\x01\x02" * 80]]))
+    pipe.stt_provider = types.SimpleNamespace(update_agent_context=AsyncMock())
+    session = _session()
+    interrupted = await TtsPlayback(pipe).synthesize_and_send(
+        session, "What is your email address?", None, track_latency=False,
+    )
+    assert interrupted is False
+    pipe.stt_provider.update_agent_context.assert_awaited_once_with(
+        session.call_id, "What is your email address?",
+    )
+
+
+@pytest.mark.asyncio
+async def test_stt_context_does_not_receive_unspoken_sentence():
+    pipe = _Pipeline(_Provider([[], []]))
+    pipe.stt_provider = types.SimpleNamespace(update_agent_context=AsyncMock())
+    await TtsPlayback(pipe).synthesize_and_send(
+        _session(), "What is your email address?", None, track_latency=False,
+    )
+    pipe.stt_provider.update_agent_context.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stt_context_omits_full_sentence_after_interruption():
+    import asyncio
+
+    pipe = _Pipeline(_Provider([[b"\x01\x02" * 80, b"\x03\x04" * 80]]))
+    pipe.stt_provider = types.SimpleNamespace(update_agent_context=AsyncMock())
+    interrupted_event = asyncio.Event()
+    original_send = pipe.media_gateway.send_audio
+
+    async def send_and_interrupt(call_id, raw):
+        await original_send(call_id, raw)
+        interrupted_event.set()
+
+    pipe.media_gateway.send_audio = send_and_interrupt
+    interrupted = await TtsPlayback(pipe).synthesize_and_send(
+        _session(), "What is your email address?", None,
+        track_latency=False, barge_in_event=interrupted_event,
+    )
+    assert interrupted is True
+    pipe.stt_provider.update_agent_context.assert_not_awaited()
 
 
 # ── the failure, and its recovery ───────────────────────────────────────────

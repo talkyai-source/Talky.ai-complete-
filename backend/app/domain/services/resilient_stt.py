@@ -466,6 +466,12 @@ class ResilientSTTProvider(STTProvider):
         if fn is not None:
             await fn(call_id)
 
+    async def update_agent_context(self, call_id: str, text: str) -> None:
+        """Context follows the active recognizer after a failover."""
+        update = getattr(self._active, "update_agent_context", None)
+        if callable(update):
+            await update(call_id, text)
+
     def is_muted(self, call_id: str) -> bool:
         fn = getattr(self._active, "is_muted", None)
         return bool(fn(call_id)) if fn is not None else False

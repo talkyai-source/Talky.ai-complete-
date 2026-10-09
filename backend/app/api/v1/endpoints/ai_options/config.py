@@ -152,6 +152,15 @@ async def save_config(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
+    if config.stt_engine == "assemblyai":
+        from app.domain.services.credential_resolver import get_credential_resolver
+        key = await get_credential_resolver().resolve("assemblyai", tenant_id=str(tenant_id))
+        if not key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AssemblyAI API key not configured. Add a tenant AssemblyAI credential or set ASSEMBLYAI_API_KEY on the backend.",
+            )
+
     # Refuse to save a Gemini config if the API key isn't present — caught
     # here gives a clear 503 instead of a confusing pipeline error mid-call.
     if config.llm_provider == "openai":

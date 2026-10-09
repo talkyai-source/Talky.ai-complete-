@@ -37,7 +37,8 @@ async def _fetch_tenant_config(conn, tenant_id: str) -> Optional[AIProviderConfi
             pipeline_mode,
             realtime_model,
             realtime_voice,
-            realtime_settings
+            realtime_settings,
+            assemblyai_settings
         FROM tenant_ai_configs
         WHERE tenant_id = $1
         """,
@@ -54,7 +55,7 @@ async def _fetch_tenant_config(conn, tenant_id: str) -> Optional[AIProviderConfi
     if isinstance(raw_tuning, str):
         import json as _json
         try:
-            tuning_dict = _json.loads(raw_tuning)
+            tuning_dict = _json.loads(raw_tuning) or None
         except (ValueError, TypeError):
             tuning_dict = None
     elif isinstance(raw_tuning, dict):
@@ -75,6 +76,13 @@ async def _fetch_tenant_config(conn, tenant_id: str) -> Optional[AIProviderConfi
     else:
         rt_settings = None
 
+    # Let the typed settings model validate the stored JSON instead of silently
+    # replacing an invalid saved choice with provider defaults.
+    assemblyai_settings = dict(row).get("assemblyai_settings")
+    if isinstance(assemblyai_settings, str):
+        import json as _json
+        assemblyai_settings = _json.loads(assemblyai_settings)
+
     return AIProviderConfig(
         llm_provider=row["llm_provider"],
         llm_model=row["llm_model"],
@@ -93,6 +101,7 @@ async def _fetch_tenant_config(conn, tenant_id: str) -> Optional[AIProviderConfi
         realtime_model=(dict(row).get("realtime_model") or "gpt-realtime-2"),
         realtime_voice=(dict(row).get("realtime_voice") or "marin"),
         realtime_settings=rt_settings,
+        assemblyai_settings=assemblyai_settings,
     )
 
 
@@ -116,6 +125,10 @@ async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) 
     realtime_settings_json = (
         _json.dumps(config.realtime_settings) if config.realtime_settings else None
     )
+    assemblyai_settings_json = (
+        config.assemblyai_settings.model_dump_json()
+        if config.assemblyai_settings is not None else None
+    )
 
     await conn.execute(
         """
@@ -137,11 +150,12 @@ async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) 
             pipeline_mode,
             realtime_model,
             realtime_voice,
-            realtime_settings
+            realtime_settings,
+            assemblyai_settings
         )
         VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14,
-            $15, $16, $17, $18::jsonb
+            $15, $16, $17, $18::jsonb, $19::jsonb
         )
         ON CONFLICT (tenant_id) DO UPDATE SET
             llm_provider = EXCLUDED.llm_provider,
@@ -161,6 +175,7 @@ async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) 
             realtime_model = EXCLUDED.realtime_model,
             realtime_voice = EXCLUDED.realtime_voice,
             realtime_settings = EXCLUDED.realtime_settings,
+            assemblyai_settings = EXCLUDED.assemblyai_settings,
             updated_at = NOW()
         """,
         tenant_id,
@@ -181,6 +196,7 @@ async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) 
         config.realtime_model,
         config.realtime_voice,
         realtime_settings_json,
+        assemblyai_settings_json,
     )
     # The save response must describe the same canonical values a reload reads.
     config.voice_tuning = coerced or None

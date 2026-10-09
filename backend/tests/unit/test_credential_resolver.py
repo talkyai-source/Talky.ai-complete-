@@ -240,3 +240,82 @@ async def test_resolver_trims_plaintext(monkeypatch):
     )
     key = await resolver.resolve("groq", tenant_id="11111111-1111-4111-8111-111111111111")
     assert key == "tenant-key"
+
+
+# AssemblyAI availability is inspected before operators enter their first key.
+# Its per-request lookup must observe credential changes without a restart or
+# an in-process invalidation (the dashboard and call worker are separate).
+_ASSEMBLY_TENANT = "22222222-2222-4222-8222-222222222222"
+
+
+@pytest.mark.asyncio
+async def test_assemblyai_missing_key_then_registration_is_visible_to_all_resolvers(monkeypatch):
+    monkeypatch.delenv("ASSEMBLYAI_API_KEY", raising=False)
+    pool = _FakePool(None)
+    encryption = _FakeEncryption("new-tenant-key")
+    resolvers = [CredentialResolver(db_pool=pool, encryption_service=encryption) for _ in range(2)]
+    for resolver in resolvers:
+        assert await resolver.resolve("assemblyai", tenant_id=_ASSEMBLY_TENANT) is None
+
+    pool._row = {"id": "new-credential", "encrypted_key": "ENC:new-tenant-key"}
+    for resolver in resolvers:
+        assert await resolver.resolve("assemblyai", tenant_id=_ASSEMBLY_TENANT) == "new-tenant-key"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform_key", [None, "platform-fallback"])
+async def test_assemblyai_rotation_and_revocation_are_visible_without_cache_invalidation(monkeypatch, platform_key):
+    if platform_key is None:
+        monkeypatch.delenv("ASSEMBLYAI_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("ASSEMBLYAI_API_KEY", platform_key)
+    pool = _FakePool({"id": "initial", "encrypted_key": "ENC:old-tenant-key"})
+    encryption = _FakeEncryption("old-tenant-key")
+    resolvers = [CredentialResolver(db_pool=pool, encryption_service=encryption) for _ in range(2)]
+    for resolver in resolvers:
+        assert await resolver.resolve("assemblyai", tenant_id=_ASSEMBLY_TENANT) == "old-tenant-key"
+
+    pool._row = {"id": "rotated", "encrypted_key": "ENC:rotated-tenant-key"}
+    encryption._plaintext = "rotated-tenant-key"
+    for resolver in resolvers:
+        assert await resolver.resolve(" ASSEMBLYAI ", tenant_id=_ASSEMBLY_TENANT) == "rotated-tenant-key"
+
+    # The SELECT filters disabled credentials, so a revoked key yields no row.
+    pool._row = None
+    for resolver in resolvers:
+        assert await resolver.resolve("assemblyai", tenant_id=_ASSEMBLY_TENANT) == platform_key
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stale_entry", ["stale-key", CredentialResolver._SENTINEL_USE_ENV])
+async def test_assemblyai_ignores_both_stale_positive_and_negative_cache_entries(monkeypatch, stale_entry):
+    monkeypatch.setenv("ASSEMBLYAI_API_KEY", "platform-fallback")
+    pool = _FakePool({"id": "current", "encrypted_key": "ENC:current-key"})
+    resolver = CredentialResolver(db_pool=pool, encryption_service=_FakeEncryption("current-key"))
+    cache_key = (pool, _ASSEMBLY_TENANT, "assemblyai", "api_key")
+    monkeypatch.setitem(CredentialResolver._CACHE, cache_key, stale_entry)
+    assert await resolver.resolve("assemblyai", tenant_id=_ASSEMBLY_TENANT) == "current-key"
+
+
+@pytest.mark.asyncio
+async def test_assemblyai_lookup_failure_preserves_env_fallback_and_recovers(monkeypatch):
+    monkeypatch.setenv("CUSTOM_ASSEMBLYAI_KEY", "platform-fallback")
+    pool = _FakePool(raise_on_fetch=RuntimeError("synthetic database unavailable"))
+    resolver = CredentialResolver(db_pool=pool, encryption_service=_FakeEncryption("tenant-key"))
+    assert await resolver.resolve(
+        "assemblyai", tenant_id=_ASSEMBLY_TENANT, env_var="CUSTOM_ASSEMBLYAI_KEY",
+    ) == "platform-fallback"
+    pool._raise = None
+    pool._row = {"id": "recovered", "encrypted_key": "ENC:tenant-key"}
+    assert await resolver.resolve(
+        "assemblyai", tenant_id=_ASSEMBLY_TENANT, env_var="CUSTOM_ASSEMBLYAI_KEY",
+    ) == "tenant-key"
+
+
+@pytest.mark.asyncio
+async def test_other_providers_keep_existing_credential_cache_behavior():
+    resolver = CredentialResolver(db_pool=object())
+    resolver._resolve_tenant = AsyncMock(side_effect=["first-key", "second-key"])
+    assert await resolver.resolve("deepgram", tenant_id=_ASSEMBLY_TENANT) == "first-key"
+    assert await resolver.resolve("deepgram", tenant_id=_ASSEMBLY_TENANT) == "first-key"
+    resolver._resolve_tenant.assert_awaited_once()

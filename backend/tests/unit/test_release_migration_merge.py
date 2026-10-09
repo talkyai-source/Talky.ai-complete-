@@ -12,8 +12,10 @@ MERGE = "0063_release_history_merge"
 
 
 def test_release_exposes_one_head_containing_both_existing_histories():
-    # 0064 (DNC phone_number compatibility trigger) sits on top of the merge.
-    assert SCRIPTS.get_heads() == ["0064_dnc_phone_number_default"]
+    # AssemblyAI settings extend the DNC compatibility revision; both released
+    # histories must still converge behind this single deployment head.
+    assert SCRIPTS.get_heads() == ["0065_assemblyai_settings"]
+    assert SCRIPTS.get_revision("0065_assemblyai_settings").down_revision == "0064_dnc_phone_number_default"
     assert SCRIPTS.get_revision("0064_dnc_phone_number_default").down_revision == MERGE
     merge = SCRIPTS.get_revision(MERGE)
     assert set(merge.down_revision) == {HEARTBEAT, RECEIPTS}

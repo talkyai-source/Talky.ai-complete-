@@ -120,6 +120,11 @@ _RULES: list[tuple[str, IssueAdvice]] = [
         "Cartesia failed to synthesize speech. Check the Cartesia API key/voice, or switch the campaign's voice provider.",
         "error", "voice",
     )),
+    ("assemblyai", IssueAdvice(
+        "Speech-to-text error (AssemblyAI)",
+        "AssemblyAI could not start or continue speech recognition. Check the AssemblyAI API key, streaming access and concurrency limit, then retry or select another speech-recognition engine in AI Options.",
+        "error", "voice",
+    )),
     ("deepgram", IssueAdvice(
         "Speech-to-text error",
         "The speech-to-text provider (Deepgram) failed, so the agent couldn't hear the caller. Check the Deepgram key/health.",
