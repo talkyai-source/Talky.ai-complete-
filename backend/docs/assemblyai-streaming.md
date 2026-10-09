@@ -6,8 +6,10 @@ Nova, and the separate native Realtime pipeline retain their existing roles.
 
 ## Configuration
 
-1. Apply Alembic migration `0065_assemblyai_settings` before deploying the new
-   backend; its parent is `0064_dnc_phone_number_default`.
+1. Use the supported [deployment procedure](../../docs/DEPLOYMENT.md) to activate
+   the reviewed code and apply `0065_assemblyai_settings` before restarting the
+   application services; its parent is `0064_dnc_phone_number_default`. Running
+   Alembic from the old checkout cannot apply a migration it does not contain.
 2. Configure the existing tenant credential store with provider `assemblyai`, or
    supply `ASSEMBLYAI_API_KEY` through the backend's private environment.
 3. In **AI Options → Speech recognition**, select **AssemblyAI Universal-3.6 Pro**.
@@ -19,6 +21,12 @@ The saved identity is `stt_engine=assemblyai`, `stt_provider=assemblyai`,
 non-English AssemblyAI selection. Every connection sends `language_codes=["en"]`;
 this is the provider's monolingual steering setting, not a claim of perfect ASR.
 The browser never receives the key.
+
+AssemblyAI tenant credentials are read afresh when listing availability, saving
+the selection or creating a session. Adding, rotating or revoking a tenant key
+therefore does not require restarting workers. The existing environment fallback
+still applies when there is no active tenant key; this does not replace credentials
+already held by an in-progress call.
 
 AssemblyAI settings are stored separately in `tenant_ai_configs.assemblyai_settings`.
 Switching to Flux retains those preferences. Inbound admission pins them in the
@@ -76,7 +84,7 @@ an AssemblyAI-only account does not require that key.
 
 ## Verification and release status
 
-The implementation branch is based on main `3951efe9`. Local protocol, runtime,
+The implementation branch is rebased onto main `67933e1d`. Local protocol, runtime,
 React interaction and real PostgreSQL checks cover the provider option, modes,
 controls, English setting, persistence, tenant isolation and failure handling.
 The release evidence is recorded in `docs/sessions/2026-10-10-assemblyai-integration.md`.
@@ -95,9 +103,12 @@ acknowledgement, counts final turns and checks optional expected text. It emits
 only hashes, counts, booleans and timings. A missing key or empty recognition
 fails; it is never reported as a successful live test.
 
-Before activation, supply the key, run the probe, apply the migration, deploy both
-backend and frontend, save the selection through the authenticated UI and run an
-English test call. Evaluate email/name capture on representative telephone audio;
+Before activation, supply the key and run the probe. Release the reviewed commit
+through the supported Git/systemd deployment, which runs the matching migration
+before restarting the backend. The existing candidate-bound drain manifest and
+operator access requirements still apply. Frontend deployment uses Vercel from
+main. Save the selection through the authenticated UI and run an English test
+call. Evaluate email/name capture on representative telephone audio;
 switching providers alone is not an accuracy guarantee. Downgrade refuses to erase
 saved AssemblyAI selections/preferences: export and clear them deliberately first.
 

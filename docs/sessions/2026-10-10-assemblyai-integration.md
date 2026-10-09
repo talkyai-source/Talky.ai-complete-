@@ -8,7 +8,9 @@ only, documentation review before implementation, and verification. This is a
 specific provider exception to the feature freeze; unrelated work remains frozen.
 
 Implementation is isolated in `codex/assemblyai-36-20261010`, initially based on
-main `3951efe9`. The original checkout and other dirty worktrees were preserved.
+main `3951efe9` and rebased without conflicts onto `67933e1d`, preserving the new
+interrupted-goodbye handling and synthetic-caller timing fixes. The original
+checkout and other dirty worktrees were preserved.
 See [integration and operating notes](../../backend/docs/assemblyai-streaming.md)
 for the exact controls, protocol, credential configuration and release sequence.
 
@@ -26,12 +28,26 @@ for the exact controls, protocol, credential configuration and release sequence.
 
 Completed verification runs (some overlap; do not sum as unique test counts):
 
+- After rebasing, the combined adapter/context/runtime/caller-turn suite passed
+  392 checks with one skip. This includes the new upstream goodbye/queued-speech
+  regression modules and the AssemblyAI-specific outage advice.
 - 286 call/runtime/regression checks passed, one pre-existing skip.
 - 43 caller-turn and runtime checks passed after adding empty-final handling.
 - 68 adapter/settings tests passed; scoped Ruff and Black passed. Deterministic
   timing tests reproduced and fixed per-frame send-latency drift without allowing
   catch-up bursts after network backpressure.
 - 87 config/catalog/credential unit checks passed.
+- Final config review reproduced a case/whitespace mismatch between saved engine
+  names and runtime selection. Canonicalization now precedes identity validation
+  and the credential check; mixed-case/whitespace requests cannot bypass them.
+  The affected suite, including real PostgreSQL, passed 119 checks.
+- Review also reproduced stale credential absence after opening AI Options
+  before registering a tenant key. AssemblyAI now re-reads the tenant credential
+  for each resolution, including across dashboard/call-worker resolver instances;
+  addition, rotation and revocation take effect without process restarts. Existing
+  environment fallback semantics and other providers' caching remain unchanged.
+  The affected config/runtime/credential suite passed 91 checks, including seven
+  credential lifecycle cases.
 - Six real PostgreSQL integration checks passed, including all modes, every
   setting, tenant isolation, migration constraints and protected downgrade.
 - 114 context/greeting/playback checks passed, with two explicit skips. Empty
@@ -54,6 +70,12 @@ No API key appeared in the task text. Presence-only checks found no
 files. The owner has been asked to designate a private credential location.
 No key values were printed or committed.
 
+Presence-only rechecks on this continuation still found no key in the checked
+local/server environment files. The production API process environment could not
+be read with the available SSH operator permissions, so these checks do not prove
+the absence of keys in every secret store or process. No tenant was selected
+arbitrarily to obtain its private credential.
+
 A synthetic mono 16 kHz PCM clip was generated locally using Windows speech
 synthesis: a fictional Alex Taylor and `alex.taylor@example.com`. The production
 adapter probe refuses to run without the key and reported that missing prerequisite.
@@ -63,3 +85,6 @@ Do not mark the goal complete or claim improved email accuracy from unit tests.
 Remaining: real provider acknowledgement/transcription in all modes, migration and
 deployment, authenticated selection/save/reload, and an English test call. The
 existing paid-use readiness freeze and broader acceptance gates remain unchanged.
+The new PostgreSQL integration module is explicitly included in CI. Production
+activation must use the existing supported deployment procedure and its measured
+drain evidence; this integration does not bypass those requirements.

@@ -7,7 +7,7 @@ This configuration is used in both the AI Options testing page and actual calls.
 from typing import Any, Optional, List, Dict
 from app.realtime.config import RealtimeProviderConfig
 from app.domain.models.assemblyai_config import ASSEMBLYAI_MODEL, AssemblyAISettings
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
 
 
@@ -242,6 +242,13 @@ class AIProviderConfig(RealtimeProviderConfig):
     stt_engine: str = "deepgram_flux"
     stt_language: str = "en"
     assemblyai_settings: Optional[AssemblyAISettings] = None
+
+    @field_validator("stt_engine")
+    @classmethod
+    def normalize_stt_engine(cls, value: str) -> str:
+        # Save, credential checks and runtime selection must see one identity.
+        # Keep legacy Nova aliases; their resolution still belongs to runtime.
+        return value.strip().lower()
 
     @model_validator(mode="after")
     def validate_assemblyai_selection(self):

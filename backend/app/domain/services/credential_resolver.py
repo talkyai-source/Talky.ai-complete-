@@ -113,6 +113,18 @@ class CredentialResolver:
         returns the env fallback.
         """
         if tenant_id:
+            if provider.strip().lower() == "assemblyai":
+                # AI Options may inspect availability before a tenant adds its
+                # key. Re-read on each session/catalog request so additions,
+                # rotations and revocations reach every worker without a
+                # process-local cache invalidation signal.
+                tenant_value = await self._resolve_tenant(
+                    provider=provider,
+                    tenant_id=tenant_id,
+                    credential_kind=credential_kind,
+                )
+                return tenant_value or resolve_sync_env_only(provider, env_var=env_var)
+
             cache_key = (
                 self._cache_scope,
                 tenant_id,
@@ -203,9 +215,9 @@ class CredentialResolver:
             # this connection could not read it" are the same zero rows from
             # here, and either way the call is about to run on the PLATFORM
             # key instead of the tenant's own. Log it so that substitution is
-            # auditable rather than silent. `resolve()` caches a sentinel per
-            # (tenant, provider), so this fires once, not per call. Names the
-            # tenant and provider only — never key material.
+            # auditable rather than silent. Providers using the cache log once
+            # per (tenant, provider); AssemblyAI deliberately re-reads every
+            # time. Names the tenant and provider only — never key material.
             logger.warning(
                 "tenant_credential_row_not_readable tenant=%s provider=%s kind=%s "
                 "— falling back to the platform key",

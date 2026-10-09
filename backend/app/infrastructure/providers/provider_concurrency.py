@@ -21,10 +21,10 @@ codebase one place to look — singleton per provider, per process.
 Sized via env vars:
 
   GROQ_MAX_CONCURRENT, ELEVENLABS_MAX_CONCURRENT,
-  DEEPGRAM_MAX_CONCURRENT, CARTESIA_MAX_CONCURRENT,
+  DEEPGRAM_MAX_CONCURRENT, ASSEMBLYAI_MAX_CONCURRENT, CARTESIA_MAX_CONCURRENT,
   GOOGLE_TTS_MAX_CONCURRENT.
 
-Defaults are conservative (8-200) — increase when account caps are uplifted.
+Defaults are conservative (5-200) — size across workers against account caps.
 
 ElevenLabs specifically: self-service Flash plans cap `concurrent_requests`
 at roughly 4-30 depending on tier (see https://elevenlabs.io/pricing), far

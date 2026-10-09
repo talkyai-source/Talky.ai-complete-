@@ -33,8 +33,10 @@ def selected(**kwargs):
     return AIProviderConfig(stt_engine="assemblyai", **kwargs)
 
 
-def test_engine_canonicalizes_model_and_provider_without_affecting_flux():
-    config = selected()
+@pytest.mark.parametrize("engine", ["assemblyai", "AssemblyAI", " ASSEMBLYAI "])
+def test_engine_canonicalizes_model_and_provider_without_affecting_flux(engine):
+    config = AIProviderConfig(stt_engine=engine)
+    assert config.stt_engine == "assemblyai"
     assert (config.stt_provider, config.stt_model, config.stt_language) == (
         "assemblyai", "universal-3-6-pro", "en",
     )
@@ -44,10 +46,22 @@ def test_engine_canonicalizes_model_and_provider_without_affecting_flux():
     assert AIProviderConfig().assemblyai_settings is None
 
 
+@pytest.mark.parametrize("engine", ["deepgram_flux", "deepgram_nova", "deepgram-nova", "nova", "nova-3"])
+def test_engine_normalization_preserves_established_deepgram_aliases(engine):
+    from app.domain.services.telephony_session_config import resolve_stt_selection
+
+    normalized = AIProviderConfig(stt_engine=f" {engine.upper()} ")
+    assert normalized.stt_engine == engine
+    assert normalized.stt_provider == "deepgram"
+    assert normalized.assemblyai_settings is None
+    assert resolve_stt_selection(normalized) == resolve_stt_selection(AIProviderConfig(stt_engine=engine))
+
+
 @pytest.mark.parametrize("language", ["es", "multi", "", "en-US"])
-def test_non_english_selection_is_rejected(language):
+@pytest.mark.parametrize("engine", ["assemblyai", " AssemblyAI "])
+def test_non_english_selection_is_rejected(language, engine):
     with pytest.raises(ValidationError, match="English only"):
-        selected(stt_language=language)
+        AIProviderConfig(stt_engine=engine, stt_language=language)
 
 
 @pytest.mark.parametrize("mode", ["balanced", "min_latency", "max_accuracy"])
@@ -85,20 +99,22 @@ async def test_corrupt_saved_settings_are_not_silently_replaced():
         await _fetch_tenant_config(storage, "A")
 
 
-async def test_save_requires_assemblyai_key_for_authenticated_tenant(monkeypatch):
+@pytest.mark.parametrize("engine", ["assemblyai", "AssemblyAI", " assemblyai "])
+async def test_save_requires_assemblyai_key_for_authenticated_tenant(monkeypatch, engine):
     resolve = AsyncMock(return_value=None)
     monkeypatch.setattr(credential_resolver, "get_credential_resolver", lambda: SimpleNamespace(resolve=resolve))
     persisted = AsyncMock()
     monkeypatch.setattr(endpoint, "_upsert_tenant_config", persisted)
     with pytest.raises(HTTPException) as caught:
-        await endpoint.save_config(selected(), SimpleNamespace(tenant_id="A"), SimpleNamespace(pool=None))
+        await endpoint.save_config(AIProviderConfig(stt_engine=engine), SimpleNamespace(tenant_id="A"), SimpleNamespace(pool=None))
     assert caught.value.status_code == 503
     assert "AssemblyAI API key" in caught.value.detail
     resolve.assert_awaited_once_with("assemblyai", tenant_id="A")
     persisted.assert_not_awaited()
 
 
-async def test_saved_endpoint_result_matches_reload_with_assemblyai_credentials(monkeypatch):
+@pytest.mark.parametrize("engine", ["assemblyai", " AssemblyAI "])
+async def test_saved_endpoint_result_matches_reload_with_assemblyai_credentials(monkeypatch, engine):
     resolve = AsyncMock(return_value="synthetic-key")
     monkeypatch.setattr(credential_resolver, "get_credential_resolver", lambda: SimpleNamespace(resolve=resolve))
     monkeypatch.setattr(endpoint, "_get_deepgram_voices_for_current_key", AsyncMock(return_value=[SimpleNamespace(id="aura-2-zeus-en")]))
@@ -110,10 +126,13 @@ async def test_saved_endpoint_result_matches_reload_with_assemblyai_credentials(
 
     monkeypatch.setattr(endpoint, "acquire_with_tenant", acquire)
     user, db = SimpleNamespace(tenant_id="A"), SimpleNamespace(pool=object())
-    config = selected(tts_voice_id="aura-2-zeus-en", assemblyai_settings={"mode": "max_accuracy", "keyterms_prompt": ["Talky"]})
+    config = AIProviderConfig(stt_engine=engine, tts_voice_id="aura-2-zeus-en", assemblyai_settings={"mode": "max_accuracy", "keyterms_prompt": ["Talky"]})
     saved = await endpoint.save_config(config, user, db)
     reloaded = await endpoint.get_config(user, db)
     assert saved.config.model_dump() == reloaded.model_dump() == config.model_dump()
+    assert (reloaded.stt_engine, reloaded.stt_provider, reloaded.stt_model) == (
+        "assemblyai", "assemblyai", "universal-3-6-pro",
+    )
     resolve.assert_awaited_once_with("assemblyai", tenant_id="A")
 
 
