@@ -940,7 +940,7 @@ export function VoiceAgentPopup() {
     };
 
     return (
-        <div className="pointer-events-auto fixed bottom-5 right-2 sm:bottom-6 sm:right-3 z-50 flex items-center gap-2">
+        <div className="pointer-events-auto fixed bottom-5 left-2 sm:bottom-6 sm:left-3 z-50 flex items-center gap-2">
             <div className="relative">
                 <button
                     onClick={handleMainButtonClick}
@@ -1033,7 +1033,7 @@ export function VoiceAgentPopup() {
             {error && (
                 <div
                     role="alert"
-                    className="absolute -top-2 right-0 -translate-y-full w-max max-w-[min(260px,calc(100vw-24px))] rounded-lg bg-red-600/95 text-white text-xs px-3 py-2 shadow-lg shadow-red-500/30 leading-snug"
+                    className="absolute -top-2 left-0 -translate-y-full w-max max-w-[min(260px,calc(100vw-24px))] rounded-lg bg-red-600/95 text-white text-xs px-3 py-2 shadow-lg shadow-red-500/30 leading-snug"
                 >
                     <div className="flex items-start gap-2">
                         <span className="flex-1">{error}</span>

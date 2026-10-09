@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import Link from "next/link";
 
 export function Footer() {
@@ -80,6 +81,27 @@ export function Footer() {
           </div>
         </div>
       </div>
+
+      {/* Reserved room for future footer rows (~two rows). */}
+      <div aria-hidden="true" className="h-28" />
+
+      {/* Keeps the last footer row clear of the fixed Ask AI button
+          (voice-agent-popup.tsx: h-11 pill at bottom-5 left-2 sm:bottom-6
+          sm:left-3). The strip must be at least the button's bottom gap +
+          its height + breathing room, or the button covers the bottom-left
+          links at max scroll. */}
+      <div
+        aria-hidden="true"
+        style={
+          {
+            "--askai-bottom-gap": "24px", // bottom-5 (20px) / sm:bottom-6 (24px) — use the larger
+            "--askai-button-height": "44px", // h-11
+            "--askai-breathing-room": "16px", // 8px minimum clearance + 8px margin
+            height:
+              "calc(var(--askai-bottom-gap) + var(--askai-button-height) + var(--askai-breathing-room))",
+          } as CSSProperties
+        }
+      />
     </footer>
   );
 }
