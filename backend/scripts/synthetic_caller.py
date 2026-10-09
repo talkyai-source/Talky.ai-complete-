@@ -25,7 +25,7 @@ usage, in backend/ on the server (reads .env for the database and keys):
       [--say "at:1.0:Hello?"] [--say "after:0.8:What do you offer?"] \
       [--say "during:1.5:Okay. Thank you. Bye."]
 
-Cues: at:<s> from the start; after:<s> once the agent has answered the
+Cues: at:<s> after the session is connected; after:<s> once the agent has answered the
 previous line and finished playing; during:<s> into the agent's next reply,
 while it is still playing.
 """
@@ -279,6 +279,7 @@ async def main() -> int:
     voices = {text: await synthesise(text, rate, os.environ["DEEPGRAM_API_KEY"]) for _, _, text in steps}
 
     await orchestrator.start_pipeline(voice, browser)
+    connected = time.monotonic()  # "at" cues count from here, as a browser would
     mic = Microphone(gateway, voice.call_id, rate)
     mic_task = asyncio.create_task(mic.run())
     said: list[tuple[float, float, str]] = []
@@ -313,7 +314,7 @@ async def main() -> int:
             break
         replies_before = len(browser.utterances)
         if cue == "at":
-            await asyncio.sleep(max(0.0, delay - (time.monotonic() - started)))
+            await asyncio.sleep(max(0.0, delay - (time.monotonic() - connected)))
         elif cue == "after":
             # A reply is several sentences, each its own playback, with tool
             # rounds between them: wait until the pipeline's turn is over.
