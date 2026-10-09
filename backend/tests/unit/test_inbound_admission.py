@@ -349,6 +349,7 @@ async def test_admission_persists_anonymous_call_before_reservation(monkeypatch)
         "stt_provider": "deepgram",
         "stt_model": "nova-3",
         "stt_engine": "deepgram_flux",
+        "assemblyai_settings": {},
         "stt_language": "en",
         "tts_provider": "cartesia",
         "tts_model": "sonic",
@@ -374,6 +375,36 @@ async def test_admission_persists_anonymous_call_before_reservation(monkeypatch)
     assert "c.billing_status='reserved'" in usage_sql
     assert "c.billing_status='reversed'" in usage_sql
     assert "COALESCE(c.direction" not in usage_sql  # no outbound-only filter
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["balanced", "min_latency", "max_accuracy"])
+async def test_admission_pins_assembly_controls_used_by_inbound_runtime(monkeypatch, mode):
+    import json
+    from app.domain.services.telephony.lifecycle import _pinned_inbound_ai_config
+    from app.domain.services.telephony_session_config import resolve_stt_selection
+
+    settings = {"mode": mode, "prompt": "English appointment calls.", "keyterms_prompt": ["Talky"]}
+    conn = _AllowedConn(route_overrides={
+        "tenant_stt_engine": "assemblyai", "tenant_stt_provider": "assemblyai",
+        "tenant_stt_model": "universal-3-6-pro", "tenant_stt_language": "en",
+        "tenant_assemblyai_settings": json.dumps(settings),
+        "tenant_pipeline_mode": "cascaded",
+    })
+    monkeypatch.setattr(admission_module, "acquire_with_tenant", lambda *_args: _acquire(conn))
+    decision = await InboundAdmissionService(object(), _Limiter()).admit(
+        InboundAdmissionRequest(
+            provider="ASTERISK", provider_call_id="assembly-synthetic-call",
+            called_did="+15551234567", caller_ani="anonymous",
+        )
+    )
+    assert decision.allowed
+    assert decision.config_snapshot["tenant_ai_config"]["assemblyai_settings"] == settings
+    pinned, _ = _pinned_inbound_ai_config({"config_snapshot": decision.config_snapshot})
+    session_settings = resolve_stt_selection(pinned)
+    assert session_settings["stt_provider_type"] == "assemblyai"
+    assert session_settings["assemblyai_settings"]["mode"] == mode
+    assert session_settings["assemblyai_settings"]["prompt"] == settings["prompt"]
 
 
 @pytest.mark.asyncio

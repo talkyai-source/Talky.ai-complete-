@@ -40,6 +40,14 @@ def test_unknown_reason_falls_back_but_is_never_blank():
     assert a.severity in {"error", "warning", "info"}
 
 
+def test_assemblyai_failure_names_selected_stt_before_generic_warmup():
+    advice = advise("pre_originate_warmup_handshake_failed: AssemblyAI authentication failed (HTTP 401)")
+    assert advice.stage == "voice"
+    assert "AssemblyAI" in advice.title
+    assert "concurrency" in advice.suggestion
+    assert "Cartesia" not in advice.suggestion
+
+
 def test_none_reason_uses_category_tiebreaker():
     a = advise(None, category="tts")
     assert a.stage == "voice"

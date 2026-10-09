@@ -6,7 +6,8 @@ This configuration is used in both the AI Options testing page and actual calls.
 """
 from typing import Any, Optional, List, Dict
 from app.realtime.config import RealtimeProviderConfig
-from pydantic import BaseModel, Field
+from app.domain.models.assemblyai_config import ASSEMBLYAI_MODEL, AssemblyAISettings
+from pydantic import BaseModel, Field, model_validator
 from enum import Enum
 
 
@@ -22,6 +23,7 @@ class LLMProvider(str, Enum):
 class STTProvider(str, Enum):
     """Available STT providers"""
     DEEPGRAM = "deepgram"
+    ASSEMBLYAI = "assemblyai"
 
 
 class TTSProvider(str, Enum):
@@ -232,12 +234,27 @@ class AIProviderConfig(RealtimeProviderConfig):
     # STT Configuration
     stt_provider: STTProvider = STTProvider.DEEPGRAM
     stt_model: str = DeepgramModel.NOVA_3.value
-    # STT engine — which Deepgram speech model drives turn-taking:
+    # STT engine — which speech model drives turn-taking:
     #   "deepgram_flux" — Flux, semantic turn-detection (/v2/listen). Default.
     #   "deepgram_nova" — Nova-3, acoustic VAD + endpointing (/v1/listen).
+    #   "assemblyai" — Universal-3.6 Pro, with its own tuning below.
     # Independent of the failover secondary (Flux always falls back to Nova-3).
     stt_engine: str = "deepgram_flux"
     stt_language: str = "en"
+    assemblyai_settings: Optional[AssemblyAISettings] = None
+
+    @model_validator(mode="after")
+    def validate_assemblyai_selection(self):
+        if self.stt_engine == "assemblyai":
+            if self.stt_language != "en":
+                raise ValueError("AssemblyAI Universal-3.6 Pro is configured for English only")
+            self.stt_provider = STTProvider.ASSEMBLYAI
+            self.stt_model = ASSEMBLYAI_MODEL
+            if self.assemblyai_settings is None:
+                self.assemblyai_settings = AssemblyAISettings()
+        elif self.stt_provider == STTProvider.ASSEMBLYAI:
+            raise ValueError("AssemblyAI requires the assemblyai STT engine")
+        return self
     
     # TTS Configuration - Using Deepgram Aura-2 (fast and high quality)
     tts_provider: TTSProvider = TTSProvider.DEEPGRAM
@@ -676,7 +693,7 @@ DEEPGRAM_MODELS = [
 ]
 
 # Selectable STT engines (the speech model that drives turn-taking). Distinct
-# from DEEPGRAM_MODELS — this is the Flux-vs-Nova choice surfaced in AI Options.
+# from model IDs — these are the adapters surfaced in AI Options.
 STT_ENGINES = [
     ModelInfo(
         id="deepgram_flux",
@@ -687,12 +704,29 @@ STT_ENGINES = [
         provider="deepgram",
     ),
     ModelInfo(
+        id="assemblyai",
+        name="AssemblyAI Universal-3.6 Pro",
+        description="English streaming transcription with fast, balanced, and accuracy modes, plus conversation context for names and contact details.",
+        speed="Streaming",
+        provider="assemblyai",
+    ),
+    ModelInfo(
         id="deepgram_nova",
         name="Deepgram Nova-3",
         description="Acoustic VAD + endpointing — proven and stable; formats emails and numbers natively. Also the automatic failover whenever Flux is unavailable.",
         speed="Streaming",
         is_preview=False,
         provider="deepgram",
+    ),
+]
+
+ASSEMBLYAI_MODELS = [
+    ModelInfo(
+        id=ASSEMBLYAI_MODEL,
+        name="Universal-3.6 Pro",
+        description="English streaming speech recognition with configurable accuracy and latency.",
+        speed="Streaming",
+        provider="assemblyai",
     ),
 ]
 

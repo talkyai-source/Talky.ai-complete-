@@ -1,6 +1,7 @@
 import type { CampaignVoiceSettingsValue, RealtimeTurnDetection } from "@/components/realtime/types";
 import { z } from "zod";
 import { sharedHttpClient } from "@/lib/api";
+import { AssemblyAISettingsSchema, type AssemblyAISettings } from "@/lib/assemblyai-settings";
 
 export interface ModelInfo {
     id: string;
@@ -11,6 +12,8 @@ export interface ModelInfo {
     context_window?: number;
     is_preview?: boolean;
     provider?: string;
+    available?: boolean;
+    unavailable_reason?: string | null;
 }
 
 export interface VoiceInfo {
@@ -45,7 +48,7 @@ export interface ProviderListResponse {
     stt: {
         providers: string[];
         models: ModelInfo[];
-        /** Selectable speech engines (Flux vs Nova-3 turn-taking). */
+        /** Selectable speech engines, including AssemblyAI Universal-3.6 Pro. */
         engines?: ModelInfo[];
     };
     tts: {
@@ -83,9 +86,10 @@ export interface AIProviderConfig {
     llm_max_tokens: number;
     stt_provider: string;
     stt_model: string;
-    /** Speech engine: "deepgram_flux" (default) or "deepgram_nova". */
+    /** Speech engine: deepgram_flux, deepgram_nova or assemblyai. */
     stt_engine: string;
     stt_language: string;
+    assemblyai_settings?: AssemblyAISettings | null;
     tts_provider: string;
     tts_model: string;
     tts_voice_id: string;
@@ -168,6 +172,8 @@ const RawModelSchema = z
         is_preview: z.boolean().optional(),
         isPreview: z.boolean().optional(),
         provider: z.string().optional(),
+        available: z.boolean().optional(),
+        unavailable_reason: z.string().nullish(),
     })
     .passthrough();
 
@@ -253,6 +259,8 @@ const RawConfigSchema = z
         sttEngine: z.string().optional(),
         stt_language: z.string().optional(),
         sttLanguage: z.string().optional(),
+        assemblyai_settings: AssemblyAISettingsSchema.nullish(),
+        assemblyaiSettings: AssemblyAISettingsSchema.nullish(),
         tts_provider: z.string().optional(),
         ttsProvider: z.string().optional(),
         tts_model: z.string().optional(),
@@ -354,6 +362,8 @@ function normalizeModel(model: z.infer<typeof RawModelSchema>): ModelInfo {
         context_window: model.context_window ?? model.contextWindow ?? undefined,
         is_preview: model.is_preview ?? model.isPreview,
         provider: model.provider,
+        available: model.available,
+        unavailable_reason: model.unavailable_reason,
     };
 }
 
@@ -435,6 +445,7 @@ function normalizeConfig(raw: z.infer<typeof RawConfigSchema>): AIProviderConfig
         // New optional field — older saved configs lack it; default to Flux.
         stt_engine: pickNonEmptyString(raw.stt_engine, raw.sttEngine) ?? "deepgram_flux",
         stt_language: requireNonEmptyString("stt_language", raw.stt_language, raw.sttLanguage),
+        assemblyai_settings: raw.assemblyai_settings !== undefined ? raw.assemblyai_settings : raw.assemblyaiSettings,
         tts_provider: requireNonEmptyString("tts_provider", raw.tts_provider, raw.ttsProvider),
         tts_model: requireNonEmptyString("tts_model", raw.tts_model, raw.ttsModel),
         tts_voice_id: requireNonEmptyString("tts_voice_id", raw.tts_voice_id, raw.ttsVoiceId),

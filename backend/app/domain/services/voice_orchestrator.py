@@ -208,6 +208,8 @@ class VoiceSessionConfig(RealtimeSessionConfig):
     # providers.yaml flux keyterms (see _default_flux_keyterms). Applies to
     # BOTH telephony and ask-AI since both build STT via _create_stt_provider.
     stt_keyterms: list[str] = field(default_factory=list)
+    # Dedicated settings; Flux timing overrides never change AssemblyAI modes.
+    assemblyai_settings: Optional[dict] = None
 
     # Turn-0 floor — see voice_pipeline_service._should_reject_turn_0.
     # Per-tenant overrides come through the voice_tuning resolver at
@@ -797,6 +799,7 @@ class VoiceOrchestrator:
         was_interrupted = False
         sent_audio = False
         waited_for_browser_playback = False
+        context_playback_allowed = True
 
         try:
             mute_during_tts = (
@@ -849,6 +852,9 @@ class VoiceOrchestrator:
                         )
                         break
 
+                    if not audio_chunk.data:
+                        continue
+
                     # Route greeting audio through the media gateway so browser
                     # sessions use the same format conversion and buffering path as
                     # normal replies.
@@ -892,7 +898,18 @@ class VoiceOrchestrator:
             ):
                 await websocket.send_json({"type": "tts_audio_complete"})
                 waited_for_browser_playback = True
-                await session.media_gateway.wait_for_playback_complete(session.call_id)
+                playback_result = await session.media_gateway.wait_for_playback_complete(session.call_id)
+                context_playback_allowed = playback_result is not False
+
+            if (
+                sent_audio and not was_interrupted and context_playback_allowed
+                and not interrupt_event.is_set()
+            ):
+                from app.domain.services.stt_context import update_stt_agent_context
+
+                await update_stt_agent_context(
+                    session.stt_provider, session.call_id, cleaned_greeting,
+                )
 
         except Exception as e:
             logger.error(f"Greeting TTS error: {e}")
@@ -1093,9 +1110,13 @@ class VoiceOrchestrator:
             get_credential_resolver,
         )
 
-        api_key = await get_credential_resolver().resolve(
-            "deepgram", tenant_id=config.tenant_id,
-        )
+        engine = (config.stt_provider_type or "deepgram_flux").lower()
+        is_assemblyai = engine == "assemblyai"
+        failover_on = _failover_enabled("STT_FAILOVER_ENABLED")
+        resolver = get_credential_resolver()
+        api_key = None
+        if not is_assemblyai or failover_on:
+            api_key = await resolver.resolve("deepgram", tenant_id=config.tenant_id)
 
         def _build_flux(model: str):
             from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
@@ -1130,24 +1151,36 @@ class VoiceOrchestrator:
             return DeepgramNovaSTTProvider(), init
 
         # PRIMARY = the engine the tenant picked in AI Options (default Flux).
-        engine = (config.stt_provider_type or "deepgram_flux").lower()
         is_nova_primary = engine in ("deepgram_nova", "deepgram-nova", "nova", "nova-3")
         # Flux only ships an English model; a non-English tenant language can
         # only be honoured by Nova-3. Switch here as well as in the session
         # builder so non-telephony callers get the same rule.
         _lang = (getattr(config, "stt_language", None) or "en").strip().lower()
-        if not is_nova_primary and _lang not in ("en", "en-us", "en-gb", "en-au", "en-in", "en-nz"):
+        if is_assemblyai and _lang not in ("en", "en-us", "en-gb", "en-au", "en-in", "en-nz"):
+            raise ValueError("AssemblyAI 3.6 Pro is configured for English only")
+        if not is_assemblyai and not is_nova_primary and _lang not in ("en", "en-us", "en-gb", "en-au", "en-in", "en-nz"):
             logger.info(
                 "stt_language_forces_nova language=%s (Flux is English-only)", _lang,
             )
             is_nova_primary = True
-        if is_nova_primary:
+        if is_assemblyai:
+            from app.infrastructure.stt.assemblyai import AssemblyAISTTProvider
+
+            primary = AssemblyAISTTProvider()
+            primary_init = {
+                "api_key": await resolver.resolve("assemblyai", tenant_id=config.tenant_id),
+                "model": "universal-3-6-pro",
+                "sample_rate": config.stt_sample_rate,
+                "encoding": config.stt_encoding,
+                "assemblyai_settings": config.assemblyai_settings or {},
+            }
+            # AssemblyAI-only accounts do not need a Deepgram subscription.
+            failover_on = failover_on and bool(api_key)
+        elif is_nova_primary:
             primary, primary_init = _build_nova(config.stt_model or "nova-3")
         else:
             primary, primary_init = _build_flux(config.stt_model or "flux-general-en")
         await primary.initialize(primary_init)
-
-        failover_on = _failover_enabled("STT_FAILOVER_ENABLED")
 
         # Controlled fault injection (2026-08-18). Off unless an operator names
         # THIS campaign in VOICE_STT_FAULT_SILENT_CAMPAIGN with a live expiry,
@@ -1199,7 +1232,7 @@ class VoiceOrchestrator:
         )
         logger.info(
             "stt_resilient_wrapper_active primary=%s-%s secondary=%s",
-            "nova" if is_nova_primary else "flux", primary_init["model"], sec_label,
+            engine, primary_init["model"], sec_label,
         )
         return wrapper
 

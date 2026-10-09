@@ -63,6 +63,9 @@ _DEFAULTS: dict[str, int] = {
     # your actual account cap, but never above limit_per_host (50).
     "elevenlabs": 8,
     "deepgram": 80,
+    # Conservative starter-account ceiling. Configure per worker against the
+    # account's total streaming allowance when increasing call capacity.
+    "assemblyai": 5,
     "cartesia": 80,
     "google_tts": 200,
 }

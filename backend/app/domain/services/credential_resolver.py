@@ -39,6 +39,7 @@ _ENV_VAR_BY_PROVIDER: dict[str, str] = {
     "gemini": "GEMINI_API_KEY",
     "cerebras": "CEREBRAS_API_KEY",
     "deepgram": "DEEPGRAM_API_KEY",
+    "assemblyai": "ASSEMBLYAI_API_KEY",
     "cartesia": "CARTESIA_API_KEY",
     "elevenlabs": "ELEVENLABS_API_KEY",
     "openai": "OPENAI_API_KEY",

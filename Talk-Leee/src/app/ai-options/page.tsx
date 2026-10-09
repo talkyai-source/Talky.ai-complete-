@@ -6,6 +6,8 @@ import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { ApplyToCampaignsModal } from "@/components/campaigns/apply-to-campaigns-modal";
 import { VoiceCloneModal } from "@/components/ai-options/voice-clone-modal";
+import { AssemblyAIControls } from "@/components/ai-options/assemblyai-controls";
+import { assemblyAISettingsError } from "@/lib/assemblyai-settings";
 import {
     aiOptionsApi,
     AIProviderConfig,
@@ -221,6 +223,16 @@ function AIOptionsEditor({ scope }: { scope: string }) {
 
     async function handleSaveConfig() {
         if (!config || saveInFlightRef.current) return;
+        const assemblyError = assemblyAISettingsError(config.assemblyai_settings);
+        if (assemblyError) {
+            setError(assemblyError);
+            return;
+        }
+        const engine = providers?.stt.engines?.find((entry) => entry.id === config.stt_engine);
+        if (config.pipeline_mode !== "realtime" && engine?.available === false) {
+            setError(engine.unavailable_reason || "The selected transcription engine is unavailable.");
+            return;
+        }
         if (config.pipeline_mode === "realtime" && !providers?.realtime?.available) {
             setError(providers?.realtime?.unavailable_reason || "Realtime availability could not be verified.");
             return;
@@ -683,20 +695,28 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                                 id="ai-options-stt-engine"
                                 ariaLabel="Engine"
                                 value={config.stt_engine}
-                                onChange={(next) => setConfig({ ...config, stt_engine: next })}
+                                onChange={(next) => setConfig({ ...config, stt_engine: next,
+                                    ...(next === "assemblyai" ? {
+                                        stt_provider: "assemblyai", stt_model: "universal-3-6-pro", stt_language: "en",
+                                        assemblyai_settings: config.assemblyai_settings ?? { mode: "balanced" },
+                                    } : { stt_provider: "deepgram", stt_model: next === "deepgram_nova" ? "nova-3" : "flux-general-en" }),
+                                })}
                                 selectClassName={sharedSelectCls}
                             >
-                                {sttEngines.length === 0 && <option value={config.stt_engine}>{config.stt_engine}</option>}
+                                {!sttEngines.some((engine) => engine.id === config.stt_engine) && <option value={config.stt_engine}>{config.stt_engine} (saved selection)</option>}
                                 {sttEngines.map((eng) => (
-                                    <option key={eng.id} value={eng.id}>{`${eng.name}${eng.is_preview ? " (beta)" : ""}`}</option>
+                                    <option key={eng.id} value={eng.id} disabled={eng.available === false}>{`${eng.name}${eng.is_preview ? " (beta)" : ""}${eng.available === false ? " (unavailable)" : ""}`}</option>
                                 ))}
                             </Select>
                             {sttEngineInfo && (
                                 <div className="rounded-lg border border-border bg-muted/40 p-3">
                                     <p className="text-sm text-foreground">{sttEngineInfo.description}</p>
-                                    <p className="mt-1 text-xs text-muted-foreground">Turn detection: {sttEngineInfo.speed ?? "n/a"} · automatically fails over to the other engine if one is unavailable</p>
+                                    <p className="mt-1 text-xs text-muted-foreground">Turn detection: {sttEngineInfo.speed ?? "n/a"}</p>
+                                    {sttEngineInfo.available === false && <p role="status" className="mt-2 text-xs text-amber-600 dark:text-amber-300">{sttEngineInfo.unavailable_reason || "This transcription engine is currently unavailable."}</p>}
                                 </div>
                             )}
+                            {sttEngines.filter((engine) => engine.available === false && engine.id !== config.stt_engine).map((engine) => <p key={engine.id} className="text-xs text-muted-foreground">{engine.name}: {engine.unavailable_reason || "currently unavailable"}</p>)}
+                            {config.stt_engine === "assemblyai" && <AssemblyAIControls value={config.assemblyai_settings} onChange={(next) => setConfig({ ...config, assemblyai_settings: next })} />}
                         </div>
                     </Card>
 
@@ -873,7 +893,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                             const numCls = "mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground";
                             return (
                                 <div className="grid gap-5 md:grid-cols-2">
-                                    {!fluxActive && <p className="md:col-span-2 text-xs text-muted-foreground">Flux turn-detection controls are inactive for Nova or non-English transcription. Saved overrides are kept for Flux calls.</p>}
+                                    {!fluxActive && <p className="md:col-span-2 text-xs text-muted-foreground">Flux turn-detection controls apply only to Flux English calls. Saved overrides are kept for Flux calls.</p>}
                                     <fieldset disabled={!fluxActive} aria-label="Flux turn detection" className="contents disabled:opacity-50">
                                     <div>
                                         <div className="flex items-center justify-between text-xs"><span className="font-medium text-foreground">End-of-turn confidence <span className="ml-1 text-muted-foreground">default 0.85</span></span><span className="font-mono text-emerald-500">{eot !== undefined ? eot.toFixed(2) : "—"}</span></div>

@@ -3494,6 +3494,7 @@ def _pinned_inbound_ai_config(
             "stt_model",
             "stt_language",
             "stt_engine",
+            "assemblyai_settings",
             "tts_provider",
             "tts_model",
             "tts_voice_id",
