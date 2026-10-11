@@ -2,6 +2,7 @@
 import asyncio
 import os
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -132,8 +133,13 @@ async def test_concurrent_shared_attempts_are_idempotent_and_no_lead_is_supporte
     assert await db.admin.fetchval("SELECT status FROM dialer_jobs WHERE id=$1", db.jobs[0]) == "queued"
 
 
-async def test_database_timeout_does_not_manufacture_acknowledgement(dnc_db):
+async def test_database_timeout_does_not_manufacture_acknowledgement(dnc_db, monkeypatch):
+    from app.domain.services.telephony import lifecycle
+
     db = dnc_db
+    db.session._caller_opted_out = True
+    purge = AsyncMock(wraps=opt_out.purge_lead_on_opt_out)
+    monkeypatch.setattr(opt_out, "purge_lead_on_opt_out", purge)
     async with db.admin.transaction():
         # Block only this synthetic tenant's FK check, never a shared table.
         await db.admin.fetchrow("SELECT id FROM tenants WHERE id=$1 FOR UPDATE", db.tenants[0])
@@ -141,8 +147,43 @@ async def test_database_timeout_does_not_manufacture_acknowledgement(dnc_db):
         assert not getattr(db.voice, "_opt_out_dnc_written", False)
         assert not getattr(db.voice, "_opt_out_purged", False)
     assert await db.admin.fetchval("SELECT count(*) FROM dnc_entries WHERE tenant_id=$1", db.tenants[0]) == 0
-    assert await opt_out.purge_opt_out_before_farewell(db.session)
-    assert db.voice._opt_out_purged
+    assert db.session._opt_out_inline_failed is True
+    assert not getattr(db.session, "_opt_out_recorded", False)
+    # The live-call contract permits one failed attempt, avoiding another
+    # 2.5 seconds of dead air. Recovery belongs to the actual terminal callback.
+    assert not await opt_out.purge_opt_out_before_farewell(db.session)
+    purge.assert_awaited_once()
+    assert not getattr(db.voice, "_opt_out_dnc_written", False)
+    assert not getattr(db.voice, "_opt_out_purged", False)
+
+    # Exercise the production teardown path with real DNC/lead/job SQL. Stub
+    # unrelated media, recording, Redis and status projection at their ports.
+    db.voice.pipeline = SimpleNamespace(cancel_active_turn=AsyncMock())
+    ended = AsyncMock()
+    state = SimpleNamespace(clear_first_speaker=lambda _: None,
+        clear_ringing_started_at=lambda _: None, pop_ringing_warmup=lambda _: None,
+        pop_voice_session=lambda _: db.voice, remove_gateway_sessions_for_call=lambda _: None)
+    monkeypatch.setattr(lifecycle, "_state", lambda: state)
+    monkeypatch.setattr(lifecycle, "get_adapter", lambda: SimpleNamespace())
+    monkeypatch.setattr(lifecycle, "_save_call_recording", AsyncMock())
+    monkeypatch.setattr(lifecycle, "_release_ended_marker_later", lambda *args, **kwargs: None)
+    monkeypatch.setattr(lifecycle, "_get_orchestrator", lambda: SimpleNamespace(end_session=ended))
+    monkeypatch.setattr("app.domain.services.global_concurrency.release_lease", AsyncMock())
+    monkeypatch.setattr("app.domain.services.call_status.record_call_state_by_provider_id", AsyncMock())
+    call_id = f"synthetic-dnc-timeout-{uuid4().hex}"
+    try:
+        assert await lifecycle._on_call_ended(call_id, terminal_at_monotonic=100, acknowledge_ledger=False)
+        assert purge.await_count == 2  # one failed inline write + the teardown retry
+        assert db.voice._opt_out_dnc_written and db.voice._opt_out_purged
+        ended.assert_awaited_once_with(db.voice)
+        assert await db.admin.fetchval("SELECT count(*) FROM dnc_entries WHERE tenant_id=$1", db.tenants[0]) == 1
+        assert await db.admin.fetchval("SELECT status FROM leads WHERE id=$1", db.leads[0]) == "dnc"
+        assert await db.admin.fetchval("SELECT status FROM dialer_jobs WHERE id=$1", db.jobs[0]) == "cancelled"
+        assert await db.admin.fetchval("SELECT count(*) FROM dnc_entries WHERE tenant_id=$1", db.tenants[1]) == 0
+        assert await db.admin.fetchval("SELECT status FROM leads WHERE id=$1", db.leads[1]) == "pending"
+        assert await db.admin.fetchval("SELECT status FROM dialer_jobs WHERE id=$1", db.jobs[1]) == "queued"
+    finally:
+        lifecycle._clear_ended_marker(call_id, lifecycle._ended_call_marker_tokens.get(call_id))
 
 
 async def test_permanent_opt_out_preserves_other_source_and_refreshes_old_expiry(dnc_db):
