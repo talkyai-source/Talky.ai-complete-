@@ -3650,16 +3650,13 @@ def _ws_audio_source_allowed(websocket: WebSocket) -> bool:
 
     A same-host reverse proxy also connects from loopback, so a loopback peer
     that carries proxy headers is a relayed public client and gets no free pass.
-    The token may arrive as a header or ``?token=`` (mod_audio_fork can only
-    shape the URL).
+    The token is accepted in the header only, never as ``?token=``: access logs
+    keep query strings, and this token opens every internal route.  A
+    same-host mod_audio_fork needs no token (direct loopback).
     """
     configured = os.getenv("INTERNAL_SERVICE_TOKEN", "").strip()
     if configured:
-        presented = (
-            websocket.headers.get("x-internal-service-token")
-            or websocket.query_params.get("token")
-            or ""
-        )
+        presented = websocket.headers.get("x-internal-service-token") or ""
         if presented and secrets.compare_digest(presented, configured):
             return True
     host = websocket.client.host if websocket.client else ""

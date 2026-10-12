@@ -88,9 +88,12 @@ def test_remote_source_with_wrong_token_is_refused(bridge):
     assert bridge.handled == []
 
 
-def test_remote_source_with_internal_token_query_is_accepted(bridge):
-    with _client("203.0.113.9").websocket_connect(URL + f"?token={TOKEN}"):
-        assert bridge.handled == ["call-uuid-1"]
+def test_internal_token_in_the_url_is_refused(bridge):
+    """The shared internal token must never travel in a URL: access logs keep
+    query strings, and that token opens every internal route.  Header only."""
+    code = _assert_refused(_client("203.0.113.9"), url=URL + f"?token={TOKEN}")
+    assert code == 1008
+    assert bridge.handled == []
 
 
 def test_remote_source_with_internal_token_header_is_accepted(bridge):
