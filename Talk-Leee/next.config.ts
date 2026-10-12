@@ -59,6 +59,7 @@ const nextConfig: NextConfig = {
         ];
     },
     async headers() {
+        const isDev = process.env.NODE_ENV === "development";
         return [
             {
                 source: "/images/:path*",
@@ -84,10 +85,13 @@ const nextConfig: NextConfig = {
                 source: "/site.webmanifest",
                 headers: [{ key: "Cache-Control", value: "public, max-age=3600, stale-while-revalidate=86400" }],
             },
-            {
+            // Content-hashed in production, but NOT in dev: the dev server reuses
+            // stable chunk names, so an immutable year-long cache makes edits
+            // invisible until the browser cache is cleared. Production only.
+            ...(isDev ? [] : [{
                 source: "/_next/static/:path*",
                 headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
-            },
+            }]),
         ];
     },
     webpack: (config, { dev }) => {
