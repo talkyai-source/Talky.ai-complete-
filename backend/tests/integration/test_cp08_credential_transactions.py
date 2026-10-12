@@ -124,20 +124,19 @@ class ResetRedis:
     async def delete(self,_):
         if self.fail_cleanup: raise RuntimeError('synthetic cleanup outage')
         self.raw=None
-    async def eval(self,script,_count,*keys_and_args):
+    async def eval(self,script,_count,*params):
         # Fake of the Redis EVAL command (redis-py Redis.eval); nothing is executed.
         if 'INCR' in script:
-            # reset._CLAIM_RESET_ATTEMPT: KEYS=(request, attempts), ARGV=(original, max, ttl).
+            # reset._CLAIM_RESET_ATTEMPT gets (request, attempts) then (original, max, ttl).
             # Same rules as the Lua: the code must still be current, each claim
             # counts, and past the cap the code is burned. Not a cleanup call.
-            _request_key,attempts_key,original,max_attempts=keys_and_args[:4]
-            if self.raw!=original: return -2
-            self.attempts[attempts_key]=self.attempts.get(attempts_key,0)+1
-            if self.attempts[attempts_key]>int(max_attempts): self.raw=None; return -1
-            return self.attempts[attempts_key]
+            counter=params[1]
+            if self.raw!=params[2]: return -2
+            self.attempts[counter]=self.attempts.get(counter,0)+1
+            if self.attempts[counter]>int(params[3]): self.raw=None; return -1
+            return self.attempts[counter]
         if self.fail_cleanup: raise RuntimeError('synthetic cleanup outage')
-        _key,expected=keys_and_args
-        if self.raw==expected: self.raw=None; return 1
+        if self.raw==params[1]: self.raw=None; return 1
         return 0
 
 
