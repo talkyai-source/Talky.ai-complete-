@@ -350,7 +350,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
         activeRef.current = true;
         return () => {
             activeRef.current = false;
-            previewRequestRef.current++;
+            previewRequestRef.current += 1;
             if (voicePreviewContextRef.current) {
                 void voicePreviewContextRef.current.close();
                 voicePreviewContextRef.current = null;

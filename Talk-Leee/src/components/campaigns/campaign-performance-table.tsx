@@ -25,7 +25,7 @@ import {
     statusBadgeClass,
 } from "@/lib/campaign-performance";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight, Pause, Play, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Pause, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { CampaignStartControl } from "@/components/campaigns/campaign-readiness";
