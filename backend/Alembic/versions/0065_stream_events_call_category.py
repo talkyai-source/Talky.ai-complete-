@@ -41,10 +41,17 @@ BEGIN
         NOT VALID;
 END $$
 """
+# The early RETURN matters: SQL gives no short-circuit guarantee for AND, so
+# "to_regclass(...) IS NOT NULL AND ... 'public.stream_events'::regclass" still
+# raises where the table is absent (complete_schema.sql, which CI and disaster
+# recovery build from). Databases that have the table behave exactly as before.
 VALIDATE_SQL = """
 DO $$
 BEGIN
-    IF to_regclass('public.stream_events') IS NOT NULL AND EXISTS (
+    IF to_regclass('public.stream_events') IS NULL THEN
+        RETURN;
+    END IF;
+    IF EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conrelid = 'public.stream_events'::regclass
           AND conname = 'stream_events_category_check' AND NOT convalidated

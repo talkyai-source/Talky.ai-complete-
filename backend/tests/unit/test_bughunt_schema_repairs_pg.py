@@ -125,6 +125,34 @@ def test_schema_repairs_and_drain_filter():
     assert out["due"] == {out["real_call"]}
 
 
+async def _no_tables_scenario(admin_dsn):
+    """The CI and disaster-recovery bootstrap (database/complete_schema.sql) has no
+    stream_events, tenant_ai_credentials or crm_deliveries: there 0065-0068 must be
+    no-ops, not errors. Only production's hand-applied lineage has the tables."""
+    names = ("0065_stream_events_call_category", "0066_crm_skip_test_calls",
+             "0067_ai_credentials_history", "0068_tenant_secret_lookup")
+    dbname = f"bh_repairs_{uuid.uuid4().hex[:10]}"
+    admin = await asyncpg.connect(admin_dsn)
+    await admin.execute(f'CREATE DATABASE "{dbname}"')
+    await admin.close()
+    conn = await asyncpg.connect(f"{admin_dsn.rpartition('/')[0]}/{dbname}")
+    try:
+        for name in names:
+            module = _migration(name)
+            for statement in getattr(module, "UPGRADE_STATEMENTS", None) or (module.FUNCTION_SQL,):
+                await conn.execute(statement)
+        return await conn.fetchval("SELECT to_regclass('public.stream_events') IS NULL")
+    finally:
+        await conn.close()
+        admin = await asyncpg.connect(admin_dsn)
+        await admin.execute(f'DROP DATABASE IF EXISTS "{dbname}" WITH (FORCE)')
+        await admin.close()
+
+
+def test_migrations_0065_to_0068_are_noops_where_the_tables_do_not_exist():
+    assert asyncio.run(_no_tables_scenario(_admin_dsn_or_skip())) is True
+
+
 def test_the_chain_keeps_one_head():
     assert _migration("0065_stream_events_call_category").down_revision == "0064_dnc_phone_number_default"
     assert _migration("0066_crm_skip_test_calls").down_revision == "0065_stream_events_call_category"
