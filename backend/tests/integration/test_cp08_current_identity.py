@@ -24,7 +24,7 @@ from app.api.v1 import dependencies as dep
 from app.api.v1.endpoints.rbac import tenant_users
 from app.core import container
 from app.core.security.rbac import Permission, require_permission, get_user_permissions
-from app.core.security.refresh_tokens import issue_initial_refresh_token
+from app.core.security.refresh_tokens import REFRESH_REUSE_GRACE_SECONDS, issue_initial_refresh_token
 
 login_ep = importlib.import_module("app.api.v1.endpoints.auth.login")
 refresh_ep = importlib.import_module("app.api.v1.endpoints.auth.refresh")
@@ -355,18 +355,32 @@ async def test_removed_membership_refresh_is_denied_and_revocation_commits(ident
     )
 
 
-async def test_concurrent_refresh_has_one_winner_and_reuse_revocation_commits(identity_db):
+async def test_concurrent_refresh_gets_a_sibling_and_later_reuse_revocation_commits(identity_db):
     db = identity_db
     raw, family = await _refresh(db)
     results = await asyncio.gather(
         *(db.http.post("/auth/refresh", headers={"cookie": f"talky_rt={raw}"}) for _ in range(2))
     )
-    assert sorted(r.status_code for r in results) == [200, 401]
+    # Bug hunt auth-sessions-1: a second tab presenting the same cookie a moment
+    # later is a race, not theft. Both succeed and nothing is revoked (it used to
+    # be [200, 401] with the whole family revoked, logging the user out).
+    assert sorted(r.status_code for r in results) == [200, 200]
     row = await db.admin.fetchrow(
-        "SELECT COUNT(*) AS count,bool_and(revoked_at IS NOT NULL) AS revoked FROM refresh_tokens WHERE family_id=$1",
+        "SELECT COUNT(*) AS count,bool_or(revoked_at IS NOT NULL) AS any_revoked FROM refresh_tokens WHERE family_id=$1",
         family,
     )
-    assert row["count"] == 2 and row["revoked"]
+    assert row["count"] == 3 and not row["any_revoked"]
+    # Past the grace window the same replay is reuse: the family is revoked.
+    await db.admin.execute(
+        "UPDATE refresh_tokens SET used_at = used_at - make_interval(secs => $2) "
+        "WHERE family_id=$1 AND parent_id IS NULL",
+        family, REFRESH_REUSE_GRACE_SECONDS + 1,
+    )
+    replay = await db.http.post("/auth/refresh", headers={"cookie": f"talky_rt={raw}"})
+    assert replay.status_code == 401
+    assert await db.admin.fetchval(
+        "SELECT bool_and(revoked_at IS NOT NULL) FROM refresh_tokens WHERE family_id=$1", family
+    )
 
 
 async def test_actual_rejected_login_keeps_durable_failure_counter(identity_db, monkeypatch):

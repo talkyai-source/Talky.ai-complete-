@@ -141,8 +141,19 @@ async def test_database_timeout_does_not_manufacture_acknowledgement(dnc_db):
         assert not getattr(db.voice, "_opt_out_dnc_written", False)
         assert not getattr(db.voice, "_opt_out_purged", False)
     assert await db.admin.fetchval("SELECT count(*) FROM dnc_entries WHERE tenant_id=$1", db.tenants[0]) == 0
-    assert await opt_out.purge_opt_out_before_farewell(db.session)
+    # One in-call attempt per call (purge_opt_out_before_farewell's docstring): a
+    # later in-call caller gets False at once instead of more dead air, so the
+    # farewell still claims nothing ...
+    assert not await opt_out.purge_opt_out_before_farewell(db.session)
+    assert not getattr(db.voice, "_opt_out_purged", False)
+    # ... and the teardown purge (lifecycle._on_call_ended) is the retry that lands it.
+    result = await opt_out.purge_lead_on_opt_out(
+        db_pool=db.pool, db_client=None, tenant_id=db.voice._dialer_tenant_id,
+        lead_id=db.voice._dialer_lead_id, phone_number=db.voice._dialer_phone,
+        call_id=db.voice._dialer_call_id)
+    assert opt_out.record_purge_result(db.voice, result)
     assert db.voice._opt_out_purged
+    assert await db.admin.fetchval("SELECT count(*) FROM dnc_entries WHERE tenant_id=$1", db.tenants[0]) == 1
 
 
 async def test_permanent_opt_out_preserves_other_source_and_refreshes_old_expiry(dnc_db):

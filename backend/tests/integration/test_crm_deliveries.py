@@ -36,7 +36,9 @@ async def crm_db(monkeypatch):
             CREATE TABLE tenants (id UUID PRIMARY KEY);
             CREATE TABLE calls (id UUID PRIMARY KEY, tenant_id UUID, status TEXT, outcome TEXT,
                 duration_seconds INTEGER, transcript TEXT, recording_url TEXT,
-                ended_at TIMESTAMPTZ, crm_call_id TEXT);
+                ended_at TIMESTAMPTZ, crm_call_id TEXT,
+                -- Alembic 0017; CRMDeliveryStore.due() skips Test Agent calls.
+                is_test BOOLEAN NOT NULL DEFAULT FALSE);
             CREATE TABLE connectors (tenant_id UUID, provider TEXT, type TEXT, status TEXT);
         ''')
         spec = importlib.util.spec_from_file_location('crm_migration',
