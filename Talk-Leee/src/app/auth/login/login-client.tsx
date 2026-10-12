@@ -33,6 +33,7 @@ import { markFreshLogin } from "@/lib/http-client";
 import { postAuthDashboard } from "@/lib/post-auth-navigation";
 import MFAVerification from "@/components/auth/mfa-verification";
 import PasskeyLogin from "@/components/auth/passkey-login";
+import { AskAiSignInNotice, clearAskAiSignInFlag } from "@/components/auth/askai-signin-notice";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Step = "email" | "password" | "mfa" | "passkey";
@@ -270,6 +271,9 @@ export default function LoginClientPage() {
             // The URL bar never updates and the user appears to be "stuck"
             // on the login page even though everything is correct.
             //
+            // The Ask-AI sign-in notice must not survive a successful login.
+            clearAskAiSignInFlag();
+
             // window.location.assign guarantees a full page navigation.
             // Cookies are 100% committed by the time the new page's first
             // request fires (no race), the URL bar updates immediately,
@@ -396,6 +400,7 @@ export default function LoginClientPage() {
             </div>
 
             <div className="relative z-10 w-full max-w-md">
+                <AskAiSignInNotice />
                 {/* Branding */}
                 <div className="text-center mb-8">
                     <Link href="/" className="inline-block">

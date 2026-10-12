@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AskAiSignInNotice, clearAskAiSignInFlag } from "@/components/auth/askai-signin-notice";
 
 type Step = "form" | "otp" | "password";
 
@@ -140,6 +141,8 @@ export default function RegisterClientPage() {
             markFreshLogin();
 
             const destination = postAuthDashboard(response.role);
+            // The Ask-AI sign-in notice must not survive a successful signup.
+            clearAskAiSignInFlag();
             if (typeof window !== "undefined") {
                 // A hard navigation guarantees the auth cookies are committed
                 // before the dashboard's first protected request.
@@ -215,6 +218,7 @@ export default function RegisterClientPage() {
             </div>
 
             <div className="relative z-10 w-full max-w-md">
+                <AskAiSignInNotice />
                 <div className="text-center mb-8">
                     <Link href="/" className="inline-block">
                         <p className="text-3xl font-bold tracking-tight text-foreground">Talk-Lee</p>

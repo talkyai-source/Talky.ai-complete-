@@ -6,6 +6,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { MessageCircle } from "lucide-react";
 import { apiBaseUrl } from "@/lib/env";
 import { useAuth } from "@/lib/auth-context";
+import { ASKAI_SIGNIN_FLAG } from "@/components/auth/askai-signin-notice";
 
 function parseConfiguredApiUrl(): URL | null {
     try {
@@ -860,18 +861,14 @@ export function VoiceAgentPopup() {
         };
     }, [handleMessage, endSession, cleanupAudioPlayer, startMicrophone, stopMicrophone, initializeAudioPlayer, playTessaIntro, prefetchTessaIntro, router, pathname]);
 
-    // Pending signed-out redirect; held in a ref so unmount can cancel it.
-    const signInRedirectTimerRef = useRef<number | null>(null);
-
     const handleMainButtonClick = useCallback(() => {
         if (!isAuthed) {
-            setError("Sign in to talk to the agent");
-            if (signInRedirectTimerRef.current === null) {
-                signInRedirectTimerRef.current = window.setTimeout(() => {
-                    signInRedirectTimerRef.current = null;
-                    router.push(`/auth/login?next=${encodeURIComponent(pathname)}`);
-                }, 1800);
-            }
+            // Signed-out: redirect immediately, no message here. The sign-in
+            // notice renders on the auth pages, keyed off this session flag.
+            try {
+                sessionStorage.setItem(ASKAI_SIGNIN_FLAG, "1");
+            } catch { /* storage blocked (private mode) — redirect still works */ }
+            router.push(`/auth/login?next=${encodeURIComponent(pathname)}`);
             return;
         }
         if (!isActive) {
@@ -921,10 +918,6 @@ export function VoiceAgentPopup() {
         isMountedRef.current = true;
         return () => {
             isMountedRef.current = false;
-            if (signInRedirectTimerRef.current !== null) {
-                clearTimeout(signInRedirectTimerRef.current);
-                signInRedirectTimerRef.current = null;
-            }
             endSession();
         };
     }, [endSession]);

@@ -17,9 +17,9 @@ export function Footer() {
   return (
     <footer className="bg-card pt-16 pb-8 px-4 md:px-6 lg:px-8 border-t border-border/60">
       <div className="max-w-7xl mx-auto">
-        <div className="grid grid-cols-2 gap-10 lg:grid-cols-[1.5fr_1fr_1fr] lg:gap-12">
+        <div className="grid grid-cols-2 gap-10 sm:grid-cols-[1.5fr_1fr_1fr] lg:gap-12">
           {/* Brand block */}
-          <div className="col-span-2 lg:col-span-1 flex flex-col items-start gap-6">
+          <div className="col-span-2 sm:col-span-1 flex flex-col items-start gap-6">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-3 group">
             <svg viewBox="327 327 369 369" className="w-8 h-8 text-primary dark:text-foreground" aria-hidden="true" fill="currentColor">
