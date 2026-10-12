@@ -46,6 +46,8 @@ def _run(tmp_path: Path, carrier_ips: tuple = ()):
     log.write_text("", encoding="utf-8")
     for name, body in (("ufw", FAKE_UFW), ("apt-get", NOOP), ("hostname", "#!/usr/bin/env bash\necho 10.0.0.9\n")):
         (shim / name).write_text(body, encoding="utf-8", newline="\n")
+        # Linux PATH lookup skips non-executable files and would run the real tool.
+        (shim / name).chmod(0o755)
 
     text = SCRIPT.read_text(encoding="utf-8")
     assert "[[ $EUID -ne 0 ]]" in text

@@ -66,6 +66,9 @@ def _launch(script_cmd: str, env: dict, cwd: Path, shim: Path):
 def _write(path: Path, body: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body, encoding="utf-8", newline="\n")
+    # Shims must be executable: Linux PATH lookup skips files without the execute
+    # bit and would run the real tool (Git Bash on Windows does not check it).
+    path.chmod(0o755)
 
 
 @pytest.fixture(scope="module")

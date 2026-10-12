@@ -52,6 +52,10 @@ def _run_backup(tmp_path: Path, dump_bytes: int, table_data: int = 60):
     docker = shim / "docker"
     docker.write_text(FAKE_DOCKER, encoding="utf-8", newline="\n")
     (shim / "install").write_text(FAKE_INSTALL, encoding="utf-8", newline="\n")
+    # Linux PATH lookup skips files without the execute bit and would run the real
+    # docker/install instead (Git Bash on Windows does not check it).
+    for name in ("docker", "install"):
+        (shim / name).chmod(0o755)
     backups = tmp_path / "backups"
     env = dict(os.environ)
     env.update(

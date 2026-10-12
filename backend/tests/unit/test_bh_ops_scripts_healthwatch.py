@@ -53,6 +53,8 @@ def _run(tmp_path: Path, bad_attempts: int, mode: str = "refused"):
     state.mkdir()
     for name, body in (("curl", FAKE_CURL), ("sleep", FAKE_SLEEP)):
         (shim / name).write_text(body, encoding="utf-8", newline="\n")
+        # Linux PATH lookup skips non-executable files and would run the real tool.
+        (shim / name).chmod(0o755)
     env = dict(os.environ)
     env.update(
         SHIM_DIR=str(shim),
