@@ -120,7 +120,9 @@
   --ring: rgba(0, 255, 255, 0.25);
   background-color: #001022;
   background-image: linear-gradient(180deg, #001022 0%, #004d5e 100%);
-  background-size: 100% 100vh;
+  /* 100% height, not 100vh: the hero can now grow taller than one screen,
+     and a gradient pinned to one viewport height left a flat band below. */
+  background-size: 100% 100%;
   background-repeat: no-repeat;
   color: var(--foreground);
   position: relative;
@@ -1096,6 +1098,38 @@ details > summary.home-menu-toggle {
   .heroMarqueeGradientBase,
   .heroMarqueeGradientBlobs {
     animation: none;
+  }
+}
+
+/* ── Homepage hero — industry chip row (one fluid rule) ───────────────────
+   Replaces the three fixed breakpoint size regimes. One fluid font-size
+   drives the row: chip height is in em of it, and padding and gap ramp on
+   the same viewport range, pinned to today's exact values at 768px
+   (12px text, 36px height, 20px inline padding, 8px gap) so ≥768px renders
+   exactly as before. All three reach their floor together at 304px of
+   viewport width; the 9px font floor is the legibility limit on a real
+   phone. Scoped to the hero's static chip row only (these classes are set
+   by the isHeroStatic branch of TrustedByMarquee); the animated marquee
+   keeps its own utility classes. */
+.heroChipsGroup {
+  font-size: clamp(9px, calc(12px - (768px - 100vw) * 0.0064655), 12px);
+  gap: clamp(3px, calc(8px - (768px - 100vw) * 0.0107759), 8px);
+}
+
+.heroChip {
+  height: 3em; /* 36px at the 12px cap = today's h-9 */
+  padding-inline: clamp(4px, calc(20px - (768px - 100vw) * 0.0344828), 20px);
+}
+
+/* Below the narrowest width where one legible 9px row still fits inside
+   the hero's 16px side padding (proven: fits at 247px, not at 246px), fall
+   back to a centred 2x2 grid (width rule, not a device list). */
+@media (max-width: 246px) {
+  .heroChipsGroup {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, max-content));
+    justify-content: center;
+    justify-items: center;
   }
 }
 

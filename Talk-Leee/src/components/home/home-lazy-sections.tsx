@@ -253,7 +253,10 @@ function NavbarHeroBackgroundVideo() {
   return (
     <div
       ref={wrapRef}
-      className="pointer-events-none absolute inset-x-0 top-0 z-0 h-screen overflow-hidden"
+      // Spans the navbar strip plus the full hero at any height: the hero is
+      // min-h since 8fd92e44 and can grow past one screen, where h-screen
+      // left a flat band below the video.
+      className="pointer-events-none absolute inset-x-0 bottom-0 top-[calc(-1*var(--home-navbar-height))] z-0 overflow-hidden"
       aria-hidden="true"
       style={{
         backgroundImage: `url("${fallbackPoster}")`,
@@ -298,22 +301,28 @@ function NavbarHeroBackgroundVideo() {
 export function HomeLazySections() {
   return (
     <>
-      <NavbarHeroBackgroundVideo />
+      {/* One positioning context for the video and the hero, so the video's
+          bottom-0 tracks the hero's real height instead of one screen. */}
+      <div className="relative">
+        <NavbarHeroBackgroundVideo />
+        <div className="relative z-10">
+          <Hero
+            title="AI Voice Agent Platform for Seamless Call Automation"
+            description={[
+              "Configure AI voice agents for inbound enquiries and outbound campaigns using your approved business information.",
+              "Choose a supported model and voice, set calling rules, and review the effective configuration before starting a campaign.",
+              "Review call records and captured details to decide what needs a follow-up or a correction from your team.",
+            ]}
+            adjustForNavbar
+            stats={[
+              { label: "Inbound & outbound", value: "Calls" },
+              { label: "Campaign settings", value: "Controls" },
+              { label: "Review outcomes", value: "Records" },
+            ]}
+          />
+        </div>
+      </div>
       <div className="relative z-10">
-        <Hero
-          title="AI Voice Agent Platform for Seamless Call Automation"
-          description={[
-            "Configure AI voice agents for inbound enquiries and outbound campaigns using your approved business information.",
-            "Choose a supported model and voice, set calling rules, and review the effective configuration before starting a campaign.",
-            "Review call records and captured details to decide what needs a follow-up or a correction from your team.",
-          ]}
-          adjustForNavbar
-          stats={[
-            { label: "Inbound & outbound", value: "Calls" },
-            { label: "Campaign settings", value: "Controls" },
-            { label: "Review outcomes", value: "Records" },
-          ]}
-        />
         <SecondaryHero />
         <StatsSection />
         <PackagesSection />
