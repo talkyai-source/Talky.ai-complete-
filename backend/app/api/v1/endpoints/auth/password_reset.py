@@ -39,6 +39,7 @@ from app.core.security.password import (
     hash_password,
     validate_password_strength,
 )
+from app.core.security.lockout import record_login_attempt
 from app.core.security.refresh_tokens import revoke_all_user_refresh_tokens
 from app.core.security.sessions import revoke_all_user_sessions
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
@@ -130,6 +131,48 @@ async def _clear_reset_request(redis, email, original) -> None:
             1, _reset_redis_key(email), original)
     except Exception:
         logger.warning("password_reset_request_cleanup_unavailable")
+
+
+# A 6-digit code has 1e6 values; uncapped, a few hundred requests a second
+# find it within its 15-minute life. Every verification claims an attempt
+# atomically BEFORE the code is compared, so parallel guesses cannot exceed
+# the cap, and past it the code is burned. The counter is keyed by the
+# code's hash, so a newly issued code starts its own count.
+_RESET_MAX_ATTEMPTS = 5
+_CLAIM_RESET_ATTEMPT = """
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return -2 end
+local n = redis.call('INCR', KEYS[2])
+if n == 1 then
+  local ttl = redis.call('PTTL', KEYS[1])
+  if ttl <= 0 then ttl = tonumber(ARGV[3]) end
+  redis.call('PEXPIRE', KEYS[2], ttl)
+end
+if n > tonumber(ARGV[2]) then
+  redis.call('DEL', KEYS[1])
+  return -1
+end
+return n
+"""
+
+
+async def _claim_reset_attempt(redis, email: str, original, pending: dict) -> bool:
+    """True when this verification may compare the code; fails closed."""
+    attempts_key = (
+        f"pwreset:attempts:{email.strip().lower()}:"
+        f"{str(pending.get('code_hash') or '')[:16]}"
+    )
+    try:
+        claimed = await redis.eval(
+            _CLAIM_RESET_ATTEMPT, 2, _reset_redis_key(email), attempts_key,
+            original, _RESET_MAX_ATTEMPTS, _RESET_CODE_TTL_SECONDS * 1000,
+        )
+    except Exception as exc:
+        logger.warning("password_reset_attempt_claim_unavailable err=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Redis is unavailable; cannot reset password right now.",
+        ) from exc
+    return int(claimed) > 0
 
 
 # --- refresh-token revocation reason ---------------------------------------
@@ -379,7 +422,17 @@ async def reset_password(
             detail="Invalid or expired reset code.",
         )
 
-    if not isinstance(pending, dict) or not secrets.compare_digest(_hash_reset_code(code), str(pending.get("code_hash") or "")):
+    if not isinstance(pending, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code.",
+        )
+    if not await _claim_reset_attempt(redis, email, raw, pending):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code. Request a new code.",
+        )
+    if not secrets.compare_digest(_hash_reset_code(code), str(pending.get("code_hash") or "")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset code.",
@@ -447,6 +500,13 @@ async def reset_password(
             # preserve — password reset is the account-RECOVERY path, so
             # EVERY device must re-authenticate, including the caller.
             refresh_revoked = await _revoke_refresh_tokens_for_reset(conn, user_id)
+
+            # Lockout is computed from login_attempts, not the columns zeroed
+            # above; a success row is the boundary that clears it.
+            await record_login_attempt(
+                conn, email=email, user_id=user_id, ip_address=get_client_ip(request),
+                success=True, failure_reason="password_reset",
+            )
 
     logger.info(
         "password_reset_completed user=%s sessions_revoked=%s refresh_tokens_revoked=%s",

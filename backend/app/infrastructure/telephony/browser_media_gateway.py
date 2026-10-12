@@ -70,6 +70,11 @@ class BrowserSession:
     dropped_input_chunks: int = 0
     # Rate-limit timestamp for the queue-overrun warning (one log/sec/call).
     last_queue_drop_warn_at: float = 0.0
+    # Monotonic time the input queue first overran without a successful put
+    # since (0.0 = not currently overrunning), and the verdict once that has
+    # lasted _consumer_stall_after_s: the STT consumer has stopped draining.
+    queue_full_since: float = 0.0
+    consumer_stalled: bool = False
     input_validation_errors: int = 0
     max_input_queue_depth: int = 0
     output_buffer_peak_bytes: int = 0
@@ -117,6 +122,11 @@ class BrowserMediaGateway(MediaGateway):
         # - "f32le": float32 PCM (Google streaming)
         # - "auto": heuristic fallback (explicit opt-in only)
         self._tts_source_format: str = "s16le"
+        # Continuous input-queue overrun this long means the STT consumer is
+        # dead, not slow: the session is closed and recording stops growing.
+        self._consumer_stall_after_s: float = 30.0
+        # Per-call monotonic time of the last "Unknown session for audio" warning.
+        self._unknown_audio_warned_at: Dict[str, float] = {}
 
     async def initialize(self, config: Dict[str, Any]) -> None:
         """Initialize the browser media gateway.
@@ -213,7 +223,16 @@ class BrowserMediaGateway(MediaGateway):
         """
         session = self._sessions.get(call_id)
         if not session:
-            logger.warning(f"Unknown session for audio: {call_id}")
+            # The browser keeps streaming 8 ms frames after the session ended;
+            # one warning per call every 10 s is enough signal.
+            import time as _time
+            _now = _time.monotonic()
+            warned = self._unknown_audio_warned_at
+            if (_now - warned.get(call_id, -1e9)) > 10.0:
+                if len(warned) >= 256:
+                    warned.clear()
+                warned[call_id] = _now
+                logger.warning(f"Unknown session for audio: {call_id}")
             return
 
         if not session.is_active:
@@ -261,16 +280,20 @@ class BrowserMediaGateway(MediaGateway):
         # At 16 kHz / 16-bit mono, 1 hour of audio ≈ 115 MB.
         # Cap at 60 minutes (≈ 115 MB) by evicting the oldest chunks when over
         # budget.  Eviction is rare — most calls are under 30 minutes.
+        # A stalled consumer means the pipeline behind this socket is dead;
+        # slow STT never reaches that verdict, so recording is only cut then.
         _MAX_RECORDING_BYTES = 115_200_000  # 60 min @ 16kHz 16-bit mono
-        session.recording_buffer.append(chunk_to_process)
-        session.recording_buffer_bytes += len(chunk_to_process)
-        while session.recording_buffer_bytes > _MAX_RECORDING_BYTES and session.recording_buffer:
-            evicted = session.recording_buffer.popleft()
-            session.recording_buffer_bytes -= len(evicted)
+        if not session.consumer_stalled:
+            session.recording_buffer.append(chunk_to_process)
+            session.recording_buffer_bytes += len(chunk_to_process)
+            while session.recording_buffer_bytes > _MAX_RECORDING_BYTES and session.recording_buffer:
+                evicted = session.recording_buffer.popleft()
+                session.recording_buffer_bytes -= len(evicted)
 
         # Buffer for STT processing
         try:
             session.input_queue.put_nowait(chunk_to_process)
+            session.queue_full_since = 0.0
             session.max_input_queue_depth = max(
                 session.max_input_queue_depth, session.input_queue.qsize()
             )
@@ -286,6 +309,25 @@ class BrowserMediaGateway(MediaGateway):
             # cost transcript quality with zero operator signal.
             import time as _time
             _now = _time.monotonic()
+            if not session.queue_full_since:
+                session.queue_full_since = _now
+            if (
+                not session.consumer_stalled
+                and (_now - session.queue_full_since) >= self._consumer_stall_after_s
+            ):
+                session.consumer_stalled = True
+                logger.error(
+                    "stt_consumer_stalled call_id=%s overrun_s=%.0f dropped_total=%d — "
+                    "closing the session; recording stops growing",
+                    call_id, _now - session.queue_full_since, session.dropped_input_chunks,
+                    extra={"call_id": call_id, "alert": "stt_consumer_stalled"},
+                )
+                try:
+                    await session.websocket.close(code=1011, reason="stt_consumer_stalled")
+                except Exception as close_exc:
+                    logger.debug("stalled-session close failed call_id=%s: %s", call_id, close_exc)
+            if session.consumer_stalled:
+                return
             if (_now - session.last_queue_drop_warn_at) > 1.0:
                 session.last_queue_drop_warn_at = _now
                 logger.warning(
@@ -533,8 +575,14 @@ class BrowserMediaGateway(MediaGateway):
         session = self._sessions.get(call_id)
         if not session:
             return False
-        await session.websocket.close(code=1000, reason=reason)
-        await self.on_call_ended(call_id, reason)
+        try:
+            await session.websocket.close(code=1000, reason=reason)
+        except Exception as exc:
+            # An already-closed socket is the normal case for a browser that
+            # left first; the session must still be torn down.
+            logger.debug("Browser hangup close failed call_id=%s: %s", call_id, exc)
+        finally:
+            await self.on_call_ended(call_id, reason)
         return True
 
     def start_playback_tracking(self, call_id: str, *, utterance_id: Optional[str] = None) -> None:

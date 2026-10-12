@@ -163,19 +163,25 @@ export function FloatingAssistant() {
     //   - Bearer fallback OFF: accessToken is null but cookie travels
     //     on the WS handshake → backend uses cookie, no auth frame
     //     needed.
-    // Token rotation still triggers a reconnect because accessToken is
-    // in the `connect` callback's deps — its identity changes and the
-    // open/close effect tears down + re-connects with the fresh
-    // credential set.
+    // A token rotation does NOT reconnect: the socket authenticated once
+    // with its ticket, and connect() reads the latest bearer through
+    // accessTokenRef whenever a (re)connect really happens.
     const accessToken = useAccessToken();
     const { user } = useAuth();
+    // Latest-value mirror for the async connect path. The ws-ticket is fetched
+    // per connect and the socket authenticates once, so a routine rotation of
+    // the access token must NOT re-run the lifecycle effect (that would close a
+    // live socket mid-turn and drop the reply). The bearer fallback still reads
+    // the freshest token when a connect or reconnect actually happens.
+    const accessTokenRef = useRef(accessToken);
+    useEffect(() => { accessTokenRef.current = accessToken; }, [accessToken]);
     // Base socket URL only — the `conversation_id` query param is appended in
     // connect() from the ref. Reading a ref here (during render) is unsafe
     // under the React Compiler, which may skip the render entirely; and the
     // reconnect chain never actually depended on this string changing:
-    // `connect` lists accessToken and conversationEpoch itself, so a token
-    // rotation or a thread switch changes ITS identity and the lifecycle
-    // effect re-connects, picking up whatever the ref holds at that moment.
+    // `connect` lists conversationEpoch itself, so a thread switch changes
+    // ITS identity and the lifecycle effect re-connects, picking up whatever
+    // the ref holds at that moment.
     const wsUrl = useMemo(() => {
         if (!user) return null;
         return `${resolveWsBase()}/assistant/chat`;
@@ -309,7 +315,7 @@ export function FloatingAssistant() {
         // A teardown or newer connect happened while awaiting the ticket — abort
         // so we don't open an orphan socket (async-connect race guard).
         if (myEpoch !== connectEpochRef.current) return;
-        if (!wsTicket && !accessToken) {
+        if (!wsTicket && !accessTokenRef.current) {
             // Genuinely unauthenticated (HTTP session lost) — NOT a transient WS
             // drop. Show the sign-in CTA via idle status; do not reconnect-spam.
             setStatus("idle");
@@ -339,7 +345,7 @@ export function FloatingAssistant() {
             // using the short-lived ticket fetched over authed HTTP (wsTicket,
             // which carries the same identity as the login token). Falls back to
             // the in-memory bearer accessToken for admin / native-shell clients.
-            const wsAuthToken = wsTicket ?? accessToken;
+            const wsAuthToken = wsTicket ?? accessTokenRef.current;
             if (wsAuthToken) {
                 try {
                     ws.send(JSON.stringify({ type: "auth", token: wsAuthToken }));
@@ -391,6 +397,9 @@ export function FloatingAssistant() {
 
             switch (payload.type) {
                 case "connected":
+                    // A fresh connection has no turn in flight; a reply that was
+                    // streaming on a previous socket is never coming.
+                    setTyping(false);
                     if (payload.conversation_id && payload.conversation_id !== "new") {
                         setConversationIdEverywhere(payload.conversation_id);
                     }
@@ -537,20 +546,17 @@ export function FloatingAssistant() {
                 setStatus("closed");
             }
         };
-    }, [accessToken, open, wsUrl, conversationEpoch, setConversationIdEverywhere]);
+    }, [open, wsUrl, conversationEpoch, setConversationIdEverywhere]);
 
-    // Lifecycle: connect when expanded, close when collapsed, AND
-    // reconnect when accessToken rotates mid-session. Token rotation
-    // flows through connect's deps → this effect
-    // re-runs. The cleanup closes the prior socket cleanly (Phase 6
-    // detaches its event handlers first, so the delayed onclose can't
-    // misfire); the body opens a new socket with the rotated token.
+    // Lifecycle: connect when expanded, close when collapsed. The cleanup
+    // closes the prior socket cleanly (Phase 6 detaches its event handlers
+    // first, so the delayed onclose can't misfire). An access-token rotation
+    // deliberately does not re-run this effect: it would close a live socket
+    // mid-turn and drop the reply.
     //
     // conversationIdRef preserves the assistant_conversations row id
-    // across the reconnect, so the backend's resume-on-conversation_id
-    // path (assistant_ws.py STEP 3) replays the full message history
-    // and the user's chat continues seamlessly across the 15-minute
-    // JWT TTL boundary.
+    // across a reconnect, so the backend's resume-on-conversation_id
+    // path (assistant_ws.py STEP 3) replays the full message history.
     useEffect(() => {
         // Voice mode owns its OWN socket (/assistant/voice); tear the text WS
         // down while it's active so the two never run concurrently.

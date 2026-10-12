@@ -21,7 +21,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends
 
-from app.api.v1.dependencies import CurrentUser, require_admin
+from app.api.v1.dependencies import CurrentUser, require_platform_admin
 from app.core.postgres_adapter import Client
 
 from .schemas import AlertSettings
@@ -39,7 +39,7 @@ _alert_settings = AlertSettings()
 
 @router.get("/alerts/settings", response_model=AlertSettings)
 async def get_alert_settings(
-    admin_user: CurrentUser = Depends(require_admin)
+    admin_user: CurrentUser = Depends(require_platform_admin)
 ):
     """Get current alert threshold settings."""
     return _alert_settings
@@ -48,7 +48,7 @@ async def get_alert_settings(
 @router.put("/alerts/settings", response_model=AlertSettings)
 async def update_alert_settings(
     settings: AlertSettings,
-    admin_user: CurrentUser = Depends(require_admin)
+    admin_user: CurrentUser = Depends(require_platform_admin)
 ):
     """
     Update alert threshold settings.

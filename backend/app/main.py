@@ -200,6 +200,19 @@ async def _terminate_active_telephony_sessions_for_shutdown(
     }
 
 
+async def _flush_audit_logger() -> None:
+    """Write audit entries still buffered in the AuditLogger (shutdown hook).
+
+    Must run before the database pool closes; a clean shutdown used to drop up
+    to one flush interval of audit entries.
+    """
+    from app.api.v1 import dependencies
+
+    service = dependencies._audit_logger_service
+    if service is not None:
+        await service.aclose()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -747,8 +760,10 @@ async def lifespan(app: FastAPI):
                         try:
                             from app.domain.services.telephony.lifecycle import (
                                 recover_orphaned_calls,
+                                wait_for_telephony_application,
                             )
 
+                            await wait_for_telephony_application()
                             recovered = await recover_orphaned_calls()
                             if recovered:
                                 logger.info(
@@ -791,8 +806,12 @@ async def lifespan(app: FastAPI):
         # process with an ARI connection to issue the hangups. No-op on the
         # in-memory backend. Best-effort — never block startup.
         try:
-            from app.domain.services.telephony.lifecycle import recover_orphaned_calls
+            from app.domain.services.telephony.lifecycle import (
+                recover_orphaned_calls,
+                wait_for_telephony_application,
+            )
 
+            await wait_for_telephony_application()
             recovered = await recover_orphaned_calls()
             if recovered:
                 logger.info("telephony startup recovery: reclaimed %d orphaned call(s)", recovered)
@@ -894,6 +913,10 @@ async def lifespan(app: FastAPI):
             logger.info("inbound_admission_watchdog_stopped")
     except Exception as exc:
         logger.warning("inbound_admission_watchdog_stop_failed err=%s", exc)
+    try:
+        await _flush_audit_logger()
+    except Exception as exc:
+        logger.warning("audit_logger_flush_failed err=%s", exc)
     try:
         await container.shutdown()
     except Exception as e:

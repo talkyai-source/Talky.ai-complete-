@@ -228,14 +228,20 @@ async def login(
         row = {**dict(row), **principal}
 
         # --- SUCCESS -----------------------------------------------------------
-        # Record success (resets the effective failure window)
-        await record_login_attempt(
-            conn,
-            email=normalised_email,
-            user_id=user_id,
-            ip_address=ip,
-            success=True,
-        )
+        # Record success (resets the effective failure window). For MFA users
+        # the password is only the first factor: a success row here would zero
+        # the failure counter on every fresh password login and so disable the
+        # lockout that protects TOTP/recovery-code guessing. /auth/mfa/verify
+        # records the success once the second factor is accepted.
+        mfa_enabled = bool(row.get("mfa_enabled", False))
+        if not mfa_enabled:
+            await record_login_attempt(
+                conn,
+                email=normalised_email,
+                user_id=user_id,
+                ip_address=ip,
+                success=True,
+            )
 
         # Update last_login_at on user profile
         await conn.execute(
@@ -256,7 +262,6 @@ async def login(
         # --- MFA check: if user has MFA enabled, issue a challenge token ------
         # instead of a full JWT.  The client must complete step-2 via
         # POST /auth/mfa/verify to receive the real session + JWT.
-        mfa_enabled = bool(row.get("mfa_enabled", False))
         if mfa_enabled:
             from app.api.v1.endpoints.mfa import create_mfa_challenge
 

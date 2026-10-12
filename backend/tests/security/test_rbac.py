@@ -1090,3 +1090,63 @@ class TestSeedScriptCoversEveryRole:
         )
         # No hardcoded level literals that can drift from UserRole.level.
         assert "UserRole.PLATFORM_ADMIN: 100" not in source
+
+
+# ========================================================================
+# require_permission() — the request cannot pick the tenant that is checked
+# ========================================================================
+
+OTHER_TENANT_ID = "00000000-0000-0000-0000-000000000002"
+
+
+class _PerTenantConn(_RevokedConn):
+    """Grants depend on the tenant the permission queries are scoped to."""
+
+    def __init__(self, grants_by_tenant):
+        super().__init__([])
+        self.grants_by_tenant = grants_by_tenant
+
+    async def fetch(self, _query, *args):
+        tenant = str(args[1]) if len(args) > 1 else None
+        return [{"name": name} for name in self.grants_by_tenant.get(tenant, [])]
+
+
+class TestRequirePermissionChecksTheTenantTheHandlerUses:
+    """Bug hunt 2026-10-10 (tenancy-rbac-admin-1): grants were resolved for the
+    X-Tenant-ID header while handlers act on user.tenant_id. A readonly member
+    of tenant A who administers tenant B sent ``X-Tenant-ID: B`` and passed
+    admin-only checks for writes that landed in tenant A."""
+
+    GRANTS = {TENANT_ID: ["calls:read"], OTHER_TENANT_ID: ["calls:read", "calls:delete"]}
+
+    @pytest.mark.asyncio
+    async def test_a_header_naming_another_tenant_is_refused(self, rbac, Permission):
+        import unittest.mock as _mock
+
+        checker = rbac.require_permission(Permission.CALLS_DELETE)
+        with _mock.patch("app.core.container.get_db_pool_from_container",
+                         return_value=_Pool(_PerTenantConn(self.GRANTS))):
+            with pytest.raises(Exception) as exc:
+                await checker(_request(OTHER_TENANT_ID), _User("readonly"))
+        assert getattr(exc.value, "status_code", None) == 403
+
+    @pytest.mark.asyncio
+    async def test_the_own_tenant_grants_decide(self, rbac, Permission):
+        import unittest.mock as _mock
+
+        with _mock.patch("app.core.container.get_db_pool_from_container",
+                         return_value=_Pool(_PerTenantConn(self.GRANTS))):
+            user = await rbac.require_permission(Permission.CALLS_READ)(_request(), _User("readonly"))
+            with pytest.raises(Exception) as exc:
+                await rbac.require_permission(Permission.CALLS_DELETE)(_request(), _User("readonly"))
+        assert user.id == "user-1" and getattr(exc.value, "status_code", None) == 403
+
+    @pytest.mark.asyncio
+    async def test_a_platform_admin_may_still_name_any_tenant(self, rbac, Permission):
+        import unittest.mock as _mock
+
+        checker = rbac.require_permission(Permission.CALLS_DELETE)
+        with _mock.patch("app.core.container.get_db_pool_from_container",
+                         return_value=_Pool(_PerTenantConn({}))):
+            user = await checker(_request(OTHER_TENANT_ID), _User("platform_admin"))
+        assert user.id == "user-1"

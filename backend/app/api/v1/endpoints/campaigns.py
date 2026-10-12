@@ -1368,9 +1368,11 @@ async def get_campaign_jobs(
         if not current_user.tenant_id:
             return {"jobs": [], "total": 0, "page": page, "page_size": page_size}
 
+        # Explicit tenant predicate: the prod app role has bypassed RLS, so a
+        # foreign campaign UUID must not return that tenant's queue rows.
         query = db_client.table("dialer_jobs").select(
             "*", count="exact"
-        ).eq("campaign_id", campaign_id)
+        ).eq("campaign_id", campaign_id).eq("tenant_id", current_user.tenant_id)
         
         if status:
             query = query.eq("status", status)
@@ -1477,6 +1479,35 @@ def _campaign_activity(
     }
 
 
+_STATS_JOBS_SQL = """
+    SELECT status, COUNT(*) AS n
+      FROM dialer_jobs
+     WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid
+     GROUP BY status
+"""
+
+_STATS_CALLS_SQL = """
+    SELECT outcome,
+           COUNT(*) AS n,
+           COUNT(*) FILTER (
+               WHERE COALESCE(goal_achieved, FALSE)
+                  OR (jsonb_typeof(summary_json) = 'object'
+                      AND (summary_json->>'outcome') ~* '^[[:space:]]*(qualified|callback)')
+           ) AS goals
+      FROM calls
+     WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid
+     GROUP BY outcome
+"""
+
+_STATS_STRING_SUMMARY_SQL = """
+    SELECT summary_json #>> '{}' AS raw
+      FROM calls
+     WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid
+       AND jsonb_typeof(summary_json) = 'string'
+       AND NOT COALESCE(goal_achieved, FALSE)
+"""
+
+
 @router.get("/{campaign_id}/stats")
 async def get_campaign_stats(
     campaign_id: str,
@@ -1508,35 +1539,44 @@ async def get_campaign_stats(
         if current_user.tenant_id and row_tenant_str not in (None, current_user.tenant_id):
             raise HTTPException(status_code=404, detail="Campaign not found")
         
-        # Get job counts by status
-        jobs_response = db_client.table("dialer_jobs").select("status").eq("campaign_id", campaign_id).execute()
-        
-        status_counts = {}
-        for job in jobs_response.data or []:
-            status = job.get("status", "unknown")
-            status_counts[status] = status_counts.get(status, 0) + 1
-        
-        # Get call outcomes. "goals_achieved" = the live resolver flag OR the
-        # post-call AI verdict reading as a success (qualified/callback). The
-        # goal_achieved flag alone is currently never set on the call path, so
-        # the AI summary verdict is the real success signal — without this the
-        # card sticks at 0 even when calls clearly qualified leads.
+        # Aggregate in SQL (one GROUP BY each) instead of pulling every
+        # dialer_jobs / calls row (with summary_json) into Python on each ~7s
+        # poll. Explicit tenant_id predicates: the prod app role bypasses RLS.
+        scope_tenant = row_tenant_str or current_user.tenant_id
+        if not scope_tenant:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+
+        # "goals_achieved" = the live resolver flag OR the post-call AI verdict
+        # reading as a success (qualified/callback). The goal_achieved flag alone
+        # is currently never set on the call path, so the AI summary verdict is
+        # the real success signal — without this the card sticks at 0 even when
+        # calls clearly qualified leads.
         import json as _json
-        calls_response = db_client.table("calls").select("outcome, goal_achieved, summary_json").eq("campaign_id", campaign_id).execute()
+        async with acquire_with_tenant(db_client.pool, scope_tenant) as conn:
+            job_rows = await conn.fetch(_STATS_JOBS_SQL, campaign_id, scope_tenant)
+            call_rows = await conn.fetch(_STATS_CALLS_SQL, campaign_id, scope_tenant)
+            # A summary_json stored as a JSON *string* (double-encoded) cannot
+            # be read with ->> ; the handful of such rows are parsed here.
+            string_rows = await conn.fetch(_STATS_STRING_SUMMARY_SQL, campaign_id, scope_tenant)
+
+        status_counts = {}
+        for row in job_rows:
+            status = row["status"]
+            status_counts[status] = status_counts.get(status, 0) + int(row["n"])
 
         outcome_counts = {}
         goals_achieved = 0
-        for call in calls_response.data or []:
-            outcome = call.get("outcome", "unknown")
-            outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
-            sj = call.get("summary_json")
-            if isinstance(sj, str):
-                try:
-                    sj = _json.loads(sj)
-                except Exception:
-                    sj = None
+        for row in call_rows:
+            outcome = row["outcome"]
+            outcome_counts[outcome] = outcome_counts.get(outcome, 0) + int(row["n"])
+            goals_achieved += int(row["goals"])
+        for row in string_rows:
+            try:
+                sj = _json.loads(row["raw"])
+            except Exception:
+                sj = None
             verdict = str((sj or {}).get("outcome") or "").strip().lower() if isinstance(sj, dict) else ""
-            if call.get("goal_achieved") or verdict.startswith("qualified") or verdict.startswith("callback"):
+            if verdict.startswith("qualified") or verdict.startswith("callback"):
                 goals_achieved += 1
 
         # Real contact + qualified-lead counts. The campaigns.total_leads column
@@ -1747,7 +1787,7 @@ async def add_contact_to_campaign(
         #      row. Re-adding a previously-deleted contact used to orphan all of
         #      its prior calls and lead status behind a fresh lead_id.
         existing = db_client.table("leads").select(
-            "id, status, is_lead"
+            "id, status, is_lead, do_not_call"
         ).eq(
             "campaign_id", campaign_id
         ).eq(
@@ -1783,6 +1823,12 @@ async def add_contact_to_campaign(
             # Prefer reviving a row that was a qualified lead so we don't lose it.
             deleted_rows.sort(key=lambda r: (0 if r.get("is_lead") else 1))
             revive_id = deleted_rows[0]["id"]
+            # Never let the form's default (False) erase an existing
+            # do-not-call suppression on the revived row.
+            expanded_values["do_not_call"] = bool(
+                expanded_values["do_not_call"]
+                or any(r.get("do_not_call") for r in deleted_rows)
+            )
             revived = db_client.table("leads").update({
                 "status": "pending",
                 **expanded_values,
@@ -1843,11 +1889,15 @@ async def update_contact_in_campaign(
     """
     db_client = supabase
     try:
-        require_owned_outbound_campaign(
+        campaign = require_owned_outbound_campaign(
             db_client,
             campaign_id,
             tenant_id=current_user.tenant_id,
+            extra_columns=("script_config",),
         )
+        # Same country the Add-Contact and CSV paths use, so all write paths
+        # normalise a national-format number identically.
+        default_country = campaign_default_country(campaign)
         existing = (
             db_client.table("leads")
             .select("*")
@@ -1866,7 +1916,9 @@ async def update_contact_in_campaign(
                 if _phone_validation_relaxed(current_user):
                     normalized_phone = normalize_phone_number_lenient(contact.phone_number)
                 else:
-                    normalized_phone = normalize_phone_number(contact.phone_number)
+                    normalized_phone = normalize_phone_number(
+                        contact.phone_number, default_country=default_country,
+                    )
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=f"Invalid phone number: {str(e)}")
 

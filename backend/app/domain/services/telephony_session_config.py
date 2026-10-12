@@ -564,7 +564,14 @@ def _extract_product_terms(script_config: dict, company_name: str) -> list:
     text = extra.strip() if isinstance(extra, str) else ""
     if text:
         # 1) Quoted phrases — users often quote a product name.
-        for m in re.findall(r"[\"'“”‘’]([^\"'“”‘’]{2,40})[\"'“”‘’]", text):
+        #    Double/curly-double quotes always delimit. A single quote (ASCII
+        #    or U+2018/U+2019) is also the apostrophe in "don't"/"we're", so it
+        #    only delimits when it is not glued to a word on the outside.
+        for m in re.findall(r"[\"“”]([^\"“”]{2,40})[\"“”]", text):
+            _add(m)
+        for m in re.findall(
+            r"(?<![A-Za-z0-9])['‘]([^'‘’\"“”]{2,40})['’](?![A-Za-z0-9])", text
+        ):
             _add(m)
         # 2) Multi-word Title-Case phrases (2+ consecutive capitalised words).
         #    [^\S\n] = a space/tab but NOT a newline, so phrases never span lines.
@@ -1404,7 +1411,8 @@ def build_telephony_session_config(
             )
 
             _renamed = rename_agent_in_script(
-                _tenant_additional_instructions, _substituted_from, agent_name
+                _tenant_additional_instructions, _substituted_from, agent_name,
+                company_name=company_name,
             )
             if _renamed != _tenant_additional_instructions:
                 logger.info(

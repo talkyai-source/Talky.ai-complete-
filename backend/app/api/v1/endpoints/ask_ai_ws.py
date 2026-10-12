@@ -11,6 +11,7 @@ Day 41: Refactored to use VoiceOrchestrator for lifecycle management.
 
 import os
 import json
+import time
 import asyncio
 import logging
 from typing import Optional
@@ -35,6 +36,25 @@ router = APIRouter(tags=["Ask AI"])
 # Groq rate limits and per-session TTS WebSocket connections.
 _MAX_CONCURRENT_ASK_AI = int(os.getenv("ASK_AI_MAX_SESSIONS", "20"))
 _ask_ai_semaphore: Optional[asyncio.Semaphore] = None
+
+# The endpoint is public by design, so one client must not be able to hold every
+# slot, and a forgotten tab must not hold one forever. Each slot runs paid STT,
+# TTS and LLM sessions. Override with the env vars below.
+_MAX_SESSIONS_PER_IP = int(os.getenv("ASK_AI_MAX_SESSIONS_PER_IP", "3"))
+_MAX_SESSION_SECONDS = float(os.getenv("ASK_AI_MAX_SESSION_SECONDS", "900"))
+_IDLE_SECONDS = float(os.getenv("ASK_AI_IDLE_SECONDS", "180"))
+_sessions_by_ip: dict[str, int] = {}
+
+
+def _client_ip(websocket: WebSocket) -> str:
+    """Real client address: nginx sets X-Real-IP; client.host is the proxy."""
+    real_ip = (websocket.headers.get("x-real-ip") or "").strip()
+    if real_ip:
+        return real_ip
+    forwarded = (websocket.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    if forwarded:
+        return forwarded
+    return websocket.client.host if websocket.client else "unknown"
 
 
 def _get_semaphore() -> asyncio.Semaphore:
@@ -138,6 +158,13 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
         await websocket.close(code=1013)
         return
 
+    client_ip = _client_ip(websocket)
+    if _sessions_by_ip.get(client_ip, 0) >= _MAX_SESSIONS_PER_IP:
+        logger.warning("Ask AI per-client cap reached ip=%s, rejecting %s", client_ip, session_id)
+        await websocket.send_json({"type": "error", "message": "Too many open sessions, please close one and retry"})
+        await websocket.close(code=1013)
+        return
+
     logger.info(f"Ask AI session started: {session_id}")
 
     # Get orchestrator from DI container
@@ -150,6 +177,9 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
 
     # Hold semaphore slot for the duration of the session.
     async with sem:
+        # Counted here, with no await before the try, so the finally below is
+        # the only way out and always gives the slot back.
+        _sessions_by_ip[client_ip] = _sessions_by_ip.get(client_ip, 0) + 1
         try:
             orchestrator = container.voice_orchestrator
 
@@ -184,7 +214,24 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
                 Running this concurrently with greeting prevents stale mic audio
                 buildup and keeps audio flow real-time.
                 """
+                started = time.monotonic()
                 while gateway.is_session_active(call_id):
+                    # Hard length cap, and an idle cap on conversational
+                    # activity (transcripts / completed turns - an open mic
+                    # keeps sending frames, so frames alone prove nothing).
+                    limit_reason = None
+                    if time.monotonic() - started > _MAX_SESSION_SECONDS:
+                        limit_reason = "max_duration"
+                    elif voice_session.call_session.is_stale(_IDLE_SECONDS):
+                        limit_reason = "idle_timeout"
+                    if limit_reason:
+                        logger.info("Ask AI session %s ended: %s", session_id, limit_reason)
+                        try:
+                            await websocket.send_json({"type": "session_limit", "reason": limit_reason})
+                        except (WebSocketDisconnect, RuntimeError):
+                            pass
+                        await gateway.on_call_ended(call_id, limit_reason)
+                        break
                     try:
                         message = await asyncio.wait_for(websocket.receive(), timeout=30.0)
                         message_type = message.get("type")
@@ -266,6 +313,11 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
             except Exception:
                 pass
         finally:
+            remaining = _sessions_by_ip.get(client_ip, 1) - 1
+            if remaining > 0:
+                _sessions_by_ip[client_ip] = remaining
+            else:
+                _sessions_by_ip.pop(client_ip, None)
             if receiver_task and not receiver_task.done():
                 receiver_task.cancel()
                 try:

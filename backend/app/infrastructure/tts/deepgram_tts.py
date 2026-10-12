@@ -188,6 +188,11 @@ class DeepgramTTSProvider(TTSProvider):
         self._warm_ws_rate: Optional[int] = None
         # Prevents concurrent synthesis on same connection
         self._synthesis_lock: Optional[asyncio.Lock] = None
+        # Serialises only the connect step (NOT the whole synthesis, so barge-in
+        # handling is never blocked): the post-barge-in background prewarm and
+        # the next synthesis must not both see "no warm socket" and each open one.
+        self._conn_lock: Optional[asyncio.Lock] = None
+        self._prewarm_task: Optional[asyncio.Task] = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -251,6 +256,14 @@ class DeepgramTTSProvider(TTSProvider):
 
     async def cleanup(self) -> None:
         """Release resources."""
+        prewarm = self._prewarm_task
+        self._prewarm_task = None
+        if prewarm is not None and not prewarm.done():
+            prewarm.cancel()
+            try:
+                await prewarm
+            except BaseException:  # CancelledError or a swallowed prewarm error
+                pass
         if self._warm_ws and not self._warm_ws.closed:
             try:
                 await self._warm_ws.send_json({"type": "Close"})
@@ -266,34 +279,45 @@ class DeepgramTTSProvider(TTSProvider):
         self, voice_id: str, rate: int
     ) -> "aiohttp.ClientWebSocketResponse":
         """Return the warm WebSocket if still open and params match, else open a new one."""
-        if (
-            self._warm_ws is not None
-            and not self._warm_ws.closed
-            and self._warm_ws_voice == voice_id
-            and self._warm_ws_rate == rate
-        ):
+        def _reusable() -> bool:
+            return (
+                self._warm_ws is not None
+                and not self._warm_ws.closed
+                and self._warm_ws_voice == voice_id
+                and self._warm_ws_rate == rate
+            )
+
+        if _reusable():
             return self._warm_ws
 
-        # Close stale connection if params changed
-        if self._warm_ws and not self._warm_ws.closed:
-            try:
-                await self._warm_ws.send_json({"type": "Close"})
-                await self._warm_ws.close()
-            except Exception:
-                pass
+        if self._conn_lock is None:
+            self._conn_lock = asyncio.Lock()
+        async with self._conn_lock:
+            # Re-check: a concurrent caller (e.g. the post-barge-in prewarm)
+            # may have finished connecting while we waited for the lock.
+            if _reusable():
+                return self._warm_ws
 
-        url = (
-            f"{self.TTS_WS_URL}"
-            f"?model={voice_id}"
-            f"&encoding=linear16"
-            f"&sample_rate={rate}"
-            f"&container=none"
-        )
-        headers = {"Authorization": f"Token {self._api_key}"}
-        self._warm_ws = await self._session.ws_connect(url, headers=headers, heartbeat=30)
-        self._warm_ws_voice = voice_id
-        self._warm_ws_rate = rate
-        return self._warm_ws
+            # Close stale connection if params changed
+            if self._warm_ws and not self._warm_ws.closed:
+                try:
+                    await self._warm_ws.send_json({"type": "Close"})
+                    await self._warm_ws.close()
+                except Exception:
+                    pass
+
+            url = (
+                f"{self.TTS_WS_URL}"
+                f"?model={voice_id}"
+                f"&encoding=linear16"
+                f"&sample_rate={rate}"
+                f"&container=none"
+            )
+            headers = {"Authorization": f"Token {self._api_key}"}
+            self._warm_ws = await self._session.ws_connect(url, headers=headers, heartbeat=30)
+            self._warm_ws_voice = voice_id
+            self._warm_ws_rate = rate
+            return self._warm_ws
 
     # ------------------------------------------------------------------
     # Streaming TTS via WebSocket with Text Chunking
@@ -472,7 +496,7 @@ class DeepgramTTSProvider(TTSProvider):
                 # ready before the next turn starts (~200-500ms later).  Without
                 # this, the next synthesis call incurs a cold WebSocket handshake
                 # (~75ms) that could otherwise be hidden during barge-in processing.
-                asyncio.create_task(
+                self._prewarm_task = asyncio.create_task(
                     self._prewarm_after_interrupt(_prewarm_voice, _prewarm_rate),
                     name="deepgram_tts_prewarm",
                 )

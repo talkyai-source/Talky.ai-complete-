@@ -29,6 +29,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import threading
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
@@ -3626,6 +3627,47 @@ async def receive_gateway_audio(session_id: str, request: Request):
 # ---------------------------------------------------------------------------
 
 
+# Call uuids that currently own (or are about to own) a ws-audio socket.  The
+# check-and-add below runs with no await in between, so two sockets racing for
+# one uuid cannot both pass; the audio bridge itself would let the second one
+# overwrite (and later pop) the first one's session.
+_ws_audio_inflight: set[str] = set()
+_WS_AUDIO_DEFAULT_MAX_CONNECTIONS = 256
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+_PROXY_HEADERS = ("x-forwarded-for", "x-real-ip", "forwarded")
+
+
+def _ws_audio_max_connections() -> int:
+    try:
+        value = int(os.getenv("TELEPHONY_WS_AUDIO_MAX_CONNECTIONS", ""))
+    except ValueError:
+        return _WS_AUDIO_DEFAULT_MAX_CONNECTIONS
+    return value if value > 0 else _WS_AUDIO_DEFAULT_MAX_CONNECTIONS
+
+
+def _ws_audio_source_allowed(websocket: WebSocket) -> bool:
+    """FreeSWITCH on this host (direct loopback) or a holder of the internal token.
+
+    A same-host reverse proxy also connects from loopback, so a loopback peer
+    that carries proxy headers is a relayed public client and gets no free pass.
+    The token may arrive as a header or ``?token=`` (mod_audio_fork can only
+    shape the URL).
+    """
+    configured = os.getenv("INTERNAL_SERVICE_TOKEN", "").strip()
+    if configured:
+        presented = (
+            websocket.headers.get("x-internal-service-token")
+            or websocket.query_params.get("token")
+            or ""
+        )
+        if presented and secrets.compare_digest(presented, configured):
+            return True
+    host = websocket.client.host if websocket.client else ""
+    if host in _LOOPBACK_HOSTS and not any(h in websocket.headers for h in _PROXY_HEADERS):
+        return True
+    return False
+
+
 @router.websocket("/ws-audio/{call_uuid}")
 async def telephony_audio_websocket(websocket: WebSocket, call_uuid: str):
     """
@@ -3635,8 +3677,30 @@ async def telephony_audio_websocket(websocket: WebSocket, call_uuid: str):
         <action application="audio_fork" data="ws://HOST:8000/api/v1/sip/telephony/ws-audio/{uuid}"/>
 
     Receives caller audio and forwards TTS responses back.
+
+    Production media is the C++ voice gateway over HTTP callbacks, not this
+    socket.  Everything is refused before ``accept()``: unknown sources, a
+    second socket for a uuid that already has one, and sockets over the cap.
     """
     from app.infrastructure.telephony.freeswitch_audio_bridge import get_audio_bridge
 
+    if not _ws_audio_source_allowed(websocket):
+        logger.warning("ws-audio rejected: source not allowed for %s", call_uuid[:12])
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
+
     bridge = get_audio_bridge()
-    await bridge.handle_websocket(websocket, call_uuid)
+    if call_uuid in _ws_audio_inflight or bridge.is_session_active(call_uuid):
+        logger.warning("ws-audio rejected: duplicate socket for %s", call_uuid[:12])
+        await websocket.close(code=1008, reason="Audio session already connected")
+        return
+    if len(_ws_audio_inflight) >= _ws_audio_max_connections():
+        logger.warning("ws-audio rejected: at capacity (%s)", call_uuid[:12])
+        await websocket.close(code=1013, reason="At capacity")
+        return
+
+    _ws_audio_inflight.add(call_uuid)
+    try:
+        await bridge.handle_websocket(websocket, call_uuid)
+    finally:
+        _ws_audio_inflight.discard(call_uuid)

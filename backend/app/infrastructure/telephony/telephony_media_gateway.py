@@ -43,6 +43,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.domain.interfaces.media_gateway import MediaGateway
 from app.infrastructure.telephony.asterisk_adapter import TtsDeliveryError
+from app.infrastructure.telephony.browser_media_gateway import SessionGoneError
 from app.domain.services.telephony.config import AUDIO_CALLBACK_INTERVAL_MS
 from app.utils import event_loop_lag
 
@@ -315,15 +316,28 @@ class TelephonyMediaGateway(MediaGateway):
         if not session or not session.is_active:
             return False
 
-        hangup = getattr(session.adapter, "hangup", None)
-        if not callable(hangup):
-            logger.debug(
-                "TelephonyMediaGateway: adapter has no hangup method for call_id=%s",
-                call_id[:12],
-            )
-            return False
-
-        await hangup(session.pbx_call_id)
+        # AsteriskAdapter.hangup() is fail-soft and drops the proof bool, so
+        # prefer hangup_confirmed(): False must reach the caller when ARI could
+        # not prove the channel gone. Other adapters keep the legacy contract.
+        confirmed = getattr(session.adapter, "hangup_confirmed", None)
+        if callable(confirmed):
+            if not await confirmed(session.pbx_call_id):
+                logger.error(
+                    "TelephonyMediaGateway: hangup NOT confirmed call_id=%s pbx=%s reason=%s",
+                    call_id[:12],
+                    session.pbx_call_id[:12],
+                    reason,
+                )
+                return False
+        else:
+            hangup = getattr(session.adapter, "hangup", None)
+            if not callable(hangup):
+                logger.debug(
+                    "TelephonyMediaGateway: adapter has no hangup method for call_id=%s",
+                    call_id[:12],
+                )
+                return False
+            await hangup(session.pbx_call_id)
         logger.info(
             "TelephonyMediaGateway: hangup requested call_id=%s pbx=%s reason=%s",
             call_id[:12],
@@ -878,10 +892,19 @@ class TelephonyMediaGateway(MediaGateway):
                         call_id, len(packet),
                         extra={"call_id": call_id, "t_tts_first_audio": 1},
                     )
+            except SessionGoneError:
+                # The adapter has already dropped the call: nothing more can be
+                # played, so stop sending and let the caller end the turn quietly.
+                session.is_active = False
+                self._discard_unsent_tts(session)
+                raise
             except TtsDeliveryError as exc:
                 # This typed exception means the gateway did not accept the
                 # packet.  Returning normally would let the playback layer mark
                 # undelivered speech as spoken, so fail on the first proof.
+                # The rest of this utterance is abandoned: its unsent tail must
+                # not be prepended to the next reply.
+                self._discard_unsent_tts(session)
                 session.consecutive_tts_failures += 1
                 now_s = loop.time()
                 if session.consecutive_tts_failures == 1 or (now_s - session.last_tts_error_warn_at) >= 1.0:
@@ -899,6 +922,7 @@ class TelephonyMediaGateway(MediaGateway):
                 # fail closed instead of creating indefinite dead air.
                 session.consecutive_tts_failures += 1
                 if session.consecutive_tts_failures >= 5:
+                    self._discard_unsent_tts(session)
                     raise TtsDeliveryError(
                         f"Repeated TTS delivery failures for {call_id[:12]} "
                         f"({session.consecutive_tts_failures} consecutive): {exc}"
@@ -919,6 +943,28 @@ class TelephonyMediaGateway(MediaGateway):
         """True if the session exists and is still active."""
         session = self._sessions.get(call_id)
         return bool(session and session.is_active)
+
+    def deactivate_session(self, call_id: str) -> None:
+        """Stop serving the call but keep it registered.
+
+        Used when a PBX hangup could not be confirmed: the channel may still
+        be live, and its ChannelDestroyed teardown reads the recording buffer
+        before removing the session.
+        """
+        session = self._sessions.get(call_id)
+        if session:
+            session.is_active = False
+
+    @staticmethod
+    def _discard_unsent_tts(session: "TelephonySession") -> None:
+        """Drop the local, not-yet-sent remainder of an abandoned utterance.
+
+        Local state only: the gateway-side clear can itself fail and would mask
+        the delivery error being propagated.
+        """
+        session.tts_buffer = b""
+        session._tts_pending_bytes = b""
+        session._tts_send_deadline = None
 
     async def flush_tts_buffer(self, call_id: str) -> None:
         """

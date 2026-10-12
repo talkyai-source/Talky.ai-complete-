@@ -1230,6 +1230,28 @@ class ApiClient {
         return this.authGeneration;
     }
 
+    private unauthorizedListeners = new Set<() => void>();
+
+    /** Called once when a 401 shows the current session expired or was revoked. */
+    onUnauthorized(listener: () => void): () => void {
+        this.unauthorizedListeners.add(listener);
+        return () => { this.unauthorizedListeners.delete(listener); };
+    }
+
+    // A 401 on an authenticated call means the session is gone: drop the dead
+    // token and tell the AuthProvider. Skipped for the credential/identity
+    // calls (a 401 there means bad credentials, or is handled by checkAuth,
+    // which would otherwise lose its own result) and for a response that
+    // belongs to a previous session (a newer login must survive a late 401).
+    private handleSessionRejected(endpoint: string, sentGeneration: number) {
+        const path = endpoint.split('?')[0];
+        if (['/auth/login', '/auth/me', '/auth/logout', '/auth/passkeys/login', '/auth/passkey-check']
+            .some((skip) => path === skip || path.startsWith(`${skip}/`))) return;
+        if (!this.token || sentGeneration !== this.authGeneration) return;
+        this.setToken(null);
+        for (const listener of [...this.unauthorizedListeners]) listener();
+    }
+
     private async request<T>(endpoint: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
         const { method = 'GET', body, headers = {}, timeoutMs } = options;
         const controller = timeoutMs ? new AbortController() : undefined;
@@ -1243,6 +1265,7 @@ class ApiClient {
         if (this.token) {
             requestHeaders['Authorization'] = `Bearer ${this.token}`;
         }
+        const sentGeneration = this.authGeneration;
 
         try {
             const response = await fetch(`${this.baseUrl}${endpoint}`, {
@@ -1255,6 +1278,7 @@ class ApiClient {
             const data: unknown = await response.json();
 
             if (!response.ok) {
+                if (response.status === 401) this.handleSessionRejected(endpoint, sentGeneration);
                 return { error: { ...normalizeAdminApiError(data), status: response.status } };
             }
 
@@ -1278,8 +1302,10 @@ class ApiClient {
         if (this.token) {
             headers.Authorization = `Bearer ${this.token}`;
         }
+        const sentGeneration = this.authGeneration;
         const response = await fetch(`${this.baseUrl}${endpoint}`, { headers });
         if (!response.ok) {
+            if (response.status === 401) this.handleSessionRejected(endpoint, sentGeneration);
             let message = `Media request failed (${response.status})`;
             try {
                 const payload: unknown = await response.json();

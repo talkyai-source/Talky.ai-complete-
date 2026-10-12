@@ -87,6 +87,10 @@ export function TestAgentButton({
     const playbackUtteranceRef = useRef<string | undefined>(undefined);
     const dropAudioRef = useRef<boolean>(false);
     const genRef = useRef<number>(0);
+    // Bumped by every connect() and by endSession()/unmount. Every await in the
+    // connect and microphone paths re-checks it, so a session the user ended
+    // (or left the page on) can never open a socket or keep a microphone.
+    const sessionRef = useRef<number>(0);
     const JITTER_MS = 40;
 
     const mountedRef = useRef(true);
@@ -153,9 +157,21 @@ export function TestAgentButton({
     }, []);
 
     // ── Microphone (started AFTER `ready`, at the backend's input rate) ──
-    const startMicrophone = useCallback(async (inputRate: number): Promise<boolean> => {
+    const startMicrophone = useCallback(async (inputRate: number, session: number): Promise<boolean> => {
+        let stream: MediaStream | null = null;
+        let ctx: AudioContext | null = null;
+        // True once the session this microphone was requested for has ended.
+        // Release only what THIS call acquired: a newer session may own the refs.
+        const abandoned = () => {
+            if (sessionRef.current === session) return false;
+            stream?.getTracks().forEach((t) => t.stop());
+            if (ctx) { try { void ctx.close(); } catch { /* */ } }
+            if (micStreamRef.current === stream) micStreamRef.current = null;
+            if (micCtxRef.current === ctx) micCtxRef.current = null;
+            return true;
+        };
         try {
-            const stream = micStreamRef.current ?? await navigator.mediaDevices.getUserMedia({
+            stream = micStreamRef.current ?? await navigator.mediaDevices.getUserMedia({
                 audio: {
                     sampleRate: inputRate,
                     channelCount: 1,
@@ -164,18 +180,21 @@ export function TestAgentButton({
                     autoGainControl: true,
                 },
             });
+            if (abandoned()) return false;
             micStreamRef.current = stream;
 
             // AudioContext at the required rate: the browser resamples the mic
             // to `inputRate`, so the worklet emits PCM16 at exactly that rate.
-            const ctx = new AudioContext({ sampleRate: inputRate });
-            if (ctx.state === "suspended") await ctx.resume();
-            micCtxRef.current = ctx;
-            const source = ctx.createMediaStreamSource(stream);
+            const audioCtx = new AudioContext({ sampleRate: inputRate });
+            ctx = audioCtx;
+            if (audioCtx.state === "suspended") await audioCtx.resume();
+            if (abandoned()) return false;
+            micCtxRef.current = audioCtx;
+            const source = audioCtx.createMediaStreamSource(stream);
 
             const startScriptProcessor = () => {
-                const proc = ctx.createScriptProcessor(1024, 1, 1);
-                const silent = ctx.createGain();
+                const proc = audioCtx.createScriptProcessor(1024, 1, 1);
+                const silent = audioCtx.createGain();
                 silent.gain.value = 0;
                 micNodeRef.current = proc;
                 proc.onaudioprocess = (ev) => {
@@ -190,14 +209,15 @@ export function TestAgentButton({
                 };
                 source.connect(proc);
                 proc.connect(silent);
-                silent.connect(ctx.destination);
+                silent.connect(audioCtx.destination);
             };
 
-            if (ctx.audioWorklet) {
+            if (audioCtx.audioWorklet) {
                 try {
                     const url = new URL(MIC_WORKLET_PATH, window.location.origin).toString();
-                    await ctx.audioWorklet.addModule(url);
-                    const node = new AudioWorkletNode(ctx, "pcm16-processor");
+                    await audioCtx.audioWorklet.addModule(url);
+                    if (abandoned()) return false;
+                    const node = new AudioWorkletNode(audioCtx, "pcm16-processor");
                     micNodeRef.current = node;
                     node.port.onmessage = (evt: MessageEvent<ArrayBuffer>) => {
                         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -247,6 +267,7 @@ export function TestAgentButton({
     }, []);
 
     const endSession = useCallback(() => {
+        sessionRef.current += 1;
         stopMicrophone();
         dropAudioRef.current = false;
         playRateRef.current = 24000;
@@ -295,7 +316,7 @@ export function TestAgentButton({
                 // Start capturing the moment the agent is ready (also lets the
                 // user barge-in through an agent-first greeting).
                 setPhase(firstSpeaker === "agent" ? "speaking" : "listening");
-                void startMicrophone(inRate);
+                void startMicrophone(inRate, sessionRef.current);
                 break;
             }
             case "transcript":
@@ -332,14 +353,17 @@ export function TestAgentButton({
                 setError(typeof data.message === "string" ? data.message : "Voice error");
                 dropAudioRef.current = true;
                 resetPlayback();
-                setPhase("idle");
+                // A server error frame is usually followed by a close, but not
+                // always: end the session so the socket and mic never outlive it.
+                endSession();
                 break;
             default:
                 break;
         }
-    }, [firstSpeaker, queueAudioChunk, resetPlayback, startMicrophone]);
+    }, [endSession, firstSpeaker, queueAudioChunk, resetPlayback, startMicrophone]);
 
     const connect = useCallback(async (fs: "agent" | "user") => {
+        const session = ++sessionRef.current;
         setError(null);
         setPhase("connecting");
 
@@ -378,6 +402,8 @@ export function TestAgentButton({
         } catch {
             /* refresh happens inside the client; a failure here is not fatal */
         }
+        // End test / unmount while the pre-flight was in flight: stop here.
+        if (sessionRef.current !== session) return;
 
         const openSocket = (attempt: number) => {
             const wsUrl = buildCampaignTestWsUrl(resolveBackendWsBaseUrl(), campaignId, {
@@ -412,6 +438,8 @@ export function TestAgentButton({
             };
 
             ws.onmessage = (event) => {
+                // Frames that race an End test (socket close is asynchronous).
+                if (sessionRef.current !== session) return;
                 // An auth refusal arrives as an error FRAME and only then a
                 // close(1008), so by the time onclose runs the socket already
                 // counts as accepted and a close-code check never fires. Catch
@@ -438,7 +466,7 @@ export function TestAgentButton({
                             } catch {
                                 /* the retry below reports the real outcome */
                             }
-                            if (mountedRef.current) openSocket(1);
+                            if (mountedRef.current && sessionRef.current === session) openSocket(1);
                         })();
                         return;
                     }

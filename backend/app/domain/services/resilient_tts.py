@@ -132,6 +132,21 @@ class ResilientTTSProvider(TTSProvider):
             except Exception as exc:
                 logger.debug("resilient_tts_cleanup_error provider=%s err=%s", p.name, exc)
 
+    # Optional per-call hooks the call path looks up with getattr(provider, name,
+    # None): pre-warm, end-of-call/orphan sweep and barge-in clear. Forward them
+    # to the PRIMARY only (never warm two vendors). Delegating via __getattr__
+    # keeps getattr(..., None) == None when the primary lacks a hook, exactly as
+    # if the wrapper were not there.
+    _PRIMARY_HOOKS = frozenset({"connect_for_call", "disconnect_for_call", "clear_queue"})
+
+    def __getattr__(self, attr: str):
+        if attr in ResilientTTSProvider._PRIMARY_HOOKS:
+            primary = self.__dict__.get("_primary")
+            hook = getattr(primary, attr, None) if primary is not None else None
+            if hook is not None:
+                return hook
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {attr!r}")
+
     async def get_available_voices(self) -> List[Dict]:
         # Voices are discovery-only; prefer primary. On primary
         # failure we surface secondary's voices so the UI still works.

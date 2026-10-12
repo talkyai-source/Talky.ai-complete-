@@ -205,6 +205,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Keep the saved same-identity history until /me proves the scope.
             notificationsStore.suspendIdentity();
             profileReadsAllowed.current = true;
+            // The old user is masked above but the session is NOT known to be
+            // gone: a sibling tab's routine token rotation lands here too. Hold
+            // `loading` until /me answers so DashboardLayout's `!loading && !user`
+            // redirect cannot send a still-valid session to /auth/login.
+            setLoading(true);
             resetSessionExpiredLatch();
             const current = () => identityEpoch.current === epoch && profileRead.current === read;
             void api.getMe().then(me => {

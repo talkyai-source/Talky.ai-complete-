@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Sidebar } from '../components/Sidebar';
 import { Header } from '../components/Header';
 import { TenantsTable } from '../components/TenantsTable';
@@ -12,8 +12,15 @@ export function TenantsPage() {
     const [error, setError] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
+    // What is typed in the box (searchTerm) is applied to the query only after a
+    // pause, so one request fires per search instead of one per keystroke.
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+    // Only the newest request may publish: an earlier, slower reply must not
+    // overwrite the results for the term now in the box.
+    const requestSeq = useRef(0);
 
     const fetchTenants = useCallback(async () => {
+        const seq = ++requestSeq.current;
         setLoading(true);
         setError(null);
         try {
@@ -21,9 +28,10 @@ export function TenantsPage() {
             // unwrap it (every other page does this). The endpoint returns a
             // bare array, so default to [] to keep TenantsTable iterable.
             const res = await api.getTenants(
-                searchTerm || undefined,
+                debouncedSearch || undefined,
                 statusFilter || undefined
             );
+            if (seq !== requestSeq.current) return;
             if (res.error) {
                 setError(res.error.message);
                 setTenants([]);
@@ -31,24 +39,23 @@ export function TenantsPage() {
                 setTenants(res.data ?? []);
             }
         } catch (err) {
+            if (seq !== requestSeq.current) return;
             setError(err instanceof Error ? err.message : 'Failed to fetch tenants');
             console.error('Failed to fetch tenants:', err);
         } finally {
-            setLoading(false);
+            if (seq === requestSeq.current) setLoading(false);
         }
-    }, [searchTerm, statusFilter]);
+    }, [debouncedSearch, statusFilter]);
 
+    // Immediate on mount and on a filter change; a search term arrives debounced.
     useEffect(() => {
-        fetchTenants();
+        void fetchTenants();
     }, [fetchTenants]);
 
-    // Debounced search
     useEffect(() => {
-        const timeoutId = setTimeout(() => {
-            fetchTenants();
-        }, 300);
+        const timeoutId = setTimeout(() => setDebouncedSearch(searchTerm), 300);
         return () => clearTimeout(timeoutId);
-    }, [searchTerm, statusFilter, fetchTenants]);
+    }, [searchTerm]);
 
     return (
         <div className="app-layout">

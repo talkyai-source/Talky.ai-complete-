@@ -37,6 +37,7 @@ from app.domain.models.tenant_phone_number import (
     VerificationMethod,
 )
 from app.domain.services.tenant_phone_number_service import (
+    TenantPhoneNumberConflictError,
     TenantPhoneNumberError,
     TenantPhoneNumberService,
 )
@@ -131,15 +132,20 @@ async def register_phone_number(
     """Register a pending number. Not dial-able until `/verify`."""
     tenant_id = _require_tenant(current_user)
     svc = TenantPhoneNumberService(db_pool)
-    row = await svc.create_pending(
-        tenant_id=tenant_id,
-        e164=payload.e164,
-        provider=payload.provider,
-        label=payload.label,
-        metadata=payload.metadata,
-        actor_id=current_user.id,
-        actor_role=current_user.role,
-    )
+    try:
+        row = await svc.create_pending(
+            tenant_id=tenant_id,
+            e164=payload.e164,
+            provider=payload.provider,
+            label=payload.label,
+            metadata=payload.metadata,
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+        )
+    except TenantPhoneNumberConflictError as exc:
+        # A revoked or suspended number is a platform control the tenant
+        # cannot undo by registering it again.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     logger.info(
         "tenant_phone_number_registered tenant=%s e164=%s provider=%s",
         tenant_id, redact_did(payload.e164), payload.provider,

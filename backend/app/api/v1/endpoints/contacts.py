@@ -257,7 +257,9 @@ async def upload_campaign_contacts(
         content = await file.read()
         text_content = None
         
-        for encoding in ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']:
+        # utf-8-sig first: Excel's "CSV UTF-8" writes a BOM, which plain utf-8
+        # keeps as U+FEFF on the first header (it also decodes BOM-less UTF-8).
+        for encoding in ['utf-8-sig', 'latin-1', 'cp1252']:
             try:
                 text_content = content.decode(encoding)
                 break
@@ -303,10 +305,21 @@ async def upload_campaign_contacts(
         )
         records: List[LeadRecord] = []
         field_errors: List[ImportError] = []
+        ragged_rows: List[ImportError] = []
         for row_num, row in enumerate(csv_reader, start=2):  # Row 1 is header
+            if row.get(None):
+                # More cells than headers (usually an unquoted comma). DictReader
+                # files the overflow under the None key as a list; report the row
+                # and carry on rather than aborting the whole import.
+                ragged_rows.append(ImportError(
+                    row=row_num, error="Row has more cells than headers",
+                ))
+                continue
             values: dict[str, str] = {}
             custom_fields: dict = {}
             for header, value in row.items():
+                if header is None or not isinstance(value, str):
+                    continue
                 value_clean = value.strip() if value else ""
                 if not value_clean:
                     continue
@@ -411,15 +424,15 @@ async def upload_campaign_contacts(
                 list_count = None
 
         return BulkImportResponse(
-            total_rows=result.total,
+            total_rows=result.total + len(ragged_rows),
             imported=result.imported,
-            failed=len(result.errors),
+            failed=len(result.errors) + len(ragged_rows),
             duplicates_skipped=result.duplicates_skipped,
-            errors=[
+            errors=(ragged_rows + [
                 ImportError(row=e.row, error=e.error, phone=e.phone,
                             field=_ingest_error_field(e))
-                for e in result.errors[:100]
-            ],
+                for e in result.errors
+            ])[:100],
             field_errors=field_errors[:200],
             list_id=list_id,
             list_name=file.filename if list_id is not None else None,
@@ -610,7 +623,7 @@ async def bulk_import_contacts(
         content = await file.read()
         
         # Try different encodings
-        for encoding in ['utf-8', 'utf-8-sig', 'latin-1']:
+        for encoding in ['utf-8-sig', 'latin-1']:
             try:
                 text_content = content.decode(encoding)
                 break

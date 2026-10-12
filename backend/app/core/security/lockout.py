@@ -94,6 +94,11 @@ async def get_consecutive_failures(
     naturally because old rows fall outside the ``created_at >= $2``
     bound; the "after most recent success" clause adds a second reset
     boundary so a successful login also clears the slate.
+
+    Attempts rejected *because* the account was already locked
+    (``failure_reason = 'account_locked'``) are still written for audit but are
+    not counted: otherwise a user retrying during a lock would extend and
+    escalate it. NULL reasons still count.
     """
     window_start = datetime.now(timezone.utc) - timedelta(
         minutes=OBSERVATION_WINDOW_MINUTES
@@ -105,6 +110,7 @@ async def get_consecutive_failures(
         FROM   login_attempts
         WHERE  email      = $1
           AND  success    = FALSE
+          AND  failure_reason IS DISTINCT FROM 'account_locked'
           AND  created_at >= $2
           AND  created_at > COALESCE(
                    (SELECT MAX(created_at)
@@ -158,6 +164,7 @@ async def check_account_locked(
         FROM   login_attempts
         WHERE  email      = $1
           AND  success    = FALSE
+          AND  failure_reason IS DISTINCT FROM 'account_locked'
           AND  created_at >= $2
           AND  created_at > COALESCE(
                    (SELECT MAX(created_at)

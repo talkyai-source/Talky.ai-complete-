@@ -310,7 +310,7 @@ async def persist_asterisk_transfer_provider_identity(
                 call_id, talklee_call_id, leg_id, event_type, source,
                 event_data, previous_state, new_state, created_at
             ) VALUES (
-                $1::uuid,$2,$3::uuid,'transfer_provider_identity_rebound',
+                $1::uuid,$2,$3::uuid,'transfer_leg_id_rebound',
                 'asterisk',$4::jsonb,$5,$5,NOW()
             )
             """,

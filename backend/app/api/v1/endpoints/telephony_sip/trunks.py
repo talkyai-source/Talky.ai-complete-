@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -46,6 +47,31 @@ from .trunk_probe import probe_sip_endpoint
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Telephony SIP"])
+
+
+class _AbandonClaim(Exception):
+    """Raised inside the idempotency-claim transaction to roll the claim back.
+
+    An early error return commits the transaction, which would persist a claim
+    with no stored result and block every retry with that Idempotency-Key
+    (409 'in progress' / 'different payload'). Raising rolls the claim back so
+    the client can retry; ``_abandons_claim`` turns it into the response.
+    """
+
+    def __init__(self, response: JSONResponse) -> None:
+        super().__init__("idempotency claim abandoned")
+        self.response = response
+
+
+def _abandons_claim(fn):
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await fn(*args, **kwargs)
+        except _AbandonClaim as abandoned:
+            return abandoned.response
+
+    return wrapper
 
 
 # --- helpers (trunk-specific) ------------------------------------------
@@ -498,6 +524,7 @@ async def create_sip_trunk(
 
 
 @router.patch("/trunks/{trunk_id}", response_model=SIPTrunkResponse)
+@_abandons_claim
 async def update_sip_trunk(
     trunk_id: UUID,
     payload: SIPTrunkUpdateRequest,
@@ -593,25 +620,25 @@ async def update_sip_trunk(
 
             existing = await _get_tenant_trunk(conn, current_user.tenant_id, trunk_id)
             if not existing:
-                return _problem(
+                raise _AbandonClaim(_problem(
                     request=request,
                     status_code=404,
                     title="Trunk Not Found",
                     detail="Requested trunk does not exist for tenant.",
                     type_suffix="trunk-not-found",
-                )
+                ))
 
             existing_auth_user = existing["auth_username"]
             if payload.clear_auth and (
                 "auth_username" in patch_payload or "auth_password" in patch_payload
             ):
-                return _problem(
+                raise _AbandonClaim(_problem(
                     request=request,
                     status_code=400,
                     title="Invalid Authentication Patch",
                     detail="clear_auth cannot be combined with auth_username/auth_password fields.",
                     type_suffix="invalid-auth-patch",
-                )
+                ))
 
             trunk_name = patch_payload.get("trunk_name", existing["trunk_name"])
             from app.domain.services.telephony.trunk_resolver import platform_default_trunk_name
@@ -620,7 +647,7 @@ async def update_sip_trunk(
             previous_name = str(existing["trunk_name"]).strip().lower()
             proposed_name = str(trunk_name).strip().lower()
             if proposed_name != previous_name and reserved in {previous_name, proposed_name}:
-                return _problem(request, 400, "Reserved Trunk Name", "The platform trunk name cannot be claimed or changed through tenant settings.", "reserved-trunk-name")
+                raise _AbandonClaim(_problem(request, 400, "Reserved Trunk Name", "The platform trunk name cannot be claimed or changed through tenant settings.", "reserved-trunk-name"))
             sip_domain = _canonical_domain(patch_payload.get("sip_domain", existing["sip_domain"]))
             port = patch_payload.get("port", existing["port"])
             transport = patch_payload.get("transport", existing["transport"])
@@ -646,20 +673,20 @@ async def update_sip_trunk(
 
             metadata = _coerce_jsonb(metadata) or {}
             if metadata.get("pool") != (_coerce_jsonb(existing["metadata"]) or {}).get("pool"):
-                return _problem(request, 400, "Platform Metadata Reserved", "Shared-pool membership is managed by the platform operator.", "reserved-trunk-metadata")
+                raise _AbandonClaim(_problem(request, 400, "Platform Metadata Reserved", "Shared-pool membership is managed by the platform operator.", "reserved-trunk-metadata"))
             if payload.clear_auth:
                 metadata = {**metadata, "register": False}
             if metadata.get("register") and not (auth_username and auth_password_encrypted):
-                return _problem(request, 400, "Invalid Registration", "REGISTER requires credentials. IP authentication uses register=false.", "invalid-registration")
+                raise _AbandonClaim(_problem(request, 400, "Invalid Registration", "REGISTER requires credentials. IP authentication uses register=false.", "invalid-registration"))
 
             if bool(auth_username) != bool(auth_password_encrypted):
-                return _problem(
+                raise _AbandonClaim(_problem(
                     request=request,
                     status_code=400,
                     title="Invalid Authentication Configuration",
                     detail="auth_username and auth_password must be set or cleared together.",
                     type_suffix="invalid-auth-configuration",
-                )
+                ))
 
             try:
                 row = await conn.fetchrow(
@@ -756,6 +783,7 @@ async def update_sip_trunk(
             return response_model
 
 
+@_abandons_claim
 async def _set_trunk_active_state(
     *,
     trunk_id: UUID,
@@ -854,13 +882,13 @@ async def _set_trunk_active_state(
                 trunk_id,
             )
             if not existing:
-                return _problem(
+                raise _AbandonClaim(_problem(
                     request=request,
                     status_code=404,
                     title="Trunk Not Found",
                     detail="Requested trunk does not exist for tenant.",
                     type_suffix="trunk-not-found",
-                )
+                ))
 
             row = await conn.fetchrow(
                 """
@@ -902,13 +930,13 @@ async def _set_trunk_active_state(
                 current_user.id,
             )
             if not row:
-                return _problem(
+                raise _AbandonClaim(_problem(
                     request=request,
                     status_code=404,
                     title="Trunk Not Found",
                     detail="Requested trunk does not exist for tenant.",
                     type_suffix="trunk-not-found",
-                )
+                ))
 
             response_model = _row_to_response(row)
             response_payload = response_model.model_dump(mode="json")

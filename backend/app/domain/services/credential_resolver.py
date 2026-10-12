@@ -18,18 +18,35 @@ Design choices:
   ciphertext) LOG and fall through to the env var. Never raise into
   the origination path — a bad per-tenant row must not kill the
   global service.
-- The resolver NEVER caches plaintext in the process. Providers are
-  expected to construct a short-lived client with the key and discard.
+- The resolver keeps a small per-process cache of resolved values, each
+  with a short TTL (`_FOUND_TTL_S` for a tenant key, `_ABSENT_TTL_S` for
+  "no BYOK row"). The cache is per process, so a key added, rotated or
+  revoked through another process only takes effect once the TTL lapses;
+  `invalidate_cache()` drops entries early within the calling process.
+  Lookup/decrypt FAILURES are never cached - only a clean "found" or a clean
+  "no active row".
 """
 from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Any, Optional
 
 from app.core.db_utils import acquire_with_tenant
 
 logger = logging.getLogger(__name__)
+
+# Cache lifetimes. The cache is per process, so these bound how long another
+# process (or a rotation/revocation) can be out of date.
+_FOUND_TTL_S = 300.0
+_ABSENT_TTL_S = 45.0
+
+# _resolve_tenant outcomes: a transient failure must be distinguishable from
+# "the tenant has no BYOK row" so it is never cached as the latter.
+_FOUND = "found"
+_ABSENT = "absent"
+_ERROR = "error"
 
 
 # Map from the short provider name used internally to the env var name
@@ -76,14 +93,15 @@ class CredentialResolver:
     env second. Safe to construct per-request; the underlying DB pool
     handles pooling."""
 
-    # Process-lifetime cache so we don't pay a DB roundtrip on every
-    # voice-session creation. Most deploys have an empty
-    # tenant_ai_credentials table, so the first resolve per (tenant,
-    # provider) writes a sentinel here and every subsequent resolve is
-    # an in-memory dict hit — restoring the demo-ready latency profile
-    # where keys came from os.getenv() directly.
+    # Short-TTL cache so we don't pay a DB roundtrip on every voice-session
+    # creation. Most deploys have an empty tenant_ai_credentials table, so the
+    # first resolve per (tenant, provider) stores an "absent" marker here and
+    # every resolve within the TTL is an in-memory dict hit - restoring the
+    # demo-ready latency profile where keys came from os.getenv() directly.
+    # Values are (payload, expires_at_monotonic); payload is the plaintext key
+    # or _SENTINEL_USE_ENV.
     _SENTINEL_USE_ENV = object()
-    _CACHE: dict[tuple[Any, str, str, str], Any] = {}
+    _CACHE: dict[tuple[Any, str, str, str], tuple[Any, float]] = {}
 
     def __init__(
         self,
@@ -118,21 +136,33 @@ class CredentialResolver:
                 provider.strip().lower(),
                 credential_kind,
             )
-            cached = CredentialResolver._CACHE.get(cache_key)
-            if cached is CredentialResolver._SENTINEL_USE_ENV:
-                return resolve_sync_env_only(provider, env_var=env_var)
-            if cached is not None:
-                return cached  # type: ignore[return-value]
+            entry = CredentialResolver._CACHE.get(cache_key)
+            if entry is not None:
+                payload, expires_at = entry
+                if time.monotonic() < expires_at:
+                    if payload is CredentialResolver._SENTINEL_USE_ENV:
+                        return resolve_sync_env_only(provider, env_var=env_var)
+                    return payload  # type: ignore[return-value]
+                CredentialResolver._CACHE.pop(cache_key, None)
 
-            tenant_value = await self._resolve_tenant(
+            outcome, tenant_value = await self._resolve_tenant(
                 provider=provider,
                 tenant_id=tenant_id,
                 credential_kind=credential_kind,
             )
-            if tenant_value:
-                CredentialResolver._CACHE[cache_key] = tenant_value
+            if outcome == _FOUND:
+                CredentialResolver._CACHE[cache_key] = (
+                    tenant_value,
+                    time.monotonic() + _FOUND_TTL_S,
+                )
                 return tenant_value
-            CredentialResolver._CACHE[cache_key] = CredentialResolver._SENTINEL_USE_ENV
+            if outcome == _ABSENT:
+                CredentialResolver._CACHE[cache_key] = (
+                    CredentialResolver._SENTINEL_USE_ENV,
+                    time.monotonic() + _ABSENT_TTL_S,
+                )
+            # _ERROR: fall back to env for THIS call only; the next resolve
+            # retries the DB instead of pinning the tenant to the platform key.
 
         return resolve_sync_env_only(provider, env_var=env_var)
 
@@ -165,9 +195,11 @@ class CredentialResolver:
         provider: str,
         tenant_id: str,
         credential_kind: str,
-    ) -> Optional[str]:
+    ) -> tuple[str, Optional[str]]:
+        """Returns (outcome, plaintext): _FOUND with the key, _ABSENT when the
+        tenant has no usable BYOK row, or _ERROR on a lookup/decrypt failure."""
         if self._db_pool is None:
-            return None
+            return _ABSENT, None
 
         try:
             # `tenant_ai_credentials` is RLS-protected and FORCEd (migration
@@ -195,22 +227,20 @@ class CredentialResolver:
                 "— falling back to env",
                 tenant_id, provider, exc,
             )
-            return None
+            return _ERROR, None
 
         if not row:
-            # "The tenant never configured a key" and "the row exists but
-            # this connection could not read it" are the same zero rows from
-            # here, and either way the call is about to run on the PLATFORM
-            # key instead of the tenant's own. Log it so that substitution is
-            # auditable rather than silent. `resolve()` caches a sentinel per
-            # (tenant, provider), so this fires once, not per call. Names the
-            # tenant and provider only — never key material.
-            logger.warning(
-                "tenant_credential_row_not_readable tenant=%s provider=%s kind=%s "
-                "— falling back to the platform key",
+            # The normal no-BYOK case: the call runs on the platform key. A
+            # real read failure raises above (lookup_failed) or fails to decrypt
+            # below, both at WARNING/ERROR, so this stays quiet. INFO keeps the
+            # platform-key substitution auditable. Names the tenant and
+            # provider only - never key material.
+            logger.info(
+                "tenant_credential_none_configured tenant=%s provider=%s kind=%s "
+                "- using the platform key",
                 tenant_id, provider, credential_kind,
             )
-            return None
+            return _ABSENT, None
 
         try:
             encryption = self._encryption or self._lazy_encryption()
@@ -221,7 +251,7 @@ class CredentialResolver:
                 "— falling back to env",
                 tenant_id, provider, row["id"], exc,
             )
-            return None
+            return _ERROR, None
 
         # Fire-and-forget touch of last_used_at — pooled, non-blocking.
         # Same RLS scoping as the read above: without the tenant GUC the
@@ -236,7 +266,10 @@ class CredentialResolver:
             # Usage tracking is best-effort; never fail origination on it.
             pass
 
-        return plaintext.strip() if plaintext else None
+        value = plaintext.strip() if plaintext else None
+        if not value:
+            return _ABSENT, None
+        return _FOUND, value
 
     @staticmethod
     def _lazy_encryption() -> Any:

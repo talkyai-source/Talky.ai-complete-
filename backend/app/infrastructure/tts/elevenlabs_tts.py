@@ -292,6 +292,25 @@ class ElevenLabsTTSProvider(TTSProvider):
                                 f"ElevenLabs TTS connection error after "
                                 f"partial audio: {exc}"
                             ) from exc
+                        # No audio has reached the caller yet, so a transient
+                        # connection failure (stale keep-alive reset, server
+                        # disconnect) is safe to retry exactly like a timeout.
+                        # aiohttp does not retry POSTs itself. Non-transient
+                        # errors (e.g. InvalidURL) still fail immediately.
+                        if (
+                            isinstance(exc, (aiohttp.ClientConnectionError, aiohttp.ClientPayloadError))
+                            and attempt < _EL_MAX_RETRIES
+                        ):
+                            last_err = exc
+                            delay = min(
+                                _EL_RETRY_BASE_DELAY * (2 ** attempt), 5.0
+                            ) * (0.5 + random.random())
+                            logger.warning(
+                                "[ElevenLabs] connection error (%s) — retry %d/%d in %.2fs",
+                                type(exc).__name__, attempt + 1, _EL_MAX_RETRIES, delay,
+                            )
+                            await asyncio.sleep(delay)
+                            continue
                         raise RuntimeError(f"ElevenLabs TTS error: {exc}") from exc
 
             if last_err:

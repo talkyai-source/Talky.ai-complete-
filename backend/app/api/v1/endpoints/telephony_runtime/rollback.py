@@ -32,6 +32,17 @@ from .schemas import RuntimeRollbackRequest, RuntimeRollbackResponse
 router = APIRouter(tags=["Telephony SIP Runtime"])
 
 
+def _is_simulated(*stage_results: dict) -> bool:
+    """True when every adapter stage ran in simulate mode (no command executed)."""
+    stages = [
+        stage
+        for result in stage_results
+        for stage in result.values()
+        if isinstance(stage, dict)
+    ]
+    return bool(stages) and all(stage.get("mode") == "simulate" for stage in stages)
+
+
 @router.post("/rollback", response_model=RuntimeRollbackResponse)
 async def rollback_runtime_policy(
     payload: RuntimeRollbackRequest,
@@ -151,6 +162,7 @@ async def rollback_runtime_policy(
                     FROM tenant_runtime_policy_versions
                     WHERE tenant_id = $1
                       AND policy_version = $2
+                      AND build_status IN ('active', 'superseded', 'rolled_back')
                     LIMIT 1
                     """,
                     current_user.tenant_id,
@@ -304,6 +316,7 @@ async def rollback_runtime_policy(
                 status="rolled_back",
                 apply_result=apply_result,
                 verify_result=verify_result,
+                simulated=_is_simulated(apply_result, verify_result),
             ).model_dump()
             await _store_idempotency_result(
                 conn,

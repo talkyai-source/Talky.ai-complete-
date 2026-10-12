@@ -2,16 +2,83 @@
 Suspension Service - Formalized suspension workflow with instant block propagation
 """
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional
 from uuid import UUID, uuid4
 
 import redis.asyncio as aioredis
 import asyncpg
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.core.db_utils import acquire_with_tenant
+
+
+# Evidence key under which a tenant/partner suspension records the exact
+# tenant_users rows it flipped, so a restore returns only those rows.
+_MEMBERS_KEY = "_suspended_tenant_user_ids"
+
+
+def _utcnow() -> datetime:
+    """Aware UTC now: the suspension columns are TIMESTAMPTZ (asyncpg returns aware)."""
+    return datetime.now(timezone.utc)
+
+
+def _recorded_member_ids(evidence: Any) -> Optional[list[UUID]]:
+    """Member ids recorded at suspend time; None for events written before that."""
+    if isinstance(evidence, str):
+        try:
+            evidence = json.loads(evidence)
+        except ValueError:
+            return None
+    if not isinstance(evidence, dict) or not isinstance(evidence.get(_MEMBERS_KEY), list):
+        return None
+    try:
+        return [UUID(str(v)) for v in evidence[_MEMBERS_KEY]]
+    except ValueError:
+        return None
+
+
+async def _suspend_members(conn, tenant_ids: list[UUID]) -> list[UUID]:
+    """Suspend ONLY currently-active memberships; removed/pending/suspended rows are left alone."""
+    changed: list[UUID] = []
+    for tid in tenant_ids:
+        rows = await conn.fetch(
+            "UPDATE tenant_users SET status = 'suspended', updated_at = NOW() "
+            "WHERE tenant_id = $1 AND status = 'active' RETURNING id",
+            tid,
+        )
+        changed.extend(r["id"] for r in rows)
+    return changed
+
+
+async def _record_members(conn, suspension_id: UUID, evidence: Optional[dict], member_ids: list[UUID]) -> None:
+    recorded = {**(evidence or {}), _MEMBERS_KEY: [str(m) for m in member_ids]}
+    await conn.execute(
+        "UPDATE suspension_events SET evidence = $2 WHERE suspension_id = $1",
+        suspension_id, json.dumps(recorded),
+    )
+
+
+async def _restore_members(conn, tenant_id: UUID, evidence: Any) -> None:
+    """Reactivate only memberships this suspension suspended (still 'suspended' now).
+
+    Events recorded before member ids were stored fall back to every currently
+    'suspended' row of the tenant; removed and pending rows are never touched.
+    """
+    ids = _recorded_member_ids(evidence)
+    if ids is None:
+        await conn.execute(
+            "UPDATE tenant_users SET status = 'active', updated_at = NOW() "
+            "WHERE tenant_id = $1 AND status = 'suspended'",
+            tenant_id,
+        )
+    else:
+        await conn.execute(
+            "UPDATE tenant_users SET status = 'active', updated_at = NOW() "
+            "WHERE tenant_id = $1 AND status = 'suspended' AND id = ANY($2::uuid[])",
+            tenant_id, ids,
+        )
 
 
 class SuspensionType(str, Enum):
@@ -84,6 +151,12 @@ class SuspensionEvent(BaseModel):
     appeal_decision: Optional[str]
     appeal_response: Optional[str]
     audit_log_id: Optional[UUID]
+
+    @field_validator("propagated_services", mode="before")
+    @classmethod
+    def _null_means_none_propagated(cls, v):
+        # The column is nullable and the INSERTs never set it, so new rows carry NULL.
+        return [] if v is None else v
 
 
 class SuspensionResult(BaseModel):
@@ -163,7 +236,7 @@ class SuspensionService:
 
         suspended_until = None
         if duration_hours and suspension_type in self.AUTO_RESTORE_TYPES:
-            suspended_until = datetime.utcnow() + timedelta(hours=duration_hours)
+            suspended_until = _utcnow() + timedelta(hours=duration_hours)
 
         # Platform suspension starts from a user id before tenant discovery.
         async with acquire_with_tenant(self.db_pool, None) as conn:
@@ -180,7 +253,7 @@ class SuspensionService:
                     """,
                     suspension_id, TargetType.USER.value, user_uuid, suspension_type.value,
                     reason_category, reason_description, json.dumps(evidence) if evidence else None,
-                    datetime.utcnow(), suspended_until, admin_uuid, True
+                    _utcnow(), suspended_until, admin_uuid, True
                 )
 
                 # Update user profile
@@ -253,7 +326,7 @@ class SuspensionService:
 
         suspended_until = None
         if duration_hours and suspension_type in self.AUTO_RESTORE_TYPES:
-            suspended_until = datetime.utcnow() + timedelta(hours=duration_hours)
+            suspended_until = _utcnow() + timedelta(hours=duration_hours)
 
         async with acquire_with_tenant(self.db_pool, str(tenant_uuid)) as conn:
             async with conn.transaction():
@@ -269,7 +342,7 @@ class SuspensionService:
                     """,
                     suspension_id, TargetType.TENANT.value, tenant_uuid, suspension_type.value,
                     reason_category, reason_description, json.dumps(evidence) if evidence else None,
-                    datetime.utcnow(), suspended_until, admin_uuid, True
+                    _utcnow(), suspended_until, admin_uuid, True
                 )
 
                 # Update tenant status (Day 8: New columns)
@@ -283,22 +356,25 @@ class SuspensionService:
                         updated_at = NOW()
                     WHERE id = $4
                     """,
-                    datetime.utcnow(), admin_uuid, reason_description, tenant_uuid
+                    _utcnow(), admin_uuid, reason_description, tenant_uuid
                 )
 
-                # Maintain legacy status update for compatibility
-                await conn.execute(
-                    "UPDATE tenant_users SET status = 'suspended', updated_at = NOW() WHERE tenant_id = $1",
-                    tenant_uuid
-                )
+                # Maintain legacy status update for compatibility; only active
+                # members are suspended, and which ones is recorded for restore.
+                member_ids = await _suspend_members(conn, [tenant_uuid])
+                await _record_members(conn, suspension_id, evidence, member_ids)
 
-                # Terminate active sessions if immediate
+                # Terminate active sessions if immediate. security_sessions is
+                # keyed by user and revoked through revoked/revoked_at (set
+                # together, chk_revoked_at_consistency); it has no tenant_id or
+                # terminated_at, and naming them rolled the whole suspension back.
                 if immediate:
                     await conn.execute(
                         """
                         UPDATE security_sessions
-                        SET terminated_at = NOW(), termination_reason = 'tenant_suspended'
-                        WHERE tenant_id = $1 AND terminated_at IS NULL
+                        SET revoked = TRUE, revoked_at = NOW(), revoke_reason = 'tenant_suspended'
+                        WHERE revoked = FALSE
+                          AND user_id IN (SELECT user_id FROM tenant_users WHERE tenant_id = $1)
                         """,
                         tenant_uuid
                     )
@@ -364,7 +440,7 @@ class SuspensionService:
 
         suspended_until = None
         if duration_hours and suspension_type in self.AUTO_RESTORE_TYPES:
-            suspended_until = datetime.utcnow() + timedelta(hours=duration_hours)
+            suspended_until = _utcnow() + timedelta(hours=duration_hours)
 
         # A partner suspension deliberately spans every tenant it owns.
         async with acquire_with_tenant(self.db_pool, None) as conn:
@@ -381,7 +457,7 @@ class SuspensionService:
                     """,
                     suspension_id, TargetType.PARTNER.value, partner_uuid, suspension_type.value,
                     reason_category, reason_description, json.dumps(evidence) if evidence else None,
-                    datetime.utcnow(), suspended_until, admin_uuid, True
+                    _utcnow(), suspended_until, admin_uuid, True
                 )
 
                 # Update partner status (Day 8: New columns)
@@ -395,7 +471,7 @@ class SuspensionService:
                         updated_at = NOW()
                     WHERE id = $4
                     """,
-                    datetime.utcnow(), admin_uuid, reason_description, partner_uuid
+                    _utcnow(), admin_uuid, reason_description, partner_uuid
                 )
 
                 # Get all partner tenants
@@ -404,6 +480,7 @@ class SuspensionService:
                     partner_uuid
                 )
                 tenant_ids = [row["id"] for row in tenant_rows]
+                member_ids: list[UUID] = []
 
                 # Suspend all partner tenants
                 for tid in tenant_ids:
@@ -418,22 +495,22 @@ class SuspensionService:
                             updated_at = NOW()
                         WHERE id = $4
                         """,
-                        datetime.utcnow(), admin_uuid, f"Partner suspended: {reason_description}", tid
+                        _utcnow(), admin_uuid, f"Partner suspended: {reason_description}", tid
                     )
 
-                    await conn.execute(
-                        "UPDATE tenant_users SET status = 'suspended' WHERE tenant_id = $1",
-                        tid
-                    )
+                    member_ids.extend(await _suspend_members(conn, [tid]))
 
                     await conn.execute(
                         """
                         UPDATE security_sessions
-                        SET terminated_at = NOW(), termination_reason = 'partner_suspended'
-                        WHERE tenant_id = $1 AND terminated_at IS NULL
+                        SET revoked = TRUE, revoked_at = NOW(), revoke_reason = 'partner_suspended'
+                        WHERE revoked = FALSE
+                          AND user_id IN (SELECT user_id FROM tenant_users WHERE tenant_id = $1)
                         """,
                         tid
                     )
+
+                await _record_members(conn, suspension_id, evidence, member_ids)
 
         # Propagate
         propagation_result = await self._propagate_to_services(
@@ -500,7 +577,7 @@ class SuspensionService:
                     SET is_active = FALSE, restored_at = $1, restored_by = $2, restore_reason = $3
                     WHERE suspension_id = $4
                     """,
-                    datetime.utcnow(), admin_uuid, reason, suspension_id
+                    _utcnow(), admin_uuid, reason, suspension_id
                 )
 
                 # Restore user
@@ -552,7 +629,7 @@ class SuspensionService:
                 # Get active suspension
                 suspension = await conn.fetchrow(
                     """
-                    SELECT suspension_id FROM suspension_events
+                    SELECT suspension_id, evidence FROM suspension_events
                     WHERE target_type = $1 AND target_id = $2 AND is_active = TRUE
                     ORDER BY suspended_at DESC LIMIT 1
                     """,
@@ -571,7 +648,7 @@ class SuspensionService:
                     SET is_active = FALSE, restored_at = $1, restored_by = $2, restore_reason = $3
                     WHERE suspension_id = $4
                     """,
-                    datetime.utcnow(), admin_uuid, reason, suspension_id
+                    _utcnow(), admin_uuid, reason, suspension_id
                 )
 
                 # Restore tenant (Day 8: New columns)
@@ -588,11 +665,8 @@ class SuspensionService:
                     tenant_uuid
                 )
 
-                # Restore tenant users
-                await conn.execute(
-                    "UPDATE tenant_users SET status = 'active', updated_at = NOW() WHERE tenant_id = $1",
-                    tenant_uuid
-                )
+                # Restore only the members this suspension suspended
+                await _restore_members(conn, tenant_uuid, suspension["evidence"])
 
         # Propagate restoration
         propagation_result = await self._propagate_to_services(
@@ -671,7 +745,7 @@ class SuspensionService:
         history = [SuspensionEvent(**dict(row)) for row in history_rows]
 
         if active_suspension:
-            if active_suspension.suspended_until and active_suspension.suspended_until > datetime.utcnow():
+            if active_suspension.suspended_until and active_suspension.suspended_until > _utcnow():
                 status = SuspensionStatus.SCHEDULED_RESTORE
             elif active_suspension.appeal_submitted_at and not active_suspension.appeal_decision:
                 status = SuspensionStatus.APPEALED
@@ -707,7 +781,7 @@ class SuspensionService:
                 # Get active suspension
                 suspension = await conn.fetchrow(
                     """
-                    SELECT suspension_id FROM suspension_events
+                    SELECT suspension_id, evidence FROM suspension_events
                     WHERE target_type = $1 AND target_id = $2 AND is_active = TRUE
                     ORDER BY suspended_at DESC LIMIT 1
                     """,
@@ -726,7 +800,7 @@ class SuspensionService:
                     SET is_active = FALSE, restored_at = $1, restored_by = $2, restore_reason = $3
                     WHERE suspension_id = $4
                     """,
-                    datetime.utcnow(), admin_uuid, reason, suspension_id
+                    _utcnow(), admin_uuid, reason, suspension_id
                 )
 
                 # Restore partner (Day 8: New columns)
@@ -765,11 +839,8 @@ class SuspensionService:
                         """,
                         tid
                     )
-                    # Restore tenant users
-                    await conn.execute(
-                        "UPDATE tenant_users SET status = 'active', updated_at = NOW() WHERE tenant_id = $1",
-                        tid
-                    )
+                    # Restore only the members this suspension suspended
+                    await _restore_members(conn, tid, suspension["evidence"])
 
         # Propagate restoration
         propagation_result = await self._propagate_to_services(
@@ -823,7 +894,7 @@ class SuspensionService:
                 SET appeal_submitted_at = $1, appeal_reason = $2, appeal_decision = 'pending'
                 WHERE suspension_id = $3 AND is_active = TRUE
                 """,
-                datetime.utcnow(), appeal_reason, suspension_uuid
+                _utcnow(), appeal_reason, suspension_uuid
             )
 
             if result == "UPDATE 0":
@@ -868,22 +939,22 @@ class SuspensionService:
         suspension_uuid = UUID(suspension_id) if isinstance(suspension_id, str) else suspension_id
         admin_uuid = UUID(reviewed_by) if isinstance(reviewed_by, str) else reviewed_by
 
-        async with self.db_pool.acquire() as conn:
-            await conn.execute(
+        # Read the target while the connection is still held: the old follow-up
+        # SELECT ran on a released connection, so a granted appeal 500'd after
+        # recording 'granted' and never restored anyone.
+        async with acquire_with_tenant(self.db_pool, None) as conn:
+            suspension = await conn.fetchrow(
                 """
                 UPDATE suspension_events
                 SET appeal_reviewed_by = $1, appeal_decision = $2, appeal_response = $3
                 WHERE suspension_id = $4
+                RETURNING target_type, target_id
                 """,
                 admin_uuid, decision, response, suspension_uuid
             )
 
-        # If granted, auto-restore
+        # If granted, auto-restore (each restore runs its own transaction)
         if decision == "granted":
-            suspension = await conn.fetchrow(
-                "SELECT target_type, target_id FROM suspension_events WHERE suspension_id = $1",
-                suspension_uuid
-            )
             if suspension:
                 if suspension["target_type"] == TargetType.USER.value:
                     await self.restore_user(suspension["target_id"], reviewed_by, "Appeal granted")
@@ -922,7 +993,7 @@ class SuspensionService:
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                     """,
                     queue_id, suspension_id, target_type.value, target_id, action,
-                    service.value, "pending", datetime.utcnow()
+                    service.value, "pending", _utcnow()
                 )
 
         # Also publish via Redis for real-time propagation

@@ -30,6 +30,7 @@ import asyncio
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
 
@@ -40,6 +41,8 @@ from app.domain.services.recording_service import (
     mix_stereo_recording,
 )
 from app.domain.services.telephony.recording import _save_call_recording
+
+_RECORDING_ID = UUID("40000000-0000-4000-8000-000000000001")
 
 
 # ---------------------------------------------------------------------------
@@ -286,8 +289,8 @@ async def test_local_save_offloaded_and_byte_identical(tmp_path, monkeypatch):
         "app.domain.services.recording_service.asyncio.to_thread",
         side_effect=spy_to_thread,
     ), patch.object(
-        svc, "_insert_recording_record", AsyncMock(return_value=None)
-    ):
+        svc, "_insert_recording_record", AsyncMock(return_value=_RECORDING_ID)
+    ), patch.object(svc, "_update_call_recording_url", AsyncMock()):
         result = await svc._save_local(
             call_id="call-1", buffer=buf, tenant_id="t1", campaign_id="c1",
         )
@@ -300,8 +303,8 @@ async def test_local_save_offloaded_and_byte_identical(tmp_path, monkeypatch):
     assert not (tmp_path / "call-1.wav").exists(), (
         "local recordings must not share a flat cross-tenant namespace"
     )
-    # DB insert failed (mocked None) -> falls back to returning the filepath.
-    assert result is not None
+    # The row insert succeeded -> the caller gets the recording id, not a path.
+    assert result == str(_RECORDING_ID)
 
 
 # ---------------------------------------------------------------------------

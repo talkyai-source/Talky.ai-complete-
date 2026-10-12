@@ -21,8 +21,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import require_platform_admin
+from app.api.v1.dependencies import CurrentUser, get_audit_logger, require_platform_admin
 from app.core.db_utils import acquire_with_tenant
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
 # PLATFORM-WIDE router — platform_admin only. This completes the follow-up the
 # previous fix flagged: router-level auth closed the fully-unauthenticated hole,
@@ -154,7 +155,7 @@ async def list_abuse_events(
     query = """
         SELECT
             e.*,
-            t.name as tenant_name
+            t.business_name AS tenant_name
         FROM abuse_events e
         JOIN tenants t ON t.id = e.tenant_id
         WHERE e.created_at > NOW() - INTERVAL '%s hours'
@@ -232,7 +233,7 @@ async def get_abuse_event(
             """
             SELECT
                 e.*,
-                t.name as tenant_name
+                t.business_name AS tenant_name
             FROM abuse_events e
             JOIN tenants t ON t.id = e.tenant_id
             WHERE e.id = $1
@@ -274,10 +275,14 @@ async def get_abuse_event(
 async def resolve_abuse_event(
     event_id: UUID,
     request: ResolveEventRequest,
-    resolved_by: UUID,  # In production, get from auth context
+    current_user: CurrentUser = Depends(require_platform_admin),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
     db_pool=Depends(get_db_pool),
 ):
-    """Resolve an abuse event."""
+    """Resolve an abuse event, attributed to the authenticated admin."""
+    # The resolver is the caller, never a client-supplied id: a platform admin
+    # must not be able to dismiss a fraud event under another admin's name.
+    resolved_by = UUID(str(current_user.id))
     # The platform-admin route resolves an ID before its tenant is known.
     async with acquire_with_tenant(db_pool, None) as conn:
         # Update the event
@@ -307,13 +312,33 @@ async def resolve_abuse_event(
             """
             SELECT
                 e.*,
-                t.name as tenant_name
+                t.business_name AS tenant_name
             FROM abuse_events e
             JOIN tenants t ON t.id = e.tenant_id
             WHERE e.id = $1
             """,
             event_id,
         )
+
+    # Dismissing a fraud event is a compliance-relevant admin action.
+    await audit_logger.log(
+        event_type=AuditEvent.SUSPICIOUS_ACTIVITY,
+        action=(
+            "abuse_event_marked_false_positive"
+            if request.false_positive
+            else "abuse_event_resolved"
+        ),
+        actor_id=current_user.id,
+        tenant_id=row["tenant_id"],
+        resource_type="abuse_event",
+        resource_id=event_id,
+        metadata={
+            "event_type": row["event_type"],
+            "severity": row["severity"],
+            "false_positive": request.false_positive,
+            "resolution_notes": request.notes,
+        },
+    )
 
     return AbuseEventResponse(
         id=row["id"],
@@ -692,7 +717,7 @@ async def get_abuse_alerts(
     query = """
         SELECT
             e.*,
-            t.name as tenant_name
+            t.business_name AS tenant_name
         FROM abuse_events e
         JOIN tenants t ON t.id = e.tenant_id
         WHERE e.resolved_at IS NULL

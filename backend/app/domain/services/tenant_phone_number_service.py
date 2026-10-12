@@ -26,6 +26,14 @@ class TenantPhoneNumberError(Exception):
     """Base exception for DID operations."""
 
 
+class TenantPhoneNumberConflictError(TenantPhoneNumberError):
+    """Registering a number whose existing row is revoked or suspended.
+
+    Platform-side controls: the tenant cannot undo them by re-registering, so
+    the caller must surface a conflict (HTTP 409) instead of a success.
+    """
+
+
 class NumberNotOwnedError(TenantPhoneNumberError):
     """Raised when a tenant tries to use a caller_id they have not
     verified. Pre-dials only — once a call is in-flight, origination
@@ -165,7 +173,10 @@ class TenantPhoneNumberService:
     ) -> TenantPhoneNumber:
         """Insert a new number in `pending_verification` state. Idempotent
         on (tenant_id, e164) — returns the existing row if it already
-        exists (admins often re-submit the same number)."""
+        exists (admins often re-submit the same number). A number that was
+        revoked or suspended by the platform is NOT returned as a success and
+        its status is never reset here: raises
+        :class:`TenantPhoneNumberConflictError`."""
         from app.core.db_utils import acquire_with_tenant
         from app.domain.services.telephony.inbound_router import redact_did
 
@@ -178,6 +189,7 @@ class TenantPhoneNumberService:
                 ON CONFLICT (tenant_id, e164) DO UPDATE
                     SET label = COALESCE(EXCLUDED.label, tenant_phone_numbers.label),
                         metadata = tenant_phone_numbers.metadata || EXCLUDED.metadata
+                    WHERE tenant_phone_numbers.status NOT IN ('revoked', 'suspended')
                 RETURNING *
                 """,
                 tenant_id,
@@ -186,6 +198,18 @@ class TenantPhoneNumberService:
                 label,
                 __import__("json").dumps(metadata or {}),
             )
+            if row is None:
+                # Conflict on a revoked/suspended row: the WHERE above left it
+                # untouched. Do not hand it back as if registration succeeded.
+                blocked = await conn.fetchval(
+                    "SELECT status FROM tenant_phone_numbers WHERE tenant_id = $1 AND e164 = $2",
+                    tenant_id,
+                    e164,
+                )
+                raise TenantPhoneNumberConflictError(
+                    f"This number is {blocked or 'blocked'} on the platform and cannot be "
+                    "re-registered by the tenant; contact support to restore it"
+                )
             if actor_id:
                 await conn.execute(
                     """

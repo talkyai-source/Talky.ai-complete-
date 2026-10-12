@@ -291,7 +291,9 @@ export function RecordingsTable({ onCallSelect }: RecordingsTableProps) {
                                         <AdminMediaPlayer
                                             compact
                                             disabled={!item.playable}
-                                            filename={`call-${item.call_id}.wav`}
+                                            filenameBase={`call-${item.call_id}`}
+                                            mimeType={item.mime_type}
+                                            fallbackExtension="wav"
                                             load={() => api.getAdminRecordingAudio(item.id)}
                                         />
                                         <span className="media-duration">{formatDuration(item.duration_seconds)}</span>

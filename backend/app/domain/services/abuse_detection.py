@@ -883,7 +883,7 @@ class AbuseDetectionService:
         query = """
             SELECT
                 e.*,
-                t.name as tenant_name
+                t.business_name AS tenant_name
             FROM abuse_events e
             JOIN tenants t ON t.id = e.tenant_id
             WHERE 1=1

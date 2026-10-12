@@ -297,7 +297,10 @@ async def _run_voice_session(
         return
 
     # --- conversation history (resume same thread as text chat) ------------
-    current_conversation_id = conversation_id
+    # Only adopt a conversation the tenant-scoped lookup actually returned. An
+    # id that is missing, belongs to another tenant, or whose lookup failed
+    # starts a new conversation instead of being updated by id.
+    current_conversation_id = None
     messages_history: List[Dict[str, Any]] = []
     if conversation_id:
         try:
@@ -309,11 +312,13 @@ async def _run_voice_session(
                 .single()
                 .execute()
             )
-            raw = conv.data.get("messages", []) if conv.data else []
-            if isinstance(raw, str):
-                raw = json.loads(raw)
-            if isinstance(raw, list):
-                messages_history = raw
+            if conv.data:
+                current_conversation_id = conversation_id
+                raw = conv.data.get("messages", [])
+                if isinstance(raw, str):
+                    raw = json.loads(raw)
+                if isinstance(raw, list):
+                    messages_history = raw
         except Exception:
             pass
 
@@ -327,7 +332,7 @@ async def _run_voice_session(
                     "messages": json.dumps(messages_history),
                     "message_count": len(messages_history),
                     "last_message_at": datetime.utcnow().isoformat(),
-                }).eq("id", current_conversation_id).execute()
+                }).eq("id", current_conversation_id).eq("tenant_id", tenant_id).execute()
             else:
                 title = (title_hint or "Voice conversation")[:50]
                 created = (

@@ -12,7 +12,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.v1.dependencies import CurrentUser, get_db_client, require_admin
+from app.api.v1.dependencies import CurrentUser, get_db_client, require_platform_admin
 from app.core.postgres_adapter import Client
 
 from .schemas import IncidentItem, IncidentListResponse
@@ -22,7 +22,7 @@ router = APIRouter()
 
 @router.get("/incidents", response_model=IncidentListResponse)
 async def list_incidents(
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -124,7 +124,7 @@ async def list_incidents(
 @router.get("/incidents/{incident_id}")
 async def get_incident(
     incident_id: str,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client)
 ):
     """Get incident details."""
@@ -150,7 +150,7 @@ async def get_incident(
 @router.post("/incidents/{incident_id}/acknowledge")
 async def acknowledge_incident(
     incident_id: str,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client)
 ):
     """Mark incident as acknowledged."""
@@ -185,7 +185,7 @@ async def acknowledge_incident(
 @router.post("/incidents/{incident_id}/resolve")
 async def resolve_incident(
     incident_id: str,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client)
 ):
     """Mark incident as resolved."""

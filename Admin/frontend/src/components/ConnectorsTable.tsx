@@ -96,6 +96,9 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
     const [total, setTotal] = useState(0);
     const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
     const [revokeLoading, setRevokeLoading] = useState(false);
+    // The API client never throws; failures come back as { error }.
+    const [listError, setListError] = useState<string | null>(null);
+    const [actionError, setActionError] = useState<string | null>(null);
 
     const fetchConnectors = useCallback(async () => {
         setLoading(true);
@@ -109,12 +112,18 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
             if (providerFilter) params.provider = providerFilter;
 
             const response = await api.getConnectors(params);
-            if (response.data) {
+            if (response.error) {
+                setListError(response.error.message || 'Failed to load connectors.');
+                setConnectors([]);
+                setTotal(0);
+            } else if (response.data) {
+                setListError(null);
                 setConnectors(response.data.items);
                 setTotal(response.data.total);
             }
         } catch (error) {
             console.error('Failed to fetch connectors:', error);
+            setListError(error instanceof Error ? error.message : 'Failed to load connectors.');
         } finally {
             setLoading(false);
         }
@@ -127,28 +136,42 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
 
     const handleReconnect = async (e: React.MouseEvent, connectorId: string) => {
         e.stopPropagation();
+        setActionError(null);
         try {
-            await api.forceReconnect(connectorId);
+            const res = await api.forceReconnect(connectorId);
+            if (res.error) {
+                setActionError(res.error.message || 'Reconnect failed.');
+                return;
+            }
             fetchConnectors();
         } catch (error) {
             console.error('Failed to reconnect:', error);
+            setActionError(error instanceof Error ? error.message : 'Reconnect failed.');
         }
     };
 
     const handleRevokeClick = (e: React.MouseEvent, connectorId: string) => {
         e.stopPropagation();
+        setActionError(null);
         setRevokeTarget(connectorId);
     };
 
     const handleRevokeConfirm = async () => {
         if (!revokeTarget) return;
         setRevokeLoading(true);
+        setActionError(null);
         try {
-            await api.revokeConnector(revokeTarget);
+            const res = await api.revokeConnector(revokeTarget);
+            if (res.error) {
+                // Access is NOT revoked: keep the confirm open and say so.
+                setActionError(res.error.message || 'Revoke failed. The connector is still active.');
+                return;
+            }
             setRevokeTarget(null);
             fetchConnectors();
         } catch (error) {
             console.error('Failed to revoke:', error);
+            setActionError(error instanceof Error ? error.message : 'Revoke failed. The connector is still active.');
         } finally {
             setRevokeLoading(false);
         }
@@ -231,12 +254,23 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
                 </button>
             </div>
 
+            {actionError && revokeTarget === null && (
+                <div className="error-banner" role="alert">
+                    <p>{actionError}</p>
+                </div>
+            )}
+
             {/* Table */}
             <div className="table-container">
                 {loading ? (
                     <div className="loading-state">
                         <Loader2 className="spinner" size={24} />
                         <span>Loading connectors...</span>
+                    </div>
+                ) : listError ? (
+                    <div className="error-banner" role="alert">
+                        <p>{listError}</p>
+                        <button onClick={fetchConnectors}>Retry</button>
                     </div>
                 ) : filteredConnectors.length === 0 ? (
                     <div className="empty-state">
@@ -352,8 +386,9 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
                 cancelLabel="Cancel"
                 variant="danger"
                 onConfirm={handleRevokeConfirm}
-                onCancel={() => setRevokeTarget(null)}
+                onCancel={() => { setRevokeTarget(null); setActionError(null); }}
                 loading={revokeLoading}
+                error={revokeTarget !== null ? actionError : null}
             />
         </div>
     );

@@ -389,7 +389,10 @@ async def assistant_chat(
         })
         
         # Initialize conversation
-        current_conversation_id = conversation_id
+        # Only adopt a conversation the tenant-scoped lookup actually returned.
+        # An id that is missing, belongs to another tenant, or whose lookup
+        # failed starts a new conversation instead of being updated by id.
+        current_conversation_id = None
         messages_history = []
         
         if conversation_id:
@@ -399,6 +402,7 @@ async def assistant_chat(
                 ).eq("id", conversation_id).eq("tenant_id", tenant_id).single().execute()
                 
                 if conv_response.data:
+                    current_conversation_id = conversation_id
                     raw_messages = conv_response.data.get("messages", [])
                     if isinstance(raw_messages, str):
                         try:
@@ -426,7 +430,7 @@ async def assistant_chat(
                         "messages": json.dumps(messages_history),
                         "message_count": len(messages_history),
                         "last_message_at": datetime.utcnow().isoformat()
-                    }).eq("id", current_conversation_id).execute()
+                    }).eq("id", current_conversation_id).eq("tenant_id", tenant_id).execute()
                 else:
                     title = (title_hint or "New conversation")[:50]
                     if title_hint and len(title_hint) > 50:

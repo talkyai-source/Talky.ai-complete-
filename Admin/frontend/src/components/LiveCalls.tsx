@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, Play, Pause } from 'lucide-react';
 import { api } from '../lib/api';
 import type { LiveCallItem } from '../lib/api';
@@ -56,23 +56,38 @@ export function LiveCalls() {
     const [showConfirm, setShowConfirm] = useState(false);
     const [pauseReason, setPauseReason] = useState('');
     const [pollError, setPollError] = useState<string | null>(null);
+    // Set while the pause state could not be read (or a pause/resume failed).
+    // isPaused alone cannot say "unknown": it would read as "not paused".
+    const [pauseStatusError, setPauseStatusError] = useState<string | null>(null);
+    const [actionError, setActionError] = useState<string | null>(null);
+    // Bumped by every pause/resume write so a status read that started before
+    // the write cannot overwrite the newer answer.
+    const pauseWriteSeq = useRef(0);
+
+    const refreshPauseStatus = useCallback(async () => {
+        const seq = pauseWriteSeq.current;
+        try {
+            const response = await api.getPauseStatus();
+            if (response.error) throw new Error(response.error.message);
+            if (seq !== pauseWriteSeq.current) return;
+            if (response.data) {
+                setIsPaused(response.data.paused);
+                // Only adopt the server's reason while paused: when not paused
+                // the field doubles as the operator's draft for the next pause.
+                if (response.data.paused) setPauseReason(response.data.reason || '');
+                setPauseStatusError(null);
+            }
+        } catch (err) {
+            console.warn('Failed to fetch pause status:', err);
+            if (seq !== pauseWriteSeq.current) return;
+            setPauseStatusError(err instanceof Error ? err.message : 'Could not read the pause status.');
+        }
+    }, []);
 
     // Fetch pause status on mount
     useEffect(() => {
-        const fetchPauseStatus = async () => {
-            try {
-                const response = await api.getPauseStatus();
-                if (response.error) throw new Error(response.error.message);
-                if (response.data) {
-                    setIsPaused(response.data.paused);
-                    setPauseReason(response.data.reason || '');
-                }
-            } catch (err) {
-                console.warn('Failed to fetch pause status:', err);
-            }
-        };
-        fetchPauseStatus();
-    }, []);
+        void refreshPauseStatus();
+    }, [refreshPauseStatus]);
 
     // Poll the real /admin/calls/live endpoint every 5s. The previous
     // version of this widget rendered a hardcoded list of fake calls
@@ -96,12 +111,17 @@ export function LiveCalls() {
             }
         };
         void fetchOnce();
-        const id = window.setInterval(fetchOnce, 5_000);
+        const tick = () => {
+            void fetchOnce();
+            // A kill switch flipped elsewhere (or a failed first read) must not stay stale.
+            void refreshPauseStatus();
+        };
+        const id = window.setInterval(tick, 5_000);
         return () => {
             cancelled = true;
             window.clearInterval(id);
         };
-    }, []);
+    }, [refreshPauseStatus]);
 
     const patchCall = useCallback((callId: string, patch: Partial<LiveCallItem>) => {
         setCalls((current) => current.map((call) => (
@@ -121,6 +141,8 @@ export function LiveCalls() {
         }
 
         setPauseLoading(true);
+        setActionError(null);
+        pauseWriteSeq.current += 1;
         try {
             const shouldPause = !isPaused;
             const response = await api.setPauseAllCalls(
@@ -131,17 +153,23 @@ export function LiveCalls() {
             if (response.data) {
                 setIsPaused(response.data.paused);
                 setPauseReason(response.data.reason || '');
+                setPauseStatusError(null);
             }
+            setShowConfirm(false);
         } catch (err) {
             console.error('Failed to toggle pause:', err);
+            // Leave the confirm open: the emergency stop was NOT applied.
+            setActionError(err instanceof Error
+                ? err.message
+                : 'The request failed. Calls were not paused or resumed.');
         } finally {
             setPauseLoading(false);
-            setShowConfirm(false);
         }
     }, [isPaused, showConfirm, pauseReason]);
 
     const handleCancelConfirm = useCallback(() => {
         setShowConfirm(false);
+        setActionError(null);
     }, []);
 
     return (
@@ -197,6 +225,22 @@ export function LiveCalls() {
                     )}
                 </div>
             </div>
+
+            {actionError && (
+                <div className="error-banner inline" role="alert">
+                    <p>
+                        {isPaused ? 'Calls were NOT resumed' : 'Calls were NOT paused'}: {actionError}
+                    </p>
+                </div>
+            )}
+
+            {pauseStatusError && (
+                <div className="error-banner inline" role="alert">
+                    <p>
+                        Pause status unknown: {pauseStatusError} Calls may or may not be paused.
+                    </p>
+                </div>
+            )}
 
             {isPaused && (
                 <div className="pause-banner">

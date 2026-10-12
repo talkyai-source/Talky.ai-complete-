@@ -256,6 +256,12 @@ class CRMSyncService:
         call = await self._load_call(tenant_id, call_id)
         if call is None:
             return CRMSyncResult(success=False, call_id=call_id, error_message="call not found")
+        if call.get("is_test"):
+            # Browser "Test agent" sessions are not customer activity: no Lead,
+            # no logged-call Task in the tenant's real CRM.
+            await self._park_test_call_deliveries(tenant_id, call_id, call, providers)
+            return CRMSyncResult(success=False, call_id=call_id, skipped=True,
+                skipped_reason="test_call")
         # Transcript revisions can commit before their replacement summary.
         # A delivery must not re-export stale AI conclusions beside the caller's
         # corrected words. Historical summaries without source proof are also
@@ -317,6 +323,22 @@ class CRMSyncService:
         return CRMSyncResult(success=bool(successful) and not errors, call_id=call_id,
             providers=successful, crm_contact_id=first_contact, crm_call_id=first_log,
             updated_existing=updated, error_message="; ".join(errors) or None)
+
+    async def _park_test_call_deliveries(self, tenant_id, call_id, call, providers) -> None:
+        """Take any trigger-queued delivery rows for a test call out of the
+        pending set, or the drain worker would re-select them on every pass."""
+        for provider in providers:
+            try:
+                receipt = await self.deliveries.enqueue(tenant_id, call_id, provider, "test_call",
+                    source_revision=call.get("source_revision"))
+                if receipt.get("status") == "skipped":
+                    continue
+                receipt = await self.deliveries.claim(tenant_id, call_id, provider,
+                    source_revision=call.get("source_revision"), expected_key="test_call")
+                if receipt is not None:
+                    await self.deliveries.save(receipt, status="skipped", error="test_call")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("crm_sync: could not park test call %s for %s: %s", call_id, provider, exc)
 
     async def _deliver(self, receipt, call, lead, body, summary):
         tenant_id, provider = str(receipt["tenant_id"]), receipt["provider"]
@@ -701,7 +723,7 @@ class CRMSyncService:
                        status, outcome, duration_seconds, transcript, summary,
                        summary_json, transcript_json, action_results, summary_transcript_hash,
                        recording_url, crm_call_id, crm_synced_at,
-                       started_at, answered_at, ended_at, created_at
+                       started_at, answered_at, ended_at, created_at, is_test
                   FROM calls
                  WHERE id = $1::uuid AND tenant_id = $2::uuid
                 """,

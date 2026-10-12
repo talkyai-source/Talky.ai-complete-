@@ -59,6 +59,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -117,6 +118,15 @@ def _reject_newlines(field: str, value: str) -> str:
     if "\n" in value or "\r" in value:
         raise ValueError(f"{field} must not contain newlines")
     return value
+
+
+def _escape_semicolons(value: str) -> str:
+    """Escape ';' so Asterisk's parser keeps it instead of starting a comment.
+
+    An unescaped ';' truncates the value ("pa;ss" is read as "pa"). A ';'
+    already preceded by a backslash is left alone (no double escaping).
+    """
+    return re.sub(r"(?<!\\);", r"\\;", value)
 
 
 def _norm_transport(transport: Optional[str]) -> str:
@@ -221,14 +231,14 @@ def render_trunk_conf(inp: TrunkConfigInput) -> str:
         lines.append(f"[{ep}-auth]")
         lines.append("type=auth")
         lines.append("auth_type=userpass")
-        lines.append(f"username={_reject_newlines('auth_username', inp.auth_username.strip())}")
-        lines.append(f"password={_reject_newlines('auth_password', inp.auth_password)}")
+        lines.append(f"username={_escape_semicolons(_reject_newlines('auth_username', inp.auth_username.strip()))}")
+        lines.append(f"password={_escape_semicolons(_reject_newlines('auth_password', inp.auth_password))}")
         # Digest realm — the working primary sets realm=asterisk; a missing/wrong
         # realm is a classic 403-on-REGISTER cause. Default to "asterisk", override
         # via the trunk's Advanced auth_realm.
         realm = _reject_newlines("auth_realm", (inp.auth_realm or "asterisk").strip())
         if realm:
-            lines.append(f"realm={realm}")
+            lines.append(f"realm={_escape_semicolons(realm)}")
         lines.append("")
 
     # --- aor ---

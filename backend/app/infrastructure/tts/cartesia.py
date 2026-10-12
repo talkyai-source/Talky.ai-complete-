@@ -10,6 +10,7 @@ import json
 import base64
 import asyncio
 import logging
+import re
 from typing import AsyncIterator, List, Dict, Optional, Any
 import aiohttp
 import numpy as np
@@ -29,6 +30,19 @@ CARTESIA_SAMPLE_RATES = frozenset({8000, 16000, 22050, 24000, 44100, 48000})
 def _validate_sample_rate(sample_rate: int) -> None:
     if sample_rate not in CARTESIA_SAMPLE_RATES:
         raise ValueError(f"Unsupported Cartesia sample rate: {sample_rate}")
+
+_API_KEY_QUERY_RE = re.compile(r"(api_key=)[^&\s'\"]+", re.IGNORECASE)
+
+
+def _redact_key(value: object) -> str:
+    """Text of an error with any ``api_key=<secret>`` query value masked.
+
+    The Cartesia key rides in the WS URL query string, and aiohttp stringifies
+    that URL into handshake errors (401/429/5xx). Never log or re-raise the
+    raw exception text from a WS connect.
+    """
+    return _API_KEY_QUERY_RE.sub(r"\g<1>***", str(value))
+
 
 # How long a sentence's WS lock wait is allowed to block before we give up
 # waiting on it and force a fresh lock. The lock is normally released within
@@ -184,7 +198,7 @@ class CartesiaTTSProvider(TTSProvider):
                 heartbeat=20.0,
             )
         except Exception as exc:
-            logger.warning("cartesia_ws_connect_failed call_id=%s: %s", call_id, exc)
+            logger.warning("cartesia_ws_connect_failed call_id=%s: %s", call_id, _redact_key(exc))
             return
         handshake_ms = (asyncio.get_event_loop().time() - _t0) * 1000.0
         self._call_ws[call_id] = ws
@@ -315,12 +329,12 @@ class CartesiaTTSProvider(TTSProvider):
                         if chunks_yielded:
                             await self.disconnect_for_call(call_id)
                             raise RuntimeError(
-                                f"Cartesia WS failed mid-generation: {exc}"
-                            )
+                                f"Cartesia WS failed mid-generation: {_redact_key(exc)}"
+                            ) from None
                         # Clean reset — WS died before any audio.  Reconnect + retry
                         # once with a fresh context_id.
                         logger.warning(
-                            "cartesia_ws_reconnect call_id=%s reason=%s", call_id, exc
+                            "cartesia_ws_reconnect call_id=%s reason=%s", call_id, _redact_key(exc)
                         )
                         await self.disconnect_for_call(call_id)
                         ws = await self._get_or_open_ws(call_id)
@@ -367,7 +381,7 @@ class CartesiaTTSProvider(TTSProvider):
             raise RuntimeError("Cartesia TTS WebSocket timeout")
           except aiohttp.ClientError as exc:
             lease.report_failure(retryable=True)
-            raise RuntimeError(f"Cartesia TTS WebSocket error: {exc}")
+            raise RuntimeError(f"Cartesia TTS WebSocket error: {_redact_key(exc)}") from None
 
     async def _stream_over_ws(
         self,
@@ -536,8 +550,8 @@ class CartesiaTTSProvider(TTSProvider):
                         break
         
         except Exception as e:
-            logger.error(f"[Cartesia WS] Error: {e}")
-            raise RuntimeError(f"Cartesia WebSocket error: {e}")
+            logger.error(f"[Cartesia WS] Error: {_redact_key(e)}")
+            raise RuntimeError(f"Cartesia WebSocket error: {_redact_key(e)}") from None
     
     async def get_available_voices(self) -> List[Dict]:
         """Get list of available Cartesia voices"""

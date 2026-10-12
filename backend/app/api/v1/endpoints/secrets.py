@@ -3,11 +3,14 @@ Secrets Management API Endpoints
 
 Centralized secrets management with encryption and rotation.
 """
+import logging
+import time
+from collections import defaultdict, deque
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import get_current_user, require_permissions, get_audit_logger, get_secrets_manager
@@ -16,7 +19,10 @@ from app.domain.services.secrets_manager import (
     SecretMetadata,
     SecretsManager,
     SecretType,
+    SecretValueRequired,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin/secrets", tags=["Secrets"])
 
@@ -43,6 +49,9 @@ class CreateSecretResponse(BaseModel):
 class RotateSecretRequest(BaseModel):
     """Rotate secret request"""
     grace_period_hours: int = 24
+    # Required for every secret type except TENANT_API_KEY (whose new key is
+    # generated server-side and returned once in the response).
+    value: Optional[dict] = None
 
 
 class ValidateApiKeyRequest(BaseModel):
@@ -168,11 +177,17 @@ async def rotate_secret(
     # tenant reads as not-found (tenant_secrets has no RLS). rotate() raises
     # ValueError when the scoped secret doesn't exist.
     try:
-        new_secret_id = await secrets_manager.rotate(
+        new_secret_id, api_key = await secrets_manager.rotate(
             secret_id=secret_id,
             rotated_by=current_user["id"],
             grace_period_hours=data.grace_period_hours,
+            new_value=data.value,
             tenant_id=tenant_id,
+        )
+    except SecretValueRequired:
+        raise HTTPException(
+            status_code=400,
+            detail="A new value is required to rotate this secret type",
         )
     except ValueError:
         raise HTTPException(status_code=404, detail="Secret not found")
@@ -187,12 +202,17 @@ async def rotate_secret(
         after_state={"new_secret_id": str(new_secret_id)},
     )
 
-    return {
+    response = {
         "rotated": True,
         "old_secret_id": secret_id,
         "new_secret_id": new_secret_id,
         "grace_period_hours": data.grace_period_hours,
     }
+    if api_key:
+        # Shown once; only its hash is stored.
+        response["api_key"] = api_key
+        response["warning"] = "Store this API key securely - it will not be shown again"
+    return response
 
 
 @router.delete("/tenants/{tenant_id}/secrets/{secret_id}")
@@ -271,18 +291,56 @@ async def mark_secret_compromised(
 
 # API Key Validation
 
+# Validation is unauthenticated, so it gets its own per-client cap on top of the
+# global IP tier. The key row is found by lookup_hash (migration 0068), so a request
+# unwraps one key rather than every active tenant key; only keys that predate that
+# column are still scanned, once, until they are indexed. Per process: it bounds
+# abuse, it is not a distributed quota.
+_VALIDATE_MAX_PER_WINDOW = 30
+_VALIDATE_WINDOW_S = 60.0
+_VALIDATE_ATTEMPTS: dict[str, deque] = defaultdict(deque)
+
+
+def _validate_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _validate_rate_limited(ip: str) -> bool:
+    now = time.monotonic()
+    attempts = _VALIDATE_ATTEMPTS[ip]
+    while attempts and now - attempts[0] > _VALIDATE_WINDOW_S:
+        attempts.popleft()
+    if len(attempts) >= _VALIDATE_MAX_PER_WINDOW:
+        return True
+    attempts.append(now)
+    if len(_VALIDATE_ATTEMPTS) > 10_000:  # bound memory under address spraying
+        for key in [k for k, v in _VALIDATE_ATTEMPTS.items() if not v or now - v[-1] > _VALIDATE_WINDOW_S]:
+            _VALIDATE_ATTEMPTS.pop(key, None)
+    return False
+
+
 @router.post("/validate-api-key")
 async def validate_api_key(
     data: ValidateApiKeyRequest,
+    request: Request,
     secrets_manager: SecretsManager = Depends(get_secrets_manager),
 ):
-    """Validate an API key (public endpoint, rate limited)"""
+    """Validate an API key (public endpoint, rate limited per client IP)"""
+    ip = _validate_client_ip(request)
+    if _validate_rate_limited(ip):
+        logger.warning("api_key_validation_rate_limited ip=%s", ip)
+        raise HTTPException(status_code=429, detail="Too many validation attempts")
+
     result = await secrets_manager.validate_api_key(
         api_key=data.api_key,
         required_permission=data.required_permission,
     )
 
     if not result:
+        logger.warning("api_key_validation_rejected ip=%s", ip)
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     return {
@@ -349,11 +407,20 @@ async def rotate_platform_secret(
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Rotate platform secret (platform admin only)"""
-    new_secret_id = await secrets_manager.rotate(
-        secret_id=secret_id,
-        rotated_by=current_user["id"],
-        grace_period_hours=data.grace_period_hours,
-    )
+    try:
+        new_secret_id, api_key = await secrets_manager.rotate(
+            secret_id=secret_id,
+            rotated_by=current_user["id"],
+            grace_period_hours=data.grace_period_hours,
+            new_value=data.value,
+        )
+    except SecretValueRequired:
+        raise HTTPException(
+            status_code=400,
+            detail="A new value is required to rotate this secret type",
+        )
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Secret not found")
 
     await audit_logger.log(
         event_type=AuditEvent.SECRET_ROTATED,
@@ -363,7 +430,11 @@ async def rotate_platform_secret(
         resource_id=secret_id,
     )
 
-    return {"rotated": True, "new_secret_id": new_secret_id}
+    response = {"rotated": True, "new_secret_id": new_secret_id}
+    if api_key:
+        response["api_key"] = api_key
+        response["warning"] = "Store this API key securely - it will not be shown again"
+    return response
 
 
 # Expiring Secrets

@@ -31,7 +31,7 @@ def test_backup_dumps_with_the_rls_bypass_and_refuses_a_schema_only_result():
     assert "--enable-row-security" in text, "row_security=off is refused on FORCE RLS tables (first prod run failed)"
     assert re.search(r"grep -c 'TABLE DATA'", text), "must count data entries"
     assert "schema-only dump" in text, "must name the failure when data is missing"
-    assert "refusing to publish a shrunken backup" in text
+    assert "published anyway so the baseline moves" in text, "a shrink must alert but still publish"
     assert re.search(r"find .*?-mtime .*?-delete", text, re.S), "retention must be enforced"
 
 

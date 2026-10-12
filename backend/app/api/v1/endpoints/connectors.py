@@ -9,8 +9,9 @@ import logging
 import re
 from typing import Optional, List, Any
 from datetime import datetime, timezone
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
+import httpx
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -550,6 +551,128 @@ async def authorize_connector_by_type(
     return TypeAuthorizeResponse(authorization_url=auth_url)
 
 
+# Salesforce settings that live in connectors.config and must survive a
+# reconnect. Identity keys (instance_url, org_id, ...) are deliberately absent:
+# the fresh authorization decides those. No OAuth token material is carried.
+_SALESFORCE_RECONNECT_KEYS = (
+    "webhook_token_hash", "webhook_token_encrypted", "callback_campaign_id",
+    "callback_priority", "log_calls", "create_leads", "sync_inbound",
+)
+
+
+def _config_dict(raw: Any) -> dict:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            import json
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except ValueError:
+            return {}
+    return {}
+
+
+_GOOGLE_PROVIDERS = {"google_calendar", "gmail", "google_drive"}
+
+
+async def _revoke_token_at_provider(
+    provider: str, token: str, *, tenant_id: str, connector_id: str
+) -> bool:
+    """Best-effort provider-side revocation of one OAuth token. Never raises.
+
+    Outlook has no per-token revocation endpoint, so it reports False.
+    """
+    try:
+        if provider in _GOOGLE_PROVIDERS:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post("https://oauth2.googleapis.com/revoke", data={"token": token})
+            return response.status_code == 200
+        if provider == "hubspot":
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.delete(
+                    f"https://api.hubapi.com/oauth/v1/refresh-tokens/{quote(token, safe='')}"
+                )
+            return response.status_code in (200, 204)
+        if provider == "salesforce":
+            connector = ConnectorFactory.create(
+                provider=provider, tenant_id=tenant_id, connector_id=connector_id
+            )
+            return bool(await connector.revoke_token(token))
+    except Exception as exc:  # noqa: BLE001 - revocation must never block the disconnect
+        logger.warning("Provider token revocation failed provider=%s: %s", provider, type(exc).__name__)
+    return False
+
+
+async def _revoke_connector_grants(db_client: Client, tenant_id: str, connector_id: str, provider: str) -> bool:
+    """Revoke every active account's grant at the provider before its tokens are deleted."""
+    accounts = (
+        db_client.table("connector_accounts")
+        .select("id, access_token_encrypted, refresh_token_encrypted")
+        .eq("connector_id", connector_id)
+        .eq("tenant_id", tenant_id)
+        .eq("status", "active")
+        .execute()
+    )
+    if getattr(accounts, "error", None):
+        # Deleting the tokens now would make provider revocation impossible later.
+        logger.error("Connector accounts lookup failed connector=%s: %s", connector_id, accounts.error)
+        raise HTTPException(status_code=503, detail="Could not disconnect the connector; please try again")
+    rows = accounts.data if isinstance(accounts.data, list) else ([accounts.data] if accounts.data else [])
+    encryption = get_encryption_service()
+    revoked = bool(rows)
+    for row in rows:
+        encrypted = row.get("refresh_token_encrypted") or row.get("access_token_encrypted")
+        ok = False
+        if encrypted:
+            try:
+                token = encryption.decrypt(encrypted)
+                ok = await _revoke_token_at_provider(
+                    provider, token, tenant_id=tenant_id, connector_id=connector_id
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Connector token revoke skipped connector=%s: %s", connector_id, type(exc).__name__)
+        revoked = revoked and ok
+    return revoked
+
+
+def _cancel_connector_reminders(db_client: Client, tenant_id: str, connector_id: str) -> None:
+    """Pending reminders for meetings on this connector can no longer be rescheduled."""
+    meetings = (
+        db_client.table("meetings").select("id")
+        .eq("tenant_id", tenant_id).eq("connector_id", connector_id).execute()
+    )
+    meeting_ids = [m["id"] for m in (meetings.data or [])] if not getattr(meetings, "error", None) else []
+    if not meeting_ids:
+        return
+    result = (
+        db_client.table("reminders")
+        .update({"status": "cancelled", "last_error": "connector_disconnected"})
+        .eq("tenant_id", tenant_id).in_("meeting_id", meeting_ids).eq("status", "pending").execute()
+    )
+    if getattr(result, "error", None):
+        logger.warning("Reminder cleanup failed for connector=%s: %s", connector_id, result.error)
+
+
+async def _disconnect_connector(db_client: Client, tenant_id: str, connector_id: str, provider: str) -> bool:
+    """Revoke at the provider, drop dependent reminders, then delete the local rows.
+
+    A failed delete is an error, never a success message. Returns whether the
+    provider confirmed revocation.
+    """
+    provider_revoked = await _revoke_connector_grants(db_client, tenant_id, connector_id, provider)
+    _cancel_connector_reminders(db_client, tenant_id, connector_id)
+    for table, column in (("connector_accounts", "connector_id"), ("connectors", "id")):
+        result = (
+            db_client.table(table).delete()
+            .eq(column, connector_id).eq("tenant_id", tenant_id).execute()
+        )
+        if getattr(result, "error", None):
+            logger.error("Connector disconnect failed table=%s connector=%s: %s", table, connector_id, result.error)
+            raise HTTPException(status_code=500, detail="Could not disconnect the connector; please try again")
+    return provider_revoked
+
+
 @router.post("/{type}/disconnect", dependencies=[Depends(require_permission(Permission.CONNECTORS_DELETE))])
 async def disconnect_connector_by_type(
     type: str,
@@ -577,11 +700,16 @@ async def disconnect_connector_by_type(
     if not ids:
         return {"success": True, "message": "Nothing to disconnect", "removed": 0}
 
+    provider_revoked = True
     for connector_id in ids:
-        db_client.table("connector_accounts").delete().eq("connector_id", connector_id).execute()
-        db_client.table("connectors").delete().eq("id", connector_id).execute()
+        provider_revoked &= await _disconnect_connector(
+            db_client, current_user.tenant_id, connector_id, provider
+        )
 
-    return {"success": True, "message": "Connector disconnected", "removed": len(ids)}
+    return {
+        "success": True, "message": "Connector disconnected",
+        "removed": len(ids), "provider_revoked": provider_revoked,
+    }
 
 
 # NOTE: the dynamic GET /{connector_id} route is deliberately registered LATER
@@ -960,7 +1088,7 @@ async def oauth_callback(
             # retire a working HubSpot connection and vice versa.
             active_rows = (
                 db_client.table("connectors")
-                .select("id, created_at")
+                .select("id, created_at, config")
                 .eq("tenant_id", tenant_id)
                 .eq("type", conn_type)
                 .eq("provider", provider)
@@ -982,7 +1110,36 @@ async def oauth_callback(
 
                 active = active_rows.data or []
                 winner = max(active, key=activation_order) if active else None
-                for duplicate in active:
+                retire_ok = True
+                if provider == "salesforce" and winner and str(winner["id"]) == str(connector_id):
+                    # Reconnect: the replacement row would otherwise lose the
+                    # webhook token and the user's toggles. Copy BEFORE the old
+                    # row is retired; older settings first, so newer rows and
+                    # the fresh identity win.
+                    carried: dict = {}
+                    for old in sorted(
+                        (d for d in active if str(d["id"]) != str(connector_id)), key=activation_order
+                    ):
+                        old_config = _config_dict(old.get("config"))
+                        carried.update({k: old_config[k] for k in _SALESFORCE_RECONNECT_KEYS if k in old_config})
+                    if carried:
+                        current_config = activate_update.get("config")
+                        if current_config is None:
+                            current_config = _config_dict(connector_row.data.get("config"))
+                        carry = (
+                            db_client.table("connectors")
+                            .update({"config": {**carried, **current_config}})
+                            .eq("id", connector_id)
+                            .eq("tenant_id", tenant_id)
+                            .execute()
+                        )
+                        if not _response_has_rows(carry):
+                            logger.error(
+                                "OAuth callback: could not carry Salesforce settings connector=%s",
+                                connector_id,
+                            )
+                            retire_ok = False  # keep the old row until its settings are safe
+                for duplicate in active if retire_ok else []:
                     old_id = duplicate["id"]
                     if winner and str(old_id) == str(winner["id"]):
                         continue
@@ -1081,17 +1238,11 @@ async def delete_connector(
     if not conn_response.data:
         raise HTTPException(status_code=404, detail="Connector not found")
     
-    # Delete connector accounts (tokens)
-    db_client.table("connector_accounts").delete().eq(
-        "connector_id", connector_id
-    ).execute()
-    
-    # Delete connector
-    db_client.table("connectors").delete().eq(
-        "id", connector_id
-    ).execute()
-    
-    return {"success": True, "message": "Connector disconnected"}
+    provider_revoked = await _disconnect_connector(
+        db_client, current_user.tenant_id, connector_id, conn_response.data["provider"]
+    )
+
+    return {"success": True, "message": "Connector disconnected", "provider_revoked": provider_revoked}
 
 
 @router.post("/{connector_id}/refresh", dependencies=[Depends(require_permission(Permission.CONNECTORS_UPDATE))])

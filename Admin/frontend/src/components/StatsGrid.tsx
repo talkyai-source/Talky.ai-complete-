@@ -56,40 +56,49 @@ export function StatsGrid() {
         return () => clearInterval(interval);
     }, [fetchStats]);
 
-    if (error) {
-        console.warn('StatsGrid error:', error);
-    }
+    // A failed read is "unavailable", never zero: zeros read as an all-clear.
+    const UNAVAILABLE = '\u2014';
 
     return (
+        <>
+        {error && (
+            <div className="error-banner inline" role="alert">
+                <p>
+                    Dashboard stats unavailable: {error}
+                    {stats ? ' Showing last known values, which may be stale.' : ''}
+                </p>
+            </div>
+        )}
         <div className="stats-grid">
             <StatCard
                 icon={<Phone />}
                 label="Active Calls:"
-                value={stats?.active_calls ?? 0}
+                value={stats?.active_calls ?? UNAVAILABLE}
                 iconColor="orange"
                 loading={loading}
             />
             <StatCard
                 icon={<AlertCircle />}
                 label="Error Rate (24h):"
-                value={stats?.error_rate_24h ?? '0%'}
+                value={stats?.error_rate_24h ?? UNAVAILABLE}
                 iconColor="red"
                 loading={loading}
             />
             <StatCard
                 icon={<Users />}
                 label="Active Tenants:"
-                value={stats?.active_tenants ?? 0}
+                value={stats?.active_tenants ?? UNAVAILABLE}
                 iconColor="green"
                 loading={loading}
             />
             <StatCard
                 icon={<AlertTriangle />}
                 label="API Errors (24h):"
-                value={stats?.api_errors_24h ?? 0}
+                value={stats?.api_errors_24h ?? UNAVAILABLE}
                 iconColor="teal"
                 loading={loading}
             />
         </div>
+        </>
     );
 }

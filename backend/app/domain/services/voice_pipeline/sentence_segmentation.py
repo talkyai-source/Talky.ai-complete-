@@ -30,7 +30,20 @@ COMMON_ABBREVIATIONS = {
     "etc",
     "e.g",
     "i.e",
+    "a.m",
+    "p.m",
+    "approx",
+    "inc",
+    "ltd",
 }
+
+# Abbreviations that are always followed by a name or number, so a period after
+# them is never a sentence end ("Dr. Patel", "12 St. James Street").
+_NEVER_TERMINAL = {"mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "e.g", "i.e"}
+
+# Abbreviations that can also close a sentence ("...at 5 p.m. Thanks."). Mid
+# buffer they end one only when the next word starts a new sentence.
+_TERMINAL_CAPABLE = {"etc", "a.m", "p.m", "approx", "inc", "ltd", "no"}
 
 
 def is_terminal_period_boundary(text: str, index: int) -> bool:
@@ -44,6 +57,35 @@ def is_terminal_period_boundary(text: str, index: int) -> bool:
         return False
     if len(token) == 1 and token.isalpha() and token.isupper():
         return False
+    # A lone lowercase letter plus a period is the start of "a.m." / "p.m." /
+    # "e.g." arriving token by token; wait for the rest instead of speaking "9 a."
+    if len(token) == 1 and token.isalpha() and token.islower():
+        return False
+    return True
+
+
+def _period_space_ends_sentence(text: str, index: int) -> bool:
+    """True when the '. ' at ``index`` ends a sentence.
+
+    ``find_sentence_end`` used to return on any '. ' mid-buffer, so "Dr. Patel",
+    "12 St. James Street" and "9 a.m. to 5 p.m." were each spoken as separate
+    utterances. Titles and initials never end one; sentence-capable
+    abbreviations do only when an uppercase word follows ("at 5 p.m. Thanks.").
+    """
+    prefix = text[:index].rstrip()
+    if not prefix:
+        return True
+    token = prefix.rsplit(maxsplit=1)[-1].strip("\"'([{")
+    lowered = token.lower()
+    rest = text[index + 1:].lstrip()
+    if lowered in _NEVER_TERMINAL:
+        return False
+    # Initials: "J. Smith". The pronoun "I" is a real sentence end.
+    if len(token) == 1 and token.isalpha() and token.isupper() and token != "I":
+        return False
+    if lowered in _TERMINAL_CAPABLE:
+        # Nothing after the space yet: wait, as the end-of-buffer rule does.
+        return bool(rest) and rest[0].isalpha() and rest[0].isupper()
     return True
 
 
@@ -144,7 +186,8 @@ def find_sentence_end(
                     i += 1
                 # After the ellipsis just continue scanning — don't return.
             elif i + 1 < len(text) and text[i + 1] == " ":
-                return i
+                if _period_space_ends_sentence(text, i):
+                    return i
             elif (
                 i + 1 == len(text)
                 # "1." / "£11." at the end of what has arrived may be half of

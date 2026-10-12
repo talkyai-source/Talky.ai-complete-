@@ -74,15 +74,44 @@ def _resolve_cached(e164: str) -> Optional[str]:
 
     if not zones:
         return None
+    # A number that spans several zones with DIFFERENT clocks (Australian/
+    # Russian mobiles, non-geographic +1 8xx, ...) cannot be placed. Taking
+    # ``zones[0]`` judged the window on an arbitrary clock (a Perth lead on
+    # Adelaide time, 05:30 local read as 09:00) and could authorise an
+    # out-of-hours call, so it is "no answer": the caller falls back to the
+    # campaign/tenant timezone. Zones that keep ONE clock all year (UK mobiles
+    # list London + Jersey + Guernsey + Isle of Man, Italy lists Rome + Vatican)
+    # are not ambiguous, and dropping them would make a non-UK tenant judge UK
+    # numbers on its own clock.
+    if len(zones) != 1 and not _zones_share_one_clock(zones):
+        return None
     # ``phonenumbers`` returns a generic "Etc/Unknown" sentinel when it
     # can't localise — treat that as no-answer so we fall back to tenant tz.
-    first = zones[0]
-    if not first or first == "Etc/Unknown":
+    zone = zones[0]
+    if not zone or zone == "Etc/Unknown":
         return None
-    # A single confident zone is the common NANP case. When a number spans
-    # multiple zones (e.g. some UK ranges) we still take the first — the
-    # caller's window check is the same across those neighbouring zones.
-    return first
+    return zone
+
+
+def _zones_share_one_clock(zones) -> bool:
+    """True when every zone has the same UTC offset on the 1st and 15th of
+    every month of a full year (so DST rules agree too). Fails safe: any zone
+    pytz cannot load, or the sentinel, makes the answer False."""
+    try:
+        import pytz
+        from datetime import datetime, timezone
+
+        tzs = [pytz.timezone(z) for z in zones if z != "Etc/Unknown"]
+        if len(tzs) != len(zones):
+            return False
+        for month in range(1, 13):
+            for day in (1, 15):
+                moment = datetime(2026, month, day, 12, tzinfo=timezone.utc)
+                if len({moment.astimezone(tz).utcoffset() for tz in tzs}) != 1:
+                    return False
+        return True
+    except Exception:
+        return False
 
 
 def resolve_lead_timezone(phone_number: Optional[str]) -> Optional[str]:

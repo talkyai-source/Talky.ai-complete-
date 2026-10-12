@@ -27,6 +27,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -44,6 +45,7 @@ from app.core.container import get_container
 from app.core.db_utils import acquire_with_tenant
 from app.core.security.rbac import Permission, require_permission
 from app.domain.services.billing_catalog import _EXPONENTS
+from app.domain.services.billing_checkout import CheckoutError, billing_return_urls
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.billing_service import BillingService
 from app.domain.services.minutes_quota import compute_minutes_status
@@ -71,6 +73,20 @@ def _service() -> TopupService:
     return TopupService(c.db_pool)
 
 
+def _live_topups_enabled() -> bool:
+    """BILLING_TOPUPS_LIVE_ENABLED, default off (same truthy set as the other flags).
+
+    Purchased top-up minutes are added to ``tenants.minutes_allocated``
+    permanently and recur every month, so they cannot be sold against a real
+    Stripe key until the owner decides how they expire. Read from the process
+    environment on each request (no cached setting), so the switch is the
+    service environment plus a restart.
+    """
+    return os.getenv("BILLING_TOPUPS_LIVE_ENABLED", "false").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
 # ── models ──────────────────────────────────────────────────────────────────
 
 class PackageOut(BaseModel):
@@ -87,9 +103,11 @@ class PackageOut(BaseModel):
 
 
 class CheckoutIn(BaseModel):
+    # Package code only. Return URLs are NOT accepted from the client: where a
+    # paid customer lands is decided by the configured, allow-listed frontend
+    # origin (billing_return_urls). Unknown fields, including any legacy
+    # success_url/cancel_url, are ignored.
     package_code: str = Field(..., max_length=64)
-    success_url: Optional[str] = None
-    cancel_url: Optional[str] = None
 
 
 class CheckoutOut(BaseModel):
@@ -182,11 +200,34 @@ async def create_topup_checkout(
     hand. The alternative (swallowing it) is a payment that credits nothing.
     """
     tenant_id = _tenant(current_user)
+
+    # Fail-closed containment (bughunt billing-money-credentials-4): with a real
+    # provider mode (live, test, or an unavailable one) top-ups are sold only
+    # when BILLING_TOPUPS_LIVE_ENABLED is true. Refused BEFORE an order row or a
+    # payment session exists. Webhook crediting of sessions already paid is a
+    # different path and is not gated here.
+    billing = BillingService(db_client, audit_logger=audit_logger)
+    if billing.mock_mode is not True and not _live_topups_enabled():
+        logger.warning(
+            "topup_checkout_refused tenant=%s billing_mode=%s: BILLING_TOPUPS_LIVE_ENABLED is off",
+            tenant_id[:8], billing.billing_mode,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Minute top-ups are not available yet",
+        )
+
     svc = _service()
 
-    origin = request.headers.get("origin", "http://localhost:3000")
-    success_url = body.success_url or f"{origin}/billing?topup=success"
-    cancel_url = body.cancel_url or f"{origin}/billing?topup=cancelled"
+    # Resolved before the order exists so a missing/invalid destination cannot
+    # leave an orphan pending order. Neither the body nor the Origin header can
+    # choose the redirect target.
+    try:
+        billing_base = billing_return_urls()
+    except CheckoutError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+    success_url = f"{billing_base}?topup=success"
+    cancel_url = f"{billing_base}?topup=cancelled"
 
     try:
         order = await svc.create_order(
@@ -197,7 +238,6 @@ async def create_topup_checkout(
     except TopupError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-    billing = BillingService(db_client, audit_logger=audit_logger)
     try:
         session = await billing.create_topup_checkout_session(
             tenant_id=tenant_id,

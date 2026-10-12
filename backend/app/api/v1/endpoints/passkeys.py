@@ -49,6 +49,7 @@ Two-step login flow with fallback:
 # natively, so the future import isn't needed for syntax anyway.
 
 import logging
+from contextlib import asynccontextmanager
 from typing import Literal, Any, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
@@ -381,6 +382,25 @@ async def register_complete(
 # ===========================================================================
 
 
+class _PasskeyRejected(HTTPException):
+    """Known passkey rejection whose failure accounting must commit."""
+
+
+@asynccontextmanager
+async def _passkey_login_transaction(pool):
+    # The clone-detection delete, the consumed challenge and the failed-attempt
+    # row must commit even though the public result is a 401 (same pattern as
+    # auth/login.py). Unexpected/internal failures still roll back.
+    rejection = None
+    async with acquire_with_tenant(pool, None) as conn:
+        try:
+            yield conn
+        except _PasskeyRejected as exc:
+            rejection = exc
+    if rejection is not None:
+        raise rejection
+
+
 @router.post("/login/begin", response_model=LoginBeginResponse)
 @limiter.limit("10/minute")
 async def login_begin(
@@ -491,7 +511,7 @@ async def login_complete(
         )
 
     # The credential must be resolved before its owning tenant is known.
-    async with acquire_with_tenant(db_client.pool, None) as conn:
+    async with _passkey_login_transaction(db_client.pool) as conn:
         # Look up the credential
         credential = await get_credential_by_id(conn, raw_credential_id, for_update=True)
 
@@ -529,7 +549,7 @@ async def login_complete(
                 success=False,
                 failure_reason="account_locked",
             )
-            raise HTTPException(
+            raise _PasskeyRejected(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials.",
             )
@@ -559,7 +579,7 @@ async def login_complete(
             logger.warning(
                 "Passkey verification failed: user=%s error=%s", user_id, e
             )
-            raise HTTPException(
+            raise _PasskeyRejected(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials.",
             ) from e

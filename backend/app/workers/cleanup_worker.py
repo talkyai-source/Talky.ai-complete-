@@ -30,6 +30,12 @@ Env:
   CLEANUP_MAX_BATCHES_PER_TABLE   default "200"   (cap: 1M rows/table/run)
   CLEANUP_BATCH_SLEEP_MS          default "100"   (throttle between batches)
   DATABASE_URL                    required (via app.core.db.init_db_pool)
+
+Recording retention (recording_retention_purge.py) runs after the telemetry
+pass. It has its OWN dry-run default, independent of CLEANUP_DRY_RUN:
+  RECORDING_RETENTION_PURGE_ENABLED   default "false" - "true" to delete
+  RECORDING_RETENTION_PURGE_ACTOR_ID  user_profiles.id for the deletion intents
+  RECORDING_RETENTION_PURGE_BATCH     default "200" recordings per run
 """
 
 from __future__ import annotations
@@ -42,6 +48,13 @@ import time
 from dataclasses import dataclass
 
 import asyncpg
+
+from app.workers.recording_retention_purge import (
+    purge_actor_id,
+    purge_batch_size,
+    purge_enabled,
+    purge_expired_recordings,
+)
 
 logger = logging.getLogger("cleanup_worker")
 
@@ -238,6 +251,13 @@ async def main() -> int:
             max_batches=max_batches,
             batch_sleep_ms=batch_sleep_ms,
         )
+        recording_summary = await purge_expired_recordings(
+            pool,
+            enabled=purge_enabled(),
+            actor_id=purge_actor_id(),
+            limit=purge_batch_size(),
+        )
+        summary["recordings_retention"] = recording_summary
     except Exception as exc:
         logger.error("cleanup_failed: %s", exc, exc_info=True)
         return 1

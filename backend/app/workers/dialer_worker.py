@@ -63,6 +63,120 @@ class DialerCallIntent:
 class CampaignStatusUnavailable(RuntimeError):
     """Campaign existence/runnability could not be proven due to DB failure."""
 
+
+class ComplianceLookupUnavailable(RuntimeError):
+    """A pre-dial compliance input (tenant rules, campaign schedule, lead
+    cooldown / daily-cap / timezone) could not be read because the QUERY failed.
+
+    A failed read is not an absent row: absent means "use the defaults",
+    failed means the gate cannot be evaluated, so the job is re-deferred
+    instead of dialled.
+    """
+
+
+class AttemptSettledFailed(RuntimeError):
+    """A replay found its attempt already settled FAILED without an answer by
+    the bridge (provider absence proven, no call-end finalizer involved), so no
+    retry exists for it. Routed through the generic failure boundary, which
+    classifies it and schedules attempt N+1 instead of dropping the lead."""
+
+    def __init__(self, call_id: str):
+        # str(exc) lands in dialer_jobs.last_error (the Call Issues panel):
+        # a bare call UUID there explains nothing.
+        super().__init__(
+            f"attempt settled failed by the bridge without an answer (call {call_id})"
+        )
+
+
+class HeldIntentExpired(RuntimeError):
+    """A same-attempt hold can no longer be kept on its committed, never-claimed
+    intent: either it is about to outlive the stuck-call reaper (which writes a
+    provider-less pre-answer row off as ``termination_pending`` after 10 min,
+    a state nothing settles), or the calling window closed while it waited.
+
+    Routed through the generic failure boundary: the intent is terminalised
+    (provider absence is provable) and attempt N+1 is staged, whose fresh pass
+    re-runs every new-call gate. ``retry_reason`` set means "not a failure of
+    the lead": retried whatever the attempt number."""
+
+    def __init__(self, message: str, *, retry_reason: Optional[str] = None):
+        super().__init__(message)
+        self.retry_reason = retry_reason
+
+
+# CallGuard denials that clear by themselves (an operator un-pauses outbound
+# calls, business hours open, the abuse window slides, a payment lands, a
+# concurrency slot frees). They are DEFERRED, not terminally blocked.
+_GUARD_TRANSIENT_CHECKS = frozenset(
+    {
+        "platform_calls_enabled",
+        "business_hours",
+        "velocity_check",
+        "concurrency_limit",
+        "rate_limit",
+    }
+)
+# Account-state checks: transient unless the tenant is gone or its
+# subscription is cancelled for good (reason is `tenant_<status>` /
+# `subscription_<status>`).
+_GUARD_ACCOUNT_CHECKS = frozenset({"tenant_active", "subscription_valid", "partner_active"})
+_GUARD_PERMANENT_ACCOUNT_REASONS = frozenset(
+    {
+        "tenant_not_found",
+        # The tenant is leaving (tenants.status); unlike a suspension it does
+        # not come back, so its leads stop instead of re-deferring forever.
+        "tenant_pending_deletion",
+        "partner_not_found",
+        "tenant_cancelled",
+        "tenant_canceled",
+        "subscription_cancelled",
+        "subscription_canceled",
+        "subscription_incomplete_expired",
+        "partner_cancelled",
+        "partner_canceled",
+    }
+)
+# An infrastructure error inside a fail-closed check (CallGuard blocks rather
+# than allow). The query failed; nothing is known about the number itself.
+_GUARD_INFRA_REASON_PREFIXES = ("check_error_blocked", "dnc_check_unavailable")
+# Seconds to hold a deferred job. Every guard evaluation INCRs the rate-limit
+# counter and writes a call_guard_decisions row, so a platform pause must never
+# be polled on a short loop.
+_GUARD_DEFER_SECONDS = 600
+_GUARD_INFRA_DEFER_SECONDS = 60
+
+
+def _classify_guard_denial(guard_result) -> Optional[tuple[str, int]]:
+    """Return ``(reason, delay_seconds)`` when EVERY failed check of a guard
+    denial is transient, else ``None`` (the denial is permanent / unknown)."""
+    failed = [
+        c for c in (getattr(guard_result, "check_results", None) or [])
+        if not getattr(c, "passed", True)
+    ]
+    if not failed:
+        return None
+    first_reason = None
+    delay = _GUARD_DEFER_SECONDS
+    for check in failed:
+        name = getattr(getattr(check, "check", None), "value", getattr(check, "check", None))
+        reason = str(getattr(check, "reason", None) or name or "")
+        low = reason.lower()
+        if low.startswith(_GUARD_INFRA_REASON_PREFIXES):
+            delay = min(delay, _GUARD_INFRA_DEFER_SECONDS)
+            # Neutral token: the raw reason may contain "dnc", which the
+            # block-reason vocabulary would present as a DNC match.
+            reason = "guard_check_unavailable"
+        elif name in _GUARD_ACCOUNT_CHECKS:
+            if low in _GUARD_PERMANENT_ACCOUNT_REASONS:
+                return None
+        elif name in _GUARD_TRANSIENT_CHECKS:
+            if name in ("concurrency_limit", "rate_limit"):
+                delay = min(delay, _GUARD_INFRA_DEFER_SECONDS)
+        else:
+            return None
+        first_reason = first_reason or reason
+    return (first_reason or "call_guard_deferred"), delay
+
 # Configure logging for worker
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -87,6 +201,8 @@ class DialerWorker:
 
     # Worker configuration
     POLL_INTERVAL = 1.0  # Seconds between queue checks when empty
+    # Re-defer delay when a pre-dial compliance lookup fails (never a tight loop).
+    COMPLIANCE_LOOKUP_REDEFER_SECONDS = 30
     SCHEDULED_CHECK_INTERVAL = 60  # Seconds between scheduled job checks
     MAX_CONSECUTIVE_ERRORS = 10
 
@@ -769,6 +885,23 @@ class DialerWorker:
                     await self._publish_block(job, "metering_unavailable", rules=rules)
                     await self._redefer_before_intent_resolution(job, reason="metering_unavailable")
                     return
+                if guard_decision == "defer":
+                    # Transient denial (platform pause, business hours, abuse
+                    # window, subscription state): nothing was attempted, so
+                    # keep the original attempt and active job ownership and
+                    # hold the job for minutes, never a tight loop.
+                    await self._publish_block(
+                        job,
+                        self._guard_defer_reason,
+                        rules=rules,
+                        retry_after_seconds=self._guard_defer_delay,
+                    )
+                    await self._redefer_before_intent_resolution(
+                        job,
+                        reason=self._guard_defer_reason,
+                        delay_seconds=self._guard_defer_delay,
+                    )
+                    return
                 if guard_decision == "block":
                     # Block the call - mark job as blocked, don't retry
                     await self._publish_block(job, "call_guard_blocked", rules=rules)
@@ -802,6 +935,14 @@ class DialerWorker:
                         job, reason="call_guard_queued", delay_seconds=30,
                     )
                     return
+                else:
+                    # An unrecognised decision must never fall through to the
+                    # originate path below: fail closed.
+                    await self._publish_block(job, "call_guard_blocked", rules=rules)
+                    await self._update_job_status(
+                        job, JobStatus.BLOCKED, reason="call_guard_blocked"
+                    )
+                    return
 
             try:
                 # 5. Commit the attempt BEFORE any provider/PBX action.  The
@@ -814,7 +955,11 @@ class DialerWorker:
                     # A stale Redis delivery replayed an attempt whose call has
                     # already settled. Never re-originate it. The durable call
                     # finalizer owns the authoritative DB job/lead disposition;
-                    # this only drops the duplicate queue delivery.
+                    # this only drops the duplicate queue delivery -- unless the
+                    # BRIDGE settled it failed-without-answer and no finalizer
+                    # ever ran, in which case nothing else will retry it.
+                    if await self._attempt_settled_failed_unanswered(job):
+                        raise AttemptSettledFailed(call_intent.call_id)
                     job.call_id = call_intent.call_id
                     await self.queue_service.mark_completed(
                         job.job_id,
@@ -848,11 +993,37 @@ class DialerWorker:
                     await self._redefer_before_intent_resolution(job, reason=reason)
                     return
 
+                if provider_call_id == self._BRIDGE_TRANSIENT_REJECT:
+                    defer_reason, defer_delay = self._last_bridge_defer
+                    if not await self._held_intent_has_headroom(
+                        job, call_intent, defer_delay
+                    ):
+                        # Too old to keep holding: the classifier (which saw the
+                        # stashed bridge status/code) decides, capped.
+                        raise HeldIntentExpired(
+                            f"{defer_reason}: held attempt reached the stuck-call horizon"
+                        )
+                    logger.warning(
+                        "dialer_bridge_rejected_transient job=%s attempt=%s code=%s "
+                        "hold=%ss (same attempt re-deferred)",
+                        job.job_id, job.attempt_number, defer_reason, defer_delay,
+                    )
+                    await release_tenant_dial_slot(self._redis, job.tenant_id)
+                    await self._publish_block(
+                        job, defer_reason, rules=rules, retry_after_seconds=defer_delay,
+                    )
+                    await self._redefer_before_intent_resolution(
+                        job, reason=defer_reason, delay_seconds=defer_delay,
+                    )
+                    return
+
                 if provider_call_id == self._ORIGINATION_UNCERTAIN:
                     await self._park_uncertain_origination(job, call_intent)
                     return
 
                 if provider_call_id == self._ATTEMPT_ALREADY_TERMINAL:
+                    if await self._attempt_settled_failed_unanswered(job):
+                        raise AttemptSettledFailed(call_intent.call_id)
                     job.call_id = call_intent.call_id
                     await self.queue_service.mark_completed(
                         job.job_id,
@@ -860,35 +1031,19 @@ class DialerWorker:
                     )
                     return
 
-                # Voice pipeline temporarily unavailable (TTS/STT warmup
-                # failed). Reschedule with a short delay and DON'T consume
-                # the job's retry budget — this is an infra issue, not a
-                # bad lead. Without this guard, a 30-second outage burns
-                # every job's max_retries and marks them all FAILED.
+                # Voice pipeline temporarily unavailable (pod draining / at
+                # capacity, TTS/STT warmup failed). An infra condition, not a
+                # bad lead: hold the SAME attempt. The committed intent stays
+                # 'initiated' (nothing reached the provider) and is reused on
+                # the next dequeue, so no attempt is consumed and no extra
+                # failed calls row is written. The hold is bounded; past the
+                # bound the failure goes through the classifier (which does
+                # consume attempts, capped) instead of looping forever.
                 if provider_call_id == self._PIPELINE_UNAVAILABLE:
-                    if not await self._mark_call_intent_not_originated(
-                        job,
-                        call_intent,
-                        reason="voice_pipeline_unavailable",
-                    ):
-                        await self._park_uncertain_origination(job, call_intent)
-                        return
+                    await self._defer_pipeline_unavailable(job, rules, call_intent)
                     # Nothing dialed — give the tenant slot back so the other
                     # campaign isn't paced against a failed attempt.
                     await release_tenant_dial_slot(self._redis, job.tenant_id)
-                    await self._publish_block(
-                        job,
-                        "voice_pipeline_unavailable",
-                        rules=rules,
-                        retry_after_seconds=60,
-                    )
-                    await self._update_lead_status(job, "pending")
-                    await self.queue_service.schedule_retry(job, delay_seconds=60)
-                    await self._update_job_status(
-                        job,
-                        JobStatus.RETRY_SCHEDULED,
-                        reason="voice_pipeline_unavailable",
-                    )
                     return
 
                 if provider_call_id:
@@ -1023,6 +1178,27 @@ class DialerWorker:
 
             await finish_critical_handoff(recovery)
             raise
+        except ComplianceLookupUnavailable as exc:
+            # Fail CLOSED: a compliance gate (calling window, campaign
+            # schedule, lead cooldown, daily cap) could not be evaluated, so
+            # nothing is dialled and no attempt is consumed. Same family as
+            # CampaignStatusUnavailable / MeteringUnavailable.
+            logger.error(
+                "dialer_compliance_lookup_unavailable job=%s attempt=%s err=%s",
+                job.job_id,
+                job.attempt_number,
+                exc,
+            )
+            if call_intent is not None:
+                await self._park_uncertain_origination(job, call_intent)
+            else:
+                await self._publish_block(job, "rules_unavailable")
+                await self._redefer_before_intent_resolution(
+                    job,
+                    reason="rules_unavailable",
+                    delay_seconds=self.COMPLIANCE_LOOKUP_REDEFER_SECONDS,
+                )
+            return
         except Exception as e:
             if call_intent is not None:
                 # Once the durable row exists, an unexpected downstream error
@@ -1037,8 +1213,25 @@ class DialerWorker:
                     reason="worker_exception_before_origination_confirmation",
                 )
                 if not absence_proved:
-                    await self._park_uncertain_origination(job, call_intent)
-                    return
+                    # The bridge may already have PROVED absence and settled
+                    # call=failed / job=failed / lead=pending itself (ARI or
+                    # originate error after the provider id was stamped). No
+                    # call-end event ever fires for a channel that never
+                    # existed, so parking would strand the lead: classify and
+                    # retry as attempt N+1 like any other failed origination.
+                    if not (
+                        isinstance(e, AttemptSettledFailed)
+                        or await self._attempt_settled_failed_unanswered(job)
+                    ):
+                        await self._park_uncertain_origination(job, call_intent)
+                        return
+                    logger.warning(
+                        "dialer_attempt_settled_failed_by_bridge job=%s attempt=%s "
+                        "call=%s — retrying via classifier",
+                        job.job_id,
+                        job.attempt_number,
+                        call_intent.call_id,
+                    )
             # Nothing dialed — release the tenant pacing slot (best-effort)
             # so a failed originate doesn't burn the whole gap window.
             try:
@@ -1059,6 +1252,8 @@ class DialerWorker:
             # `RETRY_POLICY=legacy` reverts to the old flat-delay path so
             # operators can roll back without redeploying.
             from app.workers.retry_policy import (
+                FailureCategory,
+                RetryDecision,
                 classify_telephony_response,
                 legacy_decision,
                 parse_bridge_error,
@@ -1067,10 +1262,26 @@ class DialerWorker:
             )
 
             code, msg = parse_bridge_error(self._last_bridge_body)
+            held_reason = getattr(e, "retry_reason", None)
+            if held_reason:
+                # A same-attempt hold we could no longer keep (the calling
+                # window closed under it) is not a failure of the lead, so it
+                # is retried whatever the attempt number; the next pass runs
+                # every new-call gate again.
+                decision = RetryDecision(
+                    should_retry=True,
+                    delay_seconds=30,
+                    category=FailureCategory.TRANSIENT_NETWORK,
+                    reason=held_reason,
+                    log_message=(
+                        f"dial_deferred category=transient_network reason={held_reason} "
+                        f"attempt={job.attempt_number} next_retry_in=30s"
+                    ),
+                )
             # This explicit configuration rejection cannot recover by dialing
             # again. Keep its non-retryable meaning even in legacy retry mode;
             # the absence-proof CAS above remains required before settlement.
-            if use_smart_policy() or code == "cloud_telephony_unavailable":
+            elif use_smart_policy() or code == "cloud_telephony_unavailable":
                 category, reason = classify_telephony_response(
                     http_status=self._last_bridge_http_status,
                     error_code=code,
@@ -1100,6 +1311,12 @@ class DialerWorker:
                 job.phone_number,
                 str(e)[:200],
             )
+            if decision.reason.startswith("unknown_code_"):
+                # A bridge code the classifier does not know must be seen by a
+                # human, not silently fail leads.
+                await self._emit_unknown_bridge_code_alert(
+                    job, decision.reason[len("unknown_code_"):]
+                )
 
             # Persist category/reason on the job + lead. Best-effort —
             # never let a logging/DB hiccup mask the original failure.
@@ -1118,10 +1335,25 @@ class DialerWorker:
 
             if decision.should_retry:
                 await self._update_lead_status(job, "pending")
-                await self.queue_service.schedule_retry(
-                    job,
-                    delay_seconds=decision.delay_seconds,
-                )
+                if not await self._schedule_retry_durably(
+                    job, delay_seconds=decision.delay_seconds
+                ):
+                    # Attempt N+1 could not be made durable in BOTH stores.
+                    # Never leave a Redis payload whose Postgres row lags:
+                    # keep the SAME attempt staged; its replay finds the
+                    # settled-failed attempt and retries here again.
+                    try:
+                        await self.queue_service._redefer_inflight(
+                            str(job.job_id),
+                            "retry_schedule_failed",
+                            delay_seconds=max(30, int(decision.delay_seconds)),
+                        )
+                    except Exception as redefer_exc:
+                        logger.error(
+                            "dialer_retry_stage_failed job=%s attempt=%s err=%s",
+                            job.job_id, job.attempt_number, redefer_exc,
+                        )
+                    return
                 await self._update_job_status(
                     job,
                     JobStatus.RETRY_SCHEDULED,
@@ -1145,6 +1377,14 @@ class DialerWorker:
     _PIPELINE_UNAVAILABLE = "__pipeline_unavailable__"
     _METERING_UNAVAILABLE = "__metering_unavailable__"
     _TELEPHONY_SELECTION_UNAVAILABLE = "__telephony_selection_unavailable__"
+    # The bridge rejected BEFORE provider admission with a tenant-fixable,
+    # self-clearing code (see _BRIDGE_DEFER_CODES). The same attempt is
+    # re-deferred; `_last_bridge_defer` carries (reason, delay_seconds).
+    _BRIDGE_TRANSIENT_REJECT = "__bridge_transient_reject__"
+    # bridge error code -> minimum same-attempt hold in seconds. call_blocked is
+    # deliberately absent: it covers DNC / compliance blocks and is never retried.
+    _BRIDGE_DEFER_CODES = {"call_throttled": 60, "tenant_pbx_required": 120}
+    _BRIDGE_DEFER_MAX_SECONDS = 900
 
     # The HTTP result is unknown after a transport timeout/disconnect, or the
     # bridge explicitly reports proof-aware cleanup in progress. Retrying as a
@@ -1164,6 +1404,11 @@ class DialerWorker:
     # Reset on every job to avoid leaking state across attempts.
     _last_bridge_http_status: Optional[int] = None
     _last_bridge_body: Optional[str] = None
+    _last_bridge_defer: tuple = ("bridge_rejected", 120)
+
+    # Set by `_evaluate_call_guard` just before it returns "defer".
+    _guard_defer_reason: str = "call_guard_deferred"
+    _guard_defer_delay: int = _GUARD_DEFER_SECONDS
 
     # Populated per-job when the explicit TESTING schedule override permitted a
     # dial the calling-window gate would otherwise have blocked. None on every
@@ -1321,9 +1566,14 @@ class DialerWorker:
                                 return self._TELEPHONY_SELECTION_UNAVAILABLE
                         except (ValueError, TypeError, AttributeError):
                             pass
+                        # Stash for the classifier: the same-attempt hold is
+                        # bounded, and past the bound the failure boundary
+                        # classifies this 503 as transient.
+                        self._last_bridge_http_status = resp.status
+                        self._last_bridge_body = body
                         logger.warning(
-                            "Voice pipeline unavailable (503) — will retry "
-                            "without consuming attempt budget. dest=%s body=%s",
+                            "Voice pipeline unavailable (503) — holding the same "
+                            "attempt (no attempt budget consumed). dest=%s body=%s",
                             job.phone_number,
                             body[:300],
                         )
@@ -1338,18 +1588,28 @@ class DialerWorker:
                             body[:200],
                             job.phone_number,
                         )
-                        if resp.status == 409:
-                            try:
-                                parsed = json.loads(body)
-                                detail = parsed.get("detail", parsed)
-                                error = detail.get("error") if isinstance(detail, dict) else None
-                            except (TypeError, ValueError):
-                                error = None
-                            if error in {
-                                "origination_cleanup_pending",
-                                "origination_in_progress",
-                            }:
-                                return self._ORIGINATION_UNCERTAIN
+                        from app.workers.retry_policy import (
+                            parse_bridge_error,
+                            parse_bridge_retry_after,
+                        )
+
+                        # One parser for every body shape (flat string,
+                        # canonical envelope, FastAPI {"detail": {...}}).
+                        bridge_code, _ = parse_bridge_error(body)
+                        if resp.status == 409 and bridge_code in {
+                            "origination_cleanup_pending",
+                            "origination_in_progress",
+                        }:
+                            return self._ORIGINATION_UNCERTAIN
+                        hold = self._BRIDGE_DEFER_CODES.get(bridge_code or "")
+                        if hold is not None:
+                            # Rejected before provider admission and clears on
+                            # its own: keep the same attempt, never burn one.
+                            asked = parse_bridge_retry_after(body)
+                            if asked:
+                                hold = max(hold, min(asked, self._BRIDGE_DEFER_MAX_SECONDS))
+                            self._last_bridge_defer = (bridge_code, hold)
+                            return self._BRIDGE_TRANSIENT_REJECT
                         return None
 
                     try:
@@ -1401,7 +1661,9 @@ class DialerWorker:
         Evaluate call through CallGuard security checks.
 
         Returns:
-            "allow" | "block" | "throttle" | "queue"
+            "allow" | "block" | "throttle" | "queue" | "defer"
+            ("defer" = a transient denial; ``_guard_defer_reason`` /
+            ``_guard_defer_delay`` carry the reason and hold time)
         """
         try:
             from app.domain.services.call_guard import CallGuard, GuardDecision
@@ -1427,12 +1689,24 @@ class DialerWorker:
             if any(not check.passed and check.reason == "metering_unavailable"
                    for check in guard_result.check_results):
                 return "metering_unavailable"
-            return guard_result.decision.value
+            decision = guard_result.decision.value
+            if decision == "block":
+                # A denial that clears on its own must not terminally block the
+                # queued backlog; permanent ones (DNC, geography, invalid
+                # number, tenant gone) stay "block".
+                transient = _classify_guard_denial(guard_result)
+                if transient is not None:
+                    self._guard_defer_reason, self._guard_defer_delay = transient
+                    return "defer"
+            return decision
 
         except Exception as e:
             logger.error(f"CallGuard evaluation failed for job {job.job_id}: {e}", exc_info=True)
-            # Fail-closed: errors in guard = block call
-            return "block"
+            # Fail-closed (never dial on a guard error) but not terminal: a DB
+            # blip used to permanently block every lead it touched.
+            self._guard_defer_reason = "guard_check_unavailable"
+            self._guard_defer_delay = _GUARD_INFRA_DEFER_SECONDS
+            return "defer"
 
     async def _emit_progress_event_throttled(self, job) -> None:
         """Emit a "Campaign progress updated" stream event, throttled.
@@ -1537,6 +1811,34 @@ class DialerWorker:
         except Exception as exc:
             raise MeteringUnavailable("metering_unavailable") from exc
 
+    async def _emit_unknown_bridge_code_alert(self, job, code: str) -> None:
+        """Surface an unclassified telephony-bridge error code (throttled 5 min
+        per code). Best-effort: it must never alter how the failure is handled."""
+        try:
+            if self._redis is not None:
+                acquired = await self._redis.set(
+                    f"evt:unknown_bridge_code:{code}", "1", nx=True, ex=300
+                )
+                if not acquired:
+                    return
+            from app.domain.services.event_emitter import emit_event_via_pool
+
+            await emit_event_via_pool(
+                self._db_pool,
+                tenant_id=str(job.tenant_id),
+                category="alert",
+                severity="warning",
+                title="Unrecognised telephony error",
+                description=(
+                    f"The telephony bridge rejected a call with an error code the "
+                    f"dialer does not recognise ({code}). Leads may be failing; "
+                    f"add the code to the retry classifier."
+                ),
+                related_campaign_id=str(job.campaign_id) if job.campaign_id else None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("emit unknown_bridge_code failed: %s", exc)
+
     async def _emit_out_of_minutes_event(self, job) -> None:
         """Surface an out-of-minutes alert in the UI (throttled 5 min per tenant)."""
         try:
@@ -1588,42 +1890,56 @@ class DialerWorker:
             ) from exc
 
     async def _get_tenant_rules(self, tenant_id: str) -> CallingRules:
-        """Get calling rules for a tenant."""
+        """Get calling rules for a tenant.
+
+        An absent/NULL row means "use the defaults"; a FAILED query raises
+        ``ComplianceLookupUnavailable`` (the default window is not a safe
+        stand-in for a tenant's configured one).
+        """
         try:
             async with self._acquire_db() as conn:
                 row = await conn.fetchrow(
                     "SELECT calling_rules FROM tenants WHERE id = $1", tenant_id
                 )
-                if row and row["calling_rules"]:
-                    # asyncpg returns JSON/JSONB as string or dict depending on driver config
-                    # assuming standard driver config (string/dict)
-                    rules_data = row["calling_rules"]
-                    if isinstance(rules_data, str):
-                        rules_data = json.loads(rules_data)
-                    return CallingRules.from_dict(rules_data)
-
         except Exception as e:
-            logger.warning(f"Failed to get tenant rules, using defaults: {e}")
+            logger.warning(f"Failed to get tenant rules: {e}")
+            raise ComplianceLookupUnavailable("tenant calling rules unavailable") from e
+
+        try:
+            if row and row["calling_rules"]:
+                # asyncpg returns JSON/JSONB as string or dict depending on driver config
+                # assuming standard driver config (string/dict)
+                rules_data = row["calling_rules"]
+                if isinstance(rules_data, str):
+                    rules_data = json.loads(rules_data)
+                return CallingRules.from_dict(rules_data)
+        except Exception as e:
+            logger.warning(f"Failed to parse tenant rules, using defaults: {e}")
 
         return CallingRules.default()
 
     async def _get_campaign_calling_config(self, campaign_id: str) -> Optional[dict]:
         """Load a campaign's per-campaign calling schedule (timezone, window,
         days, ignore_schedule override). Returns None when unset so the
-        worker falls back to tenant defaults."""
+        worker falls back to tenant defaults; a FAILED query raises
+        ``ComplianceLookupUnavailable`` (the schedule overlay is a gate)."""
         try:
             async with self._acquire_db() as conn:
                 cfg = await conn.fetchval(
                     "SELECT calling_config FROM campaigns WHERE id = $1",
                     campaign_id,
                 )
+        except Exception as e:
+            logger.warning(f"Failed to load campaign calling_config for {campaign_id}: {e}")
+            raise ComplianceLookupUnavailable("campaign calling config unavailable") from e
+        try:
             if cfg:
                 if isinstance(cfg, str):
                     cfg = json.loads(cfg)
                 if isinstance(cfg, dict):
                     return cfg
         except Exception as e:
-            logger.warning(f"Failed to load campaign calling_config for {campaign_id}: {e}")
+            logger.warning(f"Failed to parse campaign calling_config for {campaign_id}: {e}")
         return None
 
     def _resolve_batch_size(self, campaign_cfg: Optional[dict]) -> int:
@@ -1753,7 +2069,11 @@ class DialerWorker:
             return None
 
     async def _get_lead_last_called(self, lead_id: str) -> Optional[datetime]:
-        """Get the last time a lead was called."""
+        """Get the last time a lead was called.
+
+        NULL means never called; a FAILED query raises
+        ``ComplianceLookupUnavailable`` (None here would skip the cooldown).
+        """
         try:
             async with self._acquire_db() as conn:
                 val = await conn.fetchval("SELECT last_called_at FROM leads WHERE id = $1", lead_id)
@@ -1761,8 +2081,7 @@ class DialerWorker:
 
         except Exception as e:
             logger.warning(f"Failed to get lead last_called_at: {e}")
-
-        return None
+            raise ComplianceLookupUnavailable("lead last_called_at unavailable") from e
 
     async def _get_lead_timezone(self, lead_id: str) -> Optional[str]:
         """Read the customer-supplied per-lead IANA timezone.
@@ -1772,14 +2091,28 @@ class DialerWorker:
         prospect actually is, so the calling-window check prefers it over
         the phone-number-derived guess.
 
-        Best-effort by design: any failure — pool down, or the column
-        absent on a database that hasn't taken 0020 — returns None, and the
-        caller falls back to the derived zone and then the campaign
-        timezone. A timezone lookup must never drop a dial by exception.
+        Best-effort only for the column being ABSENT (a database that has
+        not taken 0020): that returns None and the caller falls back to the
+        derived zone and then the campaign timezone. A genuine database
+        failure (query error, timeout, connection loss) raises
+        ``ComplianceLookupUnavailable`` so the calling window is never judged
+        on a fallback zone because of a blip. Anything else (not a database
+        failure) stays non-fatal: a timezone lookup must not drop a dial by
+        an unrelated exception.
         """
         try:
             async with self._acquire_db() as conn:
                 return await conn.fetchval("SELECT timezone FROM leads WHERE id = $1", lead_id)
+        except asyncpg.UndefinedColumnError as e:
+            logger.warning(f"Failed to get lead timezone (column absent): {e}")
+        except (
+            asyncpg.PostgresError,
+            asyncpg.InterfaceError,
+            asyncio.TimeoutError,
+            OSError,
+        ) as e:
+            logger.warning(f"Failed to get lead timezone: {e}")
+            raise ComplianceLookupUnavailable("lead timezone unavailable") from e
         except Exception as e:
             logger.warning(f"Failed to get lead timezone: {e}")
         return None
@@ -1805,7 +2138,8 @@ class DialerWorker:
                 return int(val or 0)
         except Exception as e:
             logger.warning(f"Failed to count lead attempts today: {e}")
-        return 0
+            # 0 would silently disable the per-lead daily cap.
+            raise ComplianceLookupUnavailable("lead attempts today unavailable") from e
 
     @staticmethod
     def _new_call_identity() -> tuple[str, str, str]:
@@ -2065,6 +2399,8 @@ class DialerWorker:
     ) -> None:
         """Reconcile one committed attempt without charging new-call gates."""
         if self._call_status_is_terminal(intent.status):
+            if await self._attempt_settled_failed_unanswered(job):
+                raise AttemptSettledFailed(intent.call_id)
             job.call_id = intent.call_id
             await self.queue_service.mark_completed(
                 job.job_id,
@@ -2077,6 +2413,17 @@ class DialerWorker:
         tenant_rules = await self._get_tenant_rules(job.tenant_id)
         campaign_cfg = await self._get_campaign_calling_config(job.campaign_id)
         rules = effective_rules(tenant_rules, campaign_cfg)
+        if (
+            intent.provider_call_id is None
+            and str(intent.status or "").strip().lower() in {"queued", "initiated"}
+        ):
+            # The bridge never claimed this attempt, so this replay is about to
+            # be its FIRST real origination (a same-attempt hold: pipeline down,
+            # throttle, trunk not ready). The gates were applied when the hold
+            # began, possibly minutes ago.
+            await self._require_open_window_for_unclaimed_intent(
+                job, rules, campaign_cfg
+            )
         provider_call_id = await self._make_call(
             job,
             rules,
@@ -2086,6 +2433,8 @@ class DialerWorker:
             await self._park_uncertain_origination(job, intent)
             return
         if provider_call_id == self._ATTEMPT_ALREADY_TERMINAL:
+            if await self._attempt_settled_failed_unanswered(job):
+                raise AttemptSettledFailed(intent.call_id)
             job.call_id = intent.call_id
             await self.queue_service.mark_completed(
                 job.job_id,
@@ -2098,27 +2447,27 @@ class DialerWorker:
             await self._publish_block(job, reason, rules=rules)
             await self._redefer_before_intent_resolution(job, reason=reason)
             return
-        if provider_call_id == self._PIPELINE_UNAVAILABLE:
-            if not await self._mark_call_intent_not_originated(
-                job,
-                intent,
-                reason="voice_pipeline_unavailable",
-            ):
-                await self._park_uncertain_origination(job, intent)
-                return
+        if provider_call_id == self._BRIDGE_TRANSIENT_REJECT:
+            defer_reason, defer_delay = self._last_bridge_defer
+            if not await self._held_intent_has_headroom(job, intent, defer_delay):
+                raise HeldIntentExpired(
+                    f"{defer_reason}: held attempt reached the stuck-call horizon"
+                )
+            logger.warning(
+                "dialer_bridge_rejected_transient job=%s attempt=%s code=%s "
+                "hold=%ss (same attempt re-deferred)",
+                job.job_id, job.attempt_number, defer_reason, defer_delay,
+            )
             await self._publish_block(
-                job,
-                "voice_pipeline_unavailable",
-                rules=rules,
-                retry_after_seconds=60,
+                job, defer_reason, rules=rules, retry_after_seconds=defer_delay,
             )
-            await self._update_lead_status(job, "pending")
-            await self.queue_service.schedule_retry(job, delay_seconds=60)
-            await self._update_job_status(
-                job,
-                JobStatus.RETRY_SCHEDULED,
-                reason="voice_pipeline_unavailable",
+            await self._redefer_before_intent_resolution(
+                job, reason=defer_reason, delay_seconds=defer_delay,
             )
+            return
+        if provider_call_id == self._PIPELINE_UNAVAILABLE:
+            # Same-attempt hold on the committed intent (see process_job).
+            await self._defer_pipeline_unavailable(job, rules, intent)
             return
         if not provider_call_id:
             # `process_job` performs the single absence-proof CAS before its
@@ -2184,6 +2533,309 @@ class DialerWorker:
             job.job_id,
         )
         await self._emit_progress_event_throttled(job)
+
+    @staticmethod
+    def _pipeline_unavailable_max_defers() -> int:
+        try:
+            return max(1, int(os.getenv("DIALER_PIPELINE_UNAVAILABLE_MAX_DEFERS", "30")))
+        except (TypeError, ValueError):
+            return 30
+
+    async def _pipeline_unavailable_defer_count(self, job: DialerJob) -> int:
+        """Same-attempt holds already spent on this job's CURRENT attempt.
+
+        Keyed per (job, attempt) so a later attempt gets a fresh budget, with a
+        TTL so the key can never outlive the job. Without Redis there is no
+        count (0): the hold stays unbounded exactly as the other pre-intent
+        defers are.
+        """
+        if self._redis is None:
+            return 0
+        key = f"dialer:pipeline_unavailable:{job.job_id}:{int(job.attempt_number)}"
+        try:
+            count = int(await self._redis.incr(key))
+            await self._redis.expire(key, 7200)
+            return count
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("pipeline_unavailable_count_failed job=%s err=%s", job.job_id, exc)
+            return 0
+
+    @staticmethod
+    def _held_intent_max_age_seconds() -> int:
+        """Longest a never-claimed intent may be held on the SAME attempt.
+
+        ``reap_stuck_calls`` writes any pre-answer row older than
+        ``CALL_STUCK_TIMEOUT_S`` (600 s) off as ``termination_pending``. A
+        provider-less row has no identity for the telephony owner to settle,
+        so the job would then park forever on the bridge's 409
+        ``origination_cleanup_pending``. Half the horizon leaves room for queue
+        latency between the due time and the actual replay.
+        """
+        try:
+            from app.domain.services.dialer.stuck_job_reaper import CALL_STUCK_TIMEOUT_S
+
+            horizon = int(CALL_STUCK_TIMEOUT_S)
+        except Exception:  # noqa: BLE001
+            horizon = 600
+        try:
+            return max(60, int(os.getenv("DIALER_HELD_INTENT_MAX_AGE_S", str(horizon // 2))))
+        except (TypeError, ValueError):
+            return max(60, horizon // 2)
+
+    async def _held_intent_has_headroom(
+        self, job: DialerJob, intent: Optional[DialerCallIntent], delay_seconds: float
+    ) -> bool:
+        """True while holding the intent another ``delay_seconds`` keeps it
+        younger than :meth:`_held_intent_max_age_seconds` (age = the reaper's
+        own clock, ``calls.created_at``). When the age cannot be read the hold
+        is kept: holding never dials, and the hold itself needs the same DB."""
+        if intent is None:
+            return True
+        try:
+            async with self._acquire_db() as conn:
+                age = await conn.fetchval(
+                    """
+                    SELECT EXTRACT(EPOCH FROM (NOW() - created_at))
+                      FROM calls
+                     WHERE id = $1::uuid
+                       AND tenant_id = $2::uuid
+                       AND dialer_job_id = $3::uuid
+                       AND dialer_attempt_number = $4
+                       AND direction = 'outbound'
+                    """,
+                    intent.call_id,
+                    str(job.tenant_id),
+                    str(job.job_id),
+                    int(job.attempt_number),
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "held_intent_age_unavailable job=%s attempt=%s err=%s",
+                job.job_id, job.attempt_number, exc,
+            )
+            return True
+        if age is None:
+            return True
+        return float(age) + float(delay_seconds) <= self._held_intent_max_age_seconds()
+
+    async def _require_open_window_for_unclaimed_intent(
+        self,
+        job: DialerJob,
+        rules: CallingRules,
+        campaign_cfg: Optional[dict],
+    ) -> None:
+        """Re-apply the calling-window gate to a replayed, never-claimed attempt.
+
+        ``process_job`` resumes a committed intent WITHOUT the new-call gates:
+        they are stateful (the batch gate counts the intent itself, pacing and
+        CallGuard were already charged), which is right for an attempt that may
+        already be live. The window is pure time arithmetic, so it is safe to
+        evaluate again, and a hold that outlives the end of the window must not
+        become a dial outside it. Raises :class:`HeldIntentExpired`.
+        """
+        from app.domain.services.dialer.campaign_schedule import schedule_ignored
+        from app.domain.services.dialer.lead_timezone import (
+            resolve_effective_lead_timezone,
+        )
+
+        lead_tz = resolve_effective_lead_timezone(
+            explicit_timezone=await self._get_lead_timezone(job.lead_id),
+            phone_number=job.phone_number,
+        )
+        # The same oracle the fresh path uses, but with ONLY the window input:
+        # no cooldown / daily-cap data (this attempt's own row would count
+        # against them) and no live-call override.
+        in_window, window_reason = await self.rules_engine.can_make_call(
+            tenant_id=job.tenant_id,
+            campaign_id=job.campaign_id,
+            rules=rules,
+            lead_last_called=None,
+            active_calls_override=None,
+            lead_attempts_today=None,
+            lead_timezone=lead_tz,
+            enforce_window=not schedule_ignored(campaign_cfg),
+        )
+        if in_window:
+            return
+        from app.domain.services.dialer.testing_override import (
+            log_override_used,
+            schedule_override_source,
+        )
+
+        override_source = schedule_override_source(campaign_cfg)
+        if override_source:
+            from app.domain.services.dialer.block_reasons import describe_schedule
+
+            log_override_used(
+                source=override_source,
+                campaign_id=job.campaign_id,
+                tenant_id=job.tenant_id,
+                phone_number=job.phone_number,
+                blocked_reason=window_reason,
+                schedule=describe_schedule(rules),
+            )
+            return
+        raise HeldIntentExpired(
+            f"calling window closed while the attempt was held ({window_reason})",
+            retry_reason="outside_calling_window",
+        )
+
+    async def _defer_pipeline_unavailable(
+        self,
+        job: DialerJob,
+        rules: Optional[CallingRules],
+        intent: Optional[DialerCallIntent] = None,
+    ) -> None:
+        """Hold the SAME attempt for 60 s after a 503 from the bridge.
+
+        Raises once the bound is exceeded (or the held intent is about to
+        outlive the stuck-call reaper) so the generic failure boundary
+        classifies the outage (consuming capped attempts) instead of looping.
+        """
+        spent = await self._pipeline_unavailable_defer_count(job)
+        if spent > self._pipeline_unavailable_max_defers():
+            raise RuntimeError(
+                f"voice pipeline unavailable after {spent - 1} same-attempt holds"
+            )
+        if not await self._held_intent_has_headroom(job, intent, 60):
+            raise HeldIntentExpired(
+                "voice pipeline unavailable: held attempt reached the stuck-call horizon"
+            )
+        await self._publish_block(
+            job,
+            "voice_pipeline_unavailable",
+            rules=rules,
+            retry_after_seconds=60,
+        )
+        await self._redefer_before_intent_resolution(
+            job, reason="voice_pipeline_unavailable", delay_seconds=60,
+        )
+
+    async def _attempt_settled_failed_unanswered(self, job: DialerJob) -> bool:
+        """True when THIS attempt was settled failed-without-answer by the
+        bridge (or by this worker's own absence CAS) and nothing will retry it.
+
+        Conservative on purpose -- every condition must hold, and any error
+        answers False (the caller then keeps its previous park/drop behaviour):
+
+        * the attempt's call is ``failed`` and was never answered;
+        * ``dialer_jobs.last_outcome IS NULL``: the call-end finalizer writes
+          it on every branch it takes, so NULL proves no finalizer ran and
+          therefore none scheduled a retry (no double-dial);
+        * the job row still names THIS attempt (a later ``attempt_number``
+          means a retry already exists) and is not in a finalizer/operator
+          terminal state (completed, goal_achieved, non_retryable, cancelled,
+          skipped, blocked);
+        * no OTHER active job owns the lead: a campaign restart may already
+          have re-queued it, and reviving this (terminal) job would dial the
+          lead twice and trip ``uq_dialer_jobs_one_active_per_lead``.
+        """
+        try:
+            from app.domain.services.dialer.job_states import ACTIVE_STATUSES
+
+            async with self._acquire_db() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT c.status AS call_status,
+                           c.answered_at AS answered_at,
+                           j.status AS job_status,
+                           j.last_outcome AS last_outcome,
+                           COALESCE(j.attempt_number, 1) AS job_attempt
+                      FROM calls AS c
+                      JOIN dialer_jobs AS j
+                        ON j.id = c.dialer_job_id
+                       AND j.tenant_id = c.tenant_id
+                       AND j.lead_id = c.lead_id
+                     WHERE c.tenant_id = $1::uuid
+                       AND c.dialer_job_id = $2::uuid
+                       AND c.dialer_attempt_number = $3
+                       AND c.direction = 'outbound'
+                       AND NOT EXISTS (
+                           SELECT 1
+                             FROM dialer_jobs AS other_job
+                            WHERE other_job.tenant_id = c.tenant_id
+                              AND other_job.lead_id = c.lead_id
+                              AND other_job.id <> j.id
+                              AND other_job.status = ANY($4::text[])
+                       )
+                     LIMIT 1
+                    """,
+                    str(job.tenant_id),
+                    str(job.job_id),
+                    int(job.attempt_number),
+                    list(ACTIVE_STATUSES),
+                )
+            if row is None:
+                return False
+            return (
+                str(row["call_status"] or "").strip().lower() == "failed"
+                and row["answered_at"] is None
+                and row["last_outcome"] is None
+                and int(row["job_attempt"]) == int(job.attempt_number)
+                and str(row["job_status"] or "") in (*ACTIVE_STATUSES, "failed")
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "dialer_settled_attempt_check_failed job=%s attempt=%s err=%s",
+                job.job_id, job.attempt_number, exc,
+            )
+            return False
+
+    async def _schedule_retry_durably(self, job: DialerJob, *, delay_seconds: int) -> bool:
+        """Schedule attempt N+1 so Redis and Postgres agree BEFORE it dequeues.
+
+        ``queue_service.schedule_retry`` bumps ``attempt_number`` on the Redis
+        payload only. Left like that, ``dialer_jobs.attempt_number`` lags and
+        every attempt-guarded settlement (``_record_ambiguous_attempt_state``,
+        the bridge's ``_mark_durable_outbound_call_failed``) misses on attempt
+        2 and later. So the bumped value is persisted FIRST (ownership-guarded,
+        tenant/campaign/lead scoped); only then is the Redis payload scheduled.
+        Returns False -- with ``job.attempt_number`` and Postgres restored --
+        when either step failed.
+        """
+        prior = int(job.attempt_number)
+        job.attempt_number = prior + 1
+        try:
+            await self._persist_job_attempt_number(job)
+        except Exception as exc:  # noqa: BLE001
+            job.attempt_number = prior
+            logger.error(
+                "dialer_attempt_persist_failed job=%s attempt=%s err=%s",
+                job.job_id, prior + 1, exc,
+            )
+            return False
+        job.attempt_number = prior  # schedule_retry owns the Redis increment
+        scheduled = await self.queue_service.schedule_retry(
+            job, delay_seconds=delay_seconds
+        )
+        if scheduled:
+            return True
+        job.attempt_number = prior
+        try:
+            async with self._acquire_db() as conn:
+                await conn.execute(
+                    """
+                    UPDATE dialer_jobs
+                       SET attempt_number = $1, updated_at = NOW()
+                     WHERE id = $2::uuid
+                       AND tenant_id = $3::uuid
+                       AND campaign_id = $4::uuid
+                       AND lead_id = $5::uuid
+                       AND attempt_number = $6
+                    """,
+                    prior,
+                    str(job.job_id),
+                    str(job.tenant_id),
+                    str(job.campaign_id),
+                    str(job.lead_id),
+                    prior + 1,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "dialer_attempt_persist_revert_failed job=%s attempt=%s err=%s",
+                job.job_id, prior + 1, exc,
+            )
+        return False
 
     async def _bind_call_intent(
         self,
@@ -2637,6 +3289,9 @@ class DialerWorker:
                    AND tenant_id = $3::uuid
                    AND campaign_id = $4::uuid
                    AND lead_id = $5::uuid
+                   -- Never move the counter backwards: a stale payload
+                   -- replaying an older attempt must not undo a newer one.
+                   AND COALESCE(attempt_number, 0) <= $1
                 """,
                 int(job.attempt_number),
                 str(job.job_id),

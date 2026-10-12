@@ -14,6 +14,7 @@ import logging
 import os
 import secrets
 from typing import Optional, Tuple
+from uuid import UUID
 
 from fastapi import APIRouter, Request, HTTPException, Depends, Header, status
 
@@ -21,6 +22,8 @@ from app.core.security.webhook_verification import (
     verify_webhook_request,
     create_webhook_signature_headers,
     generate_webhook_secret,
+    encrypt_webhook_secret,
+    WebhookSecretEncryptionUnavailable,
     WebhookSecretManager,
 )
 from app.domain.services.call_service import WebhookTargetMismatch
@@ -30,6 +33,7 @@ from app.core.security.idempotency import (
     release_idempotency_lock,
 )
 from app.core.security.api_security import rate_limit_dependency
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.api.v1.dependencies import get_db_client
 
@@ -263,10 +267,31 @@ async def mark_as_spam_secured(
         raise HTTPException(status_code=500, detail="Failed to mark as spam")
 
 
+async def verify_idempotent_example_signature(request: Request) -> None:
+    """Authenticate the sender BEFORE any idempotency lookup, replay or lock.
+
+    Registered as a route-level dependency, which FastAPI resolves ahead of the
+    parameter dependencies, so ``idempotency_dependency`` only ever runs for a
+    request whose HMAC already verified (an unverified ``X-Tenant-ID`` plus a
+    known Idempotency-Key must not replay a cached response or hold the lock).
+    The headers are read from the request, not declared as ``Header(...)``
+    params: a missing header is a 401 here, not a validation error that would
+    still let the sibling idempotency dependency run first.
+    """
+    tenant_id = request.headers.get("X-Tenant-ID", "")
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing X-Tenant-ID header",
+        )
+    await verify_webhook_tenant(request, tenant_id, "idempotent_example")
+
+
 @router.post(
     "/idempotent-example",
     summary="Idempotent webhook example",
     description="Webhook with idempotency key support",
+    dependencies=[Depends(verify_idempotent_example_signature)],
 )
 async def idempotent_webhook_example(
     request: Request,
@@ -278,27 +303,14 @@ async def idempotent_webhook_example(
     """
     Example webhook with both signature verification and idempotency.
 
+    The signature is verified by ``verify_idempotent_example_signature`` (a
+    route dependency) before the idempotency dependency runs.
+
     Headers:
     - X-Webhook-Signature: HMAC-SHA256 signature
     - X-Tenant-ID: Tenant identifier
     - Idempotency-Key: Unique key for idempotent processing
     """
-    # Get webhook secret
-    secret = await get_webhook_secret_from_db(x_tenant_id, "idempotent_example")
-
-    if not secret:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Webhook not configured"
-        )
-
-    # Verify signature
-    try:
-        await verify_webhook_request(request, secret)
-    except HTTPException:
-        await release_idempotency_lock(request)
-        raise
-
     # Process webhook (would be idempotent)
     try:
         data = await request.json()
@@ -350,23 +362,53 @@ async def configure_webhook(
     rather than open. TODO: expose an admin-JWT (platform_admin) variant
     via webhooks_admin.py if a UI-driven provisioning path is needed.
     """
+    try:
+        tenant_uuid = UUID(tenant_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="tenant_id must be a UUID")
+
     secret = generate_webhook_secret()
 
+    # The verifier needs the raw HMAC secret back, so it cannot be hashed: store
+    # it encrypted ("enc:v1:<token>"). Fail closed - with no usable encryption
+    # key nothing is stored, never plaintext. Outside the try below so the 503
+    # is not swallowed into the generic 500.
     try:
-        await db_client.execute(
-            """
-            INSERT INTO webhook_configs (tenant_id, webhook_name, secret_key)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (tenant_id, webhook_name)
-            DO UPDATE SET secret_key = $3, is_active = TRUE, updated_at = NOW()
-            """,
-            tenant_id, webhook_name, secret
+        stored_secret = encrypt_webhook_secret(secret)
+    except WebhookSecretEncryptionUnavailable as exc:
+        logger.error("Webhook secret not stored: encryption unavailable (%s)", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Webhook secret encryption is not configured "
+                "(CONNECTOR_ENCRYPTION_KEY); nothing was stored"
+            ),
         )
+
+    try:
+        # PostgresClient has no execute(); write through the pool with the
+        # tenant context.
+        async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
+            await conn.execute(
+                """
+                INSERT INTO webhook_configs (tenant_id, webhook_name, secret_key)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (tenant_id, webhook_name)
+                DO UPDATE SET secret_key = $3, is_active = TRUE, updated_at = NOW()
+                """,
+                tenant_uuid, webhook_name, stored_secret
+            )
+
+        # The verifier caches secrets for a TTL; drop any stale entry so the
+        # new secret takes effect immediately.
+        manager = get_webhook_secret_manager()
+        manager.invalidate_cache(tenant_id, webhook_name)
+        manager.invalidate_cache(str(tenant_uuid), webhook_name)
 
         return {
             "webhook_name": webhook_name,
             "tenant_id": tenant_id,
-            "secret": secret,  # Return once - not stored in plaintext
+            "secret": secret,  # Returned once only
             "note": "Store this secret securely - it will not be shown again"
         }
 

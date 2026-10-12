@@ -304,19 +304,20 @@ async def put_recording_policy(
     )
     await _safe_audit(
         audit_logger,
-        event=AuditEvent(
-            event_type="recording_policy_updated",
-            actor_id=str(user.id),
-            tenant_id=tenant_id,
-            resource_type="tenant_recording_policy",
-            resource_id=tenant_id,
-            details={
-                "default_consent_mode": body.default_consent_mode,
-                "retention_days": body.retention_days,
-                "announcement": bool(body.announcement_text),
-                "two_party_country_codes": body.two_party_country_codes,
-            },
-        ),
+        event_type=AuditEvent.CONFIG_CHANGED,
+        actor_id=str(user.id),
+        actor_type="user",
+        tenant_id=tenant_id,
+        resource_type="tenant_recording_policy",
+        resource_id=tenant_id,
+        action="recording_policy_updated",
+        description="Tenant admin saved the call-recording consent policy",
+        metadata={
+            "default_consent_mode": body.default_consent_mode,
+            "retention_days": body.retention_days,
+            "announcement": bool(body.announcement_text),
+            "two_party_country_codes": body.two_party_country_codes,
+        },
     )
     return _policy_response(dict(row) if row else None)
 
@@ -487,8 +488,19 @@ def _ranged_file_response(
         try:
             rng = range_header.split("=", 1)[1].split(",")[0].strip()
             s, _, e = rng.partition("-")
-            start = int(s) if s.strip() else 0
-            end = int(e) if e.strip() else file_size - 1
+            if not s.strip() and e.strip():
+                # Suffix range ("bytes=-N"): the LAST N bytes, not bytes 0..N.
+                suffix = int(e)
+                if suffix <= 0:
+                    return Response(
+                        status_code=416,
+                        headers={"Content-Range": f"bytes */{file_size}", "Accept-Ranges": "bytes"},
+                    )
+                start = max(0, file_size - suffix)
+                end = file_size - 1
+            else:
+                start = int(s) if s.strip() else 0
+                end = int(e) if e.strip() else file_size - 1
             if start > end or start >= file_size:
                 return Response(
                     status_code=416,
@@ -547,7 +559,15 @@ async def _recording_storage_row(
     async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
         return await conn.fetchrow(
             """
-            SELECT id, call_id, tenant_id, s3_key, s3_bucket, status, mime_type
+            SELECT id, call_id, tenant_id, s3_key, s3_bucket, status, mime_type,
+                   EXISTS (
+                       SELECT 1
+                       FROM tenant_recording_policy p
+                       WHERE p.tenant_id = recordings_s3.tenant_id
+                         AND p.retention_days > 0
+                         AND recordings_s3.created_at
+                             < NOW() - make_interval(days => p.retention_days)
+                   ) AS retention_expired
             FROM recordings_s3
             WHERE id = $1 AND tenant_id = $2
             """,
@@ -564,6 +584,15 @@ def _assert_recording_playable(row: Any) -> None:
             status_code=409,
             detail={"code": "recording_not_playable", "status": str(row["status"])},
         )
+    # Past the tenant's retention window the audio must not be served, even
+    # before the purge job has physically removed it. Enforcement switches on
+    # with the purge itself, so a deploy cannot silently stop every recording
+    # older than its retention from playing before the owner has reviewed the
+    # dry-run. (Imported here: the purge module imports the admin endpoints.)
+    from app.workers.recording_retention_purge import purge_enabled
+
+    if row.get("retention_expired") and purge_enabled():
+        raise HTTPException(status_code=410, detail={"code": "recording_retention_expired"})
 
 
 @router.get("/{recording_id}/stream")

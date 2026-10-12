@@ -7,6 +7,7 @@ Every turn produces a parent span covering the full STT→LLM→TTS cycle,
 with child spans per stage and latency attributes on each.
 """
 import asyncio
+import inspect
 import logging
 import os
 import time
@@ -32,6 +33,7 @@ from app.domain.services.voice_pipeline import (
     is_terminal_period_boundary as _is_terminal_period_boundary_impl,
     is_repetitive_transcript as _is_repetitive_transcript_impl,
 )
+from app.domain.services.voice_pipeline import capture_mode
 from app.domain.services.voice_pipeline.tts_playback import TtsPlayback
 from app.domain.services.voice_pipeline.turn_runner import TurnRunner
 from app.domain.services.voice_pipeline.turn_streamer import TurnStreamer
@@ -41,6 +43,7 @@ from app.domain.services.voice_pipeline.turn_ender import (
     TurnEnder,
     _CONFIDENCE_UNSET,
     _CONTACT_EVIDENCE_UNSET,
+    mark_teardown_cancel,
 )
 from app.core.telemetry import get_tracer, voice_span
 from app.core.telephony_observability import record_turn_silent_reason
@@ -263,9 +266,14 @@ class VoicePipelineService:
         """Cancel any in-flight turn task for a call. Called on hangup/teardown
         so a reply still streaming TTS stops sending audio to a gateway/channel
         that's already gone (otherwise: 'no gateway session' warnings + wasted
-        synthesis on a dead call)."""
+        synthesis on a dead call).
+
+        TEARDOWN ONLY. The task is tagged so the turn queued behind it is
+        dropped rather than dispatched when it unwinds (a barge-in cancels
+        through _cancel_turn_task instead, untagged, and keeps its queue)."""
         task = self._pending_llm_tasks.pop(call_id, None)
         if task and not task.done():
+            mark_teardown_cancel(task)
             task.cancel()
             await self._await_task_after_cancel(task, call_id, "teardown")
 
@@ -349,7 +357,17 @@ class VoicePipelineService:
 
         hangup = getattr(self.media_gateway, "hangup_call", None)
         hangup_requested = False
+        pbx_session_live = False
         if callable(hangup):
+            # Sampled before the hangup. An awaitable probe (test doubles) is
+            # unknown, which keeps the local teardown below.
+            probe = getattr(self.media_gateway, "is_session_active", None)
+            live = probe(call_id) if callable(probe) else False
+            if inspect.isawaitable(live):
+                if hasattr(live, "close"):
+                    live.close()
+                live = False
+            pbx_session_live = live is True
             try:
                 hangup_requested = bool(await hangup(call_id, reason))
             except Exception as exc:
@@ -364,7 +382,14 @@ class VoicePipelineService:
         # PBX save path then sees an empty buffer and silently skips the save.
         # For sessions with no PBX hangup (browser / ask_ai), hangup_requested is
         # False, so we still tear the gateway session down locally as before.
-        if not hangup_requested:
+        # An UNCONFIRMED PBX hangup on a live session is different: the channel
+        # may still be up, and its ChannelDestroyed teardown (or orphan
+        # recovery) must still find the recording buffer, so stop the agent but
+        # keep the session registered.
+        deactivate = getattr(self.media_gateway, "deactivate_session", None)
+        if not hangup_requested and pbx_session_live and callable(deactivate):
+            deactivate(call_id)
+        elif not hangup_requested:
             try:
                 await self.media_gateway.on_call_ended(call_id, reason)
             except Exception as exc:
@@ -475,6 +500,9 @@ class VoicePipelineService:
                 pending_task = self._pending_llm_tasks.pop(call_id, None)
                 if pending_task:
                     if not pending_task.done():
+                        # Pipeline end is teardown, not a barge-in: the turn
+                        # queued behind this one must not run after it.
+                        mark_teardown_cancel(pending_task)
                         pending_task.cancel()
                     await self._await_task_after_cancel(pending_task, call_id, "orphaned_llm")
                 # Remove barge-in event so a future session cannot inherit stale state.
@@ -482,6 +510,9 @@ class VoicePipelineService:
                 self._turn_epochs.pop(call_id, None)
                 self._barge_in_epoch.pop(call_id, None)
                 self._utterance_seq.pop(call_id, None)
+                # Module-level capture-mode tracking is keyed by call: drop it
+                # (a call that ended right after an email ask would stay armed).
+                capture_mode.clear(call_id)
                 session.stt_active = False
                 self.latency_tracker.cleanup_call(call_id)
                 logger.info("pipeline_end", extra={"call_id": call_id})

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, EmailStr
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
+from app.core.security.rbac import Permission, require_permission
 from app.domain.services.email_template_manager import get_email_template_manager
 from app.services.email_service import get_email_service
 
@@ -78,7 +79,12 @@ async def list_email_templates(
     return templates
 
 
-@router.post("/send", response_model=SendEmailResponse)
+# Not mounted today; if it ever is, sending from the tenant mailbox needs the same
+# EMAIL_SEND grant the assistant tool path requires.
+@router.post(
+    "/send", response_model=SendEmailResponse,
+    dependencies=[Depends(require_permission(Permission.EMAIL_SEND))],
+)
 async def send_email(
     request: SendEmailRequest,
     current_user: CurrentUser = Depends(get_current_user),

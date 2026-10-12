@@ -96,9 +96,13 @@ async def test_local_save_stores_the_encoded_file_with_its_mime(tmp_path, monkey
 
     async def fake_insert(**kwargs):
         inserted.update(kwargs)
-        return None
+        return recording_id
 
+    from uuid import UUID
+
+    recording_id = UUID("40000000-0000-4000-8000-000000000001")
     monkeypatch.setattr(svc, "_insert_recording_record", fake_insert)
+    monkeypatch.setattr(svc, "_update_call_recording_url", AsyncMock())
     result = await svc._save_local(call_id="call-9", buffer=buf, tenant_id="t1", campaign_id="c1")
     # Local fallback recordings live under the same tenant/campaign hierarchy
     # as object storage, not a flat cross-tenant namespace.
@@ -106,7 +110,7 @@ async def test_local_save_stores_the_encoded_file_with_its_mime(tmp_path, monkey
     assert inserted["mime_type"] == "audio/mpeg"
     assert inserted["file_size_bytes"] == len(b"MP3DATA")
     assert inserted["s3_key"].endswith("call-9.mp3")
-    assert result is not None
+    assert result == str(recording_id)
 
 
 def test_s3_key_carries_the_storage_extension():

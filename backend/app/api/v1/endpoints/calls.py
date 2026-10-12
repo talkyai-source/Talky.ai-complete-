@@ -5,7 +5,7 @@ Provides paginated call list and individual call details
 
 import logging
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
@@ -870,6 +870,7 @@ async def list_live_calls(
         FROM   calls c
         LEFT   JOIN campaigns camp ON camp.id = c.campaign_id
         WHERE  c.tenant_id = ${len(_LIVE_STATUSES) + 1}
+          AND  c.is_test IS NOT TRUE
           AND  (
                   (c.status IN ({placeholders})
                    AND COALESCE(c.started_at, c.created_at)
@@ -1291,6 +1292,24 @@ async def list_calls(
         - from: Start date filter
         - to: End date filter
     """
+    # asyncpg will not coerce strings for a timestamptz parameter, so parse the
+    # dates here (a bad value is the caller's error, not a 500).
+    from_bound: Optional[datetime] = None
+    to_bound: Optional[datetime] = None
+    try:
+        if from_date:
+            from_bound = datetime.combine(
+                date.fromisoformat(from_date), time.min, tzinfo=timezone.utc
+            )
+        if to_date:
+            # Inclusive calendar day: everything before midnight of the next day.
+            to_bound = datetime.combine(
+                date.fromisoformat(to_date) + timedelta(days=1), time.min, tzinfo=timezone.utc
+            )
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="from and to must be dates in YYYY-MM-DD format"
+        )
     try:
         import uuid as _uuid
 
@@ -1317,13 +1336,13 @@ async def list_calls(
             )
             params.append(str(inbound_campaign_id))
             idx += 1
-        if from_date:
+        if from_bound is not None:
             conditions.append(f"c.created_at >= ${idx}")
-            params.append(from_date)
+            params.append(from_bound)
             idx += 1
-        if to_date:
-            conditions.append(f"c.created_at <= ${idx}")
-            params.append(to_date + "T23:59:59Z")
+        if to_bound is not None:
+            conditions.append(f"c.created_at < ${idx}")
+            params.append(to_bound)
             idx += 1
 
         where = " AND ".join(conditions)

@@ -600,7 +600,9 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                                     </div>
                                                     <AdminMediaPlayer
                                                         disabled={!recording.playable}
-                                                        filename={`call-${call.id}.wav`}
+                                                        filenameBase={`call-${call.id}`}
+                                                        mimeType={recording.mime_type}
+                                                        fallbackExtension="wav"
                                                         load={() => api.getAdminRecordingAudio(recording.id)}
                                                     />
                                                     <div className="drawer-media-actions">
@@ -635,7 +637,9 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                                 </span>
                                             </div>
                                             <AdminMediaPlayer
-                                                filename={`feedback-${call.id}.webm`}
+                                                filenameBase={`feedback-${call.id}`}
+                                                mimeType={feedback.audio_mime_type}
+                                                fallbackExtension="webm"
                                                 load={() => api.getAdminFeedbackAudio(feedback.id)}
                                             />
                                             <div className="feedback-detail-transcript">

@@ -309,16 +309,51 @@ function defaultTokenStorage(): TokenStorage {
 // a thundering herd doesn't trigger N rotations.
 type RefreshResult = { ok: boolean; status?: number; accessToken?: string; userId?: string; tenantId?: string };
 const _refreshInFlight = new Map<string, Promise<RefreshResult>>();
+const REFRESH_TIMEOUT_MS = 10_000;
+let _refreshTimeoutMs = REFRESH_TIMEOUT_MS;
+
+// Access tokens this client rotated, as "epoch + from" -> to. A request that
+// started before a rotation by a sibling request (same identity epoch, same
+// verified user/tenant) is still the same sign-in, not an account switch.
+const _rotations = new Map<string, string>();
+const MAX_TRACKED_ROTATIONS = 64;
+const MAX_ROTATION_HOPS = 16;
+const rotationKey = (epoch: number, token: string) => JSON.stringify([epoch, token]);
+function recordRotation(epoch: number, from: string | null, to: string) {
+    if (!from || from === to) return;
+    _rotations.set(rotationKey(epoch, from), to);
+    if (_rotations.size > MAX_TRACKED_ROTATIONS) _rotations.delete(_rotations.keys().next().value!);
+}
+/** The newest token this client rotated `from` into, or `from` itself. */
+function rotatedSuccessor(epoch: number, from: string | null): string | null {
+    let cur = from;
+    for (let hop = 0; cur && hop < MAX_ROTATION_HOPS; hop++) {
+        const next = _rotations.get(rotationKey(epoch, cur));
+        if (!next) break;
+        cur = next;
+    }
+    return cur;
+}
+
+/** Test-only: shorten (or, with null, restore) the refresh timeout. */
+export function __setRefreshTimeoutMsForTests(ms: number | null) {
+    _refreshTimeoutMs = ms ?? REFRESH_TIMEOUT_MS;
+}
 
 async function tryRefresh(refreshUrl: string, key: string, headers: Record<string, string>): Promise<RefreshResult> {
     const existing = _refreshInFlight.get(key);
     if (existing) return existing;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), _refreshTimeoutMs);
     const promise = (async () => {
         try {
+            // Every request waiting on this shared promise inherits its fate, and the
+            // per-request timeoutMs does not cover it: bound the refresh itself.
             const res = await fetch(refreshUrl, {
                 method: "POST",
                 credentials: "include",
                 headers,
+                signal: controller.signal,
             });
             const body = res.ok && res.headers.get("content-type")?.includes("application/json")
                 ? await res.json() as Record<string, unknown> : undefined;
@@ -329,6 +364,7 @@ async function tryRefresh(refreshUrl: string, key: string, headers: Record<strin
         } catch {
             return { ok: false };
         } finally {
+            clearTimeout(timeoutId);
             setTimeout(() => { _refreshInFlight.delete(key); }, 0);
         }
     })();
@@ -339,6 +375,7 @@ async function tryRefresh(refreshUrl: string, key: string, headers: Record<strin
 /** Test-only: reset module-level refresh state between tests. */
 export function __resetRefreshStateForTests() {
     _refreshInFlight.clear();
+    _rotations.clear();
 }
 
 export function createHttpClient(config: HttpClientConfig) {
@@ -360,8 +397,13 @@ export function createHttpClient(config: HttpClientConfig) {
         return { token: getToken(), epoch: _identityEpoch, identity: _requestIdentity ? { ..._requestIdentity } : null };
     }
     type RequestScope = ReturnType<typeof captureScope>;
+    // The current token is the scope's own, or one this client rotated it into.
+    function tokenStillOurs(scope: RequestScope) {
+        const current = getToken();
+        return current === scope.token || (current !== null && current === rotatedSuccessor(scope.epoch, scope.token));
+    }
     function assertScope(scope: RequestScope, opts: HttpRequestOptions) {
-        if (_identityEpoch !== scope.epoch || getToken() !== scope.token) {
+        if (_identityEpoch !== scope.epoch || !tokenStillOurs(scope)) {
             throw new ApiClientError({ code: "identity_changed",
                 message: "Your sign-in changed while this request was pending. Check saved results before submitting it again.",
                 url: buildUrl(baseUrl, opts.path, opts.query ?? opts.params), method: opts.method ?? "GET" });
@@ -377,6 +419,13 @@ export function createHttpClient(config: HttpClientConfig) {
     }
     async function refreshForScope(scope: RequestScope, opts: HttpRequestOptions) {
         assertScope(scope, opts);
+        // A sibling request already rotated the token this one was sent with:
+        // adopt it and retry rather than spending the refresh cookie again.
+        const rotated = rotatedSuccessor(scope.epoch, scope.token);
+        if (rotated && rotated !== scope.token && getToken() === rotated) {
+            scope.token = rotated;
+            return true;
+        }
         const key = JSON.stringify([refreshUrl, scope.epoch, scope.identity, scope.token]);
         const result = await tryRefresh(refreshUrl, key, identityHeaders(scope));
         // A concurrent request in this same scope can adopt the same refresh.
@@ -392,8 +441,18 @@ export function createHttpClient(config: HttpClientConfig) {
                 throw new ApiClientError({ code: "identity_changed", message: "Your sign-in changed. Refresh the page before continuing.",
                     url: refreshUrl, method: "POST" });
             }
+            if (scope.identity) recordRotation(scope.epoch, scope.token, result.accessToken);
             setToken(result.accessToken);
             scope.token = result.accessToken;
+        }
+        if (!result.ok && result.status !== 401 && result.status !== 403) {
+            // Only a refresh the server REJECTED means the session is gone. A
+            // restart, a 5xx or a dropped/timed-out connection says nothing
+            // about the refresh token, so keep the session and let the caller retry.
+            throw new ApiClientError({ status: result.status, code: result.status ? "server_error" : "network_error",
+                message: result.status ? "The server could not renew your session. Please try again."
+                    : "Could not reach the server to renew your session. Please try again.",
+                url: refreshUrl, method: "POST" });
         }
         return result.ok;
     }

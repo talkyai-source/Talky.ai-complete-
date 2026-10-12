@@ -19,6 +19,8 @@ function relativeTime(iso: string): string {
 export function Incidents() {
     const [incidents, setIncidents] = useState<IncidentItem[]>([]);
     const [loading, setLoading] = useState(true);
+    // Track failure separately from "empty": a failed read is not "no incidents".
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -31,9 +33,15 @@ export function Incidents() {
                     page_size: 5,
                 });
                 if (cancelled) return;
-                setIncidents(res.data?.items ?? []);
-            } catch {
-                if (!cancelled) setIncidents([]);
+                if (res.error) {
+                    // Keep the last good list (flagged stale below) rather than blanking it.
+                    setError(res.error.message || 'Failed to load incidents.');
+                } else {
+                    setIncidents(res.data?.items ?? []);
+                    setError(null);
+                }
+            } catch (err) {
+                if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load incidents.');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -58,7 +66,15 @@ export function Incidents() {
                         <span className="incident-time">Loading…</span>
                     </div>
                 )}
-                {!loading && incidents.length === 0 && (
+                {error && (
+                    <div className="error-banner inline" role="alert">
+                        <p>
+                            Incidents unavailable: {error}
+                            {incidents.length > 0 ? ' Showing last known incidents, which may be stale.' : ' Open incidents may exist.'}
+                        </p>
+                    </div>
+                )}
+                {!loading && !error && incidents.length === 0 && (
                     <div className="incident-item">
                         <span className="incident-time">No open incidents.</span>
                     </div>

@@ -115,21 +115,20 @@ async def test_a_topup_checkout_only_offers_immediate_payment_methods(monkeypatc
 
     monkeypatch.setattr(svc, "create_or_get_customer", _customer)
 
-    import app.domain.services.billing_service as bs
-
     captured = {}
 
     class _Created:
         id = "cs_new"
         url = "https://pay.example/cs_new"
 
-    class _Session:
-        @staticmethod
-        def create(**kw):
-            captured.update(kw)
-            return _Created()
+    # The session is created through BillingService._stripe_call (off the event
+    # loop, with an idempotency key), so that is the seam this test captures.
+    async def _stripe_call(resource, method, *args, **kw):
+        assert (resource, method) == ("checkout.Session", "create")
+        captured.update(kw)
+        return _Created()
 
-    monkeypatch.setattr(bs.stripe.checkout, "Session", _Session)
+    monkeypatch.setattr(svc, "_stripe_call", _stripe_call)
 
     await svc.create_topup_checkout_session(
         tenant_id="11111111-1111-1111-1111-111111111111",

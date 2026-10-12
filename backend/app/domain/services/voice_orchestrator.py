@@ -403,6 +403,41 @@ class VoiceOrchestrator:
         self._ask_ai_providers: Optional[tuple] = None  # (stt, llm, None, gateway)
         logger.info("VoiceOrchestrator initialised")
 
+    async def _create_session_providers(self, config: VoiceSessionConfig):
+        """Create (stt, llm, tts, media_gateway) concurrently.
+
+        If any of them fails, clean up the ones that DID initialise (LLM/HTTP
+        client, Deepgram TTS heartbeat socket, aiohttp sessions, gateway)
+        before re-raising the first failure with its original type, so e.g.
+        VoiceEligibilityError still maps to 403. Only objects created here are
+        cleaned; the shared ask_ai singletons never pass through this path.
+        """
+        results = await asyncio.gather(
+            self._create_stt_provider(config),
+            self._create_llm_provider(config),
+            self._create_tts_provider(config),
+            self._create_media_gateway(config),
+            return_exceptions=True,
+        )
+        failures = [r for r in results if isinstance(r, BaseException)]
+        if not failures:
+            return tuple(results)
+        for result in results:
+            if isinstance(result, BaseException) or result is None:
+                continue
+            cleanup = getattr(result, "cleanup", None)
+            if cleanup is None:
+                continue
+            try:
+                await cleanup()
+            except Exception:
+                logger.debug("Provider cleanup after failed session init failed", exc_info=True)
+        # Cancellation must win over an ordinary init error.
+        for failure in failures:
+            if isinstance(failure, asyncio.CancelledError):
+                raise failure
+        raise failures[0]
+
     async def prewarm_ask_ai_providers(self) -> None:
         """
         Pre-initialise Ask AI provider singletons at server startup.
@@ -419,12 +454,7 @@ class VoiceOrchestrator:
 
         config = build_ask_ai_session_config()
         try:
-            stt, llm, tts, gateway = await asyncio.gather(
-                self._create_stt_provider(config),
-                self._create_llm_provider(config),
-                self._create_tts_provider(config),
-                self._create_media_gateway(config),
-            )
+            stt, llm, tts, gateway = await self._create_session_providers(config)
             try:
                 cleanup = getattr(tts, "cleanup", None)
                 if cleanup:
@@ -549,12 +579,7 @@ class VoiceOrchestrator:
                 llm_provider,
                 tts_provider,
                 media_gateway,
-            ) = await asyncio.gather(
-                self._create_stt_provider(config),
-                self._create_llm_provider(config),
-                self._create_tts_provider(config),
-                self._create_media_gateway(config),
-            )
+            ) = await self._create_session_providers(config)
             # Cache STT, LLM, and gateway on first successful init for ask_ai.
             # TTS slot is left None — it is never shared.
             if config.session_type == "ask_ai" and self._ask_ai_providers is None:
@@ -1485,8 +1510,22 @@ class VoiceOrchestrator:
         elif config.tts_provider_type == "elevenlabs":
             from app.infrastructure.tts.elevenlabs_tts import ElevenLabsTTSProvider
 
-            from app.domain.services.voice_eligibility import require_elevenlabs_voice_eligible
-            await require_elevenlabs_voice_eligible(getattr(self._db_client, "pool", None), config.tenant_id, config.voice_id)
+            from app.domain.services.voice_eligibility import (
+                VoiceEligibilityError,
+                require_elevenlabs_voice_eligible,
+            )
+            try:
+                await require_elevenlabs_voice_eligible(getattr(self._db_client, "pool", None), config.tenant_id, config.voice_id)
+            except VoiceEligibilityError as exc:
+                # The catalog helper never raises: during an ElevenLabs outage it
+                # returns [] and eligibility reports a permission-style 403.
+                # Report the outage as the temporary 503 it is.
+                from app.infrastructure.tts.elevenlabs_catalog import elevenlabs_catalog_unavailable
+                if exc.code == "voice_not_available" and elevenlabs_catalog_unavailable():
+                    raise VoiceEligibilityError(
+                        "catalog_unavailable", "Voice eligibility is temporarily unavailable", 503
+                    ) from exc
+                raise
             api_key = await resolver.resolve("elevenlabs", tenant_id=config.tenant_id)
             provider = ElevenLabsTTSProvider()
             await provider.initialize(

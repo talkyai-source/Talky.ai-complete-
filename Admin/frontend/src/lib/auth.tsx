@@ -91,7 +91,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 });
                 return;
             }
-            // Token rejected — clear it.
+            const status = res.error?.status;
+            if (res.error && status !== 401 && status !== 403) {
+                // Backend restarting / 5xx / network / timeout: the token was
+                // NOT rejected, so keep it. Stay signed out (never trust an
+                // unverified session) and say why. NETWORK_ERROR and
+                // REQUEST_TIMEOUT carry no status, hence the explicit check.
+                setState({
+                    user: null,
+                    isLoading: false,
+                    isAuthenticated: false,
+                    error: `Could not verify your session (${res.error.message}). You were not signed out; retry in a moment.`,
+                });
+                return;
+            }
+            // Token rejected (401/403) — clear it.
             api.setToken(null);
             setState({
                 user: null,
@@ -215,6 +229,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             error: null,
         });
     };
+
+    // An expired/revoked session (401 on any authenticated call) must not leave
+    // the UI "signed in" over empty data.
+    useEffect(() => api.onUnauthorized(() => {
+        authOperation.current += 1;
+        setState({
+            user: null,
+            isLoading: false,
+            isAuthenticated: false,
+            error: 'Your session has expired or was revoked. Please sign in again.',
+        });
+    }), []);
 
     useEffect(() => {
         void checkAuth();

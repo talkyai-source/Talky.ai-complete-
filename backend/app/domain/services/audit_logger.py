@@ -1,12 +1,14 @@
 """
 Audit Logger Service - Comprehensive audit logging with tamper-evident properties
 """
+import asyncio
+import itertools
 import logging
 import os
 import hashlib
 import hmac
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional
 from uuid import UUID, uuid4
@@ -17,6 +19,17 @@ from pydantic import BaseModel, field_validator
 from app.core.db_utils import acquire_with_tenant
 
 logger = logging.getLogger(__name__)
+
+# The tamper-evident chain has one writer at a time across *every* process:
+# talky-api, talky-api-web, the dialer and the workers each run their own
+# AuditLogger. A flush holds this transaction-scoped advisory lock while it
+# reads the chain tail and inserts, so two flushes can never chain onto the
+# same tail. 0x61756469745F6368 is "audit_ch" in ASCII.
+_CHAIN_LOCK_KEY = 0x61756469745F6368
+# Longest a flush waits for that lock. log() flushes inline on the request
+# path, so one stalled writer must not hang every process's audit logging: the
+# flush fails, keeps its entries buffered and the next flush retries.
+_CHAIN_LOCK_TIMEOUT_MS = 5000
 
 
 class AuditEvent(str, Enum):
@@ -264,6 +277,13 @@ class AuditLogger:
         self.flush_interval_seconds = flush_interval_seconds
         self._batch: list[dict] = []
         self._last_flush = datetime.utcnow()
+        # Serialises "read the chain tail, append to the batch, flush": without
+        # it two concurrent log() calls (or a log() racing a flush) read the
+        # same previous_hash and fork the chain.
+        self._lock = asyncio.Lock()
+        self._flush_task: Optional[asyncio.Task] = None
+        self._closed = False
+        self._last_event_time: Optional[datetime] = None
 
     def _get_category(self, event_type: AuditEvent) -> EventCategory:
         """Get category for event type"""
@@ -278,11 +298,23 @@ class AuditLogger:
         days = RETENTION_PERIODS.get(category, 365)
         return datetime.utcnow() + timedelta(days=days)
 
-    def _compute_hash(self, entry: dict) -> str:
-        """Compute SHA-256 hash of entry content"""
-        # Create canonical representation
-        content = {
-            "event_time": entry["event_time"].isoformat() if isinstance(entry["event_time"], datetime) else entry["event_time"],
+    @staticmethod
+    def _canonical_time(value):
+        """Naive-UTC ISO text: the form the hash has always been computed over.
+
+        Entries are hashed before the database sees them, but read back as
+        timezone-aware datetimes; both must reduce to the same text.
+        """
+        if isinstance(value, datetime):
+            if value.tzinfo is not None:
+                value = value.astimezone(timezone.utc).replace(tzinfo=None)
+            return value.isoformat()
+        return value
+
+    def _hash_content(self, entry: dict) -> dict:
+        """Canonical content an entry hash is computed over."""
+        return {
+            "event_time": self._canonical_time(entry["event_time"]),
             "event_type": entry["event_type"],
             "actor_id": str(entry["actor_id"]) if entry.get("actor_id") else None,
             "tenant_id": str(entry["tenant_id"]) if entry.get("tenant_id") else None,
@@ -291,7 +323,10 @@ class AuditLogger:
             "after_state": entry.get("after_state"),
             "metadata": entry.get("metadata"),
         }
-        canonical = json.dumps(content, sort_keys=True, default=str)
+
+    def _compute_hash(self, entry: dict) -> str:
+        """Compute SHA-256 hash of entry content"""
+        canonical = json.dumps(self._hash_content(entry), sort_keys=True, default=str)
         return hashlib.sha256(canonical.encode()).hexdigest()
 
     def _sign_entry(self, entry: dict) -> str:
@@ -303,14 +338,32 @@ class AuditLogger:
             hashlib.sha256
         ).hexdigest()
 
-    async def _get_previous_hash(self) -> str:
-        """Get hash of most recent audit log entry"""
-        # The tamper-evident chain is platform-wide, not per tenant.
-        async with acquire_with_tenant(self.db_pool, None) as conn:
-            row = await conn.fetchrow(
-                "SELECT entry_hash FROM audit_logs ORDER BY event_time DESC LIMIT 1"
-            )
-            return row["entry_hash"] if row else "0" * 64
+    def _chain(
+        self,
+        entries: list[dict],
+        previous_hash: str,
+        previous_time: Optional[datetime],
+    ) -> list[dict]:
+        """Link ``entries`` onto the chain tail; returns new dicts, inputs untouched.
+
+        Only meaningful under the database chain lock, where (previous_hash,
+        previous_time) is the real tail. verify_chain_integrity walks rows in
+        event_time order, so event_time must increase along the chain whichever
+        process stamped the entry: an entry that is not already later than the
+        tail is moved to 1 microsecond after it. The hash text is unchanged, so
+        rows stored earlier keep verifying.
+        """
+        linked = []
+        for entry in entries:
+            event_time = entry["event_time"]
+            if previous_time is not None and event_time <= previous_time:
+                event_time = previous_time + timedelta(microseconds=1)
+            link = {**entry, "event_time": event_time, "previous_hash": previous_hash}
+            link["entry_hash"] = self._compute_hash(link)
+            link["signature"] = self._sign_entry(link)
+            linked.append(link)
+            previous_hash, previous_time = link["entry_hash"], event_time
+        return linked
 
     async def log(
         self,
@@ -372,7 +425,7 @@ class AuditLogger:
 
         entry = {
             "event_id": event_id,
-            "event_time": datetime.utcnow(),
+            "event_time": None,  # stamped under the lock, see below
             "event_type": event_type.value,
             "event_category": category.value,
             "severity": severity.value,
@@ -389,26 +442,52 @@ class AuditLogger:
             "country_code": country_code,
             "action": action,
             "description": description,
-            "before_state": before_state,
-            "after_state": after_state,
-            "metadata": metadata,
+            # Empty states are stored as NULL, so they must be hashed as None
+            # or a stored row can never reproduce its own hash.
+            "before_state": before_state or None,
+            "after_state": after_state or None,
+            "metadata": metadata or None,
             "compliance_tags": compliance_tags or [],
             "retention_until": retention_until,
         }
 
-        # Compute chain hash
-        entry["previous_hash"] = await self._get_previous_hash()
-        entry["entry_hash"] = self._compute_hash(entry)
-        entry["signature"] = self._sign_entry({**entry, "event_id": event_id})
+        # Hashing happens at flush time now. Content that cannot be hashed
+        # must be refused here, to the caller: once buffered it would make
+        # every later flush raise and no audit row would be written again.
+        self._compute_hash(entry)
 
-        # Add to batch
-        self._batch.append(entry)
+        async with self._lock:
+            # Timezone-aware (a naive datetime would be stored as host-local
+            # time) and increasing within this process. This is when the event
+            # happened; _flush_locked only moves it later if another process
+            # has already chained a later entry.
+            now = datetime.now(timezone.utc)
+            if self._last_event_time is not None and now <= self._last_event_time:
+                now = self._last_event_time + timedelta(microseconds=1)
+            self._last_event_time = now
+            entry["event_time"] = now
 
-        # Flush if needed
-        if len(self._batch) >= self.batch_size:
-            await self.flush()
-        elif (datetime.utcnow() - self._last_flush).total_seconds() >= self.flush_interval_seconds:
-            await self.flush()
+            # No previous_hash / entry_hash / signature yet. The chain tail is
+            # only known inside the database chain lock (other processes
+            # append to it too), so _flush_locked links the entry.
+            self._batch.append(entry)
+
+            # Flush if needed. A failed flush keeps the entries buffered for
+            # the timer to retry; it must not fail the caller's request.
+            if (
+                len(self._batch) >= self.batch_size
+                or (datetime.utcnow() - self._last_flush).total_seconds()
+                >= self.flush_interval_seconds
+            ):
+                try:
+                    await self._flush_locked()
+                except Exception as exc:
+                    logger.warning(
+                        "audit_logger flush failed, %s entries stay buffered: %s",
+                        len(self._batch), exc,
+                    )
+
+            self._ensure_flush_task()
 
         return event_id
 
@@ -581,8 +660,59 @@ class AuditLogger:
 
         return event_id
 
+    def _ensure_flush_task(self) -> None:
+        """Make sure a timer will write the buffer even if no log() follows.
+
+        Called with the lock held. The task ends once the buffer is empty, so
+        an idle logger holds no task, and a new entry starts a new one.
+        """
+        if self._closed or not self._batch:
+            return
+        if self._flush_task is not None and not self._flush_task.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._flush_task = loop.create_task(self._flush_loop())
+
+    async def _flush_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.flush_interval_seconds)
+            try:
+                await self.flush()
+            except Exception as exc:
+                logger.warning("audit_logger timed flush failed: %s", exc)
+            # No await between this check and clearing the handle, so a log()
+            # arriving later sees no task and starts a new one.
+            if not self._batch:
+                self._flush_task = None
+                return
+
+    async def aclose(self) -> None:
+        """Stop the timer and write whatever is still buffered (shutdown hook)."""
+        self._closed = True
+        task = self._flush_task
+        self._flush_task = None
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        await self.flush()
+
     async def flush(self) -> None:
-        """Flush batched entries to database.
+        """Flush batched entries to database."""
+        async with self._lock:
+            await self._flush_locked()
+
+    async def _flush_locked(self) -> None:
+        """Write the buffer. The caller holds ``self._lock``.
+
+        The hash chain is built here, not in log(): every process has its own
+        logger, so the only place that knows the real tail is the database,
+        and only while the chain lock is held. See ``_CHAIN_LOCK_KEY``.
 
         A single bad row (e.g. orphan FK after a user was deleted while the
         event was still in-batch) must NEVER take down the whole flush —
@@ -600,8 +730,8 @@ class AuditLogger:
         self._batch = []
         self._last_flush = datetime.utcnow()
 
-        rows = [
-            (
+        def as_row(e: dict) -> tuple:
+            return (
                 e["event_id"], e["event_time"], e["event_type"], e["event_category"],
                 e["severity"], e["actor_id"], e["actor_type"], e["actor_role"],
                 e["tenant_id"], e["resource_type"], e["resource_id"], e["ip_address"],
@@ -614,8 +744,6 @@ class AuditLogger:
                 e["previous_hash"], e["entry_hash"], e["signature"],
                 e["compliance_tags"], e["retention_until"],
             )
-            for e in batch
-        ]
 
         sql = """
             INSERT INTO audit_logs (
@@ -631,31 +759,69 @@ class AuditLogger:
         """
 
         # One batch can contain several tenants and platform (NULL-tenant) rows.
-        async with acquire_with_tenant(self.db_pool, None) as conn:
-            try:
-                await conn.executemany(sql, rows)
-                return
-            except Exception as exc:
-                logger.warning(
-                    "audit_logger batch flush failed (%s rows): %s — "
-                    "falling back to per-row inserts and dropping rejected rows.",
-                    len(rows), exc,
+        try:
+            async with acquire_with_tenant(self.db_pool, None) as conn:
+                # One chain writer at a time across every process. The lock is
+                # held until this transaction ends, so it covers the tail read
+                # and the inserts. The wait is bounded; the setting goes back
+                # to the default afterwards so the inserts are not subject to it.
+                await conn.execute(
+                    f"SET LOCAL lock_timeout = {_CHAIN_LOCK_TIMEOUT_MS}; "
+                    f"SELECT pg_advisory_xact_lock({_CHAIN_LOCK_KEY}); "
+                    "SET LOCAL lock_timeout TO DEFAULT"
                 )
+                # A separate statement, taken after the lock: under READ
+                # COMMITTED (the default) it sees what the previous holder
+                # committed. Same order verify_chain_integrity walks, newest first.
+                tail = await conn.fetchrow(
+                    "SELECT entry_hash, event_time FROM audit_logs "
+                    "ORDER BY event_time DESC, created_at DESC LIMIT 1"
+                )
+                tail_hash = tail["entry_hash"] if tail else "0" * 64
+                tail_time = tail["event_time"] if tail else None
 
-            # Per-row fallback. Each insert runs in its own implicit
-            # transaction, so one bad row no longer poisons the rest.
-            dropped = 0
-            for row in rows:
+                rows = [as_row(e) for e in self._chain(batch, tail_hash, tail_time)]
                 try:
-                    await conn.execute(sql, *row)
-                except Exception as row_exc:
-                    dropped += 1
-                    logger.error(
-                        "audit_logger dropping bad row event_id=%s actor_id=%s: %s",
-                        row[0], row[5], row_exc,
+                    # A savepoint: a failed batch must not abort the enclosing
+                    # transaction, or every per-row retry below would fail too.
+                    async with conn.transaction():
+                        await conn.executemany(sql, rows)
+                    return
+                except Exception as exc:
+                    logger.warning(
+                        "audit_logger batch flush failed (%s rows): %s — "
+                        "falling back to per-row inserts and dropping rejected rows.",
+                        len(rows), exc,
                     )
-            if dropped:
-                logger.warning("audit_logger dropped %s of %s rows this flush", dropped, len(rows))
+
+                # Per-row fallback. Each insert runs in its own savepoint, so
+                # one bad row no longer poisons the rest. The failed batch was
+                # rolled back, so the tail is unchanged; the chain is rebuilt
+                # over the rows the database accepts, so a dropped row leaves
+                # no hole for the next row to point at.
+                dropped = 0
+                for entry in batch:
+                    (linked,) = self._chain([entry], tail_hash, tail_time)
+                    row = as_row(linked)
+                    try:
+                        async with conn.transaction():
+                            await conn.execute(sql, *row)
+                    except Exception as row_exc:
+                        dropped += 1
+                        logger.error(
+                            "audit_logger dropping bad row event_id=%s actor_id=%s: %s",
+                            row[0], row[5], row_exc,
+                        )
+                    else:
+                        tail_hash, tail_time = linked["entry_hash"], linked["event_time"]
+                if dropped:
+                    logger.warning("audit_logger dropped %s of %s rows this flush", dropped, len(rows))
+        except BaseException:
+            # The database was unreachable (or we were cancelled mid-write):
+            # nothing was stored, so the entries go back in front of anything
+            # logged meanwhile and the next flush retries them in chain order.
+            self._batch = batch + self._batch
+            raise
 
     async def query(
         self,
@@ -669,6 +835,7 @@ class AuditLogger:
         severity: Optional[Severity] = None,
         limit: int = 100,
         offset: int = 0,
+        event_id: Optional[UUID | str] = None,
     ) -> list[AuditLogEntry]:
         """
         Query audit logs with filters.
@@ -723,6 +890,12 @@ class AuditLogger:
             params.append(severity.value)
             param_idx += 1
 
+        if event_id:
+            event_uuid = UUID(event_id) if isinstance(event_id, str) else event_id
+            conditions.append(f"event_id = ${param_idx}")
+            params.append(event_uuid)
+            param_idx += 1
+
         where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
 
         query = f"""
@@ -741,6 +914,37 @@ class AuditLogger:
 
         return [AuditLogEntry(**dict(row)) for row in rows]
 
+    def _recompute_row_hash(self, row) -> str:
+        """Hash a stored row; returns the stored hash if any accepted form of it matches.
+
+        Empty before/after/metadata are stored as NULL. Entries written before
+        log() normalised them were hashed as ``{}``, so a NULL column is also
+        tried as ``{}`` before a row is declared altered.
+        """
+        entry = {
+            key: row[key]
+            for key in ("event_time", "event_type", "actor_id", "tenant_id", "action")
+        }
+        states = {}
+        for key in ("before_state", "after_state", "metadata"):
+            value = row[key]
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except ValueError:
+                    pass
+            states[key] = value
+        nullable = [key for key, value in states.items() if value is None]
+        first = None
+        for fills in itertools.product((None, {}), repeat=len(nullable)):
+            candidate = {**entry, **states, **dict(zip(nullable, fills))}
+            computed = self._compute_hash(candidate)
+            if first is None:
+                first = computed
+            if computed == row["entry_hash"]:
+                return computed
+        return first
+
     async def verify_chain_integrity(self) -> dict:
         """
         Verify the integrity of the audit log chain.
@@ -749,9 +953,14 @@ class AuditLogger:
             dict with verification results
         """
         # The tamper-evident chain is verified across the entire platform.
+        # Chain order is event_time order: _flush_locked keeps event_time
+        # strictly increasing along the chain while it holds the chain lock,
+        # so created_at (the transaction start) never decides the order.
         async with acquire_with_tenant(self.db_pool, None) as conn:
             rows = await conn.fetch(
-                "SELECT event_id, event_time, event_type, actor_id, action, previous_hash, entry_hash FROM audit_logs ORDER BY event_time"
+                "SELECT event_id, event_time, event_type, actor_id, tenant_id, action, "
+                "before_state, after_state, metadata, previous_hash, entry_hash "
+                "FROM audit_logs ORDER BY event_time, created_at"
             )
 
         if not rows:
@@ -771,15 +980,8 @@ class AuditLogger:
                     "actual_previous": row["previous_hash"]
                 })
 
-            # Recompute hash to verify content
-            content = {
-                "event_time": row["event_time"].isoformat(),
-                "event_type": row["event_type"],
-                "actor_id": str(row["actor_id"]) if row["actor_id"] else None,
-                "action": row["action"],
-            }
-            canonical = json.dumps(content, sort_keys=True, default=str)
-            computed_hash = hashlib.sha256(canonical.encode()).hexdigest()
+            # Recompute the hash over the same content _compute_hash signs.
+            computed_hash = self._recompute_row_hash(row)
 
             if computed_hash != row["entry_hash"]:
                 errors.append({

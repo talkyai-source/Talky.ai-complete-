@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import get_current_user, require_permissions, get_audit_logger, get_suspension_service
+from app.api.v1.dependencies import get_current_user, require_permissions, require_platform_admin, get_audit_logger, get_suspension_service
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.suspension_service import (
     SuspensionService,
@@ -142,10 +142,12 @@ async def restore_user(
     return {"restored": True, "suspension_id": result.suspension_id}
 
 
+# The three read routes below return raw suspension_events rows (evidence,
+# internal reasons, suspended_by) for ANY id, so they are platform_admin only.
 @router.get("/users/{user_id}/status", response_model=SuspensionStatusResponse)
 async def get_user_suspension_status(
     user_id: UUID,
-    current_user: dict = Depends(require_permissions(["users:read"])),
+    current_user: dict = Depends(require_platform_admin),
     suspension_service: SuspensionService = Depends(get_suspension_service),
 ):
     """Get user suspension status and history"""
@@ -164,7 +166,7 @@ async def get_user_suspension_status(
 @router.get("/users/{user_id}/history")
 async def get_user_suspension_history(
     user_id: UUID,
-    current_user: dict = Depends(require_permissions(["users:read"])),
+    current_user: dict = Depends(require_platform_admin),
     suspension_service: SuspensionService = Depends(get_suspension_service),
 ):
     """Get user suspension history"""
@@ -254,7 +256,7 @@ async def restore_tenant(
 @router.get("/tenants/{tenant_id}/status", response_model=SuspensionStatusResponse)
 async def get_tenant_suspension_status(
     tenant_id: UUID,
-    current_user: dict = Depends(require_permissions(["tenants:read"])),
+    current_user: dict = Depends(require_platform_admin),
     suspension_service: SuspensionService = Depends(get_suspension_service),
 ):
     """Get tenant suspension status"""

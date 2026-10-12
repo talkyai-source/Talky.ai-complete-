@@ -93,11 +93,16 @@ export function ActionsTable({ onActionSelect }: ActionsTableProps) {
             if (typeFilter) params.type = typeFilter;
 
             const response = await api.getActions(params);
-            if (response.data) {
-                setActions(response.data.items);
-                setTotal(response.data.total);
+            if (response.error) {
+                // The API client returns { error } instead of throwing.
+                setError(response.error.message || 'Failed to fetch actions');
+            } else {
+                if (response.data) {
+                    setActions(response.data.items);
+                    setTotal(response.data.total);
+                }
+                setError(null);
             }
-            setError(null);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to fetch actions');
         } finally {

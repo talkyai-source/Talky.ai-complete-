@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 from app.services.scripts.knowledge.retrieval import knowledge_enabled
@@ -19,6 +20,8 @@ from app.services.scripts.knowledge.sections import (
 
 logger = logging.getLogger(__name__)
 _KNOWLEDGE_MODES = {"inline", "map_retrieve", "retrieve"}
+# Budget for the whole-catalog load at call setup (not the per-turn lookup).
+_KNOWLEDGE_SETUP_TIMEOUT_S = float(os.getenv("KNOWLEDGE_SETUP_TIMEOUT_MS", "3000")) / 1000.0
 
 
 def _row_get(row: Any, key: str):
@@ -78,12 +81,19 @@ async def apply_campaign_knowledge(session, campaign_row: Any, *, pool) -> None:
     campaign_id = str(_row_get(campaign_row, "id") or getattr(session, "campaign_id", None) or "")
     if mode not in _KNOWLEDGE_MODES or not _scope_matches(session, tenant_id, campaign_id):
         return
-    try:
-        from app.domain.services.voice_pipeline.kb_budget import _KNOWLEDGE_RETRIEVE_TIMEOUT_S
-        catalog = await asyncio.wait_for(load_section_catalog(pool, tenant_id, campaign_id),
-                                         timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S)
-    except Exception as exc:
-        logger.warning("KB_SETUP unavailable path=call_snapshot error_type=%s", type(exc).__name__)
+    # Setup runs before the SIP origination, off the caller's ear, so it gets its
+    # own budget and one retry. The 500 ms per-turn constant sits on the
+    # first-token path and must not be reused (or raised) here.
+    catalog = None
+    for attempt in (1, 2):
+        try:
+            catalog = await asyncio.wait_for(load_section_catalog(pool, tenant_id, campaign_id),
+                                             timeout=_KNOWLEDGE_SETUP_TIMEOUT_S)
+            break
+        except Exception as exc:
+            logger.warning("KB_SETUP unavailable path=call_snapshot attempt=%s campaign=%s error_type=%s",
+                           attempt, campaign_id[:8], type(exc).__name__)
+    if catalog is None:
         return
     session.tenant_id = tenant_id
     session.knowledge_mode = mode

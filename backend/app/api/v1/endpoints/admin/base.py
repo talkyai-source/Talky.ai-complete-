@@ -95,7 +95,8 @@ async def _safe_audit(audit_logger: AuditLogger, **kwargs) -> None:
 
 @router.get("/dashboard/stats", response_model=DashboardStatsResponse)
 async def get_dashboard_stats(
-    admin_user: CurrentUser = Depends(require_admin),
+    # Platform-wide totals (no tenant predicate): platform_admin only.
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client)
 ):
     """

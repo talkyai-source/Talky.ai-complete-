@@ -330,6 +330,14 @@ class MeetingService:
                 raise RuntimeError("Calendar provider did not confirm the event update")
             self._required_row(self.db_client.table("meetings").update(updates).eq("id", meeting_id).eq(
                 "tenant_id", tenant_id).execute(), "Meeting update")
+            if new_start_time is not None:
+                # Reminders carry an absolute scheduled_at for the OLD time and
+                # the original lead time is not stored, so they cannot be moved;
+                # cancel them (the tenant schedules fresh ones for the new time).
+                reminders = self.db_client.table("reminders").update({"status": "cancelled"}).eq(
+                    "tenant_id", tenant_id).eq("meeting_id", meeting_id).eq("status", "pending").execute()
+                if getattr(reminders, "error", None):
+                    raise RuntimeError("Meeting reminder cancellation was not persisted")
             result = {"success": True, "status": "updated", "confirmation_allowed": True,
                       "action_id": action_id, **receipt, "message": "Meeting updated."}
             self._finish_action(tenant_id, action_id, "completed", result)

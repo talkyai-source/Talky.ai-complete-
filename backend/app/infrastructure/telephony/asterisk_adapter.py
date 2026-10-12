@@ -41,6 +41,7 @@ import aiohttp
 
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
 from app.domain.services.telephony.config import AUDIO_CALLBACK_BATCH_FRAMES
+from app.infrastructure.telephony.browser_media_gateway import SessionGoneError
 
 # How long after an interrupt an ACCEPTED TTS chunk is still attributed to the
 # cancelled utterance rather than to the next legitimate turn.
@@ -135,6 +136,15 @@ class TtsDeliveryError(RuntimeError):
     sentence was spoken while the caller sat in silence. Every call site in
     ``telephony_media_gateway`` already wraps ``send_tts_audio`` in try/except,
     so raising cannot crash the audio path.
+    """
+
+
+class TtsSessionGoneError(TtsDeliveryError, SessionGoneError):
+    """send_tts_audio found no gateway session: the call has already ended.
+
+    Still a TtsDeliveryError for callers that catch the typed contract, but also
+    a SessionGoneError so tts_playback treats it as a finished call rather than
+    a TTS-provider fault (no emergency clip on a dead call, no CRITICAL alarm).
     """
 
 
@@ -318,6 +328,9 @@ class AsteriskAdapter(CallControlAdapter):
         # reliably passing appArgs through PJSIP trunks.
         self._originated_channels: set[str] = set()
         self._originated_channel_order: list[str] = []
+        # Stale-entry timers for the ids above, held so they are not garbage
+        # collected mid-sleep and can be cancelled once the id is consumed.
+        self._originated_expiry_tasks: Dict[str, "asyncio.Task[None]"] = {}
 
         # Q.850 / SIP hangup cause (as Asterisk's cause_txt string) captured
         # off the terminal ARI event, keyed by channel id. The outcome resolver
@@ -501,7 +514,13 @@ class AsteriskAdapter(CallControlAdapter):
             self._originated_channel_order.append(channel_id)
         self._originated_channels.add(channel_id)
 
+    def _cancel_originated_expiry(self, channel_id: str) -> None:
+        task = getattr(self, "_originated_expiry_tasks", {}).pop(channel_id, None)
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+
     def _discard_originated_channel(self, channel_id: str) -> None:
+        self._cancel_originated_expiry(channel_id)
         self._originated_channels.discard(channel_id)
         try:
             self._originated_channel_order.remove(channel_id)
@@ -512,11 +531,13 @@ class AsteriskAdapter(CallControlAdapter):
         while self._originated_channel_order:
             channel_id = self._originated_channel_order.pop(0)
             if channel_id in self._originated_channels:
+                self._cancel_originated_expiry(channel_id)
                 self._originated_channels.discard(channel_id)
                 return channel_id
         if not self._originated_channels:
             return None
         channel_id = next(iter(self._originated_channels))
+        self._cancel_originated_expiry(channel_id)
         self._originated_channels.discard(channel_id)
         return channel_id
 
@@ -1157,6 +1178,27 @@ class AsteriskAdapter(CallControlAdapter):
             if sid and state in {"created", "starting", "buffering", "active", "degraded"}:
                 ids.add(str(sid))
         return ids
+
+    async def wait_for_application_registered(self, timeout_s: float = 10.0) -> bool:
+        """True once ARI lists this Stasis application, False after the bound.
+
+        connect() only starts the event WebSocket; the application exists in
+        ARI after that socket registers it. Startup recovery run before then
+        got 404 from /applications/<app> and skipped its inverse scan until
+        the next watchdog pass.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(0.0, timeout_s)
+        path = f"/applications/{quote(self._app_name, safe='')}"
+        while True:
+            try:
+                if isinstance(await self._ari("GET", path), dict):
+                    return True
+            except Exception:  # noqa: BLE001 - not registered yet, or ARI busy
+                pass
+            if loop.time() >= deadline:
+                return False
+            await asyncio.sleep(0.25)
 
     async def list_recoverable_application_channel_ids(self) -> Optional[set[str]]:
         """Return application-owned human channels eligible for inverse recovery.
@@ -5149,17 +5191,17 @@ class AsteriskAdapter(CallControlAdapter):
         """
         session_id = self._gateway_sessions.get(call_id)
         if not session_id:
-            # No live gateway session — the packet cannot reach the caller.
-            # Rate-limit our own log (this fires transiently during teardown),
-            # but RAISE so the caller does not count silence as played audio.
-            count = self._tts_error_counts.get(call_id, 0) + 1
-            self._tts_error_counts[call_id] = count
-            if count == 1 or count % 50 == 0:
-                logger.warning(
-                    f"[AsteriskAdapter] send_tts_audio: no gateway session for "
-                    f"call_id={call_id[:12]} (undelivered packets={count})"
-                )
-            raise TtsDeliveryError(f"no gateway session for call_id={call_id[:12]}")
+            # No live gateway session — the call is over (teardown pops it before
+            # the media session is marked inactive), so the packet cannot reach
+            # the caller. RAISE so the caller does not count silence as played
+            # audio, as "session gone" rather than a delivery fault. Do not touch
+            # _tts_error_counts: teardown already popped it and a per-call entry
+            # created here would never be cleaned up.
+            logger.debug(
+                "[AsteriskAdapter] send_tts_audio: no gateway session for call_id=%s",
+                call_id[:12],
+            )
+            raise TtsSessionGoneError(f"no gateway session for call_id={call_id[:12]}")
 
         import base64
         import uuid as _uuid
@@ -5316,7 +5358,7 @@ class AsteriskAdapter(CallControlAdapter):
                 raise TtsDeliveryError("Gateway lacks tts_receipt_protocol=1; deploy the compatible gateway first")
             self._tts_receipt_protocol = 1
         if call_id not in self._gateway_sessions:
-            raise TtsDeliveryError("No gateway session for Realtime utterance")
+            raise TtsSessionGoneError("No gateway session for Realtime utterance")
         self._tts_utterances[call_id] = {"utterance_id": utterance_id, "seq": 0}
 
     async def finish_tts_utterance(self, call_id: str, utterance_id: str) -> Dict[str, Any]:
@@ -5563,18 +5605,24 @@ class AsteriskAdapter(CallControlAdapter):
             channel_id[:12],
         )
 
-        # Safety: remove the pre-generated ID from _originated_channels after
-        # 30 seconds.  For PJSIP trunk calls, the actual StasisStart channel
-        # has a different ID; the trunk-leg matcher in _handle_ari_event will
-        # consume it.  This timer prevents stale entries from leaking if the
-        # origination fails silently (no StasisStart at all).
+        # Safety: remove the pre-generated ID from _originated_channels once
+        # the ring window has closed (ring_timeout plus a margin).  A callee may
+        # legitimately answer at any point inside that window, and the trunk-leg
+        # matcher in _handle_ari_event can only correlate that late answer while
+        # the id is still pending.  For PJSIP trunk calls, the actual StasisStart
+        # channel has a different ID; the matcher consumes the entry (which
+        # cancels this timer).  The timer prevents stale entries from leaking if
+        # the origination fails silently (no StasisStart at all).
         async def _expire_originated(cid: str) -> None:
-            await asyncio.sleep(30)
+            await asyncio.sleep(ring_timeout + 15)
             if cid in self._originated_channels:
                 self._discard_originated_channel(cid)
                 logger.debug(f"AsteriskAdapter: expired stale originated channel {cid[:12]}")
 
-        asyncio.create_task(_expire_originated(channel_id))
+        self._cancel_originated_expiry(channel_id)
+        self._originated_expiry_tasks[channel_id] = asyncio.create_task(
+            _expire_originated(channel_id)
+        )
 
         return channel_id
 

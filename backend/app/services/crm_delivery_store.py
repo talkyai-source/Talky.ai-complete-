@@ -183,10 +183,16 @@ class CRMDeliveryStore:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                # Test Agent calls never go to a CRM; leaving their rows in the
+                # batch let them occupy the LIMIT ahead of real calls.
                 rows = await conn.fetch("""
-                    SELECT DISTINCT tenant_id, call_id FROM crm_deliveries
+                    SELECT DISTINCT tenant_id, call_id FROM crm_deliveries d
                     WHERE attempts < $1 AND next_attempt_at <= NOW()
                       AND (status IN ('pending','unknown') OR (status='processing' AND lease_expires_at < NOW()))
+                      AND NOT EXISTS (
+                          SELECT 1 FROM calls c
+                          WHERE c.id = d.call_id AND c.tenant_id = d.tenant_id AND c.is_test
+                      )
                     LIMIT $2
                 """, MAX_ATTEMPTS, limit)
                 return [dict(row) for row in rows]

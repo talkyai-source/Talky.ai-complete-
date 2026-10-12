@@ -2,6 +2,7 @@
 Configuration Management
 Loads settings from YAML files and environment variables
 """
+import json
 import yaml
 import os
 from pathlib import Path
@@ -71,9 +72,11 @@ class Settings(BaseSettings):
     # API Settings
     api_prefix: str = "/api/v1"
 
-    # CORS — populated from CORS_ORIGINS env var (comma-separated)
-    # Falls back to FRONTEND_URL if CORS_ORIGINS is not set
-    cors_origins: list[str] = ["http://localhost:3000"]
+    # CORS — populated from CORS_ORIGINS env var (comma-separated or a JSON
+    # array). Falls back to FRONTEND_URL if CORS_ORIGINS is not set. The str
+    # arm lets a comma-separated value reach _split_cors_origins: for a plain
+    # list field pydantic-settings JSON-decodes first and refused to boot.
+    cors_origins: list[str] | str = ["http://localhost:3000"]
     frontend_url: str = "http://localhost:3000"
     api_base_url: str = "http://localhost:8000"
 
@@ -134,6 +137,16 @@ class Settings(BaseSettings):
         if cleaned.lower() in {"null", "none", "undefined"}:
             return None
         return cleaned
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_cors_origins(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith("["):
+                return json.loads(text)
+            return [part.strip() for part in text.split(",") if part.strip()]
+        return value
 
     @property
     def allowed_origins(self) -> list[str]:

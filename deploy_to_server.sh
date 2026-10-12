@@ -145,6 +145,39 @@ ssh -t -i "$KEY" "$PROD" "
         --check-config-file /etc/talky/inbound-synthetic.env
     git -C /opt/talky worktree remove --force \"\$candidate_worktree\"
     candidate_worktree=''
+    # Prove the drain BEFORE the live checkout moves: an active call must leave
+    # /opt/talky and the unit definitions exactly as they were. This needs only
+    # the old tree's venv python and curl. (Re-checked again right before restart.)
+    echo '--> proving the running gateway has zero active sessions (before touching the checkout)'
+    gateway_stats=\"\$(curl -fsS --max-time 10 http://127.0.0.1:18080/stats)\"
+    active_sessions=\"\$(printf '%s' \"\$gateway_stats\" | backend/venv/bin/python -c 'import json,sys; value=json.load(sys.stdin).get(\"active_sessions\"); assert isinstance(value, int) and not isinstance(value, bool); print(value)')\"
+    if [ \"\$active_sessions\" -ne 0 ]; then
+        echo \"!! Gateway still owns \$active_sessions active session(s); deploy is blocked.\" >&2
+        exit 1
+    fi
+    # Anything that aborts between the checkout and a SUCCESSFUL migration puts
+    # the previous commit and its unit definitions back, so a later crash-restart
+    # cannot load new code against the un-migrated schema. Disarmed (rollback_sha
+    # cleared) once talky-migrate succeeds: rolling code back under an already
+    # migrated schema is worse than leaving it. Running services are never
+    # restarted by the rollback; a gateway restarted before the abort keeps
+    # running the new binary until the next deploy.
+    rollback_sha=\"\$(git rev-parse HEAD)\"
+    on_exit() {
+        exit_code=\$?
+        trap - EXIT
+        cleanup_candidate
+        if [ \"\$exit_code\" -ne 0 ] && [ -n \"\$rollback_sha\" ]; then
+            echo \"!! deploy aborted before migrations completed; restoring checkout \$rollback_sha and its unit definitions\" >&2
+            if git checkout --detach \"\$rollback_sha\" && sudo bash backend/systemd/install-services.sh; then
+                echo '!! previous checkout restored; no service was restarted by the rollback.' >&2
+            else
+                echo '!! ROLLBACK FAILED: reconcile /opt/talky and the systemd units by hand (docs/DEPLOYMENT.md).' >&2
+            fi
+        fi
+        exit \"\$exit_code\"
+    }
+    trap on_exit EXIT
     echo '--> checking out frozen commit (detached)'
     git checkout --detach '${DEPLOY_SHA}'
     deployed_sha=\"\$(git rev-parse HEAD)\"
@@ -159,13 +192,6 @@ ssh -t -i "$KEY" "$PROD" "
     fi
     echo \"    prod now exactly at: \$deployed_sha\"
     echo '    candidate import and gateway build already proved before checkout'
-    echo '--> proving the running gateway has zero active sessions'
-    gateway_stats=\"\$(curl -fsS --max-time 10 http://127.0.0.1:18080/stats)\"
-    active_sessions=\"\$(printf '%s' \"\$gateway_stats\" | backend/venv/bin/python -c 'import json,sys; value=json.load(sys.stdin).get(\"active_sessions\"); assert isinstance(value, int) and not isinstance(value, bool); print(value)')\"
-    if [ \"\$active_sessions\" -ne 0 ]; then
-        echo \"!! Gateway still owns \$active_sessions active session(s); deploy is blocked.\" >&2
-        exit 1
-    fi
     echo '--> publishing the tested gateway binary atomically'
     sudo install -d -o root -g admins -m 0750 /opt/talky/runtime/bin
     sudo install -o root -g admins -m 0750 \"\$gateway_candidate\" \
@@ -207,9 +233,9 @@ ssh -t -i "$KEY" "$PROD" "
     printf '%s' \"\$gateway_ready\" | backend/venv/bin/python -c 'import json,sys; p=json.load(sys.stdin); assert p.get(\"ready\") is True; assert p.get(\"protocol_version\") == 2; assert \"pcmu\" in p.get(\"codecs\", []); assert p.get(\"build_sha\") == sys.argv[1]' '${DEPLOY_SHA}'
     cleanup_candidate
     gateway_candidate=''
-    trap - EXIT
     echo '--> applying database migrations (service restart is blocked on failure)'
     sudo systemctl start talky-migrate.service
+    rollback_sha=''
     backend/venv/bin/python backend/scripts/verify_alembic_current_heads.py
     echo '--> reconciling repository-owned Asterisk configuration'
     sudo bash backend/scripts/reconcile_asterisk_release.sh
@@ -221,11 +247,20 @@ ssh -t -i "$KEY" "$PROD" "
     if ! sudo systemctl restart talky-trunk-status.service; then
         echo '!! talky-trunk-status restart failed; Restart=always will keep retrying.' >&2
     fi
-    sleep 6
+    # systemctl restart returns once the process is exec'd, not once uvicorn is
+    # listening (import + lifespan + wait-for-deps), so poll instead of a fixed
+    # sleep. Both loops are bounded (~2 min) and still fail the deploy at the deadline.
     echo '--> service status:'
     service_failure=0
     for s in talky-api talky-api-web talky-dialer-worker talky-voice-worker talky-reminder-worker talky-voice-gateway talky-trunk-status talky-inbound-synthetic.timer; do
-        state=\"\$(systemctl is-active \"\$s\" 2>/dev/null || true)\"
+        state=''
+        for state_attempt in \$(seq 1 30); do
+            state=\"\$(systemctl is-active \"\$s\" 2>/dev/null || true)\"
+            if [ \"\$state\" = 'active' ] || [ \"\$state\" = 'failed' ]; then
+                break
+            fi
+            sleep 2
+        done
         printf '    %-26s %s\n' \"\$s\" \"\$state\"
         if [ \"\$state\" != 'active' ]; then
             service_failure=1
@@ -235,12 +270,27 @@ ssh -t -i "$KEY" "$PROD" "
         echo '!! One or more required services are not active.' >&2
         exit 1
     fi
+    retry_probe() {
+        probe_name=\"\$1\"
+        shift
+        probe_attempt=0
+        until \"\$@\" >/dev/null; do
+            probe_attempt=\$((probe_attempt + 1))
+            if [ \"\$probe_attempt\" -ge 60 ]; then
+                echo \"!! \$probe_name did not become healthy after \$probe_attempt attempts.\" >&2
+                return 1
+            fi
+            sleep 2
+        done
+    }
     echo '--> health and readiness:'
-    curl -fsS --max-time 10 http://127.0.0.1:8000/health >/dev/null
+    retry_probe liveness curl -fsS --max-time 10 http://127.0.0.1:8000/health
     echo '    liveness OK'
-    curl -fsS --max-time 10 http://127.0.0.1:8000/api/v1/healthz/ready >/dev/null
+    retry_probe readiness curl -fsS --max-time 10 http://127.0.0.1:8000/api/v1/healthz/ready
     echo '    readiness OK'
-    curl -fsS --max-time 10 http://127.0.0.1:8000/api/v1/healthz/deep >/dev/null
+    retry_probe dependency-readiness curl -fsS --max-time 10 http://127.0.0.1:8000/api/v1/healthz/deep
     echo '    dependency readiness OK'
+    retry_probe dashboard-liveness curl -fsS --max-time 10 http://127.0.0.1:8001/health
+    echo '    dashboard API liveness OK'
 "
 echo "==> Deploy complete."

@@ -66,10 +66,25 @@ def _inbound_transfer_policy_available(context, tenant):
         return False
 
 
+def _call_ids(session):
+    """(tenant, campaign, call) for this live call, or Nones until bound.
+
+    session.tenant_id / session.call_id are NOT the dialer's ids on a cascaded
+    call (see lead_slot_capture.resolve_call_binding), so read the binding and
+    fall back to the session fields only for sessions that carry the real ids
+    directly (the realtime path)."""
+    from app.domain.services.voice_pipeline.lead_slot_capture import resolve_call_binding
+
+    binding = resolve_call_binding(session)
+    return (
+        binding.get("tenant_id") or getattr(session, "tenant_id", None),
+        binding.get("campaign_id") or getattr(session, "campaign_id", None),
+        binding.get("call_id") or getattr(session, "call_id", None),
+    )
+
+
 async def _context(session, pool):
-    tenant = getattr(session, "tenant_id", None)
-    campaign = getattr(session, "campaign_id", None)
-    call = getattr(session, "call_id", None)
+    tenant, campaign, call = _call_ids(session)
     if not tenant or not campaign or not call:
         return None
     async with acquire_with_tenant(pool, str(tenant)) as conn:
@@ -159,7 +174,10 @@ async def prepare_voice_action_context(session, *, refresh=False):
     except Exception:
         session._voice_action_context = None
         session._voice_action_capabilities = {}
-    session._voice_action_context_loaded = True
+    # A lookup before the call is bound has nothing to look up. Do not remember
+    # that as "this call has no actions"; try again on a later turn.
+    if all(_call_ids(session)):
+        session._voice_action_context_loaded = True
     return enabled_voice_actions(session)
 
 
@@ -317,7 +335,7 @@ async def execute_connected_voice_action(session, action, arguments, user_text):
         if action in {"send_email", "submit_form"}:
             from app.services.email_service import EmailService
             body = payload.get("body") or "\n".join(f"{k}: {v}" for k, v in payload["values"].items())
-            receipt = await EmailService(pool).send_email(tenant_id=str(session.tenant_id),
+            receipt = await EmailService(pool).send_email(tenant_id=str(_call_ids(session)[0]),
                 to=[payload["recipient"]], subject=payload["subject"], body=body,
                 lead_ids=[str(context["lead_id"])] if context.get("lead_id") else None,
                 call_id=str(context["call_id"]), triggered_by="voice")
@@ -347,7 +365,7 @@ async def execute_connected_voice_action(session, action, arguments, user_text):
                            success=True, confirmation_allowed=True, scheduled_at=payload["scheduled_at"], timezone=payload["timezone"])
         return _result(action, "unavailable", "No executor exists for this action.")
 
-    return await DurableActionExecutor(pool).execute(tenant_id=str(session.tenant_id),
+    return await DurableActionExecutor(pool).execute(tenant_id=str(_call_ids(session)[0]),
         idempotency_key="voice-" + proposal["id"], action=action, payload=request, executor=perform,
         call_id=str(context["call_id"]), lead_id=str(context["lead_id"]) if context.get("lead_id") else None,
         campaign_id=str(context["campaign_id"]), triggered_by="voice")

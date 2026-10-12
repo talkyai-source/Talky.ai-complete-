@@ -10,8 +10,9 @@
 #      the Aug-28/29/30 dumps in /home/admins/backups are exactly that (three
 #      identical 22 MB files, 0 "TABLE DATA" entries). The bypass GUC is set on
 #      the dump connection via PGOPTIONS and the result is verified: TABLE DATA
-#      entries must be present and the dump must not shrink below half of the
-#      previous good one. pg_dump ALSO needs --enable-row-security: by default
+#      entries must be present; a dump under half the previous good one is
+#      still published but exits non-zero once so the alert fires (refusing it
+#      would pin the baseline and fail every later night). pg_dump ALSO needs --enable-row-security: by default
 #      it sets row_security=off, which Postgres refuses on a FORCE RLS table
 #      ("query would be affected by row-level security policy" — the first
 #      prod run, 2026-09-10). With it the policies run, and the bypass GUC
@@ -70,12 +71,18 @@ if [[ "$table_data" -lt "$min_table_data" ]]; then
     exit 1
 fi
 size="$(stat -c %s "${partial}")"
+# A shrink below half of the previous dump is suspicious but NOT a reason to
+# throw the fresh dump away: the TABLE DATA check above already rejects the
+# RLS-bypass failure, and a legitimate purge (audit-flood cleanup, big-table
+# truncation) would otherwise fail every later night against the same old
+# baseline and leave no backup at all. So publish it (the baseline moves), keep
+# retention reachable, and exit non-zero ONCE after publishing so the alert fires.
+shrunk_from=""
 prev="$(ls -1t "${backup_dir}"/talky-*.dump 2>/dev/null | head -n1 || true)"
 if [[ -n "$prev" && -s "$prev" ]]; then
     prev_size="$(stat -c %s "$prev")"
     if (( size * 2 < prev_size )); then
-        echo "DB-BACKUP CRITICAL: dump is ${size} bytes, previous good was ${prev_size} — refusing to publish a shrunken backup" >&2
-        exit 1
+        shrunk_from="$prev_size"
     fi
 fi
 
@@ -92,3 +99,8 @@ find "${backup_dir}" -maxdepth 1 -type f \( -name 'talky-*.dump' -o -name 'talky
     -mtime "+${keep_days}" -delete
 
 echo "db-backup: ok ${dump} size=${size} table_data=${table_data} sha256=${digest:0:12}… kept_days=${keep_days}"
+
+if [[ -n "$shrunk_from" ]]; then
+    echo "DB-BACKUP CRITICAL: dump is ${size} bytes, previous good was ${shrunk_from} — published anyway so the baseline moves; confirm the shrink was a legitimate purge (${dump})" >&2
+    exit 1
+fi

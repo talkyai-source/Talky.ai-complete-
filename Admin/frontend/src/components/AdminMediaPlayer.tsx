@@ -1,22 +1,31 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Download, Loader2, Play, XCircle } from 'lucide-react';
+import { audioExtension } from '../lib/audio-filename';
 
 interface AdminMediaPlayerProps {
     load: () => Promise<Blob>;
-    filename: string;
+    /** Download name without extension; the extension comes from the real audio format. */
+    filenameBase: string;
+    /** Stored MIME type of the object (preferred), e.g. `audio/mpeg`. */
+    mimeType?: string | null;
+    /** Used only when neither the stored nor the downloaded MIME type is recognised. */
+    fallbackExtension: string;
     disabled?: boolean;
     compact?: boolean;
 }
 
 export function AdminMediaPlayer({
     load,
-    filename,
+    filenameBase,
+    mimeType,
+    fallbackExtension,
     disabled = false,
     compact = false,
 }: AdminMediaPlayerProps) {
     const [objectUrl, setObjectUrl] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const blobTypeRef = useRef('');
 
     useEffect(() => {
         return () => {
@@ -30,6 +39,7 @@ export function AdminMediaPlayer({
         setError(null);
         try {
             const blob = await load();
+            blobTypeRef.current = blob.type;
             const url = URL.createObjectURL(blob);
             setObjectUrl(url);
             return url;
@@ -46,7 +56,8 @@ export function AdminMediaPlayer({
         if (!url) return;
         const anchor = document.createElement('a');
         anchor.href = url;
-        anchor.download = filename;
+        const extension = audioExtension(mimeType) ?? audioExtension(blobTypeRef.current) ?? fallbackExtension;
+        anchor.download = `${filenameBase}.${extension}`;
         document.body.appendChild(anchor);
         anchor.click();
         anchor.remove();

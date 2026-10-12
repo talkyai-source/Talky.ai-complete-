@@ -42,13 +42,20 @@ error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
 [[ $EUID -ne 0 ]] && error "Must run as root: sudo $0"
 
+# The reset below puts ufw on default-deny, and without carrier rules that
+# blocks ALL inbound SIP and RTP (inbound calls fail, outbound calls lose their
+# inbound audio). Refuse to run rather than silently take telephony down.
 if [[ ${#CARRIER_IPS[@]} -eq 0 ]]; then
-  warn "No CARRIER_IPS configured. Edit this script and add your SIP carrier IPs."
-  warn "Skipping SIP/RTP rules — those ports will remain open."
+  error "No CARRIER_IPS configured. Edit this script and add your SIP carrier IPs. Refusing to continue: default-deny without carrier rules would block all inbound SIP and RTP."
 fi
 
 info "Installing ufw if not present..."
 apt-get install -y ufw > /dev/null 2>&1 || true
+
+# The reset wipes every existing rule (including hand-added ones), so keep a copy.
+ufw_backup="${UFW_BACKUP_DIR:-/root}/ufw-rules-before-$(date -u +%Y%m%dT%H%M%SZ).txt"
+(umask 077; ufw status numbered > "$ufw_backup" 2>&1) || true
+info "Saved the current ufw rules to $ufw_backup"
 
 info "Resetting ufw to default-deny..."
 ufw --force reset
@@ -73,19 +80,15 @@ ufw allow 80/tcp  comment "HTTP (redirect to HTTPS)"
 ufw allow 443/tcp comment "HTTPS"
 
 # ── SIP & RTP — restricted to carrier IPs only ───────────────
-if [[ ${#CARRIER_IPS[@]} -gt 0 ]]; then
-  for ip in "${CARRIER_IPS[@]}"; do
-    info "Allowing SIP/RTP from carrier: $ip"
-    ufw allow from "$ip" to any port 5080 proto udp comment "SIP UDP from carrier"
-    ufw allow from "$ip" to any port 5080 proto tcp comment "SIP TLS from carrier"
-    ufw allow from "$ip" to any port 5060 proto udp comment "SIP UDP alt from carrier"
-    ufw allow from "$ip" proto udp comment "RTP from carrier" \
-      && ufw allow from "$ip" to any port 16384:32768 proto udp comment "RTP range from carrier" 2>/dev/null || true
-  done
-else
-  warn "SIP port 5080 and RTP range are currently open to all IPs."
-  warn "Add carrier IPs to CARRIER_IPS[] and re-run this script."
-fi
+# Every rule is port-scoped: a bare "allow from <ip> proto udp" would open ALL
+# UDP ports to the carrier, wider than the ranges documented in the header.
+for ip in "${CARRIER_IPS[@]}"; do
+  info "Allowing SIP/RTP from carrier: $ip"
+  ufw allow from "$ip" to any port 5080 proto udp comment "SIP UDP from carrier"
+  ufw allow from "$ip" to any port 5080 proto tcp comment "SIP TLS from carrier"
+  ufw allow from "$ip" to any port 5060 proto udp comment "SIP UDP alt from carrier"
+  ufw allow from "$ip" to any port 16384:32768 proto udp comment "RTP range from carrier"
+done
 
 # ── Internal services — block from external interface ─────────
 # These are handled by docker networking and should never be

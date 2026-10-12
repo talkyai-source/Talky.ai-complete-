@@ -8,7 +8,7 @@ from datetime import datetime
 import psutil
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.v1.dependencies import CurrentUser, get_db_client, require_admin
+from app.api.v1.dependencies import CurrentUser, get_db_client, require_platform_admin
 from app.core.postgres_adapter import Client
 
 from ._shared import _format_uptime, _server_start_time
@@ -19,7 +19,7 @@ router = APIRouter()
 
 @router.get("/health/detailed", response_model=DetailedHealthResponse)
 async def get_detailed_health(
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client)
 ):
     """

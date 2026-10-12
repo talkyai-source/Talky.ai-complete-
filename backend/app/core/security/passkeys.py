@@ -721,10 +721,23 @@ async def verify_authentication(
         # the schema has no is_active column AND a deleted credential
         # cannot be silently re-armed by a row UPDATE elsewhere.
         try:
-            await conn.execute(
-                "DELETE FROM user_passkeys WHERE credential_id = $1",
-                credential_id,
-            )
+            # Savepoint: a failed cleanup must not abort the caller's
+            # transaction (which also holds the failed-attempt row).
+            async with conn.transaction():
+                deleted = await conn.fetchrow(
+                    "DELETE FROM user_passkeys WHERE credential_id = $1 "
+                    "RETURNING user_id",
+                    credential_id,
+                )
+                if deleted:
+                    await conn.execute(
+                        """
+                        UPDATE user_profiles
+                           SET passkey_count = GREATEST(passkey_count - 1, 0)
+                         WHERE id = $1
+                        """,
+                        deleted["user_id"],
+                    )
         except Exception as exc:
             # Never fail the rejection on a DB cleanup hiccup — the
             # critical log entry still gives ops a paper trail.

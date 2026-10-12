@@ -1,17 +1,31 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
+import { api } from '../lib/api';
 import { Zap, Mail, Lock, AlertCircle } from 'lucide-react';
 
 export function LoginPage() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const { login, error } = useAuth();
+    const { login, error, isAuthenticated, checkAuth } = useAuth();
+    const [retried, setRetried] = useState(false);
     const navigate = useNavigate();
     const location = useLocation();
 
     const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/';
+
+    // After a backend outage the stored token is kept; retrying re-verifies it.
+    useEffect(() => {
+        if (retried && isAuthenticated) navigate(from, { replace: true });
+    }, [retried, isAuthenticated, from, navigate]);
+
+    const handleRetry = async () => {
+        setIsSubmitting(true);
+        await checkAuth();
+        setRetried(true);
+        setIsSubmitting(false);
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -44,6 +58,11 @@ export function LoginPage() {
                     <div className="login-error">
                         <AlertCircle size={16} />
                         <span>{error}</span>
+                        {api.getToken() && (
+                            <button type="button" onClick={handleRetry} disabled={isSubmitting}>
+                                Retry
+                            </button>
+                        )}
                     </div>
                 )}
 

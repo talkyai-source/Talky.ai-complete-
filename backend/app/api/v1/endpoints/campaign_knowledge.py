@@ -44,6 +44,7 @@ from app.services.scripts.knowledge.ingest_service import (
     recover_stale_processing_sources,
 )
 from app.services.scripts.knowledge.retrieval import knowledge_enabled
+from app.services.scripts.prompts.prompt_safety import scan_for_injection
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +231,9 @@ async def upload_knowledge(
     if len(raw) > _MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail=f"File too large (max {_MAX_UPLOAD_BYTES} bytes)")
     try:
-        raw_md = raw.decode("utf-8")
+        # utf-8-sig drops a leading BOM (Windows editors write one); left in
+        # place it hides the first "# Title" heading from the ^-anchored parser.
+        raw_md = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="File must be UTF-8 text")
     if not raw_md.strip():
@@ -341,6 +344,20 @@ async def upload_knowledge(
 
     # Publication and its outer authorization transaction have committed.
     _invalidate_campaign_cache_fail_soft(tenant_id, campaign_id)
+    # The live agent refuses to read a section the injection scan flags (and
+    # everything beneath it). Tell the owner now, not via "I cannot confirm".
+    # Informational only, after commit: it must never turn a stored upload into an error.
+    try:
+        flagged = [n.heading for n in getattr(prepared, "nodes", ())
+                   if scan_for_injection(f"{n.heading} {n.content}")]
+    except Exception:
+        flagged = []
+    if flagged:
+        logger.warning(
+            "knowledge_flagged_unsafe campaign=%s source=%s sections=%r",
+            campaign_id[:12], str(result.get("source_id", ""))[:12], flagged[:20],
+        )
+        result = {**result, "flagged_sections": flagged}
     return result
 
 
@@ -448,7 +465,17 @@ async def update_node(
         raise HTTPException(status_code=404, detail="Node not found")
 
     mutation.mark_cache_dirty()
-    return {"id": str(updated), "updated": requested_fields}
+    response = {"id": str(updated), "updated": requested_fields}
+    if "heading" in fields or "content" in fields:
+        text = f"{fields.get('heading', current.get('heading', ''))} {fields.get('content', current.get('content', ''))}"
+        if scan_for_injection(text):
+            logger.warning(
+                "knowledge_flagged_unsafe campaign=%s node=%s heading=%r",
+                campaign_id[:12], str(node_id)[:12],
+                str(fields.get("heading", current.get("heading", "")))[:60],
+            )
+            response["flagged_unsafe_source"] = True
+    return response
 
 
 @router.post("/{campaign_id}/knowledge/test")

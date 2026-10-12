@@ -304,7 +304,9 @@ export function FeedbackTable({ onCallSelect }: FeedbackTableProps) {
                                     <td>
                                         <AdminMediaPlayer
                                             compact
-                                            filename={`feedback-${item.call_id}.webm`}
+                                            filenameBase={`feedback-${item.call_id}`}
+                                            mimeType={item.audio_mime_type}
+                                            fallbackExtension="webm"
                                             load={() => api.getAdminFeedbackAudio(item.id)}
                                         />
                                         <span className="storage-kind">

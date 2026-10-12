@@ -14,6 +14,7 @@ Implements tiered rate limiting:
 import hashlib
 import logging
 import os
+import secrets
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -188,8 +189,10 @@ class APIRateLimiter:
             }
 
         if increment:
-            # Add current request with unique member to prevent dedup
-            member = f"{now}:{hashlib.sha256(str(now).encode()).hexdigest()[:8]}"
+            # Add current request with a unique member: one derived from the
+            # timestamp alone collided for requests in the same clock tick, the
+            # set de-duplicated them and a burst was never counted.
+            member = f"{now}:{secrets.token_hex(8)}"
             await self._redis.zadd(counter_key, {member: now})
             await self._redis.expire(counter_key, config.window + 1)
 
@@ -231,10 +234,11 @@ class APIRateLimiter:
             tiers_to_check.append((RateLimitTier.TENANT, tenant_id))
 
         # Check each tier
-        most_restrictive = None
+        blocked = None
         headers = {
             "X-RateLimit-IP-Limit": str(self._configs[RateLimitTier.IP].requests),
         }
+        label = {RateLimitTier.IP: "IP", RateLimitTier.USER: "User", RateLimitTier.TENANT: "Tenant"}
 
         for tier, scope in tiers_to_check:
             action, meta = await self.check_rate_limit(tier, scope, endpoint)
@@ -248,13 +252,18 @@ class APIRateLimiter:
                 headers["X-RateLimit-Tenant-Remaining"] = str(meta.get("remaining", 0))
 
             if action == RateLimitAction.BLOCK:
-                most_restrictive = (tier, meta)
+                blocked = (tier, meta)
                 break
-            elif action == RateLimitAction.THROTTLE and not most_restrictive:
-                most_restrictive = (tier, meta)
+            elif action == RateLimitAction.THROTTLE:
+                # Near the limit (last 10%): the request is still within the
+                # configured budget, so it is served. Only BLOCK is a 429;
+                # rejecting here made every path fail at 90% of its limit.
+                headers[f"X-RateLimit-{label.get(tier, tier.value)}-Warning"] = (
+                    "approaching limit"
+                )
 
-        if most_restrictive and most_restrictive[0]:
-            tier, meta = most_restrictive
+        if blocked:
+            tier, meta = blocked
             retry_after = meta.get("retry_after", 60)
             headers["Retry-After"] = str(retry_after)
 

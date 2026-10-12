@@ -115,37 +115,54 @@ class BillingService:
         """
         Get existing Stripe customer or create a new one.
 
+        Serialized per tenant. Two first checkouts that overlap (two workers,
+        two replicas, two tabs) must not each create a customer: the tenant
+        would end up bound to one while the other checkout session belongs to
+        the other, and the top-up webhook refuses to credit a session whose
+        customer is not the tenant's. So the read, the Stripe create and the
+        write happen in ONE transaction under a transaction-scoped advisory
+        lock. The lock is deliberately not a row lock: a FOR UPDATE held across
+        the Stripe call would stall every call-row insert for the tenant.
+
         Returns:
             Dict with customer_id and whether it was newly created
         """
         self._require_billing_enabled()
-        # Check if tenant already has a Stripe customer
-        tenant = (
-            self.db_client.table("tenants")
-            .select("stripe_customer_id")
-            .eq("id", tenant_id)
-            .single()
-            .execute()
-        )
-
-        existing_customer_id = tenant.data.get("stripe_customer_id") if tenant.data else None
-
-        if existing_customer_id:
-            return {"customer_id": existing_customer_id, "created": False}
-
-        # Create new customer
-        if self.mock_mode:
-            customer_id = f"cus_mock_{tenant_id[:8]}"
-        else:
-            customer = stripe.Customer.create(
-                email=email, name=business_name, metadata={"tenant_id": tenant_id}
+        tenant_id = str(tenant_id)
+        async with acquire_with_tenant(self.db_client.pool, tenant_id) as conn:
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtext('stripe_customer:' || $1::text))", tenant_id
             )
-            customer_id = customer.id
+            # Re-read UNDER the lock: the holder before us may have bound one.
+            tenant = await conn.fetchrow(
+                "SELECT stripe_customer_id FROM tenants WHERE id = $1::uuid", tenant_id
+            )
+            if tenant is None:
+                raise ValueError("Billing tenant not found")
+            if tenant["stripe_customer_id"]:
+                return {"customer_id": tenant["stripe_customer_id"], "created": False}
 
-        # Update tenant with customer ID
-        self.db_client.table("tenants").update({"stripe_customer_id": customer_id}).eq(
-            "id", tenant_id
-        ).execute()
+            # Create new customer
+            if self.mock_mode:
+                customer_id = f"cus_mock_{tenant_id[:8]}"
+            else:
+                customer = await self._stripe_call(
+                    "Customer", "create", email=email, name=business_name,
+                    metadata={"tenant_id": tenant_id}, idempotency_key=f"cust-{tenant_id}",
+                )
+                customer_id = customer.id
+
+            # Update tenant with customer ID. The subscription checkout binds a
+            # customer under the tenant row lock, not this advisory lock, so
+            # only an unbound tenant is written; a binding that appeared during
+            # the Stripe call wins and this checkout is retried against it.
+            bound = await conn.execute(
+                "UPDATE tenants SET stripe_customer_id = $1 "
+                "WHERE id = $2::uuid AND COALESCE(stripe_customer_id, '') = ''",
+                customer_id, tenant_id,
+            )
+            if bound != "UPDATE 1":
+                raise RuntimeError("Stripe customer binding changed concurrently; retry the checkout")
 
         logger.info(f"Created Stripe customer {customer_id} for tenant {tenant_id}")
 
@@ -243,7 +260,11 @@ class BillingService:
                 ),
             }
 
-        session = stripe.checkout.Session.create(
+        # Off the event loop, and keyed to the order: a retried or replayed
+        # request for the same order returns the same session instead of a
+        # second one that could be paid as well.
+        session = await self._stripe_call(
+            "checkout.Session", "create",
             customer=customer_id,
             mode="payment",
             # IMMEDIATE methods only. Left unset, Stripe offers every method
@@ -268,6 +289,7 @@ class BillingService:
             client_reference_id=str(order_id),
             metadata=meta,
             payment_intent_data={"metadata": meta},
+            idempotency_key=f"topup-{order_id}",
         )
 
         logger.info(

@@ -41,7 +41,7 @@ export function SystemHealth() {
             case 'down':
                 return <AlertCircle />;
             default:
-                return <CheckCircle />;
+                return <Clock />;
         }
     };
 
@@ -54,7 +54,8 @@ export function SystemHealth() {
             case 'down':
                 return 'red';
             default:
-                return 'green';
+                // Unrecognised status: neutral, never the healthy colour.
+                return 'gray';
         }
     };
 
@@ -84,16 +85,20 @@ export function SystemHealth() {
         );
     }
 
-    if (error) {
-        console.warn('SystemHealth error:', error);
-    }
-
     return (
         <div className="card">
             <div className="card-header">
                 <h3 className="card-title">System Health</h3>
             </div>
             <div className="card-body">
+                {error && (
+                    <div className="error-banner inline" role="alert">
+                        <p>
+                            System health unavailable: {error}
+                            {healthItems.length > 0 ? ' Showing last known status, which may be stale.' : ''}
+                        </p>
+                    </div>
+                )}
                 {healthItems.map((item, index) => (
                     <div className="health-item" key={index}>
                         <div className="health-left">

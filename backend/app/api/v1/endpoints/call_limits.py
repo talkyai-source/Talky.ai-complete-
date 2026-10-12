@@ -291,7 +291,7 @@ async def get_partner_limits(
     async with acquire_with_tenant(db_client.pool, None) as conn:
         row = await conn.fetchrow(
             """
-            SELECT pl.*, t.name as partner_name
+            SELECT pl.*, t.business_name AS partner_name
             FROM partner_limits pl
             JOIN tenants t ON t.id = pl.partner_id
             WHERE pl.partner_id = $1 AND pl.is_active = TRUE
@@ -303,13 +303,13 @@ async def get_partner_limits(
         # Get partner name and return defaults
         async with acquire_with_tenant(db_client.pool, None) as conn:
             tenant = await conn.fetchrow(
-                "SELECT name FROM tenants WHERE id = $1",
+                "SELECT business_name FROM tenants WHERE id = $1",
                 partner_id,
             )
 
         return {
             "partner_id": str(partner_id),
-            "partner_name": tenant["name"] if tenant else "Unknown",
+            "partner_name": tenant["business_name"] if tenant else "Unknown",
             "max_tenants": 10,
             "aggregate_calls_per_minute": 600,
             "aggregate_calls_per_hour": 10000,
@@ -335,59 +335,75 @@ async def update_partner_limits(
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Update aggregate limits for a partner. Requires admin privileges."""
-    import json
+    values = (
+        limits.max_tenants,
+        limits.aggregate_calls_per_minute,
+        limits.aggregate_calls_per_hour,
+        limits.aggregate_calls_per_day,
+        limits.aggregate_concurrent_calls,
+        limits.revenue_share_percent,
+        limits.min_billing_amount,
+        limits.max_billing_amount,
+        limits.feature_whitelist,
+        limits.feature_blacklist,
+        limits.fraud_detection_sensitivity,
+    )
 
     # Partner administration is intentionally platform-wide.
     async with acquire_with_tenant(db_client.pool, None) as conn:
-        # Upsert partner limits
+        # partner_limits has no unique key on partner_id, so the former
+        # ON CONFLICT (partner_id) upsert failed on every save. Serialise saves
+        # per partner and update-or-insert. The feature lists are text[]
+        # columns, so they are bound as lists, not JSON strings.
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtext('partner_limits:' || $1::text))",
+            str(partner_id),
+        )
         row = await conn.fetchrow(
             """
-            INSERT INTO partner_limits (
-                partner_id,
-                max_tenants,
-                aggregate_calls_per_minute,
-                aggregate_calls_per_hour,
-                aggregate_calls_per_day,
-                aggregate_concurrent_calls,
-                revenue_share_percent,
-                min_billing_amount,
-                max_billing_amount,
-                feature_whitelist,
-                feature_blacklist,
-                fraud_detection_sensitivity,
-                is_active
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-            ON CONFLICT (partner_id)
-            DO UPDATE SET
-                max_tenants = EXCLUDED.max_tenants,
-                aggregate_calls_per_minute = EXCLUDED.aggregate_calls_per_minute,
-                aggregate_calls_per_hour = EXCLUDED.aggregate_calls_per_hour,
-                aggregate_calls_per_day = EXCLUDED.aggregate_calls_per_day,
-                aggregate_concurrent_calls = EXCLUDED.aggregate_concurrent_calls,
-                revenue_share_percent = EXCLUDED.revenue_share_percent,
-                min_billing_amount = EXCLUDED.min_billing_amount,
-                max_billing_amount = EXCLUDED.max_billing_amount,
-                feature_whitelist = EXCLUDED.feature_whitelist,
-                feature_blacklist = EXCLUDED.feature_blacklist,
-                fraud_detection_sensitivity = EXCLUDED.fraud_detection_sensitivity,
+            UPDATE partner_limits SET
+                max_tenants = $2,
+                aggregate_calls_per_minute = $3,
+                aggregate_calls_per_hour = $4,
+                aggregate_calls_per_day = $5,
+                aggregate_concurrent_calls = $6,
+                revenue_share_percent = $7,
+                min_billing_amount = $8,
+                max_billing_amount = $9,
+                feature_whitelist = $10,
+                feature_blacklist = $11,
+                fraud_detection_sensitivity = $12,
                 updated_at = NOW()
+            WHERE partner_id = $1
             RETURNING *
             """,
             partner_id,
-            limits.max_tenants,
-            limits.aggregate_calls_per_minute,
-            limits.aggregate_calls_per_hour,
-            limits.aggregate_calls_per_day,
-            limits.aggregate_concurrent_calls,
-            limits.revenue_share_percent,
-            limits.min_billing_amount,
-            limits.max_billing_amount,
-            json.dumps(limits.feature_whitelist),
-            json.dumps(limits.feature_blacklist),
-            limits.fraud_detection_sensitivity,
-            True,
+            *values,
         )
+        if row is None:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO partner_limits (
+                    partner_id,
+                    max_tenants,
+                    aggregate_calls_per_minute,
+                    aggregate_calls_per_hour,
+                    aggregate_calls_per_day,
+                    aggregate_concurrent_calls,
+                    revenue_share_percent,
+                    min_billing_amount,
+                    max_billing_amount,
+                    feature_whitelist,
+                    feature_blacklist,
+                    fraud_detection_sensitivity,
+                    is_active
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, TRUE)
+                RETURNING *
+                """,
+                partner_id,
+                *values,
+            )
 
     return dict(row)
 
@@ -430,44 +446,29 @@ async def add_dnc_entry(
     if entry.expires_at:
         expires = datetime.fromisoformat(entry.expires_at.replace("Z", "+00:00"))
 
-    # A NULL tenant_id represents the platform-wide DNC list.
-    async with acquire_with_tenant(
-        db_client.pool, str(tenant_id) if tenant_id is not None else None
-    ) as conn:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO dnc_entries (
-                tenant_id,
-                phone_number,
-                normalized_number,
-                source,
-                reason,
-                expires_at
-            )
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (tenant_id, normalized_number)
-            DO UPDATE SET
-                source = EXCLUDED.source,
-                reason = EXCLUDED.reason,
-                expires_at = EXCLUDED.expires_at
-            RETURNING *
-            """,
-            tenant_id,
-            entry.phone_number,
-            normalized,
-            entry.source,
-            entry.reason,
-            expires,
-        )
+    # The one DNC writer (a NULL tenant_id is the platform-wide list). This
+    # endpoint used to upsert on (tenant_id, normalized_number); migration 0061
+    # replaced that constraint with partial indexes per source, so every call
+    # failed with "no unique or exclusion constraint matching the ON CONFLICT".
+    from app.domain.services.dnc_service import DNCService
+
+    saved = await DNCService(db_client.pool).add(
+        tenant_id=str(tenant_id) if tenant_id is not None else None,
+        e164=normalized,
+        source=entry.source,
+        reason=entry.reason,
+        expires_at=expires,
+        added_by=str(admin_user.id) if getattr(admin_user, "id", None) else None,
+    )
 
     return DncEntryResponse(
-        id=row["id"],
-        phone_number=row["phone_number"],
-        normalized_number=row["normalized_number"],
-        source=row["source"],
-        reason=row["reason"],
-        expires_at=row["expires_at"].isoformat() if row["expires_at"] else None,
-        created_at=row["created_at"].isoformat(),
+        id=saved.id,
+        phone_number=saved.normalized_number,
+        normalized_number=saved.normalized_number,
+        source=saved.source,
+        reason=saved.reason,
+        expires_at=saved.expires_at.isoformat() if saved.expires_at else None,
+        created_at=saved.created_at.isoformat() if saved.created_at else None,
     )
 
 

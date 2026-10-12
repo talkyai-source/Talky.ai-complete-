@@ -7,6 +7,7 @@ keeps handle_turn_end() as a thin delegator (transcript_handler schedules it).""
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import re
 import time
@@ -60,6 +61,24 @@ _UNRESOLVED = object()
 # live read for callers that don't pass one at all.
 _CONFIDENCE_UNSET = object()
 _CONTACT_EVIDENCE_UNSET = object()
+
+# Set on a turn task that TEARDOWN is cancelling (see mark_teardown_cancel).
+_TEARDOWN_CANCEL_ATTR = "_cancelled_by_teardown"
+
+
+def mark_teardown_cancel(task) -> None:
+    """Tell a turn task that teardown (hangup, transfer, pipeline end) is about
+    to cancel it, as opposed to a barge-in.
+
+    Both cancel the same task from outside. A barge-in keeps the words queued
+    behind it: the caller is still on the line, so the cancelled task's finally
+    answers them. Teardown must not: the call is going away and answering them
+    would spend an LLM+TTS round on a dead session. Only teardown callers use
+    this; the barge-in path (``_cancel_turn_task``) never does."""
+    try:
+        setattr(task, _TEARDOWN_CANCEL_ATTR, True)
+    except Exception:  # noqa: BLE001 - teardown must not fail on an exotic task-like
+        pass
 
 
 def _resolve_transcript_target_call_id(session) -> Optional[str]:
@@ -153,6 +172,30 @@ def caller_talking_over_close(session, turn_started_at: float) -> bool:
     )
 
 
+def _dispatch_stranded_queue(handle):
+    """Run the queued turn after ``handle`` returns early.
+
+    The early returns in ``handle`` (turn-0 reprompt, repetitive STT,
+    backchannel, self-echo) never reach the dispatch in its finally, so a turn
+    queued behind this task would sit until some later turn released the slot
+    and then replay out of order. Idempotent after a normal turn (its finally
+    already emptied the queue). Skipped on cancellation, where ``handle`` raises:
+    a barge-in re-queues its own held words.
+    """
+    @functools.wraps(handle)
+    async def wrapper(self, session, websocket=None, *args, **kwargs):
+        await handle(self, session, websocket, *args, **kwargs)
+        call_id = session.call_id
+        pending = self._p._pending_llm_tasks.get(call_id)
+        if pending is not None and (pending is asyncio.current_task() or pending.done()):
+            self._p._pending_llm_tasks.pop(call_id, None)
+            pending = None
+        if pending is None:
+            self._dispatch_queued_next_turn(session, websocket, call_id)
+
+    return wrapper
+
+
 class TurnEnder:
     """Runs the end-of-turn LLM+TTS cycle with all pre-turn guards."""
 
@@ -177,6 +220,101 @@ class TurnEnder:
         except Exception as exc:
             logger.warning("transcript_progress_save_failed call=%s error_type=%s", session.call_id, type(exc).__name__)
 
+    def _call_is_over(self, session: CallSession, call_id: str) -> bool:
+        """True once the call is ending/ended, its media session is gone, or the
+        task running this was cancelled by teardown.
+
+        A turn queued behind the one that just finished must not run after the
+        agent hung up or the call was torn down: it would spend an LLM+TTS
+        round on a dead session and flip session.state back from ENDED.
+
+        The teardown tag covers what the other checks cannot: teardown cancels
+        the active turn first, while the gateway session still exists and the
+        state is still PROCESSING, and that cancelled task's finally is what
+        dispatches the queue."""
+        if getattr(asyncio.current_task(), _TEARDOWN_CANCEL_ATTR, False) is True:
+            return True
+        if getattr(session, "state", None) in (CallState.ENDING, CallState.ENDED):
+            return True
+        if getattr(session, "_end_session_action_handled", False) is True:
+            return True
+        probe = getattr(self._p.media_gateway, "is_session_active", None)
+        if callable(probe):
+            try:
+                alive = probe(call_id)
+            except Exception:  # noqa: BLE001 - a broken probe must not drop a live turn
+                return False
+            if asyncio.iscoroutine(alive):  # async stand-in: not a usable answer
+                alive.close()
+                return False
+            return alive is False
+        return False
+
+    def _keep_unprocessed_opt_out(
+        self, session: CallSession, call_id: str, words: Any
+    ) -> None:
+        """A directed opt-out in words that will never get a turn still counts.
+
+        ``handle`` flags ``session._caller_opted_out`` when the caller asks not
+        to be called again, and the call-end purge reads that flag after the
+        teardown cancel. Words discarded with the queue never reach ``handle``,
+        so flag them here, behind the same gate and detector, rather than let
+        the request vanish with the dropped turn."""
+        try:
+            if (
+                not self._p._is_ask_ai_session(session)
+                and self._p._supports_llm_end_session_action(session)
+                and contains_dnc(str(words or ""))
+            ):
+                session._caller_opted_out = True
+                logger.info("turn_queued_opt_out_kept call=%s", call_id[:12])
+        except Exception:  # noqa: BLE001 - a compliance note must never break teardown
+            pass
+
+    def _dispatch_queued_next_turn(
+        self, session: CallSession, websocket: Optional[WebSocket], call_id: str
+    ) -> None:
+        """F-08: run the turn queued behind the one that just released the slot.
+
+        The caller has already established that it owns the turn slot. On a
+        finished call the queue is discarded instead of dispatched."""
+        _queued = getattr(session, "_queued_next_turn", None)
+        if _queued is None:
+            return
+        session._queued_next_turn = None
+        if self._call_is_over(session, call_id):
+            self._keep_unprocessed_opt_out(session, call_id, _queued.get("text"))
+            logger.info(
+                "turn_queued_next_dropped_call_over call=%s seq=%s",
+                call_id[:12], _queued.get("seq"),
+            )
+            return
+        logger.info(
+            "turn_queued_next_dispatch call=%s seq=%s",
+            call_id[:12], _queued.get("seq"),
+        )
+        _next_task = asyncio.create_task(
+            self._p.handle_turn_end(
+                session, websocket, source="queued",
+                user_text=_queued.get("text"),
+                confidence=_queued.get(
+                    "confidence", _CONFIDENCE_UNSET
+                ),
+                transcript_alternatives=_queued.get(
+                    "alternatives", _CONTACT_EVIDENCE_UNSET
+                ),
+            )
+        )
+        _next_task._turn_type = "final"
+        _next_task._utterance_seq = _queued.get("seq")
+        _next_task._caller_turn_order = _queued.get("caller_turn_order")
+        _next_task._prior_caller_turn_orders = tuple(
+            _queued.get("prior_caller_turn_orders") or ())
+        _next_task._source_text = _queued.get("text")
+        _next_task._latest_text = _queued.get("latest_text") or _queued.get("text")
+        self._p._pending_llm_tasks[call_id] = _next_task
+
+    @_dispatch_stranded_queue
     async def handle(
         self,
         session: CallSession,
@@ -211,6 +349,13 @@ class TurnEnder:
 
         if not full_transcript:
             logger.debug("Empty transcript, skipping turn", extra={"call_id": call_id})
+            return
+
+        # A queued turn is dispatched from the previous turn's finally and only
+        # starts running later. If the call ended in between, answering would
+        # spend an LLM+TTS round on a dead session and overwrite ENDED.
+        if source == "queued" and self._call_is_over(session, call_id):
+            logger.info("turn_queued_skipped_call_over call=%s", call_id[:12])
             return
 
         # Turn-0 floor — protects the first AI reply (the one that "anchors"
@@ -879,30 +1024,4 @@ class TurnEnder:
                     # _owns_slot ONLY — a stale/superseded task must never
                     # fire this (that's exactly what _owns_slot protects
                     # against elsewhere in this block).
-                    _queued = getattr(session, "_queued_next_turn", None)
-                    if _queued is not None:
-                        session._queued_next_turn = None
-                        logger.info(
-                            "turn_queued_next_dispatch call=%s seq=%s",
-                            call_id[:12], _queued.get("seq"),
-                        )
-                        _next_task = asyncio.create_task(
-                            self._p.handle_turn_end(
-                                session, websocket, source="queued",
-                                user_text=_queued.get("text"),
-                                confidence=_queued.get(
-                                    "confidence", _CONFIDENCE_UNSET
-                                ),
-                                transcript_alternatives=_queued.get(
-                                    "alternatives", _CONTACT_EVIDENCE_UNSET
-                                ),
-                            )
-                        )
-                        _next_task._turn_type = "final"
-                        _next_task._utterance_seq = _queued.get("seq")
-                        _next_task._caller_turn_order = _queued.get("caller_turn_order")
-                        _next_task._prior_caller_turn_orders = tuple(
-                            _queued.get("prior_caller_turn_orders") or ())
-                        _next_task._source_text = _queued.get("text")
-                        _next_task._latest_text = _queued.get("latest_text") or _queued.get("text")
-                        self._p._pending_llm_tasks[call_id] = _next_task
+                    self._dispatch_queued_next_turn(session, websocket, call_id)

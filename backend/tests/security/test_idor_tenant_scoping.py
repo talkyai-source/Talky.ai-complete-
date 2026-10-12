@@ -143,8 +143,12 @@ class TestSecretsManagerTenantScoping:
     async def test_rotate_same_tenant_succeeds(self):
         sid = uuid4()
         mgr = _manager(_secret_row(sid, OWNER))
-        new_id = await mgr.rotate(secret_id=sid, rotated_by=uuid4(), tenant_id=OWNER)
-        assert isinstance(new_id, UUID)
+        # Rotation now requires the new value for non-API-key types
+        # (bug hunt billing-money-credentials-6: rotating without one used to
+        # blank the secret) and returns (new_id, generated_api_key).
+        new_id, api_key = await mgr.rotate(secret_id=sid, rotated_by=uuid4(), tenant_id=OWNER,
+                                           new_value={"secret": "synthetic-rotated-value"})
+        assert isinstance(new_id, UUID) and api_key is None
 
     async def test_rotate_cross_tenant_is_not_found(self):
         sid = uuid4()
@@ -197,7 +201,7 @@ class TestSecretsRouteThreadsAuthenticatedTenant:
         from app.api.v1.endpoints import secrets as sec
 
         mgr = MagicMock()
-        mgr.rotate = AsyncMock(return_value=uuid4())
+        mgr.rotate = AsyncMock(return_value=(uuid4(), None))
         await sec.rotate_secret(
             tenant_id=OWNER,
             secret_id=uuid4(),

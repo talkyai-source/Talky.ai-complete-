@@ -6,13 +6,15 @@ Day 25: Meeting Booking Feature
 """
 import logging
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, time as dt_time, timezone as dt_timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
+from app.core.security.rbac import Permission, require_permission
 from app.services.meeting_service import (
     get_meeting_service,
     CalendarNotConnectedError
@@ -21,6 +23,10 @@ from app.services.meeting_service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/meetings", tags=["Meetings"])
+
+# Writes change the tenant's real calendar and invite attendees, so they need
+# the same CALENDAR_MANAGE grant the assistant tool path requires.
+_require_calendar_manage = require_permission(Permission.CALENDAR_MANAGE)
 
 
 # =============================================================================
@@ -99,6 +105,7 @@ class CreateMeetingResponse(BaseModel):
 async def get_availability(
     date: str = Query(..., description="Date in YYYY-MM-DD format"),
     duration_minutes: int = Query(30, ge=15, le=240, description="Slot duration"),
+    tz: str = Query("UTC", alias="timezone", description="IANA timezone the 9 AM-6 PM window is in"),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ) -> List[AvailabilitySlot]:
@@ -106,13 +113,19 @@ async def get_availability(
     Get available meeting slots for a specific date.
     
     Requires a connected calendar (Google Calendar or Microsoft Outlook).
-    Returns time slots between 9 AM and 6 PM that are free for the specified duration.
+    Returns time slots between 9 AM and 6 PM (in `timezone`, default UTC) that are
+    free for the specified duration; slots are returned in that timezone.
     """
     try:
+        try:
+            zone = ZoneInfo(tz)
+        except (ZoneInfoNotFoundError, ValueError, OSError):
+            raise HTTPException(status_code=400, detail=f"Unknown timezone: {tz}")
+
         # Parse date
         target_date = datetime.strptime(date, "%Y-%m-%d").date()
-        start_time = datetime.combine(target_date, datetime.min.time().replace(hour=9))
-        end_time = datetime.combine(target_date, datetime.min.time().replace(hour=18))
+        start_time = datetime.combine(target_date, dt_time(hour=9), tzinfo=zone).astimezone(dt_timezone.utc)
+        end_time = datetime.combine(target_date, dt_time(hour=18), tzinfo=zone).astimezone(dt_timezone.utc)
         
         service = get_meeting_service(db_client)
         
@@ -123,10 +136,16 @@ async def get_availability(
             duration_minutes=duration_minutes
         )
         
+        def local(value: str) -> str:
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(zone).isoformat()
+            except (ValueError, AttributeError):
+                return value
+
         return [
             AvailabilitySlot(
-                start=slot["start"],
-                end=slot["end"],
+                start=local(slot["start"]),
+                end=local(slot["end"]),
                 duration_minutes=duration_minutes
             )
             for slot in slots
@@ -145,7 +164,7 @@ async def get_availability(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/", response_model=CreateMeetingResponse)
+@router.post("/", response_model=CreateMeetingResponse, dependencies=[Depends(_require_calendar_manage)])
 async def create_meeting(
     request: CreateMeetingRequest,
     current_user: CurrentUser = Depends(get_current_user),
@@ -270,7 +289,7 @@ async def get_meeting(
     )
 
 
-@router.put("/{meeting_id}")
+@router.put("/{meeting_id}", dependencies=[Depends(_require_calendar_manage)])
 async def update_meeting(
     meeting_id: str,
     request: UpdateMeetingRequest,
@@ -311,7 +330,7 @@ async def update_meeting(
         )
 
 
-@router.delete("/{meeting_id}")
+@router.delete("/{meeting_id}", dependencies=[Depends(_require_calendar_manage)])
 async def cancel_meeting(
     meeting_id: str,
     request: Optional[CancelMeetingRequest] = None,

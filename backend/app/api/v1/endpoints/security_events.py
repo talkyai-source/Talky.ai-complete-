@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import get_audit_logger, get_db_pool, require_permissions
+from app.api.v1.endpoints.audit_logs import resolve_tenant_scope
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
@@ -123,14 +124,12 @@ async def list_security_events(
     # predicate is the only isolation there is.
     #
     # The param is kept as an operator convenience but is now VALIDATED, never
-    # trusted: it may only ever narrow to the caller's own tenant. Same
-    # validate-then-403 shape already used by GET /events/{id} in this file.
-    user_tenant_id = current_user.get("tenant_id")
-    if tenant_id and user_tenant_id and str(tenant_id) != str(user_tenant_id):
-        raise HTTPException(
-            status_code=403, detail="Cannot access other tenant events"
-        )
-    scoped_tenant_id = user_tenant_id or tenant_id
+    # trusted: for a tenant caller it may only ever narrow to their own tenant.
+    # A platform_admin is the cross-tenant role and may name any tenant (or
+    # none); a home tenant on their profile does not pin them.
+    scoped_tenant_id = resolve_tenant_scope(
+        current_user, tenant_id, denied_detail="Cannot access other tenant events"
+    )
     if scoped_tenant_id:
         conditions.append(f"tenant_id = ${param_idx}")
         params.append(scoped_tenant_id)
@@ -167,8 +166,10 @@ async def get_security_event(
     db_pool=Depends(get_db_pool),
 ):
     """Get a specific security event"""
-    user_tenant_id = current_user.get("tenant_id")
-    # A tenant-less platform operator may resolve an event before its tenant is known.
+    user_tenant_id = resolve_tenant_scope(
+        current_user, None, denied_detail="Cannot access other tenant events"
+    )
+    # A platform operator may resolve an event before its tenant is known.
     async with acquire_with_tenant(db_pool, user_tenant_id) as conn:
         row = await conn.fetchrow(
             "SELECT * FROM security_events WHERE event_id = $1",
@@ -197,16 +198,9 @@ async def create_security_event(
     # could insert events attributed to ANY tenant — poisoning another
     # customer's security console, or burying a real event under noise.
     # The field may only narrow to the caller's own tenant.
-    _user_tenant_id = current_user.get("tenant_id")
-    if (
-        data.tenant_id
-        and _user_tenant_id
-        and str(data.tenant_id) != str(_user_tenant_id)
-    ):
-        raise HTTPException(
-            status_code=403, detail="Cannot access other tenant events"
-        )
-    scoped_tenant_id = _user_tenant_id or data.tenant_id
+    scoped_tenant_id = resolve_tenant_scope(
+        current_user, data.tenant_id, denied_detail="Cannot access other tenant events"
+    )
     # A tenant-less platform operator may create a platform-level event.
     async with acquire_with_tenant(db_pool, scoped_tenant_id) as conn:
         row = await conn.fetchrow(
@@ -280,7 +274,9 @@ async def update_security_event(
     # intentionally unscoped.
     params.append(event_id)
     tenant_clause = f"WHERE event_id = ${idx}"
-    scoped_tenant_id = current_user.get("tenant_id")
+    scoped_tenant_id = resolve_tenant_scope(
+        current_user, None, denied_detail="Cannot access other tenant events"
+    )
     if scoped_tenant_id:
         params.append(scoped_tenant_id)
         tenant_clause += f" AND tenant_id = ${idx + 1}"
@@ -325,7 +321,9 @@ async def resolve_security_event(
     # Keep the explicit tenant predicate as defence in depth alongside RLS.
     params = [datetime.utcnow(), current_user["id"], resolution_notes, event_id]
     tenant_clause = "WHERE event_id = $4"
-    scoped_tenant_id = current_user.get("tenant_id")
+    scoped_tenant_id = resolve_tenant_scope(
+        current_user, None, denied_detail="Cannot access other tenant events"
+    )
     if scoped_tenant_id:
         params.append(scoped_tenant_id)
         tenant_clause += " AND tenant_id = $5"
@@ -363,7 +361,9 @@ async def get_open_alerts(
     db_pool=Depends(get_db_pool),
 ):
     """Get open high-priority security alerts"""
-    scoped_tenant_id = current_user.get("tenant_id")
+    scoped_tenant_id = resolve_tenant_scope(
+        current_user, None, denied_detail="Cannot access other tenant events"
+    )
     params = []
     tenant_clause = ""
     if scoped_tenant_id:
@@ -396,7 +396,9 @@ async def get_overdue_alerts(
     db_pool=Depends(get_db_pool),
 ):
     """Get alerts past their SLA deadline"""
-    scoped_tenant_id = current_user.get("tenant_id")
+    scoped_tenant_id = resolve_tenant_scope(
+        current_user, None, denied_detail="Cannot access other tenant events"
+    )
     params = [datetime.utcnow()]
     tenant_clause = ""
     if scoped_tenant_id:
@@ -433,7 +435,9 @@ async def escalate_event(
     # Keep the explicit tenant predicate as defence in depth alongside RLS.
     params = [reason, event_id]
     tenant_clause = "WHERE event_id = $2"
-    scoped_tenant_id = current_user.get("tenant_id")
+    scoped_tenant_id = resolve_tenant_scope(
+        current_user, None, denied_detail="Cannot access other tenant events"
+    )
     if scoped_tenant_id:
         params.append(scoped_tenant_id)
         tenant_clause += " AND tenant_id = $3"

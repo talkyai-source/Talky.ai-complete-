@@ -14,8 +14,8 @@ from app.workers.reminder_worker import ReminderWorker
 async def test_meeting_only_reminder_reaches_worker_with_correct_tenant_contact(crm_db):
     admin, pool = crm_db
     await admin.execute('''
-        CREATE TABLE leads(id UUID PRIMARY KEY,tenant_id UUID,first_name TEXT,last_name TEXT,email TEXT,phone_number TEXT);
-        CREATE TABLE meetings(id UUID PRIMARY KEY,tenant_id UUID,lead_id UUID,title TEXT,start_time TIMESTAMPTZ,end_time TIMESTAMPTZ,join_link TEXT);
+        CREATE TABLE leads(id UUID PRIMARY KEY,tenant_id UUID,first_name TEXT,last_name TEXT,email TEXT,phone_number TEXT,status TEXT,do_not_call BOOLEAN);
+        CREATE TABLE meetings(id UUID PRIMARY KEY,tenant_id UUID,lead_id UUID,title TEXT,start_time TIMESTAMPTZ,end_time TIMESTAMPTZ,join_link TEXT,status TEXT,timezone TEXT);
         CREATE TABLE reminders(id UUID PRIMARY KEY,tenant_id UUID,lead_id UUID,meeting_id UUID,type TEXT,
             scheduled_at TIMESTAMPTZ,status TEXT,content JSONB,idempotency_key TEXT,sent_at TIMESTAMPTZ,
             channel TEXT,external_message_id TEXT,retry_count INTEGER,max_retries INTEGER,next_retry_at TIMESTAMPTZ,last_error TEXT);

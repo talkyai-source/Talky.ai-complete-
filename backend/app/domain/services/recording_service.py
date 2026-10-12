@@ -700,8 +700,14 @@ class RecordingService:
                 mime_type=mime_type,
             )
 
+            if not recording_id:
+                await self._discard_unregistered_object(
+                    call_id, tenant_id, self._s3.bucket, key
+                )
+                return None
+
             await self._update_call_recording_url(call_id, tenant_id, recording_id)
-            return str(recording_id) if recording_id else None
+            return str(recording_id)
 
         except Exception as exc:
             logger.error(f"Recording upload failed for call {call_id}: {exc}", exc_info=True)
@@ -801,8 +807,9 @@ class RecordingService:
             logger.info(f"Local recording registered in DB: recording_id={recording_id}")
             return str(recording_id)
         else:
-            logger.warning(f"Local recording saved to disk but DB insert failed for {call_id}")
-            return filepath
+            logger.error(f"Local recording saved to disk but DB insert failed for {call_id}")
+            await self._discard_unregistered_object(call_id, tenant_id, "local", filepath)
+            return None
 
     # ── Presigned URL ─────────────────────────────────────────────
 
@@ -1029,6 +1036,63 @@ class RecordingService:
         except Exception as exc:
             logger.warning(f"Could not update calls.recording_url for {call_id}: {exc}")
 
+    async def _discard_unregistered_object(
+        self, call_id: str, tenant_id: str, bucket: str, key: str
+    ) -> None:
+        """Remove audio that was stored but could not be registered.
+
+        Without a recordings_s3 row the audio cannot be listed, played,
+        retained or erased on request (DSAR), so it must not stay behind.
+        The object key is deterministic per call, so a duplicate/raced insert
+        means ANOTHER row may reference this very object: only delete when no
+        row references (bucket, key), and keep it (logged) whenever that cannot
+        be verified.
+        """
+        try:
+            async with acquire_with_tenant(self._db, tenant_id) as conn:
+                referenced = await conn.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1 FROM recordings_s3
+                        WHERE tenant_id = $1 AND s3_bucket = $2 AND s3_key = $3
+                    )
+                    """,
+                    UUID(tenant_id),
+                    bucket,
+                    key,
+                )
+        except Exception as exc:
+            logger.error(
+                "recording_orphan_unverified call=%s tenant=%s bucket=%s key=%s err=%s - "
+                "audio stored without a DB row and could not be checked; needs manual reconciliation",
+                call_id, tenant_id, bucket, key, type(exc).__name__,
+            )
+            return
+        if referenced:
+            logger.warning(
+                "recording_orphan_skipped call=%s key=%s - another row already references this object",
+                call_id, key,
+            )
+            return
+        try:
+            if bucket == "local":
+                await asyncio.to_thread(os.remove, key)
+            else:
+                await asyncio.to_thread(self._s3.delete_permanently, key, bucket)
+            logger.error(
+                "recording_orphan_removed call=%s tenant=%s bucket=%s key=%s - "
+                "recording row insert failed, stored audio deleted",
+                call_id, tenant_id, bucket, key,
+            )
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            logger.error(
+                "recording_orphan_delete_failed call=%s tenant=%s bucket=%s key=%s err=%s - "
+                "audio remains without a DB row; needs manual cleanup",
+                call_id, tenant_id, bucket, key, type(exc).__name__,
+            )
+
     async def _mark_upload_failed(
         self,
         call_id: str,
@@ -1039,6 +1103,15 @@ class RecordingService:
         """Insert a 'failed' row so the failure is visible in the admin panel."""
         try:
             async with acquire_with_tenant(self._db, tenant_id) as conn:
+                # call_id may be a PBX channel id, not a UUID: use the
+                # authoritative calls.id like the success-path insert does.
+                call_uuid = await self._resolve_call_uuid(call_id, tenant_id, conn)
+                if call_uuid is None:
+                    logger.warning(
+                        "recording_failed_row_not_written call=%s tenant=%s - call id unresolved",
+                        call_id, tenant_id,
+                    )
+                    return
                 await conn.execute(
                     """
                     INSERT INTO recordings_s3 (
@@ -1047,15 +1120,19 @@ class RecordingService:
                     ) VALUES ($1,$2,$3,$4,$5,$6,'failed')
                     ON CONFLICT DO NOTHING
                     """,
-                    UUID(call_id),
+                    call_uuid,
                     UUID(tenant_id),
                     UUID(campaign_id) if campaign_id else None,
                     self._s3.bucket,
                     f"failed/{call_id}.wav",
                     self._s3.region,
                 )
-        except Exception:
-            pass  # Best-effort — don't shadow the original error
+        except Exception as exc:
+            # Best-effort - don't shadow the original error, but leave a trace.
+            logger.warning(
+                "recording_failed_row_not_written call=%s tenant=%s err=%s",
+                call_id, tenant_id, type(exc).__name__,
+            )
 
 
 # ---------------------------------------------------------------------------

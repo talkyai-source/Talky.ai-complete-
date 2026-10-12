@@ -10,11 +10,34 @@ restarts.
 """
 from __future__ import annotations
 
+import logging
 import re
 import random
 from typing import Mapping, Optional, Sequence
 
+logger = logging.getLogger(__name__)
+
 MAX_POOL_SIZE = 3
+
+# The phrases that actually say "the agent's name is X". Detection
+# (name_is_referenced_in) and the rewrite (rename_agent_in_script) both match
+# ONLY these, so they can never disagree -- and an ordinary word, a person the
+# script tells the agent to ask for, or the company's own name that happens to
+# equal the old first name ("Daniel Bakery", "grace period") is left alone.
+_IDENTITY_PREFIX = (
+    r"(?:you\s+are|you['’]re|your\s+name\s+is|your\s+name['’]s|this\s+is|"
+    r"i['’]m|i\s+am|my\s+name\s+is|my\s+name['’]s|"
+    r"(?:introduce|identify|present)\s+yourself\s+as|call\s+yourself|go\s+by|"
+    r"speaking\s+as|answer\s+as|named|called|"
+    r"(?:agent|assistant|your)\s+name\s*[:=\-])"
+    r"\s+(?:(?:an?|the)\s+)?"
+)
+
+
+def _identity_re(token: str) -> "re.Pattern[str]":
+    return re.compile(
+        rf"\b(?P<pre>{_IDENTITY_PREFIX})(?P<name>{re.escape(token)})\b", re.IGNORECASE
+    )
 
 
 def pick_agent_name_for_voice(
@@ -165,26 +188,28 @@ def name_is_referenced_in(text: Optional[str], pool: Sequence[str]) -> bool:
     itself — the agent introducing itself as one name while its instructions
     assert another. Matching is on the FIRST TOKEN, case-insensitive, which is
     what a script actually writes ("You are Sarah", not "You are Sarah jones").
+    Only IDENTITY phrases count ("you are / your name is / this is / I'm / my
+    name is <name>"); a bare occurrence of the word is not the agent's name.
     """
     if not text:
         return False
-    haystack = str(text).lower()
+    haystack = str(text)
     for name in pool or []:
         parts = str(name or "").strip().split()
         if not parts:
             continue
-        first = parts[0].strip().lower()
+        first = parts[0].strip()
         # Bounded check so "Sam" does not match "same" / "sample".
         if len(first) < 2:
             continue
-        import re as _re
-
-        if _re.search(rf"\b{_re.escape(first)}\b", haystack):
+        if _identity_re(first).search(haystack):
             return True
     return False
 
 
-def rename_agent_in_script(text: Optional[str], old: str, new: str) -> Optional[str]:
+def rename_agent_in_script(
+    text: Optional[str], old: str, new: str, *, company_name: Optional[str] = None
+) -> Optional[str]:
     """Rewrite the operator's own script so it names the agent we will speak as.
 
     WHY THIS EXISTS (2026-08-12). ``resolve_name_against_voice`` used to face a
@@ -204,10 +229,13 @@ def rename_agent_in_script(text: Optional[str], old: str, new: str) -> Optional[
     problems disappear: the spoken name matches the voice AND the prompt agrees
     with itself.
 
-    Matches the FIRST TOKEN on a word boundary, case-insensitively — the same
-    rule ``name_is_referenced_in`` uses to detect the reference in the first
-    place, so detection and rewrite can never disagree. Returns ``text``
-    unchanged when there is nothing to do.
+    Matches the FIRST TOKEN on a word boundary, case-insensitively, but only in
+    an identity phrase ("you are / your name is / this is / I'm / my name is
+    <name>") -- the same rule ``name_is_referenced_in`` uses to detect the
+    reference in the first place, so detection and rewrite can never disagree.
+    A bare mention elsewhere ("grace period", "Marcus's Garage") and anything
+    inside ``company_name`` is left alone, and the changed spans are logged.
+    Returns ``text`` unchanged when there is nothing to do.
     """
     if not text or not old or not new:
         return text
@@ -218,9 +246,28 @@ def rename_agent_in_script(text: Optional[str], old: str, new: str) -> Optional[
     if len(token) < 2:
         return text
     replacement = str(new).strip().split()[0] if str(new).strip() else new
-    return re.sub(
-        rf"\b{re.escape(token)}\b", replacement, str(text), flags=re.IGNORECASE
-    )
+    source = str(text)
+    # Never rewrite inside the configured company name ("Daniel Bakery").
+    protected: list[tuple[int, int]] = []
+    company = (company_name or "").strip()
+    if company:
+        protected = [m.span() for m in re.finditer(re.escape(company), source, flags=re.IGNORECASE)]
+    changed: list[str] = []
+
+    def _swap(m: "re.Match[str]") -> str:
+        a, b = m.span("name")
+        if any(ps <= a and b <= pe for ps, pe in protected):
+            return m.group(0)
+        changed.append(source[max(0, m.start() - 10):b + 10].replace("\n", " "))
+        return m.group("pre") + replacement
+
+    out = _identity_re(token).sub(_swap, source)
+    if changed:
+        logger.info(
+            "agent_name_rename_spans old=%r new=%r count=%d spans=%r",
+            token, replacement, len(changed), changed[:10],
+        )
+    return out
 
 
 def substitute_name_for_voice(

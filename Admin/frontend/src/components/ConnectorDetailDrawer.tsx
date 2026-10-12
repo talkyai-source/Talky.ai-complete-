@@ -90,6 +90,8 @@ export function ConnectorDetailDrawer({ connector, onClose, onRefresh }: Connect
     const [loading, setLoading] = useState(false);
     const [actionLoading, setActionLoading] = useState<string | null>(null);
     const [showRevokeConfirm, setShowRevokeConfirm] = useState(false);
+    // The API client never throws; a failed revoke/reconnect comes back as { error }.
+    const [actionError, setActionError] = useState<string | null>(null);
 
     const fetchDetail = useCallback(async () => {
         if (!connector) return;
@@ -115,31 +117,45 @@ export function ConnectorDetailDrawer({ connector, onClose, onRefresh }: Connect
     const handleReconnect = async () => {
         if (!connector) return;
         setActionLoading('reconnect');
+        setActionError(null);
         try {
-            await api.forceReconnect(connector.id);
+            const res = await api.forceReconnect(connector.id);
+            if (res.error) {
+                setActionError(res.error.message || 'Reconnect failed.');
+                return;
+            }
             await fetchDetail();
             onRefresh?.();
         } catch (error) {
             console.error('Failed to reconnect:', error);
+            setActionError(error instanceof Error ? error.message : 'Reconnect failed.');
         } finally {
             setActionLoading(null);
         }
     };
 
     const handleRevokeClick = () => {
+        setActionError(null);
         setShowRevokeConfirm(true);
     };
 
     const handleRevokeConfirm = async () => {
         if (!connector) return;
         setActionLoading('revoke');
+        setActionError(null);
         try {
-            await api.revokeConnector(connector.id);
+            const res = await api.revokeConnector(connector.id);
+            if (res.error) {
+                // Access is NOT revoked: keep the confirm open and say so.
+                setActionError(res.error.message || 'Revoke failed. The connector is still active.');
+                return;
+            }
             onRefresh?.();
             setShowRevokeConfirm(false);
             onClose();
         } catch (error) {
             console.error('Failed to revoke:', error);
+            setActionError(error instanceof Error ? error.message : 'Revoke failed. The connector is still active.');
         } finally {
             setActionLoading(null);
         }
@@ -259,6 +275,12 @@ export function ConnectorDetailDrawer({ connector, onClose, onRefresh }: Connect
                     )}
                 </div>
 
+                {actionError && !showRevokeConfirm && (
+                    <div className="error-banner" role="alert">
+                        <p>{actionError}</p>
+                    </div>
+                )}
+
                 {/* Actions Footer */}
                 <div className="drawer-footer">
                     {data.status !== 'disconnected' && (
@@ -305,8 +327,9 @@ export function ConnectorDetailDrawer({ connector, onClose, onRefresh }: Connect
                 cancelLabel="Cancel"
                 variant="danger"
                 onConfirm={handleRevokeConfirm}
-                onCancel={() => setShowRevokeConfirm(false)}
+                onCancel={() => { setShowRevokeConfirm(false); setActionError(null); }}
                 loading={actionLoading === 'revoke'}
+                error={showRevokeConfirm ? actionError : null}
             />
         </div>
     );

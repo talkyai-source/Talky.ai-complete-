@@ -43,6 +43,16 @@ class StubConn:
             return None
         raise AssertionError(f"unhandled fetchrow: {sql_norm[:80]}")
 
+    async def fetchval(self, sql: str, *args):
+        sql_norm = " ".join(sql.split())
+        if sql_norm.startswith("SELECT EXISTS (SELECT 1 FROM refresh_tokens WHERE parent_id = $1"):
+            (parent_id,) = args
+            return any(
+                r["parent_id"] == parent_id and r["used_at"] is None and r["revoked_at"] is None
+                for r in self.rows.values()
+            )
+        raise AssertionError(f"unhandled fetchval: {sql_norm[:80]}")
+
     async def execute(self, sql: str, *args):
         sql_norm = " ".join(sql.split())
         if sql_norm.startswith("UPDATE refresh_tokens SET used_at"):
@@ -181,7 +191,10 @@ async def test_reuse_detection_revokes_entire_family(conn, monkeypatch):
     assert first is not None
     _new_raw, _ = first
 
-    # Replaying the original token a second time must trip reuse detection.
+    # Replaying the original token after the concurrent-refresh grace window
+    # must trip reuse detection.
+    original = next(r for r in conn.rows.values() if r["token_hash"] == rt._hash_token(raw))
+    original["used_at"] -= timedelta(seconds=rt.REFRESH_REUSE_GRACE_SECONDS + 1)
     second = await rt.rotate_refresh_token(conn, presented_token=raw)
     assert second is None
 
@@ -242,3 +255,32 @@ async def test_legacy_family_without_session_rotates_with_no_sid(conn):
     )
     _new_raw, claims = await rt.rotate_refresh_token(conn, presented_token=raw, ip=None, user_agent=None)
     assert claims["session_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_concurrent_refresh_gets_a_sibling_instead_of_a_logout(conn):
+    """Bug hunt 2026-10-10 (auth-sessions-1): two tabs (or an in-flight request)
+    presenting the same cookie a moment apart revoked the whole family as
+    'reuse_detected', logging out the session the winner had just extended.
+    Production logged 32 of these ERROR lines in two days."""
+    raw, token_id, family_id = await rt.issue_initial_refresh_token(conn, user_id=str(uuid.uuid4()))
+    winner_raw, _ = await rt.rotate_refresh_token(conn, presented_token=raw)
+    used_at = conn.rows[token_id]["used_at"]
+
+    loser = await rt.rotate_refresh_token(conn, presented_token=raw)
+
+    assert loser is not None and loser[0] != winner_raw
+    assert conn.rows[token_id]["used_at"] == used_at  # the window does not slide
+    assert all(r["revoked_at"] is None for r in conn.rows.values() if r["family_id"] == family_id)
+    assert await rt.rotate_refresh_token(conn, presented_token=winner_raw) is not None
+    assert await rt.rotate_refresh_token(conn, presented_token=loser[0]) is not None
+
+
+@pytest.mark.asyncio
+async def test_a_replay_after_the_successor_was_used_still_revokes(conn):
+    raw, _, family_id = await rt.issue_initial_refresh_token(conn, user_id=str(uuid.uuid4()))
+    successor, _ = await rt.rotate_refresh_token(conn, presented_token=raw)
+    await rt.rotate_refresh_token(conn, presented_token=successor)
+
+    assert await rt.rotate_refresh_token(conn, presented_token=raw) is None
+    assert all(r["revoked_at"] is not None for r in conn.rows.values() if r["family_id"] == family_id)

@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from app.api.v1.dependencies import get_audit_logger, get_db_pool, require_permissions
 from app.core.db_utils import acquire_with_tenant
+from app.core.security.rbac import UserRole, normalize_role
 from app.domain.services.audit_logger import (
     AuditEvent,
     AuditLogger,
@@ -22,6 +23,27 @@ from app.domain.services.audit_logger import (
 )
 
 router = APIRouter(prefix="/admin/audit", tags=["Audit Logs"])
+
+
+def resolve_tenant_scope(current_user, requested_tenant_id, *, denied_detail: str):
+    """The tenant an audit/security route may read, as a string; None = every tenant.
+
+    A platform_admin is the one cross-tenant role: the requested tenant is an
+    optional filter and a home tenant on their profile does not pin them (it
+    used to, which hid every other tenant and all platform-level events from
+    the only users who can reach these routes). Every other caller is pinned to
+    their own tenant: naming another tenant is a 403, and a caller with no
+    tenant is refused rather than treated as unscoped.
+    """
+    role = current_user.get("role")
+    if role and normalize_role(role) == UserRole.PLATFORM_ADMIN:
+        return str(requested_tenant_id) if requested_tenant_id else None
+    own_tenant_id = current_user.get("tenant_id")
+    if not own_tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+    if requested_tenant_id and str(requested_tenant_id) != str(own_tenant_id):
+        raise HTTPException(status_code=403, detail=denied_detail)
+    return str(own_tenant_id)
 
 
 class AuditLogResponse(BaseModel):
@@ -76,15 +98,11 @@ async def query_audit_logs(
 
     Requires: audit:read permission
     """
-    # Non-platform admins can only see their tenant's logs.
-    # Compare as strings — `tenant_id` is parsed as UUID, while
-    # current_user.tenant_id comes from the JWT as a string.
-    user_tenant_id = current_user.get("tenant_id")
-    if user_tenant_id and tenant_id and str(tenant_id) != str(user_tenant_id):
-        raise HTTPException(status_code=403, detail="Cannot access other tenant logs")
-
-    if user_tenant_id:
-        tenant_id = user_tenant_id
+    # Non-platform admins can only see their tenant's logs; a platform admin
+    # may name any tenant or none (every tenant).
+    tenant_id = resolve_tenant_scope(
+        current_user, tenant_id, denied_detail="Cannot access other tenant logs"
+    )
 
     logs = await audit_logger.query(
         start_date=start_date,
@@ -141,22 +159,21 @@ async def get_audit_log(
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Get a specific audit log entry"""
+    # The tenant predicate is part of the lookup, so another tenant's entry is
+    # indistinguishable from a missing one (404, not 403: no existence oracle).
+    scoped_tenant_id = resolve_tenant_scope(
+        current_user, None, denied_detail="Cannot access this audit log"
+    )
     logs = await audit_logger.query(
-        start_date=datetime.min,
-        end_date=datetime.utcnow(),
+        event_id=event_id,
+        tenant_id=scoped_tenant_id,
         limit=1,
     )
 
-    # Find specific log (would use direct query in production)
-    log = next((l for l in logs if l.event_id == event_id), None)
+    log = logs[0] if logs else None
 
-    if not log:
+    if not log or (scoped_tenant_id and str(log.tenant_id) != scoped_tenant_id):
         raise HTTPException(status_code=404, detail="Audit log not found")
-
-    # Check tenant access. log.tenant_id is a UUID; user_tenant_id is a string.
-    user_tenant_id = current_user.get("tenant_id")
-    if user_tenant_id and log.tenant_id and str(log.tenant_id) != str(user_tenant_id):
-        raise HTTPException(status_code=403, detail="Cannot access this audit log")
 
     return AuditLogResponse(
         event_id=log.event_id,
@@ -196,13 +213,10 @@ async def export_audit_logs(
 
     Requires: audit:export permission
     """
-    # Check tenant access. `tenant_id` is UUID; user_tenant_id is a string.
-    user_tenant_id = current_user.get("tenant_id")
-    if user_tenant_id and tenant_id and str(tenant_id) != str(user_tenant_id):
-        raise HTTPException(status_code=403, detail="Cannot export other tenant logs")
-
-    if user_tenant_id:
-        tenant_id = user_tenant_id
+    # Check tenant access. A platform admin may export any tenant or all.
+    tenant_id = resolve_tenant_scope(
+        current_user, tenant_id, denied_detail="Cannot export other tenant logs"
+    )
 
     logs = await audit_logger.query(
         start_date=start_date,
@@ -290,12 +304,9 @@ async def get_event_stats(
     # tenant's audit-event distribution to any holder of `audit:read`. The param
     # may now only narrow to the caller's own tenant. GET /logs in this same file
     # already does exactly this; the stats routes were missed.
-    user_tenant_id = current_user.get("tenant_id")
-    if tenant_id and user_tenant_id and str(tenant_id) != str(user_tenant_id):
-        raise HTTPException(
-            status_code=403, detail="Cannot access other tenant audit logs"
-        )
-    scoped_tenant_id = user_tenant_id or tenant_id
+    scoped_tenant_id = resolve_tenant_scope(
+        current_user, tenant_id, denied_detail="Cannot access other tenant audit logs"
+    )
     since = datetime.utcnow() - timedelta(days=days)
     # A tenant-less platform operator is the only legitimate cross-tenant case.
     async with acquire_with_tenant(db_pool, scoped_tenant_id) as conn:
@@ -350,8 +361,10 @@ async def get_failed_login_stats(
     number is visibly absent rather than silently missing.
     """
     since = datetime.utcnow() - timedelta(days=days)
-    user_tenant_id = current_user.get("tenant_id")
-    # A tenant-less platform operator is the only legitimate cross-tenant case.
+    # Only a platform operator is cross-tenant; everyone else is pinned.
+    user_tenant_id = resolve_tenant_scope(
+        current_user, None, denied_detail="Cannot access other tenant audit logs"
+    )
     async with acquire_with_tenant(db_pool, user_tenant_id) as conn:
         summary = await conn.fetchrow(
             """

@@ -434,11 +434,15 @@ def test_unknown_voice_gender_still_yields_a_usable_name():
 #
 # It was a false choice. Rename the agent in the script too.
 
-def test_rename_agent_in_script_rewrites_every_reference():
+def test_rename_agent_in_script_rewrites_every_identity_reference():
+    """bughunt knowledge-prompts-7: only identity phrases name the agent
+    ("you are / this is / I'm / my name is X"). A bare third-person mention may be
+    a company or another person, so it is left alone (see
+    test_bh_knowledge_prompts_name_rename.py)."""
     from app.services.scripts.prompts.agent_name_rotator import rename_agent_in_script
 
     out = rename_agent_in_script(
-        "You are Sarah, an estimator. Sarah always confirms the address.",
+        "You are Sarah, an estimator. When you call say: this is Sarah from Acme.",
         "Sarah", "James",
     )
     assert "Sarah" not in out

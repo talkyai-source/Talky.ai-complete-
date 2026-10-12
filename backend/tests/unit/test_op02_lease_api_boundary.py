@@ -37,7 +37,7 @@ async def test_foreign_http_release_cannot_release_owned_lease(monkeypatch):
     conn.transaction = transaction
     monkeypatch.setattr(endpoint, "acquire_with_tenant", scoped_pool)
     monkeypatch.setattr(endpoint, "apply_tenant_rls_context", rls)
-    principal = dependencies.CurrentUser(id=str(uuid4()), email="synthetic@example.invalid", tenant_id=str(uuid4()))
+    principal = dependencies.CurrentUser(id=str(uuid4()), email="synthetic@example.invalid", tenant_id=str(uuid4()), role="tenant_admin")
     app = FastAPI()
     app.include_router(endpoint.router)
     app.dependency_overrides[dependencies.get_current_user] = lambda: principal

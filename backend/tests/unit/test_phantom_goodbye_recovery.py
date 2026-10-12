@@ -1,7 +1,10 @@
 """Suppressed hangup recovery must preserve speech/history and clean retry nudges.
 
 Transport/recovery regressions remain. Readback/interstitial parser tests were
-retired; standalone capture-mode utility tests below do not claim live wiring.
+retired. The capture-mode tests below cover the detector (STT end-of-turn
+patience only, never contact parsing); its live wiring in the turn path is
+covered by test_a_suppressed_turn_keeps_prose_without_automatic_contact_parser
+and by test_bh2_voice_capture_mode_wiring.py.
 """
 from unittest.mock import AsyncMock, MagicMock
 
@@ -153,6 +156,7 @@ async def test_a_suppressed_turn_keeps_prose_without_automatic_contact_parser():
     session = _make_session()
     session.campaign_id = "campaign-123"
     session.current_user_input = "sure, go ahead"
+    capture_mode.clear(session.call_id)  # module-level state: start from a known call
 
     try:
         await service.handle_turn_end(session, AsyncMock())
@@ -163,7 +167,14 @@ async def test_a_suppressed_turn_keeps_prose_without_automatic_contact_parser():
             if m.role == MessageRole.ASSISTANT
         ]
         assert spoken == ["What's your email address?"]
-        assert armed == []  # Spoken prose no longer enables a regex capture workflow.
+        # The ask relaxes STT end-of-turn timing for the caller's spell-out (bh2
+        # voice-pipeline-8: commit 01195ba4 dropped this wiring by accident). That
+        # is turn-detection only: no contact is admitted from the agent's prose,
+        # record_contact still owns that.
+        assert armed == [session.call_id]
+        assert getattr(session.captured_slots, "email", None) is None
+        assert getattr(session.captured_slots, "agent_asked_kind", None) is None
+        assert getattr(session.captured_slots, "active_contact_kind", None) is None
     finally:
         capture_mode.clear(session.call_id)
 

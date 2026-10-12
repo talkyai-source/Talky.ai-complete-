@@ -162,14 +162,20 @@ class DNCService:
                 expires_at,
             )
             if row is None:
-                # Already existed — refresh and return the existing row.
+                # Already existed — refresh and return the existing row. The
+                # request's expiry applies (none = permanent) and never weakens
+                # a permanent entry: COALESCE kept an expired date (the number
+                # stayed dialable after a 201) and let a dated re-add turn a
+                # permanent suppression temporary.
                 row = await conn.fetchrow(
                     """
                     UPDATE dnc_entries
                     SET updated_at = NOW(),
                         reason = COALESCE($4, reason),
-                        expires_at = CASE WHEN source = 'caller_opt_out' THEN NULL
-                                          ELSE COALESCE($5, expires_at) END
+                        expires_at = CASE WHEN source = 'caller_opt_out'
+                                            OR $5::timestamptz IS NULL
+                                            OR expires_at IS NULL THEN NULL
+                                          ELSE GREATEST(expires_at, $5::timestamptz) END
                     WHERE (tenant_id = $1 OR (tenant_id IS NULL AND $1 IS NULL))
                       AND normalized_number = $2
                       AND source = $3

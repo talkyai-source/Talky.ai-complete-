@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 REFRESH_TOKEN_LIFETIME_DAYS = 7
 _TOKEN_BYTES = 32
+# A second tab or an in-flight request presenting the same cookie a moment
+# after it was rotated is a race, not a theft (Okta/Auth0 grace periods).
+REFRESH_REUSE_GRACE_SECONDS = 10
 
 
 def _now_utc() -> datetime:
@@ -113,8 +116,29 @@ async def rotate_refresh_token(
 
     # Reuse detection runs first: a token whose used_at is set has already
     # been rotated. Seeing it again means either a replay or a leaked
-    # successor chain — revoke the whole family.
-    if row["used_at"] is not None:
+    # successor chain — revoke the whole family. The one exception is a
+    # concurrent refresh that lost by moments while the winner's successor
+    # is still unused: revoking then logged out the session the winner had
+    # just extended, so the loser gets a sibling successor instead.
+    concurrent_loser = row["used_at"] is not None and (
+        row["revoked_at"] is None
+        and row["expires_at"] > now
+        and now - row["used_at"] <= timedelta(seconds=REFRESH_REUSE_GRACE_SECONDS)
+        and await conn.fetchval(
+            """
+            SELECT EXISTS (SELECT 1 FROM refresh_tokens WHERE parent_id = $1
+                           AND used_at IS NULL AND revoked_at IS NULL)
+            """,
+            row["id"],
+        )
+    )
+    if concurrent_loser:
+        logger.info(
+            "refresh.concurrent_rotation family=%s user=%s — sibling issued",
+            row["family_id"],
+            row["user_id"],
+        )
+    elif row["used_at"] is not None:
         await conn.execute(
             """
             UPDATE refresh_tokens
@@ -173,15 +197,16 @@ async def rotate_refresh_token(
     expires_at = now + timedelta(days=REFRESH_TOKEN_LIFETIME_DAYS)
 
     async with conn.transaction():
-        await conn.execute(
-            """
-            UPDATE refresh_tokens
-            SET used_at = $2
-            WHERE id = $1
-            """,
-            row["id"],
-            now,
-        )
+        if not concurrent_loser:  # keep the first use: the grace must not slide
+            await conn.execute(
+                """
+                UPDATE refresh_tokens
+                SET used_at = $2
+                WHERE id = $1
+                """,
+                row["id"],
+                now,
+            )
         await conn.execute(
             """
             INSERT INTO refresh_tokens

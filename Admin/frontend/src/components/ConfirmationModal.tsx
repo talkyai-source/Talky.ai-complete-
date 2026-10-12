@@ -17,6 +17,8 @@ interface ConfirmationModalProps {
     reasonLabel?: string;
     reasonPlaceholder?: string;
     reasonMinLength?: number;
+    /** Failure from the confirmed action; the modal stays open and shows it. */
+    error?: string | null;
 }
 
 export function ConfirmationModal({
@@ -34,6 +36,7 @@ export function ConfirmationModal({
     reasonLabel = 'Reason for this action',
     reasonPlaceholder = 'Explain why this irreversible action is required',
     reasonMinLength = 8,
+    error = null,
 }: ConfirmationModalProps) {
     const modalRef = useRef<HTMLDivElement>(null);
     const confirmButtonRef = useRef<HTMLButtonElement>(null);
@@ -139,6 +142,11 @@ export function ConfirmationModal({
                                     : `Enter a meaningful reason of at least ${reasonMinLength} characters.`}
                             </small>
                         </label>
+                    )}
+                    {error && (
+                        <div className="error-banner" role="alert">
+                            <p>{error}</p>
+                        </div>
                     )}
                 </div>
 

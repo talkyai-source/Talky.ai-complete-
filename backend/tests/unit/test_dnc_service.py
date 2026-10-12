@@ -101,12 +101,17 @@ class _FakeConn:
             if (len(args) == 4 and source != "caller_opt_out" and previous_expiry is not None
                     and previous_expiry <= datetime.now(previous_expiry.tzinfo)):
                 return None
-            if source == "caller_opt_out":
-                existing["expires_at"] = None
             if reason is not None:
                 existing["reason"] = reason
-            if expires_at is not None:
-                existing["expires_at"] = expires_at
+            if len(args) == 5:
+                # add(): the request's expiry applies (None = permanent) and a
+                # permanent entry is never weakened (mirrors the SQL CASE).
+                if source == "caller_opt_out" or expires_at is None or previous_expiry is None:
+                    existing["expires_at"] = None
+                else:
+                    existing["expires_at"] = max(previous_expiry, expires_at)
+            elif source == "caller_opt_out":
+                existing["expires_at"] = None
             return existing
 
         if "SELECT 1 FROM dnc_entries" in sql_norm:
@@ -351,3 +356,41 @@ async def test_dnc_row_written_matches_call_guard_lookup_key():
     )
     guard_key = CallGuard._normalize_phone_number(None, "4155551234")
     assert entry.normalized_number == guard_key
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Re-adding (2026-10-10 bug hunt, outbound-telephony-dialer-8)
+# ──────────────────────────────────────────────────────────────────────────
+# Proven on Postgres 16 with the production dnc_entries schema: the old
+# refresh kept an expired date (POST /dnc said 201, the number stayed
+# dialable) and let a dated re-add make a permanent suppression temporary.
+
+async def test_re_adding_an_expired_entry_makes_it_permanent_again():
+    from datetime import timedelta, timezone
+    pool = _FakePool()
+    svc = DNCService(pool)
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    await svc.add(tenant_id=TENANT_1, e164="+14155551234", source="manual", expires_at=past)
+    again = await svc.add(tenant_id=TENANT_1, e164="+14155551234", source="manual")
+    assert again.expires_at is None
+
+
+async def test_a_dated_re_add_never_weakens_a_permanent_entry():
+    from datetime import timedelta, timezone
+    pool = _FakePool()
+    svc = DNCService(pool)
+    await svc.add(tenant_id=TENANT_1, e164="+14155551234", source="manual")
+    later = datetime.now(timezone.utc) + timedelta(days=30)
+    again = await svc.add(tenant_id=TENANT_1, e164="+14155551234", source="manual", expires_at=later)
+    assert again.expires_at is None
+
+
+async def test_a_dated_re_add_keeps_the_later_of_two_dates():
+    from datetime import timedelta, timezone
+    pool = _FakePool()
+    svc = DNCService(pool)
+    soon = datetime.now(timezone.utc) + timedelta(days=5)
+    later = datetime.now(timezone.utc) + timedelta(days=30)
+    await svc.add(tenant_id=TENANT_1, e164="+14155551234", source="manual", expires_at=later)
+    again = await svc.add(tenant_id=TENANT_1, e164="+14155551234", source="manual", expires_at=soon)
+    assert again.expires_at == later

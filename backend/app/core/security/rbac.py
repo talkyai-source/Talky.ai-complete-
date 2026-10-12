@@ -958,9 +958,20 @@ def require_permission(
         if user_role == UserRole.PLATFORM_ADMIN:
             return user
 
-        # If no tenant_id specified, check global permissions
-        if not tenant_id and user.tenant_id:
-            tenant_id = user.tenant_id
+        # Handlers behind this dependency act on user.tenant_id, so its grants
+        # decide. Checking a tenant named by the request instead let an admin
+        # of tenant B pass admin-only checks for writes in tenant A, where
+        # they may be readonly.
+        if tenant_id and str(tenant_id) != str(user.tenant_id):
+            logger.warning(
+                f"Permission check refused: user={user.id} tenant={user.tenant_id} "
+                f"named tenant={tenant_id}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied to this tenant",
+            )
+        tenant_id = user.tenant_id
 
         # Effective permissions come from the DATABASE (role grants + bounded
         # direct grants) — the same resolver the newer call-control, recording

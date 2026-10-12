@@ -83,12 +83,10 @@ export function createAppQueryClient(onUnauthorized: () => void) {
                 },
             },
             mutations: {
-                retry: (failureCount, err) => {
-                    if (isApiClientError(err)) {
-                        if (err.code === "unauthorized" || err.code === "forbidden" || err.code === "rate_limited") return false;
-                    }
-                    return failureCount < 1;
-                },
+                // Mutations are POST/PUT/DELETE calls (top-up checkout, API keys,
+                // SIP trunks). A 5xx or timeout is ambiguous - the server may have
+                // acted - so replaying would create a second order/key/trunk.
+                retry: false,
             },
         },
     });

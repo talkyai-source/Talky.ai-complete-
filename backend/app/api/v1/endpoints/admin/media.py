@@ -1019,13 +1019,16 @@ async def _mark_deletion_stage_on_connection(
     *,
     error: str | None = None,
 ) -> None:
+    # $2 must carry one type: bound to the varchar(24) column and compared
+    # with a text literal, Postgres refused to prepare the statement, which
+    # runs after the irreversible object delete.
     result = await conn.execute(
         """
             UPDATE admin_media_deletion_intents
-               SET status = $2,
+               SET status = $2::varchar,
                    last_error = $3,
                    object_deleted_at = CASE
-                       WHEN $2 = 'object_deleted' THEN COALESCE(object_deleted_at, NOW())
+                       WHEN $2::varchar = 'object_deleted' THEN COALESCE(object_deleted_at, NOW())
                        ELSE object_deleted_at
                    END,
                    updated_at = NOW()

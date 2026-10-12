@@ -1,6 +1,10 @@
 """Independent Realtime campaign setup; never composes a cascaded prompt."""
+import logging
+
 from app.domain.models.agent_config import AgentConfig, AgentGoal
 from app.realtime.config import RealtimePrompt, validate_realtime
+
+logger = logging.getLogger(__name__)
 
 
 _PERSONA_FOR_CAMPAIGN = {
@@ -34,15 +38,30 @@ def _with_campaign_context(prompt, script, attr):
     if not guidance:
         return prompt
     account_notes = str(prompt.instructions or "").strip()
-    if account_notes:
-        guidance = f"{guidance}\n\nAccount-wide notes: {account_notes}"
+    notes_block = f"\n\nAccount-wide notes: {account_notes}" if account_notes else ""
     from app.domain.services.telephony_session_config import (
         campaign_guidance_char_budget,
     )
 
     budget = campaign_guidance_char_budget()
-    if len(guidance) > budget:
-        guidance = guidance[:budget].rsplit(" ", 1)[0]
+    if len(guidance) + len(notes_block) > budget:
+        # Tenant-wide restrictions are the high-consequence part: never trim
+        # them. Cut the campaign script instead, and say so.
+        room = budget - len(notes_block)
+        if room <= 0:
+            from app.domain.services.campaign_prompt_service import (
+                CampaignPromptValidationError,
+            )
+
+            raise CampaignPromptValidationError(
+                f"Account-wide notes are {len(notes_block):,} characters; the limit "
+                f"for notes plus campaign guidance is {budget:,}. Nothing is trimmed "
+                "automatically."
+            )
+        logger.warning("realtime_campaign_guidance_trimmed chars=%d budget=%d notes_chars=%d",
+                       len(guidance), budget, len(notes_block))
+        guidance = guidance[:room].rsplit(" ", 1)[0]
+    guidance += notes_block
     update = {"instructions": guidance}
     brief = script.get("campaign_brief") or {}
     objective = str(brief.get("opening_objective") or "").strip() if isinstance(brief, dict) else ""

@@ -32,6 +32,9 @@ from app.infrastructure.telephony.runtime_policy_adapter import RuntimePolicyAda
 
 PROBLEM_BASE = "https://talky.ai/problems"
 IDEMPOTENCY_WINDOW_SECONDS = 24 * 60 * 60
+# A claim with no stored result this old was abandoned (crash between claim and
+# store); apply/verify finish well inside this, so it is not still in flight.
+IDEMPOTENCY_STALE_CLAIM_SECONDS = 5 * 60
 
 
 def get_runtime_policy_adapter() -> RuntimePolicyAdapter:
@@ -97,6 +100,9 @@ async def _claim_idempotency(
     idempotency_key: str,
     request_hash: str,
 ) -> tuple[str, Optional[Dict[str, Any]], Optional[int]]:
+    # An existing key is re-claimed (the ON CONFLICT branch) when its window has
+    # expired, when it pinned a transient 429/5xx, or when its claim was
+    # abandoned without a result. A stored 2xx/4xx still replays.
     inserted = await conn.fetchrow(
         """
         INSERT INTO tenant_telephony_idempotency (
@@ -107,9 +113,24 @@ async def _claim_idempotency(
             expires_at
         )
         VALUES ($1, $2, $3, $4, NOW() + ($5::int * INTERVAL '1 second'))
-        ON CONFLICT (tenant_id, operation, idempotency_key) DO NOTHING
+        ON CONFLICT (tenant_id, operation, idempotency_key) DO UPDATE
+        SET request_hash = EXCLUDED.request_hash,
+            response_body = NULL,
+            status_code = NULL,
+            resource_type = NULL,
+            resource_id = NULL,
+            created_at = NOW(),
+            expires_at = EXCLUDED.expires_at
+        WHERE tenant_telephony_idempotency.expires_at < NOW()
+           OR tenant_telephony_idempotency.status_code = 429
+           OR tenant_telephony_idempotency.status_code >= 500
+           OR (
+                tenant_telephony_idempotency.response_body IS NULL
+                AND tenant_telephony_idempotency.created_at
+                    < NOW() - INTERVAL '%d seconds'
+           )
         RETURNING id
-        """,
+        """ % IDEMPOTENCY_STALE_CLAIM_SECONDS,
         tenant_id,
         operation,
         idempotency_key,

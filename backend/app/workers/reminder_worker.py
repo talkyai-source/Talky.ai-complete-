@@ -15,8 +15,9 @@ import signal
 import sys
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.core.dotenv_compat import load_dotenv
 from app.core.db_utils import acquire_with_tenant
@@ -31,6 +32,7 @@ except ImportError as e:
     raise ImportError(f"Required dependency not installed: {e}")
 
 from app.core.db import init_db_pool, close_db_pool
+from app.domain.services.dnc_service import DNCService
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +242,9 @@ class ReminderWorker:
                 SELECT 
                     r.*,
                     m.id as meeting_id, m.title as meeting_title, m.start_time, m.end_time, m.join_link,
-                    l.id as lead_id, l.first_name, l.last_name, l.phone_number, l.email
+                    m.status as meeting_status, m.timezone as meeting_timezone,
+                    l.id as lead_id, l.first_name, l.last_name, l.phone_number, l.email,
+                    l.status as lead_status, l.do_not_call as lead_do_not_call
                 FROM reminders r
                 LEFT JOIN meetings m ON r.meeting_id = m.id AND r.tenant_id = m.tenant_id
                 LEFT JOIN leads l ON r.lead_id = l.id AND r.tenant_id = l.tenant_id
@@ -281,14 +285,14 @@ class ReminderWorker:
         # Extract contact info from joined fields
         phone_number = reminder.get("phone_number")
         email = reminder.get("email")
+        # Joined columns arrive as None (not missing) for NULLs, so .get() defaults don't apply.
         lead_name = (
-            f"{reminder.get('first_name', '')} {reminder.get('last_name', '')}".strip() or "there"
+            f"{reminder.get('first_name') or ''} {reminder.get('last_name') or ''}".strip() or "there"
         )
         lead_id = str(reminder["lead_id"]) if reminder["lead_id"] else None
         meeting_id = str(reminder["meeting_id"]) if reminder["meeting_id"] else None
 
         # Get meeting details
-        meeting_title = reminder.get("meeting_title", "Your meeting")
         start_time = reminder.get("start_time")
         join_link = reminder.get("join_link")
         content = reminder.get("content") or {}
@@ -297,6 +301,11 @@ class ReminderWorker:
                 content = json.loads(content)
             except (ValueError, TypeError):
                 content = {}
+        meeting_title = (
+            reminder.get("meeting_title")
+            or (content.get("title") if isinstance(content, dict) else None)
+            or "Meeting"
+        )
         message = content.get("message") if isinstance(content, dict) else None
         requested_channel = reminder.get("type")
         # Legacy rows without a channel retain their original contact preference.
@@ -311,14 +320,41 @@ class ReminderWorker:
             elif requested_channel == 'sms':
                 phone_number = approved_recipient
 
+        # A lead who opted out (purge sets leads.status='dnc') or is flagged
+        # do-not-call must not be messaged by a reminder scheduled earlier.
+        verdict = await self._opt_out_verdict(
+            reminder, tenant_id, phone_number if requested_channel == "sms" else None
+        )
+        if verdict == "opted_out":
+            await self._cancel_pending(tenant_id, reminder_id, "recipient_opted_out")
+            logger.info(f"Reminder {reminder_id} cancelled: recipient opted out")
+            return
+        if verdict == "unknown":
+            return  # Fail closed: stays pending, re-evaluated on the next scan.
+
+        # A cancelled/completed meeting, or one that has already started (late
+        # scan after downtime, long retries), gets no reminder. Lead-only
+        # reminders (no meeting) are never stale.
+        if meeting_id and self._meeting_is_past(reminder):
+            await self._cancel_pending(tenant_id, reminder_id, "meeting_no_longer_upcoming")
+            logger.info(f"Reminder {reminder_id} cancelled: meeting is not upcoming")
+            return
+
         # Determine reminder type from content or timing
         reminder_type = self._determine_reminder_type(reminder)
 
         # Format time for display
-        time_str = self._format_time(start_time) if start_time else "soon"
+        time_str = (
+            self._format_time(start_time, reminder.get("meeting_timezone")) if start_time else "soon"
+        )
 
         # Generate idempotency key
         idempotency_key = reminder.get("idempotency_key") or f"reminder-{reminder_id}"
+        # The durable receipt replays a stored definitive failure for the same
+        # key, so each retry attempt gets its own send key (the stored reminder
+        # key stays stable). Ambiguous outcomes are never retried at all.
+        attempt = reminder.get("retry_count") or 0
+        send_key = f"{idempotency_key}:{attempt}" if attempt else idempotency_key
 
         logger.info(f"Processing reminder {reminder_id}: {reminder_type} for {meeting_title}")
 
@@ -345,14 +381,15 @@ class ReminderWorker:
                         result = await self._sms_service.send_sms(
                             tenant_id=tenant_id, to_number=phone_number, message=message,
                             lead_id=lead_id, meeting_id=meeting_id, reminder_id=reminder_id,
-                            idempotency_key=idempotency_key, triggered_by="reminder",
+                            idempotency_key=send_key, triggered_by="reminder",
                         )
                     else:
                         result = await self._sms_service.send_meeting_reminder(
                             tenant_id=tenant_id, to_number=phone_number, reminder_type=reminder_type,
-                            name=lead_name, title=meeting_title, time=time_str, join_link=join_link,
+                            name=self._clip(lead_name, 20), title=self._clip(meeting_title, 40),
+                            time=time_str, join_link=join_link,
                             lead_id=lead_id, meeting_id=meeting_id, reminder_id=reminder_id,
-                            idempotency_key=idempotency_key,
+                            idempotency_key=send_key,
                         )
 
                     success = result.get("success", False)
@@ -373,7 +410,7 @@ class ReminderWorker:
                         join_link=join_link,
                         lead_id=lead_id,
                         meeting_id=meeting_id,
-                        idempotency_key=idempotency_key,
+                        idempotency_key=send_key,
                         message=message,
                     )
 
@@ -456,6 +493,48 @@ class ReminderWorker:
                         f"Reminder {reminder_id} failed after {retry_count} attempts: {error}"
                     )
 
+    async def _opt_out_verdict(
+        self, reminder: Dict[str, Any], tenant_id: Optional[str], sms_number: Optional[str]
+    ) -> str:
+        """'opted_out', 'ok' or 'unknown' (the DNC lookup failed: do not send)."""
+        if reminder.get("lead_status") == "dnc" or reminder.get("lead_do_not_call"):
+            return "opted_out"
+        if sms_number:
+            try:
+                # Same normaliser/lookup CallGuard uses, so list entries match.
+                if await DNCService(self._db_pool).is_on_dnc(tenant_id=tenant_id, e164=sms_number):
+                    return "opted_out"
+            except Exception as exc:
+                logger.error(f"Reminder {reminder.get('id')}: DNC lookup failed, not sending: {exc}")
+                return "unknown"
+        return "ok"
+
+    @staticmethod
+    def _meeting_is_past(reminder: Dict[str, Any]) -> bool:
+        if reminder.get("meeting_status") in ("cancelled", "completed"):
+            return True
+        start = reminder.get("start_time")
+        if isinstance(start, str):
+            try:
+                start = datetime.fromisoformat(start.replace("Z", "+00:00"))
+            except ValueError:
+                return False
+        if isinstance(start, datetime):
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            return start <= datetime.now(timezone.utc)
+        return False
+
+    async def _cancel_pending(self, tenant_id: Optional[str], reminder_id: str, reason: str) -> None:
+        async with acquire_with_tenant(self._db_pool, tenant_id) as conn:
+            await conn.execute(
+                "UPDATE reminders SET status = 'cancelled', last_error = $1 "
+                "WHERE id = $2 AND tenant_id = $3 AND status = 'pending'",
+                reason,
+                reminder_id,
+                tenant_id,
+            )
+
     def _determine_reminder_type(self, reminder: Dict[str, Any]) -> str:
         """Determine reminder type (24h, 1h, 10m) from content or context."""
         content = reminder.get("content")
@@ -470,20 +549,39 @@ class ReminderWorker:
         if "reminder_type" in content:
             return content["reminder_type"]
 
-        # Infer from template name
-        template = content.get("template", "")
+        # A non-default template name is an explicit choice.
+        template = content.get("template") or ""
         if "24h" in template:
             return "24h"
-        elif "1h" in template:
-            return "1h"
         elif "10m" in template:
             return "10m"
 
-        # Default to 1h
+        # The scheduler stamps every row with the default 1h template, so the
+        # wording must follow the real lead time (meeting start - scheduled time).
+        start, scheduled = reminder.get("start_time"), reminder.get("scheduled_at")
+        if isinstance(start, datetime) and isinstance(scheduled, datetime):
+            try:
+                lead = start - scheduled
+            except TypeError:  # naive vs aware: fall through to the template
+                lead = None
+            if lead is not None:
+                if lead >= timedelta(hours=12):
+                    return "24h"
+                if lead >= timedelta(minutes=30):
+                    return "1h"
+                return "10m"
+
+        if "1h" in template:
+            return "1h"
         return "1h"
 
-    def _format_time(self, start_time: Any) -> str:
-        """Format ISO time string or datetime for display."""
+    @staticmethod
+    def _clip(text: str, limit: int) -> str:
+        """Keep SMS template fields short enough for a single 160-char message."""
+        return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
+
+    def _format_time(self, start_time: Any, tz_name: Optional[str] = None) -> str:
+        """Format a meeting start in its own timezone, labelled (UTC when unknown)."""
         try:
             if isinstance(start_time, str):
                 dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
@@ -491,7 +589,15 @@ class ReminderWorker:
                 dt = start_time
             else:
                 return str(start_time)
-            return dt.strftime("%I:%M %p")
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            zone = timezone.utc
+            if tz_name:
+                try:
+                    zone = ZoneInfo(tz_name)
+                except (ZoneInfoNotFoundError, ValueError):
+                    zone = timezone.utc
+            return dt.astimezone(zone).strftime("%I:%M %p %Z")
         except Exception:
             return str(start_time)
 

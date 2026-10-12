@@ -50,6 +50,9 @@ export function TenantsTable({
         action: 'suspend' | 'resume';
     }>({ open: false, tenant: null, action: 'suspend' });
     const [actionLoading, setActionLoading] = useState(false);
+    // The API client never throws: a 403/500/network failure comes back as
+    // { error }. Keep the modal open and show it rather than looking like success.
+    const [actionError, setActionError] = useState<string | null>(null);
 
     // Sort tenants
     const sortedTenants = [...tenants].sort((a, b) => {
@@ -110,33 +113,53 @@ export function TenantsTable({
         return Math.min((used / allocated) * 100, 100);
     };
 
+    const closeConfirm = () => {
+        setActionError(null);
+        setConfirmAction({ open: false, tenant: null, action: 'suspend' });
+    };
+
+    const closeQuota = () => {
+        setActionError(null);
+        setQuotaModal({ open: false, tenant: null });
+    };
+
     const handleSuspendResume = async () => {
         if (!confirmAction.tenant) return;
         setActionLoading(true);
+        setActionError(null);
         try {
-            if (confirmAction.action === 'suspend') {
-                await api.suspendTenant(confirmAction.tenant.id);
-            } else {
-                await api.resumeTenant(confirmAction.tenant.id);
+            const res = confirmAction.action === 'suspend'
+                ? await api.suspendTenant(confirmAction.tenant.id)
+                : await api.resumeTenant(confirmAction.tenant.id);
+            if (res.error) {
+                setActionError(res.error.message || 'The tenant status was not changed.');
+                return;
             }
             onRefresh();
+            closeConfirm();
         } catch (error) {
             console.error('Failed to update tenant status:', error);
+            setActionError(error instanceof Error ? error.message : 'The tenant status was not changed.');
         } finally {
             setActionLoading(false);
-            setConfirmAction({ open: false, tenant: null, action: 'suspend' });
         }
     };
 
     const handleQuotaUpdate = async (quota: QuotaUpdateRequest) => {
         if (!quotaModal.tenant) return;
         setActionLoading(true);
+        setActionError(null);
         try {
-            await api.updateTenantQuota(quotaModal.tenant.id, quota);
+            const res = await api.updateTenantQuota(quotaModal.tenant.id, quota);
+            if (res.error) {
+                setActionError(res.error.message || 'The quota was not saved.');
+                return;
+            }
             onRefresh();
-            setQuotaModal({ open: false, tenant: null });
+            closeQuota();
         } catch (error) {
             console.error('Failed to update quota:', error);
+            setActionError(error instanceof Error ? error.message : 'The quota was not saved.');
         } finally {
             setActionLoading(false);
         }
@@ -268,6 +291,7 @@ export function TenantsTable({
                                                         <button
                                                             className="action-menu-item danger"
                                                             onClick={() => {
+                                                                setActionError(null);
                                                                 setConfirmAction({
                                                                     open: true,
                                                                     tenant,
@@ -283,6 +307,7 @@ export function TenantsTable({
                                                         <button
                                                             className="action-menu-item"
                                                             onClick={() => {
+                                                                setActionError(null);
                                                                 setConfirmAction({
                                                                     open: true,
                                                                     tenant,
@@ -298,6 +323,7 @@ export function TenantsTable({
                                                     <button
                                                         className="action-menu-item"
                                                         onClick={() => {
+                                                            setActionError(null);
                                                             setQuotaModal({ open: true, tenant });
                                                             setActiveMenu(null);
                                                         }}
@@ -318,7 +344,7 @@ export function TenantsTable({
 
             {/* Confirm Modal */}
             {confirmAction.open && confirmAction.tenant && (
-                <div className="modal-overlay" onClick={() => setConfirmAction({ open: false, tenant: null, action: 'suspend' })}>
+                <div className="modal-overlay" onClick={closeConfirm}>
                     <div className="modal-content" onClick={(e) => e.stopPropagation()}>
                         <h3 className="modal-title">
                             {confirmAction.action === 'suspend' ? 'Suspend Tenant?' : 'Resume Tenant?'}
@@ -329,10 +355,15 @@ export function TenantsTable({
                                 : `Are you sure you want to resume "${confirmAction.tenant.business_name}"? This will restore full platform access.`
                             }
                         </p>
+                        {actionError && (
+                            <div className="error-banner" role="alert">
+                                <p>{actionError}</p>
+                            </div>
+                        )}
                         <div className="modal-actions">
                             <button
                                 className="btn btn-secondary"
-                                onClick={() => setConfirmAction({ open: false, tenant: null, action: 'suspend' })}
+                                onClick={closeConfirm}
                                 disabled={actionLoading}
                             >
                                 Cancel
@@ -353,9 +384,10 @@ export function TenantsTable({
             {quotaModal.open && quotaModal.tenant && (
                 <QuotaModal
                     tenant={quotaModal.tenant}
-                    onClose={() => setQuotaModal({ open: false, tenant: null })}
+                    onClose={closeQuota}
                     onSave={handleQuotaUpdate}
                     loading={actionLoading}
+                    error={actionError}
                 />
             )}
         </>
@@ -368,18 +400,37 @@ interface QuotaModalProps {
     onClose: () => void;
     onSave: (quota: QuotaUpdateRequest) => void;
     loading: boolean;
+    error: string | null;
 }
 
-function QuotaModal({ tenant, onClose, onSave, loading }: QuotaModalProps) {
-    const [minutes, setMinutes] = useState(tenant.minutes_allocated);
-    const [concurrentCalls, setConcurrentCalls] = useState(tenant.max_concurrent_calls);
+// An empty/garbled box is invalid, never silently coerced to 0 or 1.
+function parseBounded(raw: string, min: number, max: number): number | null {
+    if (!/^\d+$/.test(raw.trim())) return null;
+    const value = Number(raw);
+    return value >= min && value <= max ? value : null;
+}
+
+function QuotaModal({ tenant, onClose, onSave, loading, error }: QuotaModalProps) {
+    const [minutes, setMinutes] = useState(String(tenant.minutes_allocated));
+    const [concurrentCalls, setConcurrentCalls] = useState(String(tenant.max_concurrent_calls));
+
+    const parsedMinutes = parseBounded(minutes, 0, Number.MAX_SAFE_INTEGER);
+    const parsedConcurrent = parseBounded(concurrentCalls, 1, 100);
+    // Send only what the admin actually changed, so a stale snapshot of the
+    // other field cannot overwrite a value changed elsewhere since the list loaded.
+    const changes: QuotaUpdateRequest = {};
+    if (parsedMinutes !== null && parsedMinutes !== tenant.minutes_allocated) {
+        changes.minutes_allocated = parsedMinutes;
+    }
+    if (parsedConcurrent !== null && parsedConcurrent !== tenant.max_concurrent_calls) {
+        changes.max_concurrent_calls = parsedConcurrent;
+    }
+    const canSave = parsedMinutes !== null && parsedConcurrent !== null && Object.keys(changes).length > 0;
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onSave({
-            minutes_allocated: minutes,
-            max_concurrent_calls: concurrentCalls
-        });
+        if (!canSave) return;
+        onSave(changes);
     };
 
     return (
@@ -393,7 +444,7 @@ function QuotaModal({ tenant, onClose, onSave, loading }: QuotaModalProps) {
                             type="number"
                             id="minutes"
                             value={minutes}
-                            onChange={(e) => setMinutes(parseInt(e.target.value) || 0)}
+                            onChange={(e) => setMinutes(e.target.value)}
                             min={0}
                             className="form-input"
                         />
@@ -405,12 +456,17 @@ function QuotaModal({ tenant, onClose, onSave, loading }: QuotaModalProps) {
                             type="number"
                             id="concurrent"
                             value={concurrentCalls}
-                            onChange={(e) => setConcurrentCalls(parseInt(e.target.value) || 1)}
+                            onChange={(e) => setConcurrentCalls(e.target.value)}
                             min={1}
                             max={100}
                             className="form-input"
                         />
                     </div>
+                    {error && (
+                        <div className="error-banner" role="alert">
+                            <p>{error}</p>
+                        </div>
+                    )}
                     <div className="modal-actions">
                         <button
                             type="button"
@@ -423,7 +479,7 @@ function QuotaModal({ tenant, onClose, onSave, loading }: QuotaModalProps) {
                         <button
                             type="submit"
                             className="btn btn-primary"
-                            disabled={loading}
+                            disabled={loading || !canSave}
                         >
                             {loading ? 'Saving...' : 'Save Changes'}
                         </button>

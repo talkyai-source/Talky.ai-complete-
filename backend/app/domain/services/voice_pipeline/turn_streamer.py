@@ -20,10 +20,12 @@ import json
 import logging
 import re
 import time
+import uuid
 from typing import Optional
 
 from fastapi import WebSocket
 
+from app.core.db_utils import acquire_with_tenant
 from app.domain.models.conversation import MessageRole
 from app.domain.models.session import CallSession
 from app.domain.services.ask_ai_constants import (
@@ -77,6 +79,51 @@ _HISTORY_OMISSION_NOTICE = (
 )
 
 _END_SESSION_TOOL_INSTRUCTIONS = build_end_session_tool_instructions()
+
+
+async def _ensure_campaign_timezone(session) -> None:
+    """Stash the campaign's calling timezone on the session, once per call.
+
+    Nothing else sets ``_campaign_timezone`` and AgentConfig has no timezone
+    field, so the live-state time-of-day line used to fall through to a
+    hard-coded Europe/London for every callee. The zone lives in
+    ``campaigns.calling_config.timezone`` (the same field the dialer's schedule
+    gate overlays). Fail-soft: no zone means no time-of-day line, never a wrong one.
+    """
+    if getattr(session, "_campaign_timezone_loaded", False):
+        return
+    if getattr(session, "_campaign_timezone", None):
+        session._campaign_timezone_loaded = True
+        return
+    from app.domain.services.voice_pipeline.lead_slot_capture import resolve_call_binding
+
+    binding = resolve_call_binding(session)
+    tenant, campaign = binding.get("tenant_id"), binding.get("campaign_id")
+    if not tenant or not campaign:
+        return  # not bound yet; try again next turn
+    zone = None
+    try:
+        from app.core.container import get_container
+
+        container = get_container()
+        # Demo/test sessions carry names ("ask-ai", "voice-demo"), not campaign UUIDs.
+        uuid.UUID(str(campaign))
+        uuid.UUID(str(tenant))
+        if container.is_initialized:
+            async with acquire_with_tenant(container.db_pool, str(tenant)) as conn:
+                raw = await conn.fetchval(
+                    "SELECT calling_config FROM campaigns "
+                    "WHERE id=$1::uuid AND tenant_id=$2::uuid",
+                    str(campaign), str(tenant),
+                )
+            if isinstance(raw, str) and raw:
+                raw = json.loads(raw)
+            if isinstance(raw, dict):
+                zone = str(raw.get("timezone") or "").strip() or None
+    except Exception as exc:  # noqa: BLE001 - a clock hint must never fail a turn
+        logger.debug("campaign_timezone_lookup_failed err=%s", exc)
+    session._campaign_timezone = zone
+    session._campaign_timezone_loaded = True
 
 
 # Matches the START of an internal action envelope inside a longer buffer:
@@ -261,12 +308,18 @@ class TurnStreamer:
         _structured = reduce_cascaded_session_live_state(session)
         # Callee-local time-of-day so "morning/afternoon/evening" matches the
         # hour where the phone rang (was always "Morning"). Timezone comes from
-        # the campaign (calling_config.timezone), stashed on the session; UK
-        # campaigns default to Europe/London when unset.
+        # the campaign (calling_config.timezone), loaded onto the session. With
+        # no zone the line is omitted; London is assumed only for an explicit
+        # UK contact region, never for every callee.
+        await _ensure_campaign_timezone(session)
         _tz_name = (
             getattr(session, "_campaign_timezone", None)
             or getattr(_agent_cfg, "timezone", None)
-            or "Europe/London"
+            or (
+                "Europe/London"
+                if str(getattr(session, "contact_phone_region", "") or "").upper() in {"GB", "UK"}
+                else None
+            )
         )
         try:
             from app.domain.services.voice_pipeline.time_of_day import (

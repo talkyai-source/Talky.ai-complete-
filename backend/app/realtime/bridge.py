@@ -163,6 +163,7 @@ class RealtimeBridge:
         self._knowledge_lookup_seq = 0
         self._utterance = None
         self._playback_generation = 0
+        self._caller_speech_generation = None
         self._on_end_call = on_end_call
         self._closing_after_generation = None
         self._goodbye_completed = asyncio.Event()
@@ -225,6 +226,7 @@ class RealtimeBridge:
         self._contact_session = contact_session
         self._contact_session.contact_phone_region = contact_phone_region
         self._contact_history: list[Any] = []
+        self._contact_history_orders: list[Optional[int]] = []  # caller order per entry
         self._contact_tasks: "set[asyncio.Task]" = set()
         self._contact_persist_tail: Optional[asyncio.Task] = None
         # Identity is delivery evidence, not generated-text evidence. Consume
@@ -528,6 +530,9 @@ class RealtimeBridge:
                     raw = getattr(ev, "raw", None) or {}
                     if raw.get("reason") == "speech_started":
                         self._register_caller_item(raw)
+                        # Only speech generated after this point can answer the
+                        # caller's coming words (their ASR may finish late).
+                        self._caller_speech_generation = self._playback_generation
                     # Revoke the timer immediately, before ASR supplies the new
                     # words. A delayed tool from the old turn cannot rearm it.
                     if not self._caller_transcript_pending:
@@ -587,6 +592,8 @@ class RealtimeBridge:
                         if admission_kind == "historical":
                             self._record_turn("user", text, metadata={
                                 "caller_turn_order": caller_order, "late_final": True})
+                            self._remember_late_contact_turn(
+                                self._caller_item_id(caller_raw), caller_order, text)
                             continue
                         if admission_kind == "replacement":
                             self._latest_caller_text = text
@@ -611,10 +618,12 @@ class RealtimeBridge:
                         self._action_session._voice_action_user_turn = self._live_user_turn_seq
                         # The caller owns close/DNC intent even when the model
                         # produces only a plain goodbye and omits its tool.
-                        self._arm_caller_end_call(require_explicit=True)
+                        self._arm_caller_end_call(require_explicit=True,
+                            after_generation=self._caller_speech_generation)
+                        self._caller_speech_generation = None  # one anchor per caller turn
                         _tidx = self._turn_index
                         await self._observe_contact_turn(text, caller_raw)
-                        self._remember_contact_turn("user", text)
+                        self._remember_contact_turn("user", text, caller_order=caller_order)
                         self._current_caller_transcript_index = self._record_turn("user", text, metadata={
                             "provider_item_id": self._current_caller_item_key,
                             "caller_turn_order": caller_order,
@@ -791,7 +800,12 @@ class RealtimeBridge:
             truncate = getattr(self._rt, "truncate_response", None)
             if callable(truncate) and not (utterance and utterance["status"] == "completed"):
                 played = (receipt or {}).get("played_ms", 0)
-                await truncate((utterance or {}).get("raw") or raw or {}, played_ms=played or 0)
+                target = (utterance or {}).get("raw") or raw or {}
+                await truncate(target, played_ms=played or 0)
+                if raw and raw.get("during_response") and target is not raw:
+                    # The response still generating when the caller spoke was
+                    # never played: its partial items stay unheard in history.
+                    await truncate(raw, played_ms=0)
             elif callable(truncate) and raw and raw.get("during_response"):
                 # A new still-generating response can be interrupted after the
                 # preceding utterance has completely played.
@@ -910,23 +924,50 @@ class RealtimeBridge:
                     "utterance_id": utterance["id"], "status": "interrupted", "evidence": "unknown"}})
                 utterance["transcript_recorded"] = True
 
-    def _remember_contact_turn(self, role: str, text: str) -> None:
+    def _remember_contact_turn(self, role: str, text: str, *, caller_order=None) -> None:
         from app.domain.models.conversation import Message, MessageRole
 
-        self._contact_history.append(
-            Message(
-                role=(
-                    MessageRole.ASSISTANT
-                    if role == "assistant"
-                    else MessageRole.USER
-                ),
-                content=text,
-            )
+        message = Message(
+            role=(
+                MessageRole.ASSISTANT
+                if role == "assistant"
+                else MessageRole.USER
+            ),
+            content=text,
         )
+        position = len(self._contact_history)
+        if caller_order is not None:
+            # A caller turn whose ASR finished late goes before every newer
+            # caller turn already remembered, so history keeps caller order.
+            position = next((i for i, order in enumerate(self._contact_history_orders)
+                             if order is not None and order > caller_order), position)
+        self._contact_history.insert(position, message)
+        self._contact_history_orders.insert(position, caller_order)
         # The read-back gate only needs the latest few turns; bound retained
         # contact-bearing text independently of transcript persistence.
         if len(self._contact_history) > 12:
             del self._contact_history[:-12]
+            del self._contact_history_orders[:-12]
+
+    def _remember_late_contact_turn(self, item_id, caller_order: int, text: str) -> None:
+        """Keep a late-final caller turn as quotable evidence and read-back history.
+
+        The turn is not current: it must not touch ``_contact_turn`` (the live
+        turn record_contact is bound to), ``_latest_caller_text`` or the
+        end-call arming, so bind_contact_turn is deliberately not used here.
+        """
+        from app.domain.services.voice_pipeline.contact_capture import ContactSource
+        from app.domain.services.voice_pipeline.contact_recording import _TURN_HISTORY, ContactTurn
+        if not item_id or not text.strip():
+            return
+        source = ContactSource(item_id, caller_order,
+            hashlib.sha256(text.strip().encode("utf-8")).hexdigest())
+        kept = [turn for turn in getattr(self._contact_session, "_contact_turns", None) or ()
+                if turn.source.caller_turn_order != caller_order]
+        kept.append(ContactTurn(text.strip(), source))
+        kept.sort(key=lambda turn: turn.source.caller_turn_order)
+        self._contact_session._contact_turns = kept[-_TURN_HISTORY:]
+        self._remember_contact_turn("user", text, caller_order=caller_order)
 
     async def _observe_contact_turn(self, text: str, raw: Any = None, *, revision: bool = False) -> None:
         """Bind caller ownership without parsing or interrupting the model reply."""
@@ -1269,7 +1310,7 @@ class RealtimeBridge:
             self._opt_out_acknowledged = True
         return acknowledged
 
-    def _arm_caller_end_call(self, *, require_explicit=False):
+    def _arm_caller_end_call(self, *, require_explicit=False, after_generation=None):
         from app.domain.services.end_session_action import caller_signaled_end
         from app.domain.services.voice_pipeline.identity_disposition import contains_explicit_goodbye
         if self._caller_transcript_pending or self._hangup_started:
@@ -1286,8 +1327,15 @@ class RealtimeBridge:
         if self._pending_end_call_revision == self._caller_activity_revision:
             return True
         self._pending_end_call_revision = self._caller_activity_revision
-        self._closing_after_generation = self._playback_generation
+        # ASR can finish after the model already answered the caller: anchor on
+        # where the caller's speech began, not on the current generation.
+        self._closing_after_generation = (
+            self._playback_generation if after_generation is None else after_generation)
         self._goodbye_completed.clear()
+        utterance = self._utterance
+        if (utterance is not None and utterance.get("status") == "completed"
+                and utterance["generation"] > self._closing_after_generation):
+            self._goodbye_completed.set()  # that answer was fully played already
         self._action_session._end_call_requested = True
         self._termination_task = asyncio.create_task(
             self._finish_end_call(self._caller_activity_revision))

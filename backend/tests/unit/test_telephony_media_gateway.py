@@ -35,10 +35,12 @@ async def test_hangup_call_uses_adapter_pbx_call_id():
         {"adapter": adapter, "pbx_call_id": "pbx-call-id"},
     )
 
+    adapter.hangup_confirmed.return_value = True
+
     result = await gateway.hangup_call("pipeline-call-id", "user_goodbye")
 
     assert result is True
-    adapter.hangup.assert_awaited_once_with("pbx-call-id")
+    adapter.hangup_confirmed.assert_awaited_once_with("pbx-call-id")
 
 
 @pytest.mark.asyncio
@@ -437,7 +439,7 @@ async def test_force_hangup_failure_is_logged_and_deactivates_session():
     session = _force_audio_route_failures(
         gateway, "call-hangup-fail", gateway._AUDIO_ROUTE_FORCE_END_THRESHOLD
     )
-    adapter.hangup.side_effect = RuntimeError("ARI down")
+    adapter.hangup_confirmed.side_effect = RuntimeError("ARI down")
 
     # Force the decode/resample branch to fail on this chunk.
     with patch(
@@ -466,6 +468,7 @@ async def test_force_hangup_success_clears_failure_counter():
     await gateway.on_call_started(
         "call-hangup-ok", {"adapter": adapter, "pbx_call_id": "pbx-hangup-ok"},
     )
+    adapter.hangup_confirmed.return_value = True
     session = _force_audio_route_failures(
         gateway, "call-hangup-ok", gateway._AUDIO_ROUTE_FORCE_END_THRESHOLD
     )
@@ -480,7 +483,7 @@ async def test_force_hangup_success_clears_failure_counter():
     await task
     await asyncio.sleep(0)
 
-    adapter.hangup.assert_awaited_once_with("pbx-hangup-ok")
+    adapter.hangup_confirmed.assert_awaited_once_with("pbx-hangup-ok")
     assert session.consecutive_audio_route_failures == 0
     assert session.is_active is True
 

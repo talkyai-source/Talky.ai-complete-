@@ -183,6 +183,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                 dashboardApi.getMinutesStatus().catch(() => null),
             ]);
             if (superseded()) return;
+            setError("");
             setCampaign(campaignData.campaign);
             setContacts(contactsData.items);
             setStats(statsData);
@@ -232,6 +233,8 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                 if (cancelled) return;
                 setCampaign(c.campaign);
                 if (s) setStats(s);
+                // A successful tick proves the backend is reachable again.
+                setError("");
             } catch {
                 /* transient network hiccup — the next tick retries */
             }
@@ -397,16 +400,26 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                 </button>
             </motion.div>
 
-            {loading ? (
+            {/* Keep the last good data on screen during a reload or after a
+                failed one: Pause/Stop must stay reachable while the campaign runs. */}
+            {loading && !campaign ? (
                 <div className="flex items-center justify-center h-64">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-foreground/60" />
                 </div>
-            ) : error ? (
+            ) : error && !campaign ? (
                 <div className="content-card border-red-500/30 text-red-400">
                     {error}
                 </div>
             ) : campaign ? (
                 <div className="space-y-6">
+                    {error ? (
+                        <div role="alert" className="content-card border-red-500/30 bg-red-500/5 flex items-center justify-between gap-3">
+                            <p className="text-sm text-red-400">Could not refresh this campaign: {error}</p>
+                            <Button variant="outline" onClick={() => { void loadData(); }} disabled={loading}>
+                                Retry
+                            </Button>
+                        </div>
+                    ) : null}
                     {/* Header */}
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}

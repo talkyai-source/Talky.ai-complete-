@@ -9,6 +9,7 @@ import os
 import logging
 from typing import Optional
 from functools import lru_cache
+from urllib.parse import quote, urlsplit
 
 try:
     import redis.asyncio as redis
@@ -46,10 +47,20 @@ def _build_redis_url() -> str:
     password = os.getenv("REDIS_PASSWORD", "").strip()
 
     if password:
-        # redis://:password@host:port/db
-        return f"redis://:{password}@{host}:{port}/{db}"
+        # redis://:password@host:port/db — quoted, or a base64-style password
+        # ('/', '+', '=', '#') breaks parsing and Redis silently falls back.
+        return f"redis://:{quote(password, safe='')}@{host}:{port}/{db}"
     else:
         return f"redis://{host}:{port}/{db}"
+
+
+def _mask_redis_url(url: str) -> str:
+    """The URL with any password replaced by ***, whatever its source."""
+    parts = urlsplit(url)
+    if not parts.password:
+        return url
+    userinfo, _, hostinfo = parts.netloc.rpartition("@")
+    return parts._replace(netloc=f"{userinfo.split(':', 1)[0]}:***@{hostinfo}").geturl()
 
 
 def _parse_address_list(value: str) -> list[tuple[str, int]]:
@@ -330,9 +341,7 @@ class ServiceContainer:
                 logger.info("redis_connected mode=cluster")
             else:
                 redis_url = _build_redis_url()
-                log_url = redis_url.replace(
-                    os.getenv("REDIS_PASSWORD", "NOPASSWORD"), "***"
-                ) if os.getenv("REDIS_PASSWORD") else redis_url
+                log_url = _mask_redis_url(redis_url)
                 self._redis = redis.from_url(
                     redis_url,
                     encoding="utf-8",

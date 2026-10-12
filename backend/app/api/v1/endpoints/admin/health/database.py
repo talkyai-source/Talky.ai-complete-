@@ -5,7 +5,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.v1.dependencies import CurrentUser, get_db_client, require_admin
+from app.api.v1.dependencies import CurrentUser, get_db_client, require_platform_admin
 from app.core.postgres_adapter import Client
 
 from .schemas import DatabaseStatus
@@ -15,7 +15,7 @@ router = APIRouter()
 
 @router.get("/health/database", response_model=DatabaseStatus)
 async def get_database_status(
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client)
 ):
     """

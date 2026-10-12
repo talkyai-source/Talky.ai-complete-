@@ -1725,6 +1725,19 @@ async def _register_unknown_asterisk_cleanup_candidates(
     return registered
 
 
+async def wait_for_telephony_application(timeout_s: float = 10.0) -> bool:
+    """Bounded startup wait until the PBX application is registered.
+
+    Run before the startup recovery pass so its ARI inventory does not race
+    the event socket's registration (AsteriskAdapter.
+    wait_for_application_registered). True when there is nothing to wait for.
+    """
+    waiter = getattr(get_adapter(), "wait_for_application_registered", None)
+    if not callable(waiter):
+        return True
+    return bool(await waiter(timeout_s))
+
+
 async def recover_orphaned_calls() -> int:
     """Hang up and record calls abandoned by a dead process incarnation.
 
@@ -2203,6 +2216,7 @@ async def _on_ringing(call_id: str) -> None:
     _t0 = asyncio.get_event_loop().time()
     logger.info(f"WARMUP ringing_warmup_start {call_id[:12]}")
     voice_session = None
+    handed_to_end = False  # the unused session is closed at most once
     try:
         orchestrator = _get_orchestrator()
         config = _build_telephony_session_config(gateway_type="telephony")
@@ -2219,6 +2233,7 @@ async def _on_ringing(call_id: str) -> None:
             # session; never publish it over a selected or terminal call.
             if _sb.get_ringing_event(call_id) is evt:
                 _sb.pop_ringing_event(call_id)
+            handed_to_end = True
             await orchestrator.end_session(voice_session)
             return
 
@@ -2235,9 +2250,13 @@ async def _on_ringing(call_id: str) -> None:
             )
         connect_task: Optional[asyncio.Task] = None
         if warmup_coros:
-            connect_task = asyncio.create_task(
-                asyncio.gather(*warmup_coros, return_exceptions=True)
-            )
+            # create_task takes a coroutine, not the future gather() returns:
+            # passing it raised TypeError, so every warm-up with a connection
+            # to open failed unpublished (production 2026-09-29, talky-out-94).
+            async def _connect_all():
+                return await asyncio.gather(*warmup_coros, return_exceptions=True)
+
+            connect_task = asyncio.create_task(_connect_all())
 
         # LLM: tiny max_tokens=1 completion that seeds the httpx HTTP/2+TLS
         # pool.  Fire-and-forget — unlike the old answer-phase placement, the
@@ -2337,6 +2356,17 @@ async def _on_ringing(call_id: str) -> None:
         current = _sb.get_ringing_warmup(call_id)
         if current is not None and current[0] is voice_session:
             _pop_ringing_warmup(call_id)
+        elif voice_session is not None and not handed_to_end and (
+                current is None or current[0] is not voice_session):
+            # Created here but never published: nobody else owns it, so end it
+            # rather than leave its providers in the orchestrator's sessions.
+            try:
+                await _get_orchestrator().end_session(voice_session)
+            except Exception as end_exc:  # noqa: BLE001 - cleanup must not mask the failure
+                logger.warning(
+                    "ringing_warmup_unpublished_end_failed call=%s err=%s",
+                    call_id[:12], end_exc,
+                )
     finally:
         # Always signal the event so _on_new_call never waits forever.
         evt.set()

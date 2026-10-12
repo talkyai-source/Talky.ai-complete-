@@ -465,7 +465,7 @@ class CallGuard:
             async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
                 row = await conn.fetchrow(
                     """
-                    SELECT id, subscription_status
+                    SELECT id, subscription_status, status
                     FROM tenants
                     WHERE id = $1
                     """,
@@ -477,6 +477,16 @@ class CallGuard:
                         check=GuardCheck.TENANT_ACTIVE,
                         passed=False,
                         reason="tenant_not_found",
+                    )
+
+                # Suspension (suspension_service) writes tenants.status and
+                # leaves subscription_status alone, so both must be read.
+                account_status = row.get("status")
+                if account_status is not None and account_status != "active":
+                    return CheckResult(
+                        check=GuardCheck.TENANT_ACTIVE,
+                        passed=False,
+                        reason=f"tenant_{account_status}",
                     )
 
                 status = canonical_subscription_status(row.get("subscription_status") or "active")
@@ -737,7 +747,9 @@ class CallGuard:
                 reason="no_limits_configured",
             )
 
-        async with self._db_pool.acquire() as conn:
+        # The limiter's tables are FORCE RLS: without the tenant scope the
+        # event insert fails its WITH CHECK once the role loses BYPASSRLS.
+        async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
             decision = await self._rate_limiter.evaluate(
                 conn=conn,
                 tenant_id=tenant_id,
@@ -767,8 +779,9 @@ class CallGuard:
                 reason="no_limits_configured",
             )
 
-        # Get current status without acquiring lease
-        async with self._db_pool.acquire() as conn:
+        # Get current status without acquiring lease. Leases are FORCE RLS:
+        # an unscoped read counts 0 and the cap could never trip.
+        async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
             status = await self._concurrency_limiter.get_status(
                 conn=conn,
                 tenant_id=tenant_id,
@@ -1261,7 +1274,14 @@ class CallGuard:
                 cached = await self._redis.get(cache_key)
                 if cached:
                     data = json.loads(cached)
-                    return TenantCallLimits(**data)
+                    # The hours travel as ISO strings. An entry without them
+                    # predates their caching; trusting it would switch the
+                    # business-hours check off, so reload it instead.
+                    if not data.get("respect_business_hours") or "business_hours_start" in data:
+                        for key in ("business_hours_start", "business_hours_end"):
+                            if data.get(key):
+                                data[key] = time.fromisoformat(data[key])
+                        return TenantCallLimits(**data)
             except Exception:
                 pass
 
@@ -1350,6 +1370,14 @@ class CallGuard:
                             "features_enabled": limits.features_enabled,
                             "features_disabled": limits.features_disabled,
                             "respect_business_hours": limits.respect_business_hours,
+                            "business_hours_start": (
+                                limits.business_hours_start.isoformat()
+                                if limits.business_hours_start else None
+                            ),
+                            "business_hours_end": (
+                                limits.business_hours_end.isoformat()
+                                if limits.business_hours_end else None
+                            ),
                             "business_hours_timezone": limits.business_hours_timezone,
                             "is_active": limits.is_active,
                         }
