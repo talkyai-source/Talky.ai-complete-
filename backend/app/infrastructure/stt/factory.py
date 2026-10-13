@@ -2,46 +2,44 @@
 STT Provider Factory
 Creates STT provider instances based on configuration
 """
-from typing import Dict, Type
+
 from app.domain.interfaces.stt_provider import STTProvider
+from app.infrastructure.stt.assemblyai import AssemblyAISTTProvider
 
 
 class STTFactory:
     """Factory for creating STT provider instances"""
-    
-    _providers: Dict[str, Type[STTProvider]] = {}
-    
+
+    _providers: dict[str, type[STTProvider]] = {}
+
     @classmethod
     def create(cls, provider_name: str, config: dict) -> STTProvider:
         """
         Create and initialize an STT provider
-        
+
         Args:
             provider_name: Name of the provider (e.g., "deepgram-flux")
             config: Provider-specific configuration
-            
+
         Returns:
             Initialized STTProvider instance
-            
+
         Raises:
             ValueError: If provider not found
         """
         if provider_name not in cls._providers:
             available = ", ".join(cls._providers.keys()) if cls._providers else "None"
-            raise ValueError(
-                f"Unknown STT provider: {provider_name}. "
-                f"Available: {available}"
-            )
-        
+            raise ValueError(f"Unknown STT provider: {provider_name}. " f"Available: {available}")
+
         provider_class = cls._providers[provider_name]
         instance = provider_class()
         return instance
-    
+
     @classmethod
-    def register(cls, name: str, provider_class: Type[STTProvider]) -> None:
+    def register(cls, name: str, provider_class: type[STTProvider]) -> None:
         """Register a custom provider"""
         cls._providers[name] = provider_class
-    
+
     @classmethod
     def list_providers(cls) -> list[str]:
         """Get list of available provider names"""
@@ -49,16 +47,22 @@ class STTFactory:
 
 
 # Auto-register available providers
+STTFactory.register("assemblyai", AssemblyAISTTProvider)
+
 try:
     from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
+
     STTFactory.register("deepgram-flux", DeepgramFluxSTTProvider)
-    STTFactory.register("deepgram_flux", DeepgramFluxSTTProvider)  # Underscore alias (orchestrator convention)
+    STTFactory.register(
+        "deepgram_flux", DeepgramFluxSTTProvider
+    )  # Underscore alias (orchestrator convention)
     STTFactory.register("flux", DeepgramFluxSTTProvider)  # Short alias
 except ImportError:
     pass  # Deepgram Flux not available
 
 try:
     from app.infrastructure.stt.deepgram import DeepgramSTT
+
     STTFactory.register("deepgram", DeepgramSTT)
     STTFactory.register("nova-2", DeepgramSTT)  # Alias
 except ImportError:
@@ -68,10 +72,10 @@ try:
     # nova-3 streaming on /v1/listen (acoustic VAD/endpointing). The failover
     # secondary for Flux, and a selectable primary engine. Verified 2026-06-29.
     from app.infrastructure.stt.deepgram_nova import DeepgramNovaSTTProvider
+
     STTFactory.register("deepgram-nova", DeepgramNovaSTTProvider)
     STTFactory.register("deepgram_nova", DeepgramNovaSTTProvider)
     STTFactory.register("nova-3", DeepgramNovaSTTProvider)
     STTFactory.register("nova", DeepgramNovaSTTProvider)
 except ImportError:
     pass  # Deepgram nova not available
-

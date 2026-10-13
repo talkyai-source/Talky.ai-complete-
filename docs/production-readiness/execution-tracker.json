@@ -4,7 +4,7 @@
   "created_at": "2026-10-04",
   "plan_status": "in_progress",
   "plan_file": "docs/production ready.md",
-  "scope_policy": "Fixed to the October 2 assessment; no unrelated feature work. On 7 October the user explicitly revised AG02–AG05 implementation toward concise prompts, model-selected knowledge and model-interpreted contact tools; unrelated scope remains frozen.",
+  "scope_policy": "Fixed to the October 2 assessment; no unrelated feature work. On 7 October the user explicitly revised AG02–AG05 implementation toward concise prompts, model-selected knowledge and model-interpreted contact tools. On 10 October the user explicitly authorized the AssemblyAI Universal-3.6 Pro STT integration, English only with its selectable controls; evidence and remaining live prerequisites are in docs/sessions/2026-10-10-assemblyai-integration.md. Unrelated scope remains frozen.",
   "feature_freeze": {
     "active": true,
     "source": "Explicit user instruction on 4 October 2026",

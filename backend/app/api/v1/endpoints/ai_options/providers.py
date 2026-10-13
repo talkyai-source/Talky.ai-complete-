@@ -20,6 +20,7 @@ from app.domain.services.voice_eligibility import (
 )
 
 from app.domain.models.ai_config import (
+    ASSEMBLYAI_MODELS,
     CARTESIA_MODELS,
     DEEPGRAM_MODELS,
     DEEPGRAM_TTS_MODELS,
@@ -58,7 +59,11 @@ async def list_providers(current_user=Depends(get_current_user)):
         ProviderListResponse with LLM, STT, and TTS options
     """
     from app.realtime.credentials import resolve_openai_key
+    from app.domain.services.credential_resolver import get_credential_resolver
     realtime_available = bool(await resolve_openai_key(getattr(current_user, "tenant_id", None)))
+    assemblyai_available = bool(await get_credential_resolver().resolve(
+        "assemblyai", tenant_id=getattr(current_user, "tenant_id", None),
+    ))
     elevenlabs_models = (
         await get_elevenlabs_tts_models_for_current_key()
         if elevenlabs_enabled()
@@ -102,10 +107,19 @@ async def list_providers(current_user=Depends(get_current_user)):
             "models": llm_models,
         },
         stt={
-            "providers": ["deepgram"],
-            "models": [model.model_dump() for model in DEEPGRAM_MODELS],
-            # Selectable speech ENGINES (the Flux-vs-Nova-3 turn-taking choice).
-            "engines": [engine.model_dump() for engine in STT_ENGINES],
+            "providers": ["deepgram", "assemblyai"],
+            "models": [model.model_dump() for model in [*DEEPGRAM_MODELS, *ASSEMBLYAI_MODELS]],
+            "engines": [
+                {
+                    **engine.model_dump(),
+                    "available": assemblyai_available if engine.id == "assemblyai" else True,
+                    "unavailable_reason": (
+                        "AssemblyAI API key is not configured"
+                        if engine.id == "assemblyai" and not assemblyai_available else None
+                    ),
+                }
+                for engine in STT_ENGINES
+            ],
         },
         tts={
             "providers": tts_providers,

@@ -216,6 +216,7 @@ class TtsPlayback:
         # a guessed fixed tail. Review of 91b61694 (2026-09-24): the fixed
         # tail unmuted well before the browser-paced playback really ended.
         _waited_for_browser_playback = False
+        _context_playback_allowed = True
         _tts_iter = None
         _playback_uid = None
         stopped_by_caller_at_end = None
@@ -604,14 +605,23 @@ class TtsPlayback:
                 ):
                     try:
                         await websocket.send_json({"type": "tts_audio_complete"})
-                        _waited_for_browser_playback = bool(
-                            await self._p.media_gateway.wait_for_playback_complete(call_id)
-                        )
+                        playback_result = await self._p.media_gateway.wait_for_playback_complete(call_id)
+                        _waited_for_browser_playback = bool(playback_result)
+                        _context_playback_allowed = playback_result is not False
                     except Exception as _wait_exc:
+                        _context_playback_allowed = False
                         logger.debug(
                             "tts_playback_wait_for_playback_failed call_id=%s: %s",
                             call_id[:8], _wait_exc,
                         )
+            if (
+                completed and not interrupted and first_chunk_sent and _context_playback_allowed
+                and session.tts_active
+                and not (barge_in_event and barge_in_event.is_set())
+            ):
+                from app.domain.services.stt_context import update_stt_agent_context
+
+                await update_stt_agent_context(getattr(self._p, "stt_provider", None), call_id, text)
         except asyncio.CancelledError:
             session._tts_playout_completed = False
             raise

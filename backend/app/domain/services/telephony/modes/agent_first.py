@@ -542,6 +542,7 @@ async def _send_outbound_greeting(voice_session) -> None:
                     break
 
             # Flush remaining audio in the gateway buffer
+            context_submitted = not was_interrupted and chunks_sent > 0
             if not was_interrupted:
                 flush = getattr(voice_session.media_gateway, "flush_tts_buffer", None)
                 if not flush:
@@ -550,7 +551,15 @@ async def _send_outbound_greeting(voice_session) -> None:
                     try:
                         await flush(call_id)
                     except Exception:
-                        pass
+                        context_submitted = False
+
+            if (
+                context_submitted and session.tts_active
+                and not (barge_in_event and barge_in_event.is_set())
+            ):
+                from app.domain.services.stt_context import update_stt_agent_context
+
+                await update_stt_agent_context(getattr(voice_session, "stt_provider", None), call_id, greeting)
 
             session.tts_active = False
             _elapsed_ms = (_time.monotonic() - _t0) * 1000.0

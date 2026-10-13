@@ -56,6 +56,7 @@ _ENV_VAR_BY_PROVIDER: dict[str, str] = {
     "gemini": "GEMINI_API_KEY",
     "cerebras": "CEREBRAS_API_KEY",
     "deepgram": "DEEPGRAM_API_KEY",
+    "assemblyai": "ASSEMBLYAI_API_KEY",
     "cartesia": "CARTESIA_API_KEY",
     "elevenlabs": "ELEVENLABS_API_KEY",
     "openai": "OPENAI_API_KEY",
@@ -130,6 +131,22 @@ class CredentialResolver:
         returns the env fallback.
         """
         if tenant_id:
+            if provider.strip().lower() == "assemblyai":
+                # AI Options may inspect availability before a tenant adds its
+                # key. Re-read on each session/catalog request so additions,
+                # rotations and revocations reach every worker without a
+                # process-local cache invalidation signal.
+                # _resolve_tenant returns (outcome, value): use the tenant key only
+                # when one was found, else the platform env key (never the tuple).
+                outcome, tenant_value = await self._resolve_tenant(
+                    provider=provider,
+                    tenant_id=tenant_id,
+                    credential_kind=credential_kind,
+                )
+                if outcome == _FOUND and tenant_value:
+                    return tenant_value
+                return resolve_sync_env_only(provider, env_var=env_var)
+
             cache_key = (
                 self._cache_scope,
                 tenant_id,
@@ -233,8 +250,9 @@ class CredentialResolver:
             # The normal no-BYOK case: the call runs on the platform key. A
             # real read failure raises above (lookup_failed) or fails to decrypt
             # below, both at WARNING/ERROR, so this stays quiet. INFO keeps the
-            # platform-key substitution auditable. Names the tenant and
-            # provider only - never key material.
+            # platform-key substitution auditable. Providers using the cache log
+            # once per (tenant, provider); AssemblyAI deliberately re-reads every
+            # time. Names the tenant and provider only - never key material.
             logger.info(
                 "tenant_credential_none_configured tenant=%s provider=%s kind=%s "
                 "- using the platform key",

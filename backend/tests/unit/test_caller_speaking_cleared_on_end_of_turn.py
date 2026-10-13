@@ -163,6 +163,27 @@ async def deliver_end_of_turn(pipeline, session):
     await drain(pipeline)
 
 
+@pytest.mark.asyncio
+async def test_assembly_empty_final_releases_floor_without_promoting_partial():
+    p, s = _Pipeline(), real_session()
+    mark_caller_speaking(s)
+    await TranscriptHandler(p).handle(s, _Chunk(text="an uncertain partial", is_final=False))
+    assert s.current_user_input == "an uncertain partial"
+    s._last_transcript_confidence = 0.9
+    s._last_transcript_alternatives = ("another uncertain partial",)
+    await TranscriptHandler(p).handle(s, _Chunk(
+        text="", is_final=True,
+        metadata={"provider": "assemblyai", "turn_order": 3, "empty_turn": True},
+    ))
+    await drain(p)
+    assert caller_is_speaking(s) is False
+    assert s.current_user_input == ""
+    assert s._last_transcript_confidence is None
+    assert s._last_transcript_alternatives == ()
+    assert not p._pending_llm_tasks
+    assert not p.spoken
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  The four early returns inside transcript_handler.handle
 # ═══════════════════════════════════════════════════════════════════════════

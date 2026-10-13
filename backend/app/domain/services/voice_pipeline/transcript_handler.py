@@ -140,6 +140,14 @@ class TranscriptHandler:
             mark_caller_stopped(session)
 
         metadata = transcript.metadata or {}
+        if _is_turn_end and metadata.get("provider") == "assemblyai" and metadata.get("empty_turn") is True:
+            # A revised turn may finalize with no words. Release the speaking
+            # gate above, but never promote its earlier partial into an answer.
+            session.current_user_input = ""
+            session._last_transcript_confidence = None
+            session._last_transcript_alternatives = ()
+            session._suppressed_backchannel_seq = None
+            return
         self._p.transcript_service.bind_call_identity(call_id, session.talklee_call_id)
 
         # Ensure latency tracker is aligned with current turn ID.
