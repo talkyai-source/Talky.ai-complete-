@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { SuspensionStateProvider } from "@/components/admin/suspension-state-provider";
 import { AppProviders } from "@/components/providers/app-providers";
+import { CallEndedNotice } from "@/components/ui/call-ended-notice";
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -45,6 +46,9 @@ export default function RootLayout({
             {children}
           </SuspensionStateProvider>
         </AppProviders>
+        {/* Renders null unless the Ask AI popup flagged a call as dropped by
+            navigation — see ASKAI_CALL_ENDED_FLAG in call-ended-notice.tsx. */}
+        <CallEndedNotice />
       </body>
     </html>
   );

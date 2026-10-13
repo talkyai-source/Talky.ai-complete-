@@ -233,7 +233,12 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
             {/* Hero content */}
             <div
                 ref={heroContentRef}
-                className="heroContentWrap relative z-10 flex w-full items-center justify-center px-4 py-8 md:px-16 md:py-10"
+                // py-20 (80px, symmetric): reserves the hero's bottom-left corner for
+                // the Ask AI button, which is absolutely positioned there. Symmetric
+                // because flex centring puts the content at (heroHeight-contentHeight)/2
+                // regardless of equal padding — roomy viewports render pixel-identical,
+                // tight ones grow the hero (min-h) instead of overlapping the button.
+                className="heroContentWrap relative z-10 flex w-full items-center justify-center px-4 py-20 md:px-16"
             >
                 <div className="w-full max-w-4xl text-center">
                     <div className="heroHeadlineContainer flex flex-col items-center gap-0 mb-6">

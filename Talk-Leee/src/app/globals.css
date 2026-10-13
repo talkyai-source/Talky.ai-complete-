@@ -1223,6 +1223,166 @@ details > summary.home-menu-toggle {
   animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
+/* ── Ask AI active-call bar (voice-agent-popup.tsx) ──────────────────────
+   Shown while a call is live and the user has scrolled past the hero.
+   Horizontal geometry (top / left / width / radius) is NOT defined here:
+   it is measured from the navbar element at runtime, so the bar occupies
+   the navbar's area on every device by construction. Only the heights are
+   fixed here — 87px two-row below 640px, 56px one-row at 640px and above,
+   the same sm breakpoint the rest of the site uses (viewport width only,
+   no device targeting). Keep the two heights in sync with
+   BAR_HEIGHT_TWO_ROW / BAR_HEIGHT_ONE_ROW in voice-agent-popup.tsx: the
+   orb↔bar swap thresholds are computed from them. */
+.askAiCallBar {
+  position: fixed;
+  z-index: 600;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 87px;
+  padding: 8px 10px;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(2, 14, 28, 0.92);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25), 0 1px 2px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(20px) saturate(1.5);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  font-family: var(--font-manrope, inherit);
+  /* Fluid, breakpoint-free: 11px on a 280px viewport up to 13px from
+     ~430px, so "Talk-Lee is listening" never truncates at 280-294px. */
+  font-size: clamp(11px, calc(7px + 1.4vw), 13px);
+  line-height: 1.3;
+  font-weight: 500;
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+@media (min-width: 640px) {
+  .askAiCallBar {
+    height: 56px;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    padding: 0 8px 0 14px;
+  }
+}
+
+.askAiCallBarVisible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.askAiCallBarRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+@media (min-width: 640px) {
+  .askAiCallBarRow {
+    flex: 1;
+    gap: 10px;
+  }
+}
+
+.askAiCallBarState {
+  font-weight: 700;
+  flex: none;
+}
+
+.askAiCallBarLine {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.75;
+}
+
+.askAiCallBarErrorText {
+  color: #fecaca;
+  opacity: 1;
+}
+
+.askAiCallBarTimer {
+  margin-left: auto;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.9;
+}
+
+.askAiCallBarEnd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  min-width: 44px;
+  width: 100%;
+  border: 0;
+  border-radius: 9999px;
+  background: #dc2626;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  flex: none;
+}
+
+.askAiCallBarEnd:hover {
+  background: #b91c1c;
+}
+
+@media (min-width: 640px) {
+  .askAiCallBarEnd {
+    width: auto;
+    padding: 0 16px;
+  }
+}
+
+/* ── Ask AI call-ended notice (call-ended-notice.tsx, root layout) ── */
+.askAiCallEndedNotice {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100vw - 24px);
+  padding: 8px 6px 8px 14px;
+  border-radius: 9999px;
+  background: rgba(2, 14, 28, 0.92);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(20px) saturate(1.5);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* 44x44 effective tap target without inflating the pill's height. */
+.askAiCallEndedDismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin: -12px 0;
+  opacity: 0.75;
+}
+
+.askAiCallEndedDismiss:hover {
+  opacity: 1;
+}
+
 .heroTitleGlow,
 .heroTitleGlow span {
   text-shadow:
