@@ -131,9 +131,11 @@ _VERSIONS: Final[Mapping[str, str]] = {
     # figures exactly as sourced (docs/standards/voice-agent-standards.md).
     # @17 / @15 (2026-10-09): read an email back exactly as said (no added
     # dot), and numbers with their country code (test calls 43020665, f5dcac8e).
-    "lead_gen": "lead_gen@17",
-    "customer_support": "customer_support@15",
-    "receptionist": "receptionist@15",
+    # @18 / @16 (2026-10-14): numbers are read back exactly as the caller gave
+    # them; no country code is added (owner decision, test call 3413d73c).
+    "lead_gen": "lead_gen@18",
+    "customer_support": "customer_support@16",
+    "receptionist": "receptionist@16",
 }
 
 #: Fallback for a persona that is not in the registry yet. Deliberately visible

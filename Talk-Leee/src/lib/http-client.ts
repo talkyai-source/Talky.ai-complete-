@@ -181,7 +181,12 @@ function managesSession(path: string) {
 }
 
 export function setRequestIdentity(identity: RequestIdentity | null) {
-    if (JSON.stringify(identity) !== JSON.stringify(_requestIdentity)) _identityEpoch += 1;
+    // Only replacing or clearing a verified identity is an account change. The
+    // first verification after a page load is not: requests a page sent before
+    // /auth/me answered used that same session, and failing them showed "Your
+    // sign-in changed" on every refresh. Logout and cross-tab changes still
+    // invalidate pending work through invalidateRequestIdentity().
+    if (_requestIdentity !== null && JSON.stringify(identity) !== JSON.stringify(_requestIdentity)) _identityEpoch += 1;
     _requestIdentity = identity ? { ...identity } : null;
 }
 

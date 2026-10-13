@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 from email_validator import EmailNotValidError, validate_email
 
-from app.domain.services.phone_number_normalizer import normalize_phone_for_capture
+from app.domain.services.phone_number_normalizer import normalize_phone_as_said
 from app.domain.services.voice_pipeline.contact_capture import (
     CAPTURE_FIELD_TYPES, CaptureStatus, ContactCaptureState, ContactSource,
 )
@@ -36,7 +36,7 @@ CONTACT_TOOL_SPEC = {
             "caller's words where they gave it (this turn or an earlier one); "
             "confirm records the caller's clear agreement in this turn to that exact candidate. "
             "If they agreed to a detail you never set, set it, then confirm. For a phone, give "
-            "+country code when the country is clear from the call. "
+            "the number exactly as the caller said it; never ask for, add or change a country code. "
             "Add preserves a confirmed email/phone when the caller offers another; name/company "
             "each have one current value. Withdraw "
             "removes the selected contact. Use its field_key to correct or withdraw an earlier "
@@ -154,7 +154,17 @@ def _quote_words(text) -> list[str]:
     return re.findall(r"[a-z0-9]+", str(text or "").lower().replace("’", "").replace("'", ""))
 
 
-def _quote_turn(session, current: ContactTurn, quote: str, *, current_only: bool) -> ContactTurn | None:
+def _digit_runs(text) -> list[str]:
+    """Each number in the text as its digits: "0 8 1, 010 188" and "zero eight
+    one zero one zero one eight eight" are both "081010188"."""
+    from app.services.scripts.spoken_email_normalizer import spoken_digits_to_numerals
+
+    spoken = spoken_digits_to_numerals(str(text or ""))
+    return [re.sub(r"\D", "", run) for run in re.findall(r"\d(?:[\d\s,.()\-]*\d)?", spoken)]
+
+
+def _quote_turn(session, current: ContactTurn, quote: str, *, current_only: bool,
+                phone: bool = False) -> ContactTurn | None:
     """The caller turn the quote comes from (most recent first), or None.
 
     A detail is often given in one turn and confirmed in the next; the model
@@ -164,17 +174,24 @@ def _quote_turn(session, current: ContactTurn, quote: str, *, current_only: bool
     only the current turn counted. Provenance stays exact: the value's source
     is the turn that holds the words. Confirmation and withdrawal still need
     the current turn.
+
+    A phone quote is matched on its digits, however they were spaced or spoken:
+    test call 3413d73c (2026-10-13) refused the caller's "081010188" twice
+    because the model quoted it as separate digits.
     """
     words = _quote_words(quote)
     if not words:
         return None
     turns = [current] if current_only else [current, *reversed(getattr(session, "_contact_turns", None) or ())]
     size = len(words)
+    number = max(_digit_runs(quote), key=len, default="") if phone else ""
     for candidate in turns:
         if not isinstance(candidate, ContactTurn):
             continue
         said = _quote_words(candidate.text)
         if any(said[i:i + size] == words for i in range(len(said) - size + 1)):
+            return candidate
+        if len(number) >= 6 and any(number in run for run in _digit_runs(candidate.text)):
             return candidate
     return None
 
@@ -204,24 +221,15 @@ def _separators_said(value: str, quote: str) -> bool:
                for char in needed)
 
 
-def _phone_region(session) -> str | None:
-    """The campaign's region, else the country of the line this call is on."""
-    from app.domain.services.phone_number_normalizer import region_of_e164
-
-    region = getattr(session, "contact_phone_region", None)
-    if region:
-        return region
-    return region_of_e164(getattr(getattr(session, "captured_slots", None), "line_phone", None))
-
-
-def _normalise(kind, value, region):
+def _normalise(kind, value):
     if not isinstance(value, str) or not value.strip() or len(value) > 320:
         return None
     try:
         if kind == "email":
             return validate_email(value.strip(), check_deliverability=False).normalized.lower()
         if kind == "phone":
-            return normalize_phone_for_capture(value.strip(), region)
+            # Exactly as said, for any country: no region, nothing added.
+            return normalize_phone_as_said(value.strip())
         if any(ord(char) < 32 or ord(char) == 127 for char in value):
             return None
         return value.strip()  # Identity spelling/case belongs to the caller/model, not a parser.
@@ -308,7 +316,8 @@ async def record_contact(session, arguments, *, turn=_UNSET, pool=None) -> dict:
         return result("invalid_arguments")
     # Where the caller said it: set/add may quote an earlier caller turn (the
     # detail confirmed now was given before); confirm/withdraw are about now.
-    quote_turn = _quote_turn(session, turn, quote, current_only=operation in ("confirm", "withdraw"))
+    quote_turn = _quote_turn(session, turn, quote, current_only=operation in ("confirm", "withdraw"),
+                             phone=kind == "phone")
     if quote_turn is None:
         return result("quote_not_found")
     quote_order = quote_turn.source.caller_turn_order
@@ -334,10 +343,9 @@ async def record_contact(session, arguments, *, turn=_UNSET, pool=None) -> dict:
         if operation == "add" and (kind not in ("email", "phone") or field_key != current_key):
             return result("additional_contact_not_ready")
         current = entries[field_key]
-        region = _phone_region(session)
-        normalized = _normalise(kind, value, region)
-        # The candidate may be named in any formatting ("+92 312 0750496").
-        named = None if expected is None else (_normalise(kind, expected, region) or expected)
+        normalized = _normalise(kind, value)
+        # The candidate may be named in any formatting ("0312 075 0496").
+        named = None if expected is None else (_normalise(kind, expected) or expected)
         if current is None and operation == "set" and named is not None and named == normalized:
             # No candidate, so nothing can be stale: the model named the value
             # it is setting (replays of f5dcac8e and 43020665, 2026-10-09).

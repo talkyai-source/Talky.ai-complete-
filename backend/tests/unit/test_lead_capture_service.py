@@ -202,7 +202,10 @@ class _RecordingPool:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("field_type", "value", "stored"),
-    (("phone", "+1 415 555 2671", "+14155552671"), ("email", "Bob@Acme.com", "bob@acme.com")),
+    (("phone", "+1 415 555 2671", "+14155552671"), ("email", "Bob@Acme.com", "bob@acme.com"),
+     # Owner decision 2026-10-14: a number without a country code is stored
+     # exactly as said (call 3413d73c lost "081010188" to the E.164 rule).
+     ("phone", "0810 101 88", "081010188")),
 )
 async def test_a_contact_the_caller_stated_is_stored_unconfirmed(field_type, value, stored):
     """2026-09-28 (owner): what the caller SAID is kept while the read-back is
@@ -239,9 +242,9 @@ async def test_a_caller_contact_that_is_not_being_read_back_is_refused(status):
 @pytest.mark.asyncio
 async def test_an_unconfirmed_caller_contact_is_still_validated():
     svc = LeadCaptureService(pool=object())
-    with pytest.raises(InvalidCaptureError, match="E.164"):
+    with pytest.raises(InvalidCaptureError, match="6 to 15 digits"):
         await svc.capture(
-            tenant_id="t", call_id="c", field_key="phone", value="4155552671",
+            tenant_id="t", call_id="c", field_key="phone", value="41555",
             source="caller_stated", field_type="phone", confirmed=False,
             validation_status="awaiting_confirmation",
         )
@@ -251,7 +254,7 @@ async def test_an_unconfirmed_caller_contact_is_still_validated():
 @pytest.mark.parametrize(
     ("field_type", "value", "message"),
     (
-        ("phone", "4155552671", "E.164"),
+        ("phone", "12-34", "6 to 15 digits"),
         ("email", "bob..smith@example.com", "valid"),
     ),
 )

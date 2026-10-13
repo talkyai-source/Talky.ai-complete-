@@ -17,9 +17,10 @@ function trunk(overrides: Partial<SipTrunkRow> = {}): SipTrunkRow {
     return { id: "trunk-1", tenant_id: "tenant-1", trunk_name: "Test trunk", sip_domain: "sip.example.com", port: 5060, transport: "udp", direction: "both", is_active: true, auth_configured: true, auth_username: "saved-user", metadata: { register: true, caller_id: "+442079460000", unrelated: "keep" }, runtime_ready: false, runtime_status_code: "unreachable", runtime_status_detail: "No SIP response within 5s", live_registration_status: "registered", created_at: "2026-10-02T00:00:00Z", ...overrides };
 }
 
-function mount(row = trunk(), mutate: (options: Parameters<typeof api.request>[0]) => Promise<unknown> = async () => row) {
+function mount(row = trunk(), mutate: (options: Parameters<typeof api.request>[0]) => Promise<unknown> = async () => row, route: unknown = {}) {
     api.request = async <T,>(options: Parameters<typeof api.request>[0]) => {
         if (options.method && options.method !== "GET") return await mutate(options) as T;
+        if (options.path.endsWith("/outbound-route")) return route as T;
         if (options.path.endsWith("/pool")) return [] as T;
         if (options.path.endsWith("/pool-assignment")) return {} as T;
         return [row] as T;
@@ -101,4 +102,30 @@ test("an inbound-only IP trunk uses inbound proof despite an unanswered outbound
     mount(trunk({ direction: "inbound", auth_configured: false, auth_username: null, runtime_ready: false, inbound_runtime_ready: true, live_registration_status: "unreachable" }));
     await screen.findByText("Inbound ready · Inbound configuration is ready.");
     assert.equal(screen.queryByText(/^Outbound ready/), null);
+});
+
+
+test("the page shows the number outbound calls really go out from, not only a stored caller ID", async () => {
+    // Owner report 2026-10-14: the backend dialled one number while this page
+    // kept showing another (the trunk's stored caller ID).
+    mount(trunk(), undefined, { ready: true, reason_code: "ready", caller_id: "+17789249977", trunk_id: "trunk-1", trunk_name: "Test trunk" });
+    const status = await screen.findByText(/Outbound calls go out from/);
+    assert.match(status.textContent || "", /\+17789249977 on Test trunk/);
+    assert.ok(screen.getByText("Outbound calls use this line"));
+    assert.ok(screen.getByText("Caller ID: +442079460000"));
+});
+
+test("a line the dialer cannot use says so instead of showing a number as if it worked", async () => {
+    mount(trunk(), undefined, { ready: false, reason_code: "selected_trunk_not_ready", reason: "Selected SIP trunk is not ready (selected_trunk_not_ready). Check its live status in Settings.", caller_id: "+442046132300", trunk_id: "trunk-1" });
+    const status = await screen.findByText(/Outbound calls can.t go out right now/);
+    assert.match(status.textContent || "", /not ready/);
+    assert.match(status.textContent || "", /\+442046132300/);
+    assert.equal(screen.queryByText("Outbound calls use this line"), null);
+});
+
+test("an account that does not dial through SIP lines shows no outbound line summary", async () => {
+    mount(trunk(), undefined, { ready: true, reason_code: "sip_not_required", caller_id: "1001", trunk_id: null });
+    await screen.findByText("Test trunk");
+    assert.equal(screen.queryByText(/Outbound calls go out from/), null);
+    assert.equal(screen.queryByText(/1001/), null);
 });

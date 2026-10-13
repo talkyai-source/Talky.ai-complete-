@@ -16,10 +16,14 @@ Function                     Contract
                              (``default_country``), passes 4-5 digit SIP
                              extensions through, rejects junk with
                              ``ValueError``.  Use this for anything new.
-``normalize_phone_for_``     VOICE CAPTURE. Strict libphonenumber validity;
-``capture``                  accepts ``+`` E.164 input without a region, but a
+``normalize_phone_for_``     Strict libphonenumber validity; accepts ``+``
+``capture``                  E.164 input without a region, but a
                              national-format number requires explicit region
                              context and is never guessed as US.
+``normalize_phone_as_said``  VOICE CAPTURE. The caller's number exactly as
+                             said: formatting removed, nothing added, no
+                             country inferred or required (6-15 digits, a
+                             leading ``+`` only if they said one).
 ``normalize_phone_number_``  Same, but never rejects on length/format --
 ``lenient``                  digits passthrough fallback.  Only for accounts
                              with relaxed phone validation.
@@ -154,6 +158,24 @@ def normalize_phone_for_capture(phone: str, region: str | None = None) -> str:
     if not is_strict_e164(normalized):
         raise ValueError("Invalid E.164 phone number")
     return normalized
+
+
+_AS_SAID_RE = re.compile(r"^\+?\d{6,15}$")
+
+
+def normalize_phone_as_said(phone: str) -> str:
+    """A caller-stated number exactly as said, for every country.
+
+    The voice agent records numbers generically (owner decision 2026-10-14):
+    spaces, dashes, dots and brackets are removed and nothing is added -- no
+    country code is inferred from the line or campaign, none is required, and
+    no national numbering plan is applied. "081010188" stays "081010188";
+    "+92 312 0750496" becomes "+923120750496".
+    """
+    compact = re.sub(r"[\s().\-]", "", str(phone or ""))
+    if not _AS_SAID_RE.match(compact):
+        raise ValueError("A phone number is 6 to 15 digits, with an optional leading '+'")
+    return compact
 
 
 def region_of_e164(number: str | None) -> str | None:

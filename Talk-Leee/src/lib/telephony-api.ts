@@ -305,6 +305,31 @@ export function useUpdateSipTrunk() {
     });
 }
 
+// ----- Where outbound calls really go out from ------------------------------
+
+export interface OutboundRoute {
+    ready: boolean;
+    reason_code: string;
+    reason?: string | null;
+    caller_id?: string | null;
+    trunk_id?: string | null;
+    trunk_name?: string | null;
+}
+
+/**
+ * The line and number the dialer uses now, from the same preflight as campaign
+ * launch. A trunk's stored caller ID is not always the number dialled (the
+ * dialer can fall back to the account's calling-rules number). Keyed under
+ * sipTrunks so every trunk or pool change refreshes it.
+ */
+export function useOutboundRoute() {
+    return useQuery({
+        queryKey: [...telephonyKeys.sipTrunks, "outbound-route"] as const,
+        queryFn: () => api<OutboundRoute>("/telephony/sip/trunks/outbound-route"),
+        refetchInterval: 10000,
+    });
+}
+
 // ----- Shared trunk pool: allot a registered pool account to this tenant ----
 
 export interface PoolTrunkItem {

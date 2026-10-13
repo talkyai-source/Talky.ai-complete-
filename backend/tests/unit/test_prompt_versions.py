@@ -145,6 +145,10 @@ _EXPECTED_HASHES: dict[str, str] = {
     "lead_gen@17": "41fa28c4ab063c87",
     "customer_support@15": "4c213c2492a34be5",
     "receptionist@15": "840d79acdb0095af",
+    # Numbers read back exactly as the caller gave them; no country code added.
+    "lead_gen@18": "81790fb2053275ac",
+    "customer_support@16": "35dcec22a72a34a8",
+    "receptionist@16": "8fac66e925646eb2",
 }
 
 

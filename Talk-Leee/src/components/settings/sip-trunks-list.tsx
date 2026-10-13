@@ -33,6 +33,8 @@ import {
     usePoolTrunks,
     usePoolAssignment,
     useSetPoolAssignment,
+    useOutboundRoute,
+    type OutboundRoute,
     type SipTrunkInput,
     type SipTrunkRow,
 } from "@/lib/telephony-api";
@@ -225,9 +227,31 @@ function PoolAccountSelector() {
     );
 }
 
+/** The number outbound calls really go out from, decided by the dialer's own rules. */
+function OutboundRouteSummary({ route }: { route?: OutboundRoute }) {
+    // A cloud-provider account does not dial through these SIP lines.
+    if (!route || typeof route.ready !== "boolean" || route.reason_code === "sip_not_required") return null;
+    return (
+        <div role="status" className="mb-4 rounded-lg border border-border bg-muted/30 p-3 text-sm text-foreground">
+            {route.ready && route.caller_id ? (
+                <>
+                    Outbound calls go out from <strong>{route.caller_id}</strong>
+                    {route.trunk_name ? <> on <strong>{route.trunk_name}</strong></> : " on the shared line"}.
+                </>
+            ) : (
+                <>
+                    Outbound calls can&apos;t go out right now{route.reason ? `: ${route.reason}` : "."}
+                    {route.caller_id ? <> They would show <strong>{route.caller_id}</strong>.</> : null}
+                </>
+            )}
+        </div>
+    );
+}
+
 export function SipTrunksList() {
     const { create: createNotification } = useNotificationsActions();
     const trunksQuery = useSipTrunks();
+    const outboundRoute = useOutboundRoute().data;
     const createMutation = useCreateSipTrunk();
     const updateMutation = useUpdateSipTrunk();
     const testMutation = useTestSipTrunk();
@@ -448,6 +472,7 @@ export function SipTrunksList() {
                 </div>
             </CardHeader>
             <CardContent>
+                <OutboundRouteSummary route={outboundRoute} />
                 <PoolAccountSelector />
                 {trunksQuery.isLoading ? (
                     <div className="flex items-center justify-center py-8 text-muted-foreground">
@@ -527,6 +552,11 @@ export function SipTrunksList() {
                                             {typeof t.metadata?.caller_id === "string" && t.metadata.caller_id ? (
                                                 <div className="text-[10px] font-normal text-muted-foreground">
                                                     Caller ID: {t.metadata.caller_id as string}
+                                                </div>
+                                            ) : null}
+                                            {outboundRoute?.ready && outboundRoute.trunk_id === t.id ? (
+                                                <div className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
+                                                    Outbound calls use this line
                                                 </div>
                                             ) : null}
                                         </td>

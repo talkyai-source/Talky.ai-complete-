@@ -337,17 +337,17 @@ class LeadCaptureService:
                 raise InvalidCaptureError("confirmed contact value is empty")
             if field_type == "phone":
                 from app.domain.services.phone_number_normalizer import (
-                    normalize_phone_for_capture,
+                    normalize_phone_as_said,
                 )
 
+                # Stored exactly as the caller said it, for any country: a
+                # number without a country code is valid (owner decision
+                # 2026-10-14); requiring +E.164 here failed every such save.
                 try:
-                    audit_normalized = normalize_phone_for_capture(
-                        audit_normalized,
-                        region=None,
-                    )
+                    audit_normalized = normalize_phone_as_said(audit_normalized)
                 except ValueError as exc:
                     raise InvalidCaptureError(
-                        "confirmed phone must be a valid +E.164 number"
+                        "confirmed phone must be 6 to 15 digits"
                     ) from exc
             elif field_type == "email":
                 from email_validator import EmailNotValidError, validate_email

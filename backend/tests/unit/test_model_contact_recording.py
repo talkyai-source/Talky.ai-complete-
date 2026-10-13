@@ -92,7 +92,7 @@ async def test_model_candidate_and_natural_confirmation_use_actual_save_boundary
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind,value", [("email", "alex at"), ("phone", "+123"), ("phone", "4155552671")])
+@pytest.mark.parametrize("kind,value", [("email", "alex at"), ("phone", "+123"), ("phone", "41555")])
 async def test_partial_contact_retains_visible_quote_with_no_usable_value(kind, value):
     pool, s = SQLPort(), session()
     text = "My contact is " + value

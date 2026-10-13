@@ -1238,6 +1238,69 @@ async def get_pool_assignment(
     )
 
 
+class OutboundRouteResponse(BaseModel):
+    ready: bool
+    reason_code: str
+    reason: Optional[str] = None
+    caller_id: Optional[str] = None
+    trunk_id: Optional[str] = None
+    trunk_name: Optional[str] = None
+
+
+@router.get("/trunks/outbound-route", response_model=OutboundRouteResponse)
+async def get_outbound_route(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_pool: asyncpg.Pool = Depends(get_db_pool),
+):
+    """The number and line this tenant's outbound calls go out from now.
+
+    Settings showed each trunk's stored caller ID, while the dialer picks the
+    line and number by its own rules (pool account, newest own trunk, verified
+    DID, calling-rules number), so the page could show a number no call used.
+    This answers from the same read-only preflight as campaign launch and
+    redial, for a campaign with no line of its own.
+    """
+    tenant_problem = _require_tenant(request, current_user)
+    if tenant_problem:
+        return tenant_problem
+    from app.domain.services.telephony.outbound_readiness import evaluate_outbound_readiness
+
+    tenant_id = str(current_user.tenant_id)
+    try:
+        async with acquire_with_tenant(db_pool, tenant_id, user_id=current_user.id) as conn:
+            calling_rules = await conn.fetchval(
+                "SELECT calling_rules FROM tenants WHERE id = $1::uuid", tenant_id
+            )
+        readiness = await evaluate_outbound_readiness(
+            db_pool, tenant_id=tenant_id, campaign_id=None, campaign={}, calling_rules=calling_rules,
+        )
+        trunk_name = None
+        if readiness.get("trunk_id"):
+            async with acquire_with_tenant(db_pool, tenant_id, user_id=current_user.id) as conn:
+                trunk_name = await conn.fetchval(
+                    "SELECT trunk_name FROM tenant_sip_trunks WHERE id = $1::uuid AND tenant_id = $2::uuid",
+                    readiness["trunk_id"], tenant_id,
+                )
+    except Exception as exc:  # noqa: BLE001 - a status read must not 500
+        logger.warning("outbound_route_unavailable tenant=%s error=%s", tenant_id[:8], type(exc).__name__)
+        return _problem(
+            request=request,
+            status_code=503,
+            title="Outbound Route Unavailable",
+            detail="The outbound line could not be checked. Retry shortly.",
+            type_suffix="outbound-route-unavailable",
+        )
+    return OutboundRouteResponse(
+        ready=bool(readiness.get("ready")),
+        reason_code=str(readiness.get("reason_code") or ""),
+        reason=readiness.get("reason"),
+        caller_id=readiness.get("caller_id"),
+        trunk_id=readiness.get("trunk_id"),
+        trunk_name=trunk_name,
+    )
+
+
 @router.put("/trunks/pool-assignment", response_model=PoolAssignmentResponse)
 async def set_pool_assignment(
     body: PoolAssignmentBody,

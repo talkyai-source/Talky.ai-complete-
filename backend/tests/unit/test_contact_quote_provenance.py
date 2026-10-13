@@ -82,10 +82,10 @@ async def test_the_replayed_confirmation_turn_now_records_both_details():
     pool = Pool()
     s, yes, name, phone = await _replayed_flow(pool, line_phone="+923001234567")
     assert name["status"] == "saved" and name["saved"]
-    assert phone["status"] == "saved" and phone["value"] == "+923120750496"
+    assert phone["status"] == "saved" and phone["value"] == "03120750496"  # exactly as said
     capture = s.captured_slots.phone_capture
     assert capture.value_source.caller_turn_order == 12  # where the number was said
-    confirmed = await record_contact(s, _args("phone", "confirm", "+923120750496", "Yes.", "+923120750496"), turn=yes)
+    confirmed = await record_contact(s, _args("phone", "confirm", "03120750496", "Yes.", "03120750496"), turn=yes)
     assert confirmed["status"] == "saved" and confirmed["validation_status"] == "confirmed"
     assert s.captured_slots.phone_capture.confirmation_source.caller_turn_order == 13
     assert pool.writes  # persisted on a real call
@@ -111,13 +111,13 @@ async def test_naming_the_new_value_as_expected_with_no_candidate_is_not_a_confl
     s = _session(Pool(), region="PK")
     said = "Uh, zero three one two zero seven five zero four nine six."
     turn = _caller(s, said, 1)
-    first = await record_contact(s, _args("phone", "set", "+92 312 0750496", said, "+92 312 0750496"), turn=turn)
-    assert first["status"] == "saved" and first["value"] == "+923120750496"
+    first = await record_contact(s, _args("phone", "set", "0312 075 0496", said, "0312 075 0496"), turn=turn)
+    assert first["status"] == "saved" and first["value"] == "03120750496"
     # A candidate exists now: naming the new value instead of it is a conflict.
     later = _caller(s, "No, make it zero three one two zero seven five zero four nine seven.", 2)
     changed = await record_contact(s, _args("phone", "set", "03120750497", later.text, "03120750497"), turn=later)
     assert changed["status"] == "contact_changed"
-    assert s.captured_slots.phone_capture.normalized_value == "+923120750496"
+    assert s.captured_slots.phone_capture.normalized_value == "03120750496"
     # With no candidate, a different expected value is still a stale view.
     other = _session(Pool())
     turn = _caller(other, "It's alex at example dot com.", 1)
@@ -173,13 +173,15 @@ async def test_expected_value_matches_the_candidate_in_any_formatting():
     await record_contact(s, _args("phone", "set", "03120750496", said), turn=first)
     yes = _caller(s, "Yes, that's right.", 2)
     confirmed = await record_contact(
-        s, _args("phone", "confirm", "+92 312 0750496", "Yes, that's right.", "+92 312 0750496"), turn=yes)
+        s, _args("phone", "confirm", "0312 075 0496", "Yes, that's right.", "(0312) 075-0496"), turn=yes)
     assert confirmed["status"] == "saved" and confirmed["validation_status"] == "confirmed"
 
 
-async def test_a_national_number_needs_a_country_when_nothing_in_the_call_says_it():
+async def test_a_national_number_is_kept_as_said_without_any_country():
+    # Owner decision 2026-10-14: generic for every country. Nothing in this
+    # call names a country and none is needed or added.
     s, _, _, phone = await _replayed_flow(Pool())
-    assert phone["validation_status"] == "needs_clarification" and phone["value"] is None
+    assert phone["validation_status"] == "awaiting_confirmation" and phone["value"] == "03120750496"
 
 
 async def test_a_quote_must_be_words_the_caller_said_in_this_call():
@@ -207,7 +209,7 @@ async def test_quotes_match_whatever_the_case_and_punctuation():
     turn = _caller(s, "uh, zero three one two zero seven five zero four nine six", 4)
     result = await record_contact(
         s, _args("phone", "set", "03120750496", "Zero three one two, zero seven five, zero four nine six."), turn=turn)
-    assert result["status"] == "saved" and result["value"] == "+923120750496"
+    assert result["status"] == "saved" and result["value"] == "03120750496"
 
 
 async def test_a_test_call_behaves_like_a_real_call_without_writing_lead_data():
@@ -218,7 +220,7 @@ async def test_a_test_call_behaves_like_a_real_call_without_writing_lead_data():
     result = await record_contact(s, _args("phone", "set", "03120750496", "zero three one two zero seven five zero four nine six"), turn=turn)
     assert result["status"] == "saved_test_call" and result["saved"] is True
     assert pool.writes == []
-    assert s.captured_slots.phone_capture.normalized_value == "+923120750496"
+    assert s.captured_slots.phone_capture.normalized_value == "03120750496"
 
 
 async def test_every_outcome_is_logged_without_the_value(caplog):
@@ -251,3 +253,49 @@ async def test_separators_the_caller_did_say_are_kept():
         turn = _caller(s, said, 1)
         result = await record_contact(s, _args("email", "set", value, said), turn=turn)
         assert result["status"] == "saved" and result["value"] == value, said
+
+
+async def test_the_number_from_call_3413d73c_is_recorded_as_said():
+    # Test call 3413d73c (2026-10-13): the caller said "081010188", the agent
+    # asked for a country code, then quoted the digits one by one; both saves
+    # were refused (quote_not_found) and it said "I wasn't able to save that".
+    s = _session(Pool(), line_phone="+442046132300")
+    turn = _caller(s, "No, note down the other number, that's 081010188.", 27)
+    result = await record_contact(s, _args("phone", "set", "081010188", "0 8 1 0 1 0 1 8 8"), turn=turn)
+    assert result["status"] == "saved" and result["saved"]
+    assert result["value"] == "081010188"  # no +44 from the UK line
+    assert s.captured_slots.phone_capture.value_source.caller_turn_order == 27
+
+
+async def test_a_phone_quote_matches_the_digits_however_they_were_said():
+    for said, quote in [("It's zero eight one zero one zero one eight eight.", "081010188"),
+                        ("It's 081 010 188.", "zero eight one, zero one zero, one eight eight"),
+                        ("Call me on 0800-555-0199 after six.", "08005550199")]:
+        s = _session(Pool())
+        turn = _caller(s, said, 1)
+        digits = "".join(ch for ch in quote if ch.isdigit()) or "081010188"
+        result = await record_contact(s, _args("phone", "set", digits, quote), turn=turn)
+        assert result["status"] == "saved", said
+
+
+async def test_a_phone_quote_with_digits_the_caller_never_said_is_refused():
+    s = _session(Pool())
+    turn = _caller(s, "It's zero eight one zero one zero one eight eight.", 1)
+    result = await record_contact(s, _args("phone", "set", "0810101999", "0810101999"), turn=turn)
+    assert result["status"] == "quote_not_found" and s.captured_slots.phone_capture is None
+
+
+async def test_a_number_said_with_its_country_code_keeps_it():
+    s = _session(Pool())
+    said = "It's plus nine two three one two zero seven five zero four nine six."
+    turn = _caller(s, said, 1)
+    result = await record_contact(s, _args("phone", "set", "+92 312 0750496", said), turn=turn)
+    assert result["status"] == "saved" and result["value"] == "+923120750496"
+
+
+def test_the_tool_never_asks_the_model_to_add_a_country_code():
+    from app.domain.services.voice_pipeline.contact_recording import CONTACT_TOOL_SPEC
+
+    description = CONTACT_TOOL_SPEC["function"]["description"]
+    assert "give +country code" not in description
+    assert "never ask for, add or change a country code" in description

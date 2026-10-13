@@ -158,3 +158,24 @@ for (const method of ["blob", "json"] as const) test(`a delayed ${method} body c
     stream.enqueue(new TextEncoder().encode('{"private":"account-a"}')); stream.close();
     await assert.rejects(body, identityChanged);
 });
+
+test("a request sent before the first sign-in check survives that check confirming the account", async () => {
+    const response = deferred<Response>();
+    globalThis.fetch = (() => response.promise) as typeof fetch;
+    const client = createHttpClient({ baseUrl: "http://example.test", getToken: () => "account-a" });
+    const pending = client.request<{ campaigns: string[] }>({ path: "/campaigns" });
+    setRequestIdentity({ userId: "user-a", tenantId: "tenant-a" });
+    response.resolve(Response.json({ campaigns: ["spring"] }));
+    assert.deepEqual(await pending, { campaigns: ["spring"] });
+});
+
+test("a request sent as one verified account is still discarded when a different account is verified", async () => {
+    const response = deferred<Response>();
+    globalThis.fetch = (() => response.promise) as typeof fetch;
+    setRequestIdentity({ userId: "user-a", tenantId: "tenant-a" });
+    const client = createHttpClient({ baseUrl: "http://example.test", getToken: () => "same-cookie-session" });
+    const pending = client.request({ path: "/contacts" });
+    setRequestIdentity({ userId: "user-b", tenantId: "tenant-b" });
+    response.resolve(Response.json({ contacts: ["account-a-private-contact"] }));
+    await assert.rejects(pending, identityChanged);
+});
