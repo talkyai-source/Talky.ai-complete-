@@ -17,7 +17,7 @@ interface HeroProps {
     adjustForNavbar?: boolean;
 }
 
-function DescriptionSlideshow({ paragraphs }: { paragraphs: string[]; intervalMs?: number }) {
+function DescriptionSlideshow({ paragraphs }: { paragraphs: string[] }) {
     const [activeIndex, setActiveIndex] = useState(0);
     const [phase, setPhase] = useState<"entering" | "typing" | "holding" | "exiting">("typing");
     // Starts fully revealed so the first paragraph is in the server HTML and
@@ -166,8 +166,6 @@ function DescriptionSlideshow({ paragraphs }: { paragraphs: string[]; intervalMs
 }
 
 export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustForNavbar = false }) => {
-    const heroContentRef = useRef<HTMLDivElement | null>(null);
-
     const titleParts = title.split(/\s+/).filter(Boolean);
     const firstTitleToken = titleParts[0] ?? "";
     const normalizedTitleParts = (() => {
@@ -232,7 +230,6 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
 
             {/* Hero content */}
             <div
-                ref={heroContentRef}
                 // py-20 (80px, symmetric): reserves the hero's bottom-left corner for
                 // the Ask AI button, which is absolutely positioned there. Symmetric
                 // because flex centring puts the content at (heroHeight-contentHeight)/2
@@ -322,5 +319,3 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
         </section>
     );
 };
-
-export default Hero;

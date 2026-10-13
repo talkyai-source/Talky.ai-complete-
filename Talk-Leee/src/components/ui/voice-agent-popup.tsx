@@ -155,7 +155,6 @@ export function VoiceAgentPopup() {
 
     // Tessa intro greeting — fetched on the first interaction with the button.
     const tessaIntroF32Ref = useRef<Float32Array | null>(null);
-    const tessaIntroFetchedRef = useRef<boolean>(false);
     // Stable reference to the in-flight prefetch promise so startSession() can
     // await completion when the user clicks before the first-interaction fetch finishes.
     const tessaIntroPromiseRef = useRef<Promise<void> | null>(null);
@@ -461,7 +460,6 @@ export function VoiceAgentPopup() {
         if (tessaIntroF32Ref.current) return Promise.resolve();
         // Already in flight — return the same promise so callers can await it.
         if (tessaIntroPromiseRef.current) return tessaIntroPromiseRef.current;
-        tessaIntroFetchedRef.current = true;
 
         const promise = (async () => {
             try {
@@ -476,10 +474,10 @@ export function VoiceAgentPopup() {
                         text: "Hi, you've reached the Talk-Lee receptionist team — how can I help you today?",
                     }),
                 });
-                if (!res.ok) { tessaIntroFetchedRef.current = false; tessaIntroPromiseRef.current = null; return; }
+                if (!res.ok) { tessaIntroPromiseRef.current = null; return; }
                 const data = await res.json() as { audio_base64?: string };
                 const b64 = data.audio_base64;
-                if (!b64) { tessaIntroFetchedRef.current = false; tessaIntroPromiseRef.current = null; return; }
+                if (!b64) { tessaIntroPromiseRef.current = null; return; }
                 // Decode base64 → raw bytes → Float32Array (f32le PCM at 24 kHz)
                 const binary = atob(b64);
                 const bytes = new Uint8Array(binary.length);
@@ -488,7 +486,6 @@ export function VoiceAgentPopup() {
                 console.log('[TessaIntro] Pre-fetched intro audio:', tessaIntroF32Ref.current.length, 'samples');
             } catch (e) {
                 console.warn('[TessaIntro] Prefetch failed — intro will be skipped:', e);
-                tessaIntroFetchedRef.current = false;
                 tessaIntroPromiseRef.current = null;
             }
         })();
@@ -1081,10 +1078,6 @@ export function VoiceAgentPopup() {
 
     const getStatusText = () => {
         switch (aiState) {
-            case "connecting": return "Connecting...";
-            case "listening": return "Listening...";
-            case "processing": return "Thinking...";
-            case "speaking": return "Speaking...";
             default: return "Click to talk";
         }
     };
