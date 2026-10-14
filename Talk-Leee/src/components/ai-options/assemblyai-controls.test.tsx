@@ -106,6 +106,48 @@ test("PII redaction explains lead capture loss and unredacted partials; dependen
     assert.equal(draft.max_speakers, 2);
 });
 
+test("universal settings apply the recommended values in one click and keep the account's own names and context", () => {
+    // Owner 2026-10-15: "make universal settings for me". Saved details of
+    // switched-off features (threshold, speaker count, redaction types) stay.
+    let draft: AssemblyAISettings = {
+        mode: "max_accuracy", region: "eu", min_turn_silence: 50, max_turn_silence: 900, interruption_delay: 600,
+        vad_threshold: 0.5, include_partial_turns: false, auto_campaign_keyterms: false, auto_agent_context: false,
+        previous_context_n_turns: 0, language_detection: true, voice_focus: "near-field", voice_focus_threshold: 0.8,
+        domain: "medical-v1", speaker_labels: true, max_speakers: 3, redact_pii: true, redact_pii_policies: ["password"],
+        filter_profanity: true, session_heartbeat: false, inactivity_timeout: 30,
+        keyterms_prompt: ["Azian", "Dojo"], prompt: "Calls with UK restaurant owners about card machines.",
+    };
+    function Editor() {
+        const [value, setValue] = useState(draft);
+        return <AssemblyAIControls value={value} onChange={(next) => { draft = next; setValue(next); }} />;
+    }
+    render(<Editor />);
+    fireEvent.click(screen.getByRole("button", { name: "Apply universal settings" }));
+    assert.deepEqual(draft, {
+        mode: "balanced", region: "global", min_turn_silence: null, max_turn_silence: null, interruption_delay: null,
+        vad_threshold: null, include_partial_turns: null, auto_campaign_keyterms: true, auto_agent_context: true,
+        previous_context_n_turns: null, language_detection: false, voice_focus: null, voice_focus_threshold: 0.8,
+        domain: null, speaker_labels: false, max_speakers: 3, redact_pii: false, redact_pii_policies: ["password"],
+        filter_profanity: false, session_heartbeat: true, inactivity_timeout: null,
+        keyterms_prompt: ["Azian", "Dojo"], prompt: "Calls with UK restaurant owners about card machines.",
+    });
+    assert.equal(assemblyAISettingsError(draft), null);
+    assert.equal(screen.queryByRole("button", { name: "Apply universal settings" }), null);
+    screen.getByText("✓ Using the universal settings");
+});
+
+test("an account that never changed a setting already counts as universal", () => {
+    render(<AssemblyAIControls value={{}} onChange={() => {}} />);
+    screen.getByText("✓ Using the universal settings");
+});
+
+test("every settings group has a tip card with the best choice, an example and how to check it", () => {
+    render(<AssemblyAIControls value={{}} onChange={() => {}} />);
+    const tips = Array.from(document.querySelectorAll("[data-tip]"));
+    assert.equal(tips.length, 6);
+    for (const tip of tips) assert.match(tip.textContent || "", /Best:.+Example:.+Check it:/);
+});
+
 test("partial transcripts switched off, directly or by PII redaction, warn that interruptions are noticed late", async () => {
     // Barge-in decides on partial transcripts; without them the agent hears an
     // interruption only when the caller's turn ends.

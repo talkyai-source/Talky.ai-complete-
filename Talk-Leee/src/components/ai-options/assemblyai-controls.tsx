@@ -29,6 +29,41 @@ const MODE_TIMING: Record<NonNullable<AssemblyAISettings["mode"]>, { minSilence:
 };
 const SHORTEST_PRESET_SILENCE_MS = 128;
 
+// One click to the values that suit most phone campaigns (owner, 2026-10-15:
+// "make universal settings for me"). The tenant's own keyterms and audio
+// context stay, and the saved details of switched-off features (redaction
+// types, speaker counts, Voice Focus threshold) are kept for when they return.
+export const UNIVERSAL_ASSEMBLYAI_SETTINGS = {
+    mode: "balanced", region: "global",
+    min_turn_silence: null, max_turn_silence: null, interruption_delay: null, vad_threshold: null,
+    include_partial_turns: null, auto_campaign_keyterms: true, auto_agent_context: true,
+    previous_context_n_turns: null, language_detection: false, voice_focus: null, domain: null,
+    speaker_labels: false, redact_pii: false, filter_profanity: false, session_heartbeat: true,
+    inactivity_timeout: null,
+} as const satisfies AssemblyAISettings;
+
+// What an unsaved field means, so a never-touched form counts as universal.
+const UNSET_MEANS: Partial<Record<keyof AssemblyAISettings, unknown>> = {
+    mode: "balanced", region: "global", auto_campaign_keyterms: true, auto_agent_context: true,
+    language_detection: false, speaker_labels: false, redact_pii: false, filter_profanity: false,
+    session_heartbeat: true,
+};
+
+function usesUniversal(settings: AssemblyAISettings): boolean {
+    return (Object.entries(UNIVERSAL_ASSEMBLYAI_SETTINGS) as [keyof AssemblyAISettings, unknown][])
+        .every(([key, wanted]) => (settings[key] ?? UNSET_MEANS[key] ?? null) === wanted);
+}
+
+/** A short "what is best, an example, how to check it" card for one group of settings. */
+function TipCard({ title, best, example, check }: { title: string; best: string; example: string; check: string }) {
+    return <div data-tip className="space-y-1 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-xs">
+        <p className="font-semibold text-foreground">Tip: {title}</p>
+        <p><span className="font-medium">Best:</span> {best}</p>
+        <p><span className="font-medium">Example:</span> {example}</p>
+        <p><span className="font-medium">Check it:</span> {check}</p>
+    </div>;
+}
+
 function Toggle({ label, hint, checked, onChange }: { label: string; hint: string; checked: boolean; onChange: (checked: boolean) => void }) {
     return <div><label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" className="accent-emerald-500" checked={checked} onChange={(event) => onChange(event.target.checked)} />{label}</label><p className="mt-1 text-xs text-muted-foreground">{hint}</p></div>;
 }
@@ -40,17 +75,32 @@ export function AssemblyAIControls({ value, onChange }: { value?: AssemblyAISett
     const partials = settings.include_partial_turns == null ? "auto" : String(settings.include_partial_turns);
     const timing = MODE_TIMING[mode];
     const timingOverridden = [settings.min_turn_silence, settings.max_turn_silence, settings.interruption_delay, settings.vad_threshold].some((field) => field != null);
+    const universal = usesUniversal(settings);
 
     return <div className="space-y-5" aria-label="AssemblyAI 3.6 Pro settings">
+        <section aria-label="Universal settings" className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3">
+            <p className="text-sm font-semibold">Universal settings: recommended for phone calls</p>
+            <p className="mt-1 text-xs text-muted-foreground">Balanced mode, the recommended turn timing, quick interruptions, your campaign names boosted, and no redaction so contact details are saved. Your keyterms and audio context are kept.</p>
+            {universal
+                ? <p className="mt-2 text-xs font-medium text-emerald-700 dark:text-emerald-400">✓ Using the universal settings</p>
+                : <button type="button" className="mt-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700" onClick={() => onChange({ ...settings, ...UNIVERSAL_ASSEMBLYAI_SETTINGS })}>Apply universal settings</button>}
+            <p className="mt-1 text-[11px] text-muted-foreground">Then click Save Config to use them on new calls.</p>
+        </section>
         <Field label="Transcription language" hint="English is fixed for AssemblyAI calls, including calls started from campaigns.">{(id) => <input id={id} className={inputClass} value="English (en)" readOnly disabled />}</Field>
         <Field label="AssemblyAI mode" hint={ASSEMBLYAI_MODE_OPTIONS.find((option) => option.value === mode)?.description}>{(id) => <Select id={id} ariaLabel="AssemblyAI mode" value={mode} onChange={(next) => set("mode", next as AssemblyAISettings["mode"])}>
             {ASSEMBLYAI_MODE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </Select>}</Field>
         <p className="text-xs text-muted-foreground">Changes apply to new calls after Save Config. Leave advanced overrides blank to keep the selected mode&apos;s defaults.</p>
+        <TipCard title="Mode" best="Balanced: quick replies without cutting callers off."
+            example="Fast suits very short yes/no surveys. Accuracy suits calls that collect long reference numbers or spelled names, but every reply waits about 0.4 s longer."
+            check="On a test call, say a sentence with a short pause in the middle. The agent waits for you, then replies within about a second." />
 
         <details className="rounded-lg border border-border p-3">
             <summary className="cursor-pointer text-sm font-semibold">Recognition and conversation context</summary>
             <div className="mt-4 space-y-4">
+                <TipCard title="Names and topic" best="A one-sentence audio context, plus only the names it gets wrong as keyterms. Keep Boost campaign names and agent replies on."
+                    example={"Audio context: \"Phone calls with UK restaurant owners about card payment machines.\" Keyterms: Azian, Dojo."}
+                    check="Say each name on a test call, then open the call transcript and check the spelling." />
                 <Field label="Audio context prompt" hint="Optional. Describe the call topic or unusual vocabulary in a short paragraph. Start without a prompt; this is separate from your agent instructions. Up to 1,750 characters.">{(id) => <textarea id={id} className={inputClass} rows={3} maxLength={1750} value={settings.prompt ?? ""} onChange={(event) => set("prompt", event.target.value)} placeholder="English appointment booking calls for a dental clinic." />}</Field>
                 <Field label="Keyterms" hint="One name or specialist term per line. Maximum 100 terms, 50 characters each. Avoid generic words and letter lists.">{(id) => <textarea id={id} className={inputClass} rows={4} value={(settings.keyterms_prompt ?? []).join("\n")} onChange={(event) => set("keyterms_prompt", event.target.value.split("\n"))} onBlur={(event) => set("keyterms_prompt", event.target.value.split("\n").map((term) => term.trim()).filter(Boolean))} placeholder={"Talky\nAcme Dental"} />}</Field>
                 <Toggle label="Boost campaign names" checked={settings.auto_campaign_keyterms ?? true} onChange={(next) => set("auto_campaign_keyterms", next)} hint="Adds each call's brand, agent and product names to the keyterms above, so names like your company or agent are recognized. Turn off to send only the terms you list." />
@@ -62,6 +112,9 @@ export function AssemblyAIControls({ value, onChange }: { value?: AssemblyAISett
         <details className="rounded-lg border border-border p-3">
             <summary className="cursor-pointer text-sm font-semibold">Turn detection and interruptions</summary>
             <div className="mt-4 space-y-4">
+                <TipCard title="Timing and interruptions" best="Leave every box blank (the Use recommended timing button clears them) and keep Partial transcripts on Auto."
+                    example="Raise Minimum turn silence to about 300 ms only if callers spelling emails or numbers get cut off. Below 128 ms the agent talks over people."
+                    check="Interrupt the agent mid-sentence: it stops within about a third of a second. Say “yeah” while it talks: it carries on." />
                 <p className="text-xs text-muted-foreground">Blank fields use the timing recommended for the selected mode, shown in each box.</p>
                 <NumberOverride label="Minimum turn silence (ms)" hint="Wait before checking whether an answer is complete. Longer pauses can help with spelling and phone numbers. Range: 50–10,000 ms." min={50} max={10000} placeholder={`Mode default: ${timing.minSilence} ms`} value={settings.min_turn_silence} onChange={(next) => set("min_turn_silence", next)} />
                 {settings.min_turn_silence != null && settings.min_turn_silence < SHORTEST_PRESET_SILENCE_MS && <p role="alert" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs">Below {SHORTEST_PRESET_SILENCE_MS} ms the agent may answer before callers finish speaking. AssemblyAI&apos;s fastest preset uses {SHORTEST_PRESET_SILENCE_MS} ms; leave this blank unless you have tested a shorter value.</p>}
@@ -78,6 +131,9 @@ export function AssemblyAIControls({ value, onChange }: { value?: AssemblyAISett
         <details className="rounded-lg border border-border p-3">
             <summary className="cursor-pointer text-sm font-semibold">Audio processing and speaker labels</summary>
             <div className="mt-4 space-y-4">
+                <TipCard title="Noise and speakers" best="All off for normal phone calls: one caller, general vocabulary."
+                    example="Try Voice Focus Near field only if many callers are somewhere loud, such as a kitchen or a street. Medical is for clinical campaigns only."
+                    check="Compare the transcript of a noisy test call with Voice Focus off and on; keep whichever reads better." />
                 <p className="text-xs text-muted-foreground">Voice Focus, medical vocabulary and speaker labels may add provider charges.</p>
                 <Field label="Voice Focus" hint="Suppress background sound. Near field favors a close microphone; far field supports speakers farther away.">{(id) => <Select id={id} ariaLabel="Voice Focus" value={settings.voice_focus ?? "off"} onChange={(next) => set("voice_focus", next === "off" ? null : next as "near-field" | "far-field")}><option value="off">Off</option><option value="near-field">Near field</option><option value="far-field">Far field</option></Select>}</Field>
                 <NumberOverride label="Voice Focus threshold" hint="Provider default: 0.7. Applies only when Voice Focus is enabled." min={0} max={1} step={0.01} disabled={!settings.voice_focus} value={settings.voice_focus_threshold} onChange={(next) => set("voice_focus_threshold", next)} />
@@ -93,6 +149,9 @@ export function AssemblyAIControls({ value, onChange }: { value?: AssemblyAISett
         <details className="rounded-lg border border-border p-3">
             <summary className="cursor-pointer text-sm font-semibold">Privacy and transcript filtering</summary>
             <div className="mt-4 space-y-4">
+                <TipCard title="Privacy" best="Redaction off for sales and lead calls, so names, emails and phone numbers are saved."
+                    example="Turn redaction on only if your policy forbids storing personal details; the agent then cannot save emails or numbers, and it notices interruptions later."
+                    check="After a test call where you give an email, open the call: the email is in the saved details." />
                 <Toggle label="Redact personal information (PII)" hint="Off by default for lead capture. Redaction can hide names, emails and phone numbers from the agent and lead records. This optional feature may add provider charges." checked={settings.redact_pii ?? false} onChange={(next) => set("redact_pii", next)} />
                 {settings.redact_pii && <p role="status" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs">Redacted contact details cannot be recovered for leads from the transcript. Redaction applies to final text, not the call recording.</p>}
                 <fieldset disabled={!settings.redact_pii} className="space-y-4 disabled:opacity-50" aria-label="PII redaction settings">
@@ -114,6 +173,9 @@ export function AssemblyAIControls({ value, onChange }: { value?: AssemblyAISett
         <details className="rounded-lg border border-border p-3">
             <summary className="cursor-pointer text-sm font-semibold">Connection and diagnostics</summary>
             <div className="mt-4 space-y-4">
+                <TipCard title="Connection" best="Global region, Session heartbeat on, inactivity timeout blank."
+                    example="Choose the EU or US region only if a contract requires your data to stay there. A short inactivity timeout can cut transcription while a caller is on hold."
+                    check="A five-minute test call stays connected and is fully transcribed." />
                 <Field label="AssemblyAI region" hint="Global uses the nearest AssemblyAI endpoint. Choose a regional endpoint when required for data residency.">{(id) => <Select id={id} ariaLabel="AssemblyAI region" value={settings.region ?? "global"} onChange={(next) => set("region", next as AssemblyAISettings["region"])}><option value="global">Global (nearest)</option><option value="us">United States</option><option value="eu">European Union</option></Select>}</Field>
                 <Toggle label="Session heartbeat" hint="Receive provider session-health updates while the call runs." checked={settings.session_heartbeat ?? true} onChange={(next) => set("session_heartbeat", next)} />
                 <NumberOverride label="Audio inactivity timeout (seconds)" hint="Optional provider disconnect when no audio arrives. Range: 5–3,600 seconds. This does not set how long the caller may pause." min={5} max={3600} value={settings.inactivity_timeout} onChange={(next) => set("inactivity_timeout", next)} />
