@@ -1225,23 +1225,35 @@ details > summary.home-menu-toggle {
 
 /* ── Ask AI active-call bar (voice-agent-popup.tsx) ──────────────────────
    Shown while a call is live and the user has scrolled past the hero.
-   Horizontal geometry (top / left / width / radius) is NOT defined here:
-   it is measured from the navbar element at runtime, so the bar occupies
-   the navbar's area on every device by construction. Only the heights are
-   fixed here — 87px two-row below 640px, 56px one-row at 640px and above,
-   the same sm breakpoint the rest of the site uses (viewport width only,
-   no device targeting). Keep the two heights in sync with
+   Horizontal centring is solved here by the browser: left:0 / right:0 /
+   margin-inline:auto is the same over-constrained auto-margin rule the
+   navbar uses (.home-navbar-fixed), so the two side gaps are always equal
+   by construction. Top offset, width and radius are measured from the
+   navbar element at runtime (ResizeObserver in voice-agent-popup.tsx) and
+   set inline; the values below are the fallbacks that apply before the
+   first measurement, mirroring the navbar's own defaults. Only the heights
+   are fixed here — 95px two-row below 640px, 64px one-row at 640px and
+   above, the same sm breakpoint the rest of the site uses (viewport width
+   only, no device targeting). Keep the two heights in sync with
    BAR_HEIGHT_TWO_ROW / BAR_HEIGHT_ONE_ROW in voice-agent-popup.tsx: the
-   orb↔bar swap thresholds are computed from them. */
+   orb↔bar swap thresholds are computed from them. The padding gives the
+   red End Call button a visible band of bar on all four sides, including
+   at its lower corners where the two pill radii converge. */
 .askAiCallBar {
   position: fixed;
   z-index: 600;
+  top: 8px;
+  left: 0;
+  right: 0;
+  margin-inline: auto;
+  width: calc(100% - 1.5rem);
+  border-radius: 9999px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  height: 87px;
-  padding: 8px 10px;
+  height: 95px;
+  padding: 12px 16px;
   color: #fff;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(2, 14, 28, 0.92);
@@ -1262,11 +1274,18 @@ details > summary.home-menu-toggle {
 
 @media (min-width: 640px) {
   .askAiCallBar {
-    height: 56px;
+    height: 64px;
     flex-direction: row;
     align-items: center;
     gap: 10px;
-    padding: 0 8px 0 14px;
+    padding: 0 16px;
+  }
+}
+
+/* Same breakpoint as the navbar's own top offset (.home-navbar-fixed). */
+@media (min-width: 768px) {
+  .askAiCallBar {
+    top: 10px;
   }
 }
 
@@ -1320,7 +1339,6 @@ details > summary.home-menu-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
   min-height: 44px;
   min-width: 44px;
   width: 100%;

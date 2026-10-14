@@ -4,7 +4,7 @@ import type React from "react";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, usePathname } from "next/navigation";
-import { MessageCircle, X } from "lucide-react";
+import { MessageCircle } from "lucide-react";
 import { apiBaseUrl } from "@/lib/env";
 import { useAuth } from "@/lib/auth-context";
 import { ASKAI_SIGNIN_FLAG } from "@/components/auth/askai-signin-notice";
@@ -46,11 +46,11 @@ const MIC_WORKLET_PATH = "/worklets/pcm16-capture-processor.js";
 const BAR_COUNT = 14;
 
 // Call-bar heights, mirrored EXACTLY by .askAiCallBar in globals.css
-// (87px two-row below 640px, 56px one-row at 640px and above). The
+// (95px two-row below 640px, 64px one-row at 640px and above). The
 // orb↔bar swap thresholds are navbarTop + these, so the swap happens the
 // moment the hero's bottom edge clears the bar's own bottom edge.
-const BAR_HEIGHT_TWO_ROW = 87;
-const BAR_HEIGHT_ONE_ROW = 56;
+const BAR_HEIGHT_TWO_ROW = 95;
+const BAR_HEIGHT_ONE_ROW = 64;
 // Gap between the show and hide thresholds so scroll jitter exactly on
 // the boundary can never make the swap oscillate.
 const BAR_SWAP_HYSTERESIS_PX = 24;
@@ -129,10 +129,14 @@ export function VoiceAgentPopup() {
     // while the bar is on screen — the in-hero error panel is off-screen at
     // that point and would never be seen. Cleared on dismiss.
     const [barSticky, setBarSticky] = useState(false);
-    // The navbar's measured geometry. The bar copies it (top offset, left,
-    // width, radius) so it occupies the navbar's area on every device by
-    // construction instead of duplicating the navbar's CSS.
-    const [navGeom, setNavGeom] = useState<{ top: number; left: number; width: number; radius: string } | null>(null);
+    // The navbar's measured geometry. The bar copies it (top offset, width,
+    // radius) so it occupies the navbar's area on every device by
+    // construction instead of duplicating the navbar's CSS. Horizontal
+    // placement is NOT copied: .askAiCallBar centres itself with the same
+    // left:0/right:0/margin-inline:auto rule the navbar uses, so the two
+    // gaps are solved by the browser and can never drift. Null until the
+    // first measurement — the CSS fallbacks in .askAiCallBar apply then.
+    const [navGeom, setNavGeom] = useState<{ top: number; width: number; radius: string } | null>(null);
     const wrapperRef = useRef<HTMLDivElement | null>(null);
 
     const wsRef = useRef<WebSocket | null>(null);
@@ -194,8 +198,9 @@ export function VoiceAgentPopup() {
     }, [isActive]);
 
     // Measure the navbar the call bar mirrors. The navbar is absolutely
-    // positioned at the document top and the page never scrolls
-    // horizontally, so its rect is stable regardless of scroll position.
+    // positioned at the document top and stays in the DOM at every scroll
+    // position, so its width is readable whenever the bar needs it. Its
+    // left edge is deliberately not read — see navGeom above.
     const measureNav = useCallback(() => {
         const nav = document.querySelector('nav[aria-label="Primary"]');
         if (!nav) return;
@@ -204,13 +209,11 @@ export function VoiceAgentPopup() {
         setNavGeom((prev) => {
             const next = {
                 top: Number.parseFloat(cs.top) || 8,
-                left: rect.left,
                 width: rect.width,
                 radius: cs.borderRadius || "9999px",
             };
             return prev &&
                 prev.top === next.top &&
-                prev.left === next.left &&
                 prev.width === next.width &&
                 prev.radius === next.radius
                 ? prev
@@ -224,7 +227,13 @@ export function VoiceAgentPopup() {
     // band, so the boundary can never oscillate. IntersectionObservers fire
     // on crossings only — no scroll listener. Thresholds are rebuilt on
     // resize because the navbar offset (8/10px) and the bar height
-    // (87/56px) follow their own width breakpoints.
+    // (95/64px) follow their own width breakpoints.
+    //
+    // The navbar's geometry is re-measured by a ResizeObserver on the
+    // navbar element itself, not by the resize listener: its box also
+    // changes without any window resize — when the web font swaps in and
+    // when a hover/pointer media query flips (DevTools device-type switch)
+    // — and the observer fires on every one of those, plus once on observe.
     useEffect(() => {
         const hero = wrapperRef.current?.closest(".heroSectionRoot");
         if (!hero) return;
@@ -268,14 +277,18 @@ export function VoiceAgentPopup() {
 
         setup();
         measureNav();
-        const onResize = () => {
-            setup();
-            measureNav();
-        };
+        const nav = document.querySelector('nav[aria-label="Primary"]');
+        let navObserver: ResizeObserver | null = null;
+        if (nav && typeof ResizeObserver !== "undefined") {
+            navObserver = new ResizeObserver(() => measureNav());
+            navObserver.observe(nav);
+        }
+        const onResize = () => setup();
         window.addEventListener("resize", onResize);
         return () => {
             showObserver?.disconnect();
             hideObserver?.disconnect();
+            navObserver?.disconnect();
             window.removeEventListener("resize", onResize);
         };
     }, [measureNav]);
@@ -1145,8 +1158,12 @@ export function VoiceAgentPopup() {
                             </div>
                         </div>
                     ) : (
-                        <div className="relative z-10 flex flex-col items-center justify-center gap-2">
-                            {/* Voice-reactive orb — scales + glows with audioLevel */}
+                        <div className="relative z-10 flex flex-col items-center justify-center">
+                            {/* Voice-reactive orb — scales + glows with audioLevel.
+                                Sole in-flow child of this column, so the button's own
+                                flex centring puts the cluster (glow, core, wave bars)
+                                exactly on the button's centre — the same centre the
+                                ping rings (-inset-2 on the button) already share. */}
                             <div className="relative flex items-center justify-center">
                                 <div
                                     className="absolute rounded-full bg-gradient-to-br from-indigo-400/50 to-purple-500/40 blur-md transition-transform duration-100"
@@ -1169,29 +1186,34 @@ export function VoiceAgentPopup() {
                                     <AudioVisualizer isActive={true} audioLevel={audioLevel} />
                                 </div>
                             </div>
+                        </div>
+                    )}
 
-                            {/* State badge — Listening / Thinking / Speaking */}
-                            <div
-                                className={`px-2.5 py-0.5 rounded-full text-[10px] font-medium tracking-wide leading-none ${
-                                    aiState === "listening"
-                                        ? "bg-emerald-500/20 text-emerald-200 border border-emerald-400/30"
-                                        : aiState === "processing"
-                                            ? "bg-amber-500/20 text-amber-200 border border-amber-400/30"
-                                            : aiState === "speaking"
-                                                ? "bg-indigo-500/25 text-indigo-100 border border-indigo-400/40"
-                                                : "bg-white/10 text-white/80 border border-white/20"
-                                }`}
-                            >
-                                {aiState === "connecting"
-                                    ? "Connecting…"
-                                    : aiState === "listening"
-                                        ? "Listening"
-                                        : aiState === "processing"
-                                            ? "Thinking"
-                                            : aiState === "speaking"
-                                                ? "Speaking"
-                                                : "Idle"}
-                            </div>
+                    {/* State badge — Listening / Thinking / Speaking. Absolutely
+                        positioned at the button's bottom centre, outside the orb
+                        column, so it no longer pushes the orb cluster above the
+                        button's centre. */}
+                    {isActive && (
+                        <div
+                            className={`absolute left-1/2 bottom-1.5 z-10 -translate-x-1/2 whitespace-nowrap px-2.5 py-0.5 rounded-full text-[10px] font-medium tracking-wide leading-none ${
+                                aiState === "listening"
+                                    ? "bg-emerald-500/20 text-emerald-200 border border-emerald-400/30"
+                                    : aiState === "processing"
+                                        ? "bg-amber-500/20 text-amber-200 border border-amber-400/30"
+                                        : aiState === "speaking"
+                                            ? "bg-indigo-500/25 text-indigo-100 border border-indigo-400/40"
+                                            : "bg-white/10 text-white/80 border border-white/20"
+                            }`}
+                        >
+                            {aiState === "connecting"
+                                ? "Connecting…"
+                                : aiState === "listening"
+                                    ? "Listening"
+                                    : aiState === "processing"
+                                        ? "Thinking"
+                                        : aiState === "speaking"
+                                            ? "Speaking"
+                                            : "Idle"}
                         </div>
                     )}
                 </button>
@@ -1224,16 +1246,15 @@ export function VoiceAgentPopup() {
             would be painted over by every sibling section below. Rendered
             by this same component instance, so swapping to and from it can
             never touch the call. */}
-        {typeof document !== "undefined" && (isActive || barSticky) && navGeom &&
+        {typeof document !== "undefined" && (isActive || barSticky) &&
             createPortal(
                 <div
                     className={`askAiCallBar${barVisible ? " askAiCallBarVisible" : ""}`}
                     role="status"
                     style={{
-                        top: navGeom.top,
-                        left: navGeom.left,
-                        width: navGeom.width,
-                        borderRadius: navGeom.radius,
+                        top: navGeom?.top,
+                        width: navGeom?.width,
+                        borderRadius: navGeom?.radius,
                     }}
                 >
                     <div className="askAiCallBarRow">
@@ -1246,11 +1267,11 @@ export function VoiceAgentPopup() {
                     </div>
                     {isActive ? (
                         <button type="button" className="askAiCallBarEnd" onClick={endSession}>
-                            <X className="h-3.5 w-3.5" aria-hidden />End Call
+                            End Call
                         </button>
                     ) : (
                         <button type="button" className="askAiCallBarEnd" onClick={dismissBarError}>
-                            <X className="h-3.5 w-3.5" aria-hidden />Dismiss
+                            Dismiss
                         </button>
                     )}
                 </div>,
