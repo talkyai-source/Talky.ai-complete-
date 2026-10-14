@@ -136,7 +136,10 @@ export function TestResultPanel({
             </div>
             <ul className="mt-2 space-y-2">
                 {steps.map((step, index) => {
-                    const code = stepCodes[index];
+                    // A SIP code explains a step that failed or was inconclusive. On a
+                    // passed step it only alarms: Blaze answers the reachability ping
+                    // with "404", which still proves its server is up (2026-10-15).
+                    const code = step.ok === true ? null : stepCodes[index];
                     return (
                         <li key={`${step.key}-${index}`} className="flex items-start gap-2" data-step={step.key}>
                             <StepIcon ok={step.ok} />

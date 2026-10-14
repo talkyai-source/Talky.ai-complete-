@@ -61,6 +61,21 @@ test("each check says whether it passed, failed or was skipped, in words as well
     assert.match(texts[3], /Registration \(Failed\)Not signed in\./);
 });
 
+test("a passed step never shows a SIP code, even when the provider answered 404 to the ping", () => {
+    // Owner's real result 2026-10-15: Blaze answers the reachability OPTIONS with
+    // 404; the line was Connected, yet "SIP 404" under "Passed" read like an error.
+    const steps = [
+        { key: "address", ok: true, label: "Address", detail: "Found sip3.blazedigitel.com (144.76.17.155)" },
+        { key: "reachability", ok: true, label: "Reachability", detail: "Server reachable (7 ms)", sip_code: 404 },
+        { key: "credentials", ok: true, label: "Credentials", detail: "Signed in — the line is registered", sip_code: null },
+        { key: "registration", ok: true, label: "Registration", detail: "Registered with sip3.blazedigitel.com." },
+    ];
+    show({ phase: "done", result: result({ ok: true, status: "connected", sip_code: "404", steps }) });
+    const panel = screen.getByRole("region");
+    assert.equal(within(panel).queryByText(/SIP 404/), null, "neither on the step nor in the footer");
+    within(panel).getByText("Server reachable (7 ms)");
+});
+
 test("the footer shows when and how fast, and a SIP code only once", () => {
     const steps = [{ key: "credentials", ok: false, label: "Sign-in", detail: "Refused.", sip_code: 403 }];
     show({ phase: "done", result: result({ sip_code: "408", steps }) });
