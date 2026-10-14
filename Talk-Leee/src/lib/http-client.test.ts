@@ -116,6 +116,33 @@ test("http client maps 429 response to rate_limited with retryAfterMs", async ()
     (globalThis as unknown as { fetch?: unknown }).fetch = prevFetch;
 });
 
+test("http client reads an application/problem+json refusal and shows its detail", async () => {
+    // 2026-10-14: the PBX endpoints answer RFC 9457 problem+json, and every
+    // refusal (line in use, tested too often, duplicate name) read "Request failed".
+    const prevFetch = (globalThis as unknown as { fetch?: unknown }).fetch;
+    (globalThis as unknown as { fetch: unknown }).fetch = (async () => {
+        return new Response(JSON.stringify({
+            type: "about:blank", title: "Trunk In Use", status: 409,
+            detail: "This shared line is still assigned to another account.", instance: "/x",
+        }), { status: 409, headers: { "content-type": "application/problem+json" } });
+    }) as unknown as typeof fetch;
+
+    const client = createHttpClient({ baseUrl: "http://example.test" });
+    let caught: unknown;
+    try {
+        await client.request({ path: "/x", method: "DELETE" });
+    } catch (e) {
+        caught = e;
+    } finally {
+        (globalThis as unknown as { fetch?: unknown }).fetch = prevFetch;
+    }
+
+    assert.ok(caught instanceof ApiClientError);
+    const err = caught as ApiClientError;
+    assert.equal(err.status, 409);
+    assert.equal(err.message, "This shared line is still assigned to another account.");
+});
+
 // Regression: the recordings audio stream + CSV upload are binary/multipart
 // and go through requestRaw. They MUST get the same refresh-on-401 retry as
 // JSON calls — otherwise a rotated talky_at cookie surfaces as

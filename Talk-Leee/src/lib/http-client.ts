@@ -99,7 +99,9 @@ function readRetryAfterMs(res: Response) {
 
 async function readBody(res: Response) {
     const ct = res.headers.get("content-type") ?? "";
-    if (ct.includes("application/json")) {
+    // Also RFC 9457 `application/problem+json`: read as text, every refusal from
+    // those endpoints surfaced as "Request failed" instead of its own detail.
+    if (/\bapplication\/(?:[\w.-]+\+)?json\b/i.test(ct)) {
         try {
             return await res.json();
         } catch {
