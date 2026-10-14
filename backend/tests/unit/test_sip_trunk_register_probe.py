@@ -12,6 +12,7 @@ rule are all observed on the wire.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 import socket
@@ -112,6 +113,12 @@ class FakeProvider:
             except OSError:
                 return
             request = parse(data)
+            # Only this probe's REGISTERs count. A stray datagram from another
+            # test's socket can land on a reused ephemeral port (CI 2026-10-14
+            # counted 2 requests where the probe had sent 1); answering it
+            # would also kill this thread on a missing Via header.
+            if not request.start.startswith("REGISTER "):
+                continue
             self.requests.append(request)
             for datagram in self.script(request, len(self.requests)) or []:
                 self.sock.sendto(datagram, addr)
@@ -259,6 +266,22 @@ async def test_an_answer_to_the_first_request_is_reported_as_is(first_answer, ou
     with FakeProvider(lambda req, n: [reply(req, *first_answer)]) as server:
         result = await probe(server)
     assert (result["outcome"], result["sip_code"], len(server.requests)) == (outcome, code, requests)
+
+
+@pytest.mark.asyncio
+async def test_a_stray_datagram_from_another_socket_is_not_counted_as_a_request():
+    # CI 2026-10-14 counted 2 requests where the probe sent 1: something else
+    # reached the fake's reused ephemeral port. Only the probe's REGISTERs count.
+    def answer_then_stray(req, n):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as other:
+            other.sendto(b"OPTIONS sip:x SIP/2.0\r\n\r\n", ("127.0.0.1", server.port))
+            other.sendto(b"\x80\x00 not sip at all", ("127.0.0.1", server.port))
+        return [reply(req, 404, "Not Found")]
+
+    with FakeProvider(answer_then_stray) as server:
+        result = await probe(server)
+        await asyncio.sleep(0.2)  # let the strays arrive before counting
+    assert (result["outcome"], result["sip_code"], len(server.requests)) == ("not_found", 404, 1)
 
 
 @pytest.mark.asyncio
