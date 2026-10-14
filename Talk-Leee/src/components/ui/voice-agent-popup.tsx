@@ -46,11 +46,16 @@ const MIC_WORKLET_PATH = "/worklets/pcm16-capture-processor.js";
 const BAR_COUNT = 14;
 
 // Call-bar heights, mirrored EXACTLY by .askAiCallBar in globals.css
-// (95px two-row below 640px, 64px one-row at 640px and above). The
+// (103px two-row below 640px, 64px one-row at 640px and above). The
 // orb↔bar swap thresholds are navbarTop + these, so the swap happens the
 // moment the hero's bottom edge clears the bar's own bottom edge.
-const BAR_HEIGHT_TWO_ROW = 95;
+const BAR_HEIGHT_TWO_ROW = 103;
 const BAR_HEIGHT_ONE_ROW = 64;
+// The one-row form's media query — the same sm breakpoint globals.css
+// splits .askAiCallBar on. Below it the bar is the phone form, sized by
+// CSS alone (88% / 14px); at and above it the bar takes the navbar's
+// measured width and radius inline.
+const BAR_ONE_ROW_QUERY = "(min-width: 640px)";
 // Gap between the show and hide thresholds so scroll jitter exactly on
 // the boundary can never make the swap oscillate.
 const BAR_SWAP_HYSTERESIS_PX = 24;
@@ -129,14 +134,21 @@ export function VoiceAgentPopup() {
     // while the bar is on screen — the in-hero error panel is off-screen at
     // that point and would never be seen. Cleared on dismiss.
     const [barSticky, setBarSticky] = useState(false);
-    // The navbar's measured geometry. The bar copies it (top offset, width,
-    // radius) so it occupies the navbar's area on every device by
-    // construction instead of duplicating the navbar's CSS. Horizontal
-    // placement is NOT copied: .askAiCallBar centres itself with the same
-    // left:0/right:0/margin-inline:auto rule the navbar uses, so the two
-    // gaps are solved by the browser and can never drift. Null until the
-    // first measurement — the CSS fallbacks in .askAiCallBar apply then.
+    // The navbar's measured geometry. The bar copies its top offset at
+    // every size, and its width and radius only in the one-row form (640px
+    // and above), so there it occupies the navbar's area on every device by
+    // construction instead of duplicating the navbar's CSS. Below 640px the
+    // phone form is sized by .askAiCallBar alone (88% / 14px) and nothing
+    // but `top` is set inline. Horizontal placement is never copied:
+    // .askAiCallBar centres itself with the same left:0/right:0/
+    // margin-inline:auto rule the navbar uses, so the two gaps are solved
+    // by the browser and can never drift. Null until the first measurement
+    // — the CSS fallbacks in .askAiCallBar apply then.
     const [navGeom, setNavGeom] = useState<{ top: number; width: number; radius: string } | null>(null);
+    // Whether the one-row form applies (BAR_ONE_ROW_QUERY). Kept in state
+    // so the render can decide whether to emit the inline width/radius;
+    // refreshed by the same resize path that rebuilds the swap thresholds.
+    const [oneRowBar, setOneRowBar] = useState(false);
     const wrapperRef = useRef<HTMLDivElement | null>(null);
 
     const wsRef = useRef<WebSocket | null>(null);
@@ -227,7 +239,7 @@ export function VoiceAgentPopup() {
     // band, so the boundary can never oscillate. IntersectionObservers fire
     // on crossings only — no scroll listener. Thresholds are rebuilt on
     // resize because the navbar offset (8/10px) and the bar height
-    // (95/64px) follow their own width breakpoints.
+    // (103/64px) follow their own width breakpoints.
     //
     // The navbar's geometry is re-measured by a ResizeObserver on the
     // navbar element itself, not by the resize listener: its box also
@@ -246,9 +258,9 @@ export function VoiceAgentPopup() {
             hideObserver?.disconnect();
             const nav = document.querySelector('nav[aria-label="Primary"]');
             const navTop = nav ? Number.parseFloat(getComputedStyle(nav).top) || 8 : 8;
-            const barHeight = window.matchMedia("(min-width: 640px)").matches
-                ? BAR_HEIGHT_ONE_ROW
-                : BAR_HEIGHT_TWO_ROW;
+            const oneRow = window.matchMedia(BAR_ONE_ROW_QUERY).matches;
+            setOneRowBar(oneRow);
+            const barHeight = oneRow ? BAR_HEIGHT_ONE_ROW : BAR_HEIGHT_TWO_ROW;
             const showEdge = navTop + barHeight;
             const hideEdge = showEdge + BAR_SWAP_HYSTERESIS_PX;
             // With the viewport clipped at the top by `edge`, the hero
@@ -1239,9 +1251,11 @@ export function VoiceAgentPopup() {
                 </div>
             )}
         </div>
-        {/* Active-call bar: pinned to the top of the viewport in the
-            navbar's measured geometry while the call is live and the hero
-            has scrolled away (plus the sticky error state). Portaled to
+        {/* Active-call bar: pinned to the top of the viewport while the
+            call is live and the hero has scrolled away (plus the sticky
+            error state). Its top offset follows the navbar at every size;
+            its width and radius follow the navbar only in the one-row form
+            — the phone form is sized by CSS alone. Portaled to
             document.body — rendered inside the hero's z-10 container it
             would be painted over by every sibling section below. Rendered
             by this same component instance, so swapping to and from it can
@@ -1253,8 +1267,8 @@ export function VoiceAgentPopup() {
                     role="status"
                     style={{
                         top: navGeom?.top,
-                        width: navGeom?.width,
-                        borderRadius: navGeom?.radius,
+                        width: oneRowBar ? navGeom?.width : undefined,
+                        borderRadius: oneRowBar ? navGeom?.radius : undefined,
                     }}
                 >
                     <div className="askAiCallBarRow">
