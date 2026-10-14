@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { AskAiSignInNotice, clearAskAiSignInFlag } from "@/components/auth/askai-signin-notice";
+import { AskAiSignInNotice, clearAskAiSignInFlag, hasAskAiSignInFlag } from "@/components/auth/askai-signin-notice";
 
 type Step = "form" | "otp" | "password";
 
@@ -140,9 +140,16 @@ export default function RegisterClientPage() {
             });
             markFreshLogin();
 
-            const destination = postAuthDashboard(response.role);
-            // The Ask-AI sign-in notice must not survive a successful signup.
+            // Same rule as login-client.tsx: an Ask AI arrival (per-tab session
+            // flag) returns to the homepage, everyone else opens their
+            // dashboard. Read the flag BEFORE clearing it; the notice must not
+            // survive a successful signup.
+            const fromAskAi = hasAskAiSignInFlag();
             clearAskAiSignInFlag();
+            const destination =
+                fromAskAi && response.role !== "white_label_admin"
+                    ? "/"
+                    : postAuthDashboard(response.role);
             if (typeof window !== "undefined") {
                 // A hard navigation guarantees the auth cookies are committed
                 // before the dashboard's first protected request.

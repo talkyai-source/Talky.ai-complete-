@@ -2,9 +2,27 @@
 
 import type { CSSProperties } from "react";
 import Link from "next/link";
+import { useAuth } from "@/lib/auth-context";
+import { postAuthDashboard } from "@/lib/post-auth-navigation";
+
+// Shared by the Login/Dashboard link and its empty slot so the slot has the
+// same box as the link it stands in for.
+const authLinkClassName =
+  "font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md relative after:content-[''] after:absolute after:left-0 after:bottom-[-4px] after:w-0 after:h-0.5 after:bg-primary after:transition-all hover:after:w-full";
 
 export function Footer() {
   const currentYear = new Date().getFullYear();
+  const { status, user } = useAuth();
+
+  // The Login/Dashboard link. `null` while the auth state is unresolved
+  // (server render, hydration, /auth/me in flight): the slot then renders
+  // empty but keeps its box, so a signed-in visitor never sees "Login".
+  const authAction =
+    status === "authenticated"
+      ? { label: "Dashboard", href: postAuthDashboard(user?.role) }
+      : status === "anonymous"
+        ? { label: "Login", href: "/auth/login" }
+        : null;
 
   const navLinks = [
     { label: "Home", href: "/" },
@@ -66,12 +84,16 @@ export function Footer() {
             >
               Privacy Policy
             </Link>
-            <Link 
-              href="/auth/login" 
-              className="font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md relative after:content-[''] after:absolute after:left-0 after:bottom-[-4px] after:w-0 after:h-0.5 after:bg-primary after:transition-all hover:after:w-full"
-            >
-              Login
-            </Link>
+            {authAction ? (
+              <Link href={authAction.href} className={authLinkClassName}>
+                {authAction.label}
+              </Link>
+            ) : (
+              // Empty slot: same box as the link, invisible, until auth resolves.
+              <span aria-hidden="true" data-auth-slot className={`${authLinkClassName} invisible`}>
+                Dashboard
+              </span>
+            )}
             <Link 
               href="/auth/register" 
               className="font-semibold text-primary dark:text-foreground hover:text-primary/90 dark:hover:text-foreground/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md relative after:content-[''] after:absolute after:left-0 after:bottom-[-4px] after:w-0 after:h-0.5 after:bg-primary after:transition-all hover:after:w-full"

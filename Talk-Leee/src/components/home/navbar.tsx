@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Bot, ChevronDown, PhoneCall, Sparkles, Moon, Sun, X, Headphones, BadgeCheck } from "lucide-react";
 import { useTheme } from "@/components/providers/theme-provider";
 import { useAuth } from "@/lib/auth-context";
+import { postAuthDashboard } from "@/lib/post-auth-navigation";
 import { industryNavItems } from "@/Industries/industries";
 
 // Mirrors the w-[680px]/w-[345px]/w-[520px] widths on `dropdownWidthClass` below exactly —
@@ -199,12 +200,23 @@ export function Navbar() {
   // `NEXT_PUBLIC_ENABLE_DEV_AUTH=1`. A misconfigured prod build that
   // forgets to set NODE_ENV no longer accidentally writes a fake
   // token to AuthContext.
-  const { accessToken, setToken } = useAuth();
+  const { accessToken, setToken, status, user } = useAuth();
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_ENABLE_DEV_AUTH !== "1") return;
     if (accessToken) return;
     setToken("dev-token");
   }, [accessToken, setToken]);
+
+  // The Login/Dashboard action. `null` while the auth state is unresolved
+  // (server render, hydration, /auth/me in flight): the slot then renders
+  // empty but keeps its box, so a signed-in visitor never sees "Login" and
+  // nothing around the slot moves when the label arrives.
+  const authAction =
+    status === "authenticated"
+      ? { label: "Dashboard", href: postAuthDashboard(user?.role) }
+      : status === "anonymous"
+        ? { label: "Login", href: "/auth/login" }
+        : null;
 
   const closeMobileMenu = useCallback(() => {
     const details = mobileMenuRef.current;
@@ -456,17 +468,28 @@ export function Navbar() {
                     );
                   })}
                   <li className="mt-1 border-t border-border/60 pt-1">
-                    <Link
-                      href="/dashboard"
-                      className={[
-                        "home-mobile-link text-sm font-medium focus-visible:outline-none text-foreground/90 hover:text-foreground",
-                      ].join(" ")}
-                      onClick={() => {
-                        closeMobileMenu();
-                      }}
-                    >
-                      Login
-                    </Link>
+                    {authAction ? (
+                      <Link
+                        href={authAction.href}
+                        className={[
+                          "home-mobile-link text-sm font-medium focus-visible:outline-none text-foreground/90 hover:text-foreground",
+                        ].join(" ")}
+                        onClick={() => {
+                          closeMobileMenu();
+                        }}
+                      >
+                        {authAction.label}
+                      </Link>
+                    ) : (
+                      // Empty slot: same row box, no text, until auth resolves.
+                      <span
+                        aria-hidden="true"
+                        data-auth-slot
+                        className="home-mobile-link text-sm font-medium text-foreground/90 invisible"
+                      >
+                        Dashboard
+                      </span>
+                    )}
                   </li>
                 </ul>
               </div>
@@ -666,15 +689,37 @@ export function Navbar() {
           </ul>
 
           <div className="navbarThemeWrap flex items-center gap-1.5 lg:gap-2.5 justify-self-end">
-            <Link
-              href="/dashboard"
-              className={[
-                "navbarDesktopAction hidden md:inline-flex px-3 text-[13px] font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400 transition-[background-color,box-shadow,transform] duration-200 ease-out shadow-[0_2px_8px_rgba(99,102,241,0.25),0_1px_2px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_16px_rgba(99,102,241,0.35),0_2px_4px_rgba(0,0,0,0.08)] hover:scale-[1.02] active:scale-[1.0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                isCompact ? "py-1" : "py-1.5",
-              ].join(" ")}
-            >
-              Login
-            </Link>
+            {authAction ? (
+              <Link
+                href={authAction.href}
+                className={[
+                  "navbarDesktopAction hidden md:inline-flex px-3 text-[13px] font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400 transition-[background-color,box-shadow,transform] duration-200 ease-out shadow-[0_2px_8px_rgba(99,102,241,0.25),0_1px_2px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_16px_rgba(99,102,241,0.35),0_2px_4px_rgba(0,0,0,0.08)] hover:scale-[1.02] active:scale-[1.0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                  isCompact ? "py-1" : "py-1.5",
+                ].join(" ")}
+              >
+                {/* The visible label sits over an invisible "Dashboard" so the
+                    button is the same width whichever label it shows — the
+                    grid's three auto columns would otherwise re-centre the
+                    nav links when the label changed. */}
+                <span className="grid justify-items-center">
+                  <span className="col-start-1 row-start-1">{authAction.label}</span>
+                  <span className="col-start-1 row-start-1 invisible" aria-hidden="true">Dashboard</span>
+                </span>
+              </Link>
+            ) : (
+              // Empty slot: identical box (classes, padding, text metrics),
+              // invisible, until the auth state resolves.
+              <span
+                aria-hidden="true"
+                data-auth-slot
+                className={[
+                  "navbarDesktopAction hidden md:inline-flex px-3 text-[13px] font-medium rounded-lg bg-indigo-600 text-white invisible",
+                  isCompact ? "py-1" : "py-1.5",
+                ].join(" ")}
+              >
+                Dashboard
+              </span>
+            )}
             <button
               type="button"
               onClick={toggleTheme}

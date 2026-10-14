@@ -126,7 +126,7 @@ export function Sidebar({ className }: { className?: string }) {
     const brandLogoAlt = whiteLabel?.branding.logo.alt ?? "Talk-Lee";
     const brandLogoWidth = whiteLabel?.branding.logo.width ?? 28;
     const brandLogoHeight = whiteLabel?.branding.logo.height ?? 28;
-    const brandHomeHref = whiteLabel ? `/white-label/${whiteLabel.branding.partnerId}/preview` : "/dashboard";
+    const brandHomeHref = whiteLabel ? `/white-label/${whiteLabel.branding.partnerId}/preview` : "/";
     const { collapsed, mobileOpen } = useSidebarState();
     const { toggleCollapsed, closeMobile } = useSidebarActions();
     const tooltip = useHoverTooltip();
@@ -321,13 +321,14 @@ export function Sidebar({ className }: { className?: string }) {
                             </Button>
                         ) : null}
 
-                        <Link
-                            href={brandHomeHref}
+                        {/* Only the brand name links home; the logo is inert. The
+                            wrapper keeps the exact collapse classes so the
+                            animation is unchanged. */}
+                        <div
                             className={cn(
                                 "flex items-center gap-3 min-w-0 overflow-hidden transition-[opacity,transform,max-width] duration-300 ease-in-out",
                                 collapsed ? "max-w-0 opacity-0 -translate-x-2 pointer-events-none" : "max-w-[190px] opacity-100 translate-x-0"
                             )}
-                            onClick={onClose}
                         >
                             {whiteLabel ? (
                                 <Image src={brandLogoSrc} alt={brandLogoAlt} width={brandLogoWidth} height={brandLogoHeight} className="w-7 h-7" />
@@ -337,9 +338,15 @@ export function Sidebar({ className }: { className?: string }) {
                                 </svg>
                             )}
                             <div className="min-w-0">
-                                <div className="text-base font-black leading-none text-sidebar-foreground tracking-tight">{brandName}</div>
+                                <Link
+                                    href={brandHomeHref}
+                                    className="block text-base font-black leading-none text-sidebar-foreground tracking-tight"
+                                    onClick={onClose}
+                                >
+                                    {brandName}
+                                </Link>
                             </div>
-                        </Link>
+                        </div>
                     </div>
 
                     <div className={cn("flex items-center gap-2 shrink-0", collapsed ? "hidden" : undefined)}>
