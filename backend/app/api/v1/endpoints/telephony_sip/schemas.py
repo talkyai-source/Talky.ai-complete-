@@ -12,7 +12,7 @@ import ipaddress
 import os
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -337,11 +337,26 @@ class SIPTrunkResponse(BaseModel):
     updated_at: datetime
 
 
+class SIPTrunkTestStep(BaseModel):
+    """One check inside a line test, in the order address, reachability,
+    credentials, registration."""
+    key: Literal["address", "reachability", "credentials", "registration"]
+    # True = passed, False = failed, None = skipped or inconclusive.
+    ok: Optional[bool] = None
+    label: str
+    # One plain-language sentence for the person looking at the page.
+    detail: str
+    # The raw SIP status behind this check (e.g. 403), for small print.
+    sip_code: Optional[int] = None
+
+
 class SIPTrunkTestResponse(BaseModel):
     """Result of POST /trunks/{id}/test — persisted on the trunk row.
 
-    Mirrors the dict returned by the SIP probe helper so the activation
-    gate can read .ok back off the trunk row without re-running the probe.
+    The legacy fields keep their meaning for older clients (``ok`` is False only
+    when something is actually wrong, ``detail`` is now the plain-language
+    verdict, ``sip_code`` is the answer to OPTIONS). ``steps``, ``verdict`` and
+    ``status`` are the real, step-by-step result.
     """
     ok: bool
     latency_ms: int
@@ -352,6 +367,9 @@ class SIPTrunkTestResponse(BaseModel):
     tested_at: datetime
     sip_code: Optional[str] = None
     timeout_code: Optional[int] = None
+    steps: List[SIPTrunkTestStep]
+    verdict: str
+    status: Literal["connected", "credentials_rejected", "unreachable", "not_registered", "reachable"]
 
 
 # --- codec policies -----------------------------------------------------

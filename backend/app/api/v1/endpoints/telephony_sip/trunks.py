@@ -8,14 +8,17 @@ import json
 import logging
 import os
 import socket
+import time
+from collections import deque
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
+from app.core.container import get_container
 from app.core.db_utils import acquire_with_tenant
 from app.core.tenant_rls import apply_tenant_rls_context
 from app.domain.services.telephony.trunk_runtime import (
@@ -42,7 +45,7 @@ from .schemas import (
     SIPTrunkTestResponse,
     SIPTrunkUpdateRequest,
 )
-from .trunk_probe import probe_sip_endpoint
+from .trunk_probe import run_trunk_test
 
 logger = logging.getLogger(__name__)
 
@@ -292,6 +295,7 @@ async def _get_tenant_trunk(
         FROM tenant_sip_trunks
         WHERE tenant_id = $1
           AND id = $2
+          AND deleted_at IS NULL
         """,
         tenant_id,
         trunk_id,
@@ -346,6 +350,7 @@ async def list_sip_trunks(
                 updated_at
             FROM tenant_sip_trunks
             WHERE tenant_id = $1
+              AND deleted_at IS NULL
             ORDER BY created_at DESC
             """,
             current_user.tenant_id,
@@ -716,6 +721,7 @@ async def update_sip_trunk(
                         updated_at = NOW()
                     WHERE tenant_id = $1
                       AND id = $2
+                      AND deleted_at IS NULL
                     RETURNING
                         id,
                         tenant_id,
@@ -757,6 +763,15 @@ async def update_sip_trunk(
                     detail="A trunk with this name already exists for the tenant.",
                     type_suffix="duplicate-trunk",
                 )
+            if not row:
+                # Deleted by someone else between the read above and this write.
+                raise _AbandonClaim(_problem(
+                    request=request,
+                    status_code=404,
+                    title="Trunk Not Found",
+                    detail="Requested trunk does not exist for tenant.",
+                    type_suffix="trunk-not-found",
+                ))
 
             response_model = _row_to_response(row)
             response_payload = response_model.model_dump(mode="json")
@@ -904,6 +919,7 @@ async def _set_trunk_active_state(
                     updated_at = NOW()
                 WHERE tenant_id = $1
                   AND id = $2
+                  AND deleted_at IS NULL
                 RETURNING
                     id,
                     tenant_id,
@@ -1010,6 +1026,70 @@ async def deactivate_sip_trunk(
     )
 
 
+# --- POST /trunks/{id}/test: rate limit ---------------------------------
+# Providers ban an IP after a few failed sign-ins (fail2ban), and that would also
+# take down the tenant's live registration, so one line can be tested at most
+# once every 10 seconds and 10 times in any 15 minutes. The 10-second gap reads
+# last_tested_at (shared by every worker); the 15-minute budget lives in Redis
+# when it is available and in this process otherwise.
+
+_TEST_MIN_GAP_SECONDS = 10
+_TEST_WINDOW_SECONDS = 15 * 60
+_TEST_MAX_PER_WINDOW = 10
+_test_history: dict[str, deque] = {}  # in-process fallback: key -> test times (oldest first)
+
+
+def _clock() -> float:
+    return time.time()
+
+
+def _trunk_test_redis():
+    try:
+        container = get_container()
+        return container.redis if container.is_initialized else None
+    except Exception:  # noqa: BLE001 - no Redis is a supported configuration
+        return None
+
+
+async def _count_trunk_test(tenant_id: str, trunk_id: UUID) -> int:
+    """Count one test against the line's 15-minute budget.
+
+    Returns 0 when the test may run (it is now counted), otherwise the number of
+    seconds until the oldest counted test ages out. Refused clicks are not counted.
+    """
+    now = _clock()
+    cutoff = now - _TEST_WINDOW_SECONDS
+    key = f"telephony:sip_trunk_test:{tenant_id}:{trunk_id}"
+    redis = _trunk_test_redis()
+    if redis is not None:
+        try:
+            await redis.zremrangebyscore(key, "-inf", cutoff)
+            if await redis.zcard(key) >= _TEST_MAX_PER_WINDOW:
+                oldest = await redis.zrange(key, 0, 0, withscores=True)
+                return max(1, int(oldest[0][1] + _TEST_WINDOW_SECONDS - now) + 1) if oldest else _TEST_WINDOW_SECONDS
+            await redis.zadd(key, {f"{now:.6f}:{uuid4().hex[:8]}": now})
+            await redis.expire(key, _TEST_WINDOW_SECONDS + 60)
+            return 0
+        except Exception as exc:  # noqa: BLE001 - a Redis outage must not stop tests
+            logger.warning("trunk_test_limit_redis_unavailable err_type=%s", type(exc).__name__)
+    if len(_test_history) > 1024:  # forget lines nobody has tested for a window
+        for stale in [k for k, v in _test_history.items() if not v or v[-1] <= cutoff]:
+            del _test_history[stale]
+    history = _test_history.setdefault(key, deque())
+    while history and history[0] <= cutoff:
+        history.popleft()
+    if len(history) >= _TEST_MAX_PER_WINDOW:
+        return max(1, int(history[0] + _TEST_WINDOW_SECONDS - now) + 1)
+    history.append(now)
+    return 0
+
+
+def _test_refused(request: Request, *, title: str, detail: str, retry_after: int, type_suffix: str) -> JSONResponse:
+    response = _problem(request=request, status_code=429, title=title, detail=detail, type_suffix=type_suffix)
+    response.headers["Retry-After"] = str(retry_after)
+    return response
+
+
 @router.post("/trunks/{trunk_id}/test", response_model=SIPTrunkTestResponse)
 async def test_sip_trunk(
     trunk_id: UUID,
@@ -1017,12 +1097,15 @@ async def test_sip_trunk(
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
 ):
-    """Probe a tenant's SIP trunk for reachability and persist the result.
+    """Report a line's real state: address, reachability, credentials, registration.
 
-    The probe runs a real network handshake (TCP/TLS) or sends a SIP
-    OPTIONS datagram (UDP). The full result dict is stored on the trunk
-    row in last_test_result so the activate endpoint's gate can read
-    .ok back without re-running the probe.
+    The first two checks are an address lookup and one OPTIONS (or a TCP/TLS
+    connect). The third proves the saved username and password with one REGISTER
+    round that cannot disturb the live registration (see trunk_probe), and is
+    skipped when Asterisk already holds a fresh registration for the line. The
+    fourth reads what the status updater last saw Asterisk do. The full result,
+    steps included, is stored in last_test_result; the password is never part of
+    it. A deleted line is a 404; testing too often is a 429.
     """
     from datetime import datetime, timezone
 
@@ -1043,8 +1126,10 @@ async def test_sip_trunk(
             request_id=request.headers.get("x-request-id"),
         )
         row = await conn.fetchrow(
-            "SELECT sip_domain, port, transport FROM tenant_sip_trunks "
-            "WHERE id = $1 AND tenant_id = $2",
+            "SELECT sip_domain, port, transport, auth_username, auth_password_encrypted, metadata, "
+            "is_active, live_registration_status, live_status_detail, live_status_checked_at, last_tested_at "
+            "FROM tenant_sip_trunks "
+            "WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL",
             trunk_id,
             current_user.tenant_id,
         )
@@ -1057,11 +1142,54 @@ async def test_sip_trunk(
             type_suffix="trunk-not-found",
         )
 
-    result = await probe_sip_endpoint(
+    last_tested_at = row["last_tested_at"]
+    if last_tested_at is not None:
+        if last_tested_at.tzinfo is None:
+            last_tested_at = last_tested_at.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - last_tested_at).total_seconds()
+        if 0 <= age < _TEST_MIN_GAP_SECONDS:
+            wait = max(1, int(_TEST_MIN_GAP_SECONDS - age) + 1)
+            return _test_refused(
+                request, title="Test Too Soon", retry_after=wait, type_suffix="trunk-test-too-soon",
+                detail=f"This line was tested a moment ago. Wait {wait} seconds and try again.",
+            )
+    wait = await _count_trunk_test(str(current_user.tenant_id), trunk_id)
+    if wait:
+        return _test_refused(
+            request, title="Too Many Tests", retry_after=wait, type_suffix="trunk-test-rate-limited",
+            detail=(
+                f"This line has already been tested {_TEST_MAX_PER_WINDOW} times in the last 15 minutes. "
+                "Wait a few minutes before testing again — repeated sign-in attempts can get your server "
+                "blocked by your provider."
+            ),
+        )
+
+    password = None
+    credentials_problem = None
+    if row["auth_username"] and row["auth_password_encrypted"]:
+        try:
+            password = get_encryption_service().decrypt(row["auth_password_encrypted"])
+        except Exception as exc:  # noqa: BLE001 - never echo the cause; it can name the key
+            logger.warning(
+                "trunk_test_password_unreadable trunk=%s err_type=%s", str(trunk_id)[:8], type(exc).__name__
+            )
+            credentials_problem = "The saved password couldn't be read. Re-enter the password and save the line."
+
+    result = await run_trunk_test(
         host=row["sip_domain"],
         port=row["port"],
         transport=row["transport"],
+        auth_username=row["auth_username"],
+        auth_password=password,
+        metadata=_coerce_jsonb(row["metadata"]) or {},
+        is_active=bool(row["is_active"]),
+        live_status=row["live_registration_status"],
+        live_detail=row["live_status_detail"],
+        live_checked_at=row["live_status_checked_at"],
+        freshness_seconds=trunk_status_freshness_seconds(),
+        credentials_problem=credentials_problem,
     )
+    password = None
     tested_at = datetime.now(timezone.utc)
 
     async with acquire_with_tenant(
@@ -1081,7 +1209,7 @@ async def test_sip_trunk(
             UPDATE tenant_sip_trunks
             SET last_tested_at = $1,
                 last_test_result = $2::jsonb
-            WHERE id = $3 AND tenant_id = $4
+            WHERE id = $3 AND tenant_id = $4 AND deleted_at IS NULL
             """,
             tested_at,
             # Raw dict — see create-path comment above.
@@ -1091,15 +1219,18 @@ async def test_sip_trunk(
         )
 
     return SIPTrunkTestResponse(
-        ok=bool(result.get("ok")),
-        latency_ms=int(result.get("latency_ms", 0) or 0),
+        ok=result["ok"],
+        latency_ms=result["latency_ms"],
         transport=row["transport"],
-        target=f'{row["sip_domain"]}:{row["port"]}',
-        error=result.get("error"),
-        detail=result.get("detail"),
+        target=result["target"],
+        error=result["error"],
+        detail=result["detail"],
         tested_at=tested_at,
-        sip_code=result.get("sip_code"),
-        timeout_code=result.get("timeout_code"),
+        sip_code=result["sip_code"],
+        timeout_code=result["timeout_code"],
+        steps=result["steps"],
+        verdict=result["verdict"],
+        status=result["status"],
     )
 
 
@@ -1136,7 +1267,7 @@ async def _current_assignment_projection(db_pool, tenant_id: str, trunk_id: str)
     async with acquire_with_tenant(db_pool, tenant_id) as conn:
         return await conn.fetchrow(
             "SELECT trunk_name, metadata->>'caller_id' AS caller_id FROM tenant_sip_trunks "
-            "WHERE id=$1::uuid AND tenant_id=$2::uuid",
+            "WHERE id=$1::uuid AND tenant_id=$2::uuid AND deleted_at IS NULL",
             trunk_id,
             str(tenant_id),
         )
@@ -1152,6 +1283,7 @@ async def _fetch_pool_trunk(conn, pool_trunk_id: str, tenant_id: str):
         FROM tenant_sip_trunks
         WHERE id = $1::uuid
           AND tenant_id = $3::uuid
+          AND deleted_at IS NULL
           AND is_active = TRUE
           AND direction IN ('outbound', 'both')
           AND metadata->>'pool' = 'true'
@@ -1405,6 +1537,7 @@ async def _fetch_assignable_trunk(conn, trunk_id: str, tenant_id):
         FROM tenant_sip_trunks
         WHERE id = $1::uuid AND is_active = TRUE
           AND tenant_id = $2::uuid
+          AND deleted_at IS NULL
         FOR SHARE
         """,
         trunk_id,
@@ -1602,6 +1735,149 @@ async def set_campaign_trunk_assignment(
     )
 
 
+# ── Delete a line ───────────────────────────────────────────────────────────
+# A tenant can always delete its own line (owner report 2026-10-14: the UI
+# deactivated a line and then got 409 "Trunk In Use" for every line that had ever
+# carried an inbound number). What pointed at the line is cleaned up, and the row
+# is removed unless inbound call history still references it, in which case it is
+# retired in place (deleted_at, migration 0070) and disappears from every API.
+
+# A call row that never reached a terminal status must not block deletion forever.
+_DELETE_OPEN_CALL_HOURS = 4
+
+# Another tenant's allotment / campaign pin is invisible under RLS and is not ours
+# to edit; this only answers "does anyone else still use the line". It runs with the
+# RLS bypass on and returns a boolean, never their identities.
+_SHARED_LINE_IN_USE_SQL = """
+SELECT EXISTS (
+    SELECT 1 FROM tenants
+     WHERE id <> $2::uuid AND calling_rules->'pool_trunk'->>'id' = $1
+    UNION ALL
+    SELECT 1 FROM campaigns
+     WHERE tenant_id <> $2::uuid AND calling_config->'trunk'->>'id' = $1
+)
+"""
+_OPEN_CALL_SQL = """
+SELECT EXISTS (
+    SELECT 1 FROM calls
+     WHERE tenant_id = $1::uuid
+       AND (status IS NULL OR status <> ALL($2::text[]))
+       AND created_at >= NOW() - make_interval(hours => $3::int)
+)
+"""
+_UNPIN_CAMPAIGNS_SQL = """
+UPDATE campaigns
+   SET calling_config = (COALESCE(calling_config, '{}'::jsonb) - 'trunk'), updated_at = NOW()
+ WHERE tenant_id = $1::uuid AND calling_config->'trunk'->>'id' = $2
+RETURNING id
+"""
+_CLEAR_POOL_ASSIGNMENT_SQL = """
+UPDATE tenants
+   SET calling_rules = (COALESCE(calling_rules, '{}'::jsonb) - 'pool_trunk'), updated_at = NOW()
+ WHERE id = $1::uuid AND calling_rules->'pool_trunk'->>'id' = $2
+"""
+_DELETE_ROUTE_POLICIES_SQL = """
+DELETE FROM tenant_route_policies WHERE tenant_id = $1::uuid AND target_trunk_id = $2::uuid
+"""
+# An inbound campaign whose number is archived below can no longer answer calls, and
+# its lifecycle refuses an archived assignment ("assignment_archived"), so leaving it
+# "active" strands it. Pause it first, as an approved number reassignment does.
+# Configs are locked before their assignments: the order every inbound path uses.
+_PAUSE_INBOUND_CONFIGS_SQL = """
+UPDATE inbound_campaign_configs
+   SET status = 'paused', version = version + 1, updated_by = $3, updated_at = NOW()
+ WHERE tenant_id = $1::uuid AND status = 'active'
+   AND id IN (SELECT config_id FROM inbound_did_assignments
+               WHERE tenant_id = $1::uuid AND sip_trunk_id = $2::uuid AND status <> 'archived')
+RETURNING id, campaign_id
+"""
+_PAUSE_INBOUND_CAMPAIGNS_SQL = """
+UPDATE campaigns
+   SET status = 'paused', updated_at = NOW()
+ WHERE tenant_id = $1::uuid AND id = ANY($2::uuid[]) AND direction = 'inbound'
+   AND status IN ('running', 'active')
+"""
+_AUDIT_INBOUND_PAUSE_SQL = """
+INSERT INTO inbound_audit_events
+    (tenant_id, event_type, actor_id, actor_role, resource_type, resource_id, reason, metadata)
+SELECT $1::uuid, 'inbound_campaign_paused', $2::uuid, $3, 'inbound_campaign', config_id,
+       'Its phone line was deleted', jsonb_build_object('sip_trunk_id', $4::text)
+  FROM unnest($5::uuid[]) AS config_id
+"""
+# History is archived, never deleted. An assignment that already ended earlier keeps
+# its earlier end; valid_to must stay after valid_from (inbound_assignments_valid_window).
+_ARCHIVE_INBOUND_ASSIGNMENTS_SQL = """
+UPDATE inbound_did_assignments
+   SET status = 'archived',
+       valid_to = GREATEST(LEAST(COALESCE(valid_to, NOW()), NOW()), valid_from + INTERVAL '1 millisecond'),
+       version = version + 1, updated_by = $3, updated_at = NOW()
+ WHERE tenant_id = $1::uuid AND sip_trunk_id = $2::uuid AND status <> 'archived'
+RETURNING id
+"""
+_INBOUND_HISTORY_REMAINS_SQL = """
+SELECT EXISTS (
+    SELECT 1 FROM inbound_did_assignments WHERE tenant_id = $1::uuid AND sip_trunk_id = $2::uuid
+)
+"""
+_RETIRE_LINE_SQL = """
+UPDATE tenant_sip_trunks
+   SET deleted_at = NOW(), is_active = FALSE, live_registration_status = 'inactive',
+       live_status_detail = NULL, live_status_checked_at = NOW(),
+       updated_by = $3, updated_at = NOW()
+ WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+"""
+
+
+async def _delete_blocker(
+    conn, request: Request, *, tenant_id: str, trunk_id: UUID
+) -> Optional[JSONResponse]:
+    """Why this tenant's line still cannot be deleted right now; None when it can."""
+    from app.domain.services.call_status import TERMINAL_CALL_STATUSES
+
+    await conn.execute("SET LOCAL app.bypass_rls = 'on'")
+    shared = await conn.fetchval(_SHARED_LINE_IN_USE_SQL, str(trunk_id), tenant_id)
+    # Back under this tenant's own policies before anything else is read or written.
+    await conn.execute("SET LOCAL app.bypass_rls = 'off'")
+    if shared:
+        return _problem(
+            request,
+            409,
+            "Trunk In Use",
+            "This shared line is still assigned to another account, so it can't be deleted from here. "
+            "Ask the platform operator to release it first.",
+            "trunk-in-use",
+        )
+    if await conn.fetchval(_OPEN_CALL_SQL, tenant_id, list(TERMINAL_CALL_STATUSES), _DELETE_OPEN_CALL_HOURS):
+        return _problem(
+            request,
+            409,
+            "Call In Progress",
+            "A call on your account is still in progress. Delete this line once it has finished.",
+            "trunk-call-in-progress",
+        )
+    return None
+
+
+async def _restore_trunk_config_file(row) -> None:
+    """Best effort after a refused delete: the row stays active, so its file goes back."""
+    try:
+        from app.infrastructure.telephony.pjsip_config_generator import (
+            apply_trunk_config,
+            request_pjsip_reload,
+        )
+
+        decrypted = (
+            get_encryption_service().decrypt(row["auth_password_encrypted"])
+            if row["auth_password_encrypted"] else None
+        )
+        await apply_trunk_config(row, decrypted_password=decrypted, reload=False)
+        await request_pjsip_reload()
+    except Exception as exc:  # noqa: BLE001
+        logger.critical(
+            "pjsip_config_compensation_failed trunk=%s err_type=%s", str(row["id"])[:8], type(exc).__name__
+        )
+
+
 @router.delete("/trunks/{trunk_id}")
 async def delete_sip_trunk(
     trunk_id: UUID,
@@ -1610,7 +1886,18 @@ async def delete_sip_trunk(
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
 ):
-    """Remove an unused, disabled tenant trunk without cascading routing history."""
+    """Delete one of the tenant's own lines. Switching it off first is not required.
+
+    In one transaction: this tenant's campaign pins, pool allotment and route
+    policies that point at the line are cleared, inbound numbers on it are
+    archived, and the line is removed (``mode: "removed"``) or, when inbound call
+    history still references it, retired in place (``mode: "archived"``). Refused
+    only for the platform line (409), a shared line another account still uses
+    (409), or an unfinished call of this account created in the last four hours
+    (409). A missing or already-deleted line is a 404. The PJSIP file is removed
+    first; if Asterisk does not confirm that in production the call fails (503)
+    and nothing is changed.
+    """
     tenant_problem = _require_tenant(request, current_user)
     if tenant_problem:
         return tenant_problem
@@ -1623,13 +1910,14 @@ async def delete_sip_trunk(
             "idempotency-key-required",
         )
     operation = f"sip_trunks:delete:{trunk_id}"
+    tenant_id = current_user.tenant_id
     async with acquire_with_tenant(
-        db_pool, current_user.tenant_id, user_id=current_user.id
+        db_pool, tenant_id, user_id=current_user.id
     ) as conn:
         async with conn.transaction():
             state, cached, code = await _claim_idempotency(
                 conn,
-                tenant_id=current_user.tenant_id,
+                tenant_id=tenant_id,
                 operation=operation,
                 idempotency_key=idempotency_key,
                 request_hash=_stable_hash({"trunk_id": str(trunk_id)}),
@@ -1647,7 +1935,7 @@ async def delete_sip_trunk(
             quota_problem = await _enforce_ws_i_quota(
                 conn=conn,
                 request=request,
-                tenant_id=current_user.tenant_id,
+                tenant_id=tenant_id,
                 user_id=current_user.id,
                 policy_scope="api_mutation",
                 metric_key="sip_trunks:delete",
@@ -1656,15 +1944,19 @@ async def delete_sip_trunk(
             if quota_problem:
                 await _store_error_idempotency_result(
                     conn,
-                    tenant_id=current_user.tenant_id,
+                    tenant_id=tenant_id,
                     operation=operation,
                     idempotency_key=idempotency_key,
                     response=quota_problem,
                 )
                 return quota_problem
+            # Holding the row lock until commit also makes an in-flight pin or pool
+            # assignment (which share-locks the line) finish first, so the cleanup
+            # below sees it and nothing is left pointing at a removed line.
             row = await conn.fetchrow(
-                "SELECT * FROM tenant_sip_trunks WHERE tenant_id=$1 AND id=$2 FOR UPDATE",
-                current_user.tenant_id,
+                "SELECT * FROM tenant_sip_trunks "
+                "WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL FOR UPDATE",
+                tenant_id,
                 trunk_id,
             )
             problem = None
@@ -1676,18 +1968,10 @@ async def delete_sip_trunk(
                     "Requested trunk does not exist for tenant.",
                     "trunk-not-found",
                 )
-            elif row["is_active"]:
-                problem = _problem(
-                    request,
-                    409,
-                    "Disable Trunk First",
-                    "Disable this trunk before deleting it.",
-                    "trunk-active",
-                )
             else:
                 from app.domain.services.telephony.trunk_resolver import platform_default_trunk_name
 
-                if row["trunk_name"].strip().lower() == platform_default_trunk_name().lower():
+                if row["trunk_name"].strip().lower() == platform_default_trunk_name().strip().lower():
                     problem = _problem(
                         request,
                         409,
@@ -1695,42 +1979,18 @@ async def delete_sip_trunk(
                         "This shared platform trunk is managed by the platform operator.",
                         "platform-trunk-managed",
                     )
-            if not problem:
-                from app.domain.services.call_status import TERMINAL_CALL_STATUSES
-
-                # Pool assignments may be owned by another tenant. Return only
-                # a boolean, never their identities or campaign data.
-                await conn.execute("SET LOCAL app.bypass_rls = 'on'")
-                used = await conn.fetchval(
-                    """SELECT EXISTS (
-                        SELECT 1 FROM campaigns WHERE calling_config->'trunk'->>'id'=$1
-                        UNION ALL SELECT 1 FROM tenants WHERE calling_rules->'pool_trunk'->>'id'=$1
-                        UNION ALL SELECT 1 FROM tenant_route_policies WHERE target_trunk_id=$1::uuid
-                        UNION ALL SELECT 1 FROM inbound_did_assignments WHERE sip_trunk_id=$1::uuid
-                        UNION ALL SELECT 1 FROM calls WHERE tenant_id=$2::uuid
-                            AND (status IS NULL OR status <> ALL($3::text[]))
-                    )""",
-                    str(trunk_id),
-                    current_user.tenant_id,
-                    list(TERMINAL_CALL_STATUSES),
-                )
-                if used:
-                    problem = _problem(
-                        request,
-                        409,
-                        "Trunk In Use",
-                        "Finish active calls and remove this trunk's campaign, pool or route-policy assignments before deleting it. Historical inbound bindings must be retained.",
-                        "trunk-in-use",
-                    )
+                else:
+                    problem = await _delete_blocker(conn, request, tenant_id=tenant_id, trunk_id=trunk_id)
             if problem:
                 await _store_error_idempotency_result(
                     conn,
-                    tenant_id=current_user.tenant_id,
+                    tenant_id=tenant_id,
                     operation=operation,
                     idempotency_key=idempotency_key,
                     response=problem,
                 )
                 return problem
+
             from app.infrastructure.telephony.pjsip_config_generator import remove_trunk_config
 
             try:
@@ -1738,19 +1998,51 @@ async def delete_sip_trunk(
                     str(trunk_id), require_reload=_requires_confirmed_pjsip_apply()
                 )
             except Exception as exc:
+                if row["is_active"]:
+                    await _restore_trunk_config_file(row)
                 raise HTTPException(
                     503,
-                    "Asterisk configuration cleanup was not confirmed; the disabled trunk was retained.",
+                    "Asterisk configuration cleanup was not confirmed; the trunk was not deleted.",
                 ) from exc
-            await conn.execute(
-                "DELETE FROM tenant_sip_trunks WHERE tenant_id=$1 AND id=$2",
-                current_user.tenant_id,
-                trunk_id,
+
+            unpinned = await conn.fetch(_UNPIN_CAMPAIGNS_SQL, tenant_id, str(trunk_id))
+            await conn.execute(_CLEAR_POOL_ASSIGNMENT_SQL, tenant_id, str(trunk_id))
+            await conn.execute(_DELETE_ROUTE_POLICIES_SQL, tenant_id, trunk_id)
+            paused = await conn.fetch(
+                _PAUSE_INBOUND_CONFIGS_SQL, tenant_id, trunk_id, current_user.id
             )
-            result = {"id": str(trunk_id), "deleted": True}
+            if paused:
+                await conn.execute(
+                    _PAUSE_INBOUND_CAMPAIGNS_SQL, tenant_id, [r["campaign_id"] for r in paused]
+                )
+                await conn.execute(
+                    _AUDIT_INBOUND_PAUSE_SQL, tenant_id, current_user.id,
+                    getattr(current_user, "role", None), str(trunk_id), [r["id"] for r in paused],
+                )
+            archived = await conn.fetch(
+                _ARCHIVE_INBOUND_ASSIGNMENTS_SQL, tenant_id, trunk_id, current_user.id
+            )
+            if await conn.fetchval(_INBOUND_HISTORY_REMAINS_SQL, tenant_id, trunk_id):
+                await conn.execute(_RETIRE_LINE_SQL, tenant_id, trunk_id, current_user.id)
+                mode = "archived"
+            else:
+                await conn.execute(
+                    "DELETE FROM tenant_sip_trunks WHERE tenant_id=$1 AND id=$2",
+                    tenant_id,
+                    trunk_id,
+                )
+                mode = "removed"
+            result = {
+                "id": str(trunk_id),
+                "deleted": True,
+                "mode": mode,
+                "archived_inbound_numbers": len(archived),
+                "paused_inbound_campaigns": len(paused),
+                "unpinned_campaigns": len(unpinned),
+            }
             await _store_idempotency_result(
                 conn,
-                tenant_id=current_user.tenant_id,
+                tenant_id=tenant_id,
                 operation=operation,
                 idempotency_key=idempotency_key,
                 response_body=result,

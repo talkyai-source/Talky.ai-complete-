@@ -328,7 +328,7 @@ async def requires_sip_readiness(db_pool, *, tenant_id: str, campaign: dict) -> 
         row = await conn.fetchrow(
             """SELECT active_telephony_provider,
                       calling_rules->'pool_trunk' AS pool_trunk,
-                      EXISTS (SELECT 1 FROM tenant_sip_trunks WHERE tenant_id=$1::uuid) AS has_trunks
+                      EXISTS (SELECT 1 FROM tenant_sip_trunks WHERE tenant_id=$1::uuid AND deleted_at IS NULL) AS has_trunks
                FROM tenants WHERE id=$1::uuid""",
             tenant_id,
         )

@@ -279,7 +279,7 @@ async def main() -> None:
         await conn.execute("SET app.bypass_rls = 'true'")
 
         rows = await conn.fetch(
-            "SELECT id, trunk_name, is_active, metadata, auth_username FROM tenant_sip_trunks"
+            "SELECT id, trunk_name, is_active, metadata, auth_username, deleted_at FROM tenant_sip_trunks"
         )
         if not rows:
             # Never fail quietly: a zero-row read here is indistinguishable from
@@ -291,8 +291,12 @@ async def main() -> None:
                 file=sys.stderr,
             )
             raise SystemExit(2)
+        # A deleted line (deleted_at, migration 0070) is inactive and invisible to
+        # every API. It still goes through the stale-file cleanup, but gets no
+        # status heartbeat: nothing reads it and it must not look alive.
         cleanup_count = reconcile_inactive_config_files(rows, endpoints)
-        for r in rows:
+        live_rows = [r for r in rows if r["deleted_at"] is None]
+        for r in live_rows:
             raw = r["metadata"]
             md = raw if isinstance(raw, dict) else (
                 json.loads(raw) if isinstance(raw, str) and raw else {}
@@ -343,7 +347,7 @@ async def main() -> None:
     finally:
         await conn.close()
     print(
-        f"updated {len(rows)} trunks; registrations_ok={registrations_ok}; "
+        f"updated {len(live_rows)} trunks; registrations_ok={registrations_ok}; "
         f"endpoints_ok={endpoints_ok}; registrations={reg}; "
         f"endpoint_count={len(endpoints)}; inactive_cleanup={cleanup_count}; failures={fails}"
     )

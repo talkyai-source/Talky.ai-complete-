@@ -57,8 +57,16 @@ def test_trunk_api_projects_inbound_and_outbound_readiness_separately(direction,
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("case,status", [("unused", 200), ("active", 409), ("assigned", 409), ("foreign", 404), ("cleanup_failed", 503)])
-async def test_delete_is_tenant_scoped_and_preserves_used_or_unclean_trunk(monkeypatch, case, status):
+@pytest.mark.parametrize("case,status", [
+    ("unused", 200), ("active", 200), ("history", 200),
+    ("foreign", 404), ("shared", 409), ("cleanup_failed", 503),
+])
+async def test_delete_is_tenant_scoped_and_never_changes_what_it_cannot_finish(monkeypatch, case, status):
+    # Current contract (owner report 2026-10-14): an active line, pins and inbound
+    # history no longer block deletion; a foreign line is a 404, a shared line another
+    # account uses is a 409, and a failed file cleanup changes nothing (503).
+    # The full matrix is in test_trunk_delete_flow.py and, on real PostgreSQL, in
+    # tests/integration/test_op04_trunk_lifecycle.py.
     from app.infrastructure.telephony import pjsip_config_generator
 
     tenant, tid = str(uuid4()), uuid4()
@@ -70,16 +78,23 @@ async def test_delete_is_tenant_scoped_and_preserves_used_or_unclean_trunk(monke
             yield self
 
         async def fetchrow(self, query, *args):
-            assert "tenant_id=$1 AND id=$2 FOR UPDATE" in query
+            assert "tenant_id=$1 AND id=$2" in query and "deleted_at IS NULL" in query and "FOR UPDATE" in query
             assert args == (tenant, tid)
-            return None if case == "foreign" else {"id": tid, "is_active": case == "active", "trunk_name": "my-trunk"}
+            return None if case == "foreign" else {
+                "id": tid, "is_active": case == "active", "trunk_name": "my-trunk", "auth_password_encrypted": None,
+            }
 
         async def fetchval(self, query, *args):
-            assert "inbound_did_assignments" in query and "calling_config" in query
-            return case == "assigned"
+            if "pool_trunk" in query:
+                return case == "shared"
+            return case == "history" if "inbound_did_assignments" in query else False
+
+        async def fetch(self, query, *args):
+            commands.append((query, args))
+            return []
 
         async def execute(self, query, *args):
-            commands.append((query, args))
+            commands.append((" ".join(query.split()), args))
 
     @asynccontextmanager
     async def acquire(*_args, **kwargs):
@@ -99,9 +114,13 @@ async def test_delete_is_tenant_scoped_and_preserves_used_or_unclean_trunk(monke
     except HTTPException as exc:
         actual = exc.status_code
     assert actual == status
-    deletes = [args for query, args in commands if query.startswith("DELETE")]
-    assert deletes == ([(tenant, tid)] if case == "unused" else [])
-    assert cleanup.await_count == (1 if case in {"unused", "cleanup_failed"} else 0)
+    deletes = [args for query, args in commands if query.startswith("DELETE FROM tenant_sip_trunks")]
+    retired = [args for query, args in commands if query.startswith("UPDATE tenant_sip_trunks")]
+    assert deletes == ([(tenant, tid)] if case in {"unused", "active"} else [])
+    assert len(retired) == (1 if case == "history" else 0)
+    if case in {"foreign", "shared", "cleanup_failed"}:
+        assert not any(q.startswith(("UPDATE", "DELETE")) for q, _ in commands), "nothing may change"
+    assert cleanup.await_count == (1 if case in {"unused", "active", "history", "cleanup_failed"} else 0)
 
 
 @pytest.mark.asyncio
