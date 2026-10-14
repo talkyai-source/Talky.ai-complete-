@@ -680,7 +680,10 @@ async def test_business_quote_remains_needs_review_and_manual_correction_wins(le
     await save_summary_details(lead_db.pool, str(lead_db.tenants[0]), str(lead_db.calls[0]), summary, row)
     response = await details(lead_db)
     note = response["details"][0]
-    assert note["value"] == quote and not note["confirmed"]
+    # Current contract (2026-10-14): the model's concise value is stored, the
+    # caller's whole turn is the evidence, and it is still unconfirmed review.
+    assert note["value"] == "Synthetic classification" and not note["confirmed"]
+    assert note["evidence"]["source_quote"] == quote
     assert note["evidence"]["status"] == "needs_review"
     assert note["evidence"]["validation"] == "caller_quote_only"
     record_example(lead_db, "business_needs_review", response,

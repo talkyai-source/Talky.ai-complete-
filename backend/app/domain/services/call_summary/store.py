@@ -16,7 +16,12 @@ from typing import Any, Optional
 
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services.transcript_service import conversation_turns, transcript_text_from_turns
-from app.domain.services.call_summary.business_details import save_summary_details, transcript_revision, summary_snapshot
+from app.domain.services.call_summary.business_details import (
+    load_campaign_extract_fields,
+    save_summary_details,
+    summary_snapshot,
+    transcript_revision,
+)
 from app.domain.services.call_summary.summarizer import (
     SUMMARY_UNAVAILABLE_HEADLINE,
     summarize_transcript,
@@ -204,10 +209,16 @@ async def generate_and_store(
     # cannot state an unconfirmed contact or an unexecuted action as fact.
     confirmed_contacts = await _confirmed_contacts_for_call(pool, tenant_id, call_id)
     executed_actions = _executed_actions_from_results(row.get("action_results"))
+    # The campaign's own non-contact fields (job title, best time to call,
+    # custom notes ...) are extracted in the same pass. A failed lookup raises
+    # (retried on the next view) rather than caching a summary that silently
+    # lacks them; a campaign without any is called exactly as before.
+    campaign_fields = await load_campaign_extract_fields(pool, tenant_id, row.get("campaign_id"))
     summary = await summarize_transcript(
         transcript_text,
         confirmed_contacts=confirmed_contacts,
         executed_actions=executed_actions,
+        **({"campaign_fields": campaign_fields} if campaign_fields else {}),
     )
 
     # A fail-soft summarizer error (network/SDK/429, or output that won't parse

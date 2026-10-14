@@ -203,15 +203,17 @@ class LeadCaptureService:
 
         clause = " AND agent_visible" if agent_only else ""
         async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
+            # Explicit tenant predicate: RLS is context, not ownership (the
+            # app role has been superuser/BYPASSRLS in production).
             rows = await conn.fetch(
                 f"""
                 SELECT field_key, label, field_type, is_required,
                        agent_visible, user_visible, options, sort_order
                   FROM campaign_lead_fields
-                 WHERE campaign_id = $1::uuid{clause}
+                 WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid{clause}
                  ORDER BY sort_order, label
                 """,
-                str(campaign_id),
+                str(campaign_id), str(tenant_id),
             )
         return [dict(r) for r in rows]
 

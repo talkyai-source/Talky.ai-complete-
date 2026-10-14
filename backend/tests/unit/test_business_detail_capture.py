@@ -21,7 +21,11 @@ def test_only_actual_caller_evidence_can_be_saved():
         item("budget", "I have a big budget"),
     ], turns)
     assert [d["field_key"] for d in result] == ["current_provider", "preferred_channel"]
-    assert result[0]["value"] == "I use Stripe and prefer WhatsApp."
+    # Current contract (2026-10-14): the model's concise value is the value;
+    # the caller's whole turn is the evidence. Both details cite the same turn.
+    assert [d["value"] for d in result] == ["Stripe", "WhatsApp"]
+    assert result[0]["evidence"]["source_quote"] == "I use Stripe and prefer WhatsApp."
+    assert result[1]["evidence"]["source_quote"] == "I use Stripe and prefer WhatsApp."
     assert result[0]["evidence"]["status"] == "needs_review"
     assert result[0]["evidence"]["turn_index"] == 1
 
