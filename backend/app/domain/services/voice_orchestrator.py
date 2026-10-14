@@ -1198,6 +1198,9 @@ class VoiceOrchestrator:
                 "sample_rate": config.stt_sample_rate,
                 "encoding": config.stt_encoding,
                 "assemblyai_settings": config.assemblyai_settings or {},
+                # The call's brand/agent/product names (telephony_session_config
+                # ._build_call_keyterms), the same list Flux already receives.
+                "keyterms": list(config.stt_keyterms or []),
             }
             # AssemblyAI-only accounts do not need a Deepgram subscription.
             failover_on = failover_on and bool(api_key)

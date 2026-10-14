@@ -1096,6 +1096,7 @@ async def _bind_durable_outbound_call_provider(
     durable_call_id: str,
     provider: str,
     provider_call_id: str,
+    from_number: Optional[str] = None,
 ) -> None:
     """Bind provider identity after originate; loss of this write is fatal."""
     try:
@@ -1143,6 +1144,47 @@ async def _bind_durable_outbound_call_provider(
             headers={"Retry-After": "2"},
             detail={"error": "durable_call_bind_failed"},
         ) from exc
+    if from_number:
+        await _record_outbound_from_number(
+            db_pool, tenant_id=tenant_id, durable_call_id=durable_call_id, from_number=from_number,
+        )
+
+
+async def _record_outbound_from_number(
+    db_pool, *, tenant_id: str, durable_call_id: str, from_number: str,
+) -> None:
+    """Record the number the call was really dialled from, for call history.
+
+    The dialer creates the outbound leg before the bridge resolves the line and
+    caller ID, so every leg kept from_number NULL and call history showed "From
+    not recorded" (2026-10-14). Best effort: a failure here never fails a call
+    that is already ringing.
+    """
+    try:
+        from app.core.db_utils import acquire_with_tenant
+
+        async with acquire_with_tenant(
+            db_pool, str(tenant_id), timeout=_OUTBOUND_BOUNDARY_DB_TIMEOUT_S
+        ) as conn:
+            await conn.execute(
+                """
+                UPDATE call_legs l
+                   SET from_number = $3
+                 WHERE l.call_id = $1::uuid
+                   AND l.direction = 'outbound'
+                   AND l.leg_type = 'pstn_outbound'
+                   AND NULLIF(BTRIM(l.from_number), '') IS NULL
+                   AND EXISTS (SELECT 1 FROM calls c WHERE c.id = l.call_id AND c.tenant_id = $2::uuid)
+                """,
+                durable_call_id,
+                str(tenant_id),
+                str(from_number),
+            )
+    except Exception as exc:  # noqa: BLE001 - history only, never fail the call
+        logger.warning(
+            "outbound_from_number_record_failed call=%s err=%s",
+            durable_call_id[:8], type(exc).__name__,
+        )
 
 
 async def _persist_durable_outbound_channel_alias(
@@ -2419,6 +2461,7 @@ async def make_call(request: Request, body: MakeCallRequest):
                 durable_call_id=durable_call_id,
                 provider=str(getattr(_adapter, "name", "unknown") or "unknown"),
                 provider_call_id=call_id,
+                from_number=caller_id,
             )
 
         # Non-Asterisk adapters do not expose a pre-generated channel ID, so we

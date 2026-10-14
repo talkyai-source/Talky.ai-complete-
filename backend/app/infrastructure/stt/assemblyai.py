@@ -111,6 +111,25 @@ class _Connection:
             await self.slot.__aexit__(None, None, None)
 
 
+_MAX_KEYTERMS = 100
+_MAX_KEYTERM_CHARS = 50
+
+
+def _merge_keyterms(saved, campaign) -> list[str]:
+    """Saved terms first, then campaign terms; case-insensitive dedupe, within
+    AssemblyAI's limits (100 terms, 50 characters each; longer ones are ignored
+    by the provider, so they are dropped here instead of wasting a slot)."""
+    terms: list[str] = []
+    seen: set[str] = set()
+    for term in [*(saved or []), *(campaign or [])]:
+        term = str(term or "").strip()
+        if not term or len(term) > _MAX_KEYTERM_CHARS or term.casefold() in seen:
+            continue
+        seen.add(term.casefold())
+        terms.append(term)
+    return terms[:_MAX_KEYTERMS]
+
+
 class AssemblyAISTTProvider(STTProvider):
     def __init__(self) -> None:
         self._api_key: str | None = None
@@ -150,9 +169,14 @@ class AssemblyAISTTProvider(STTProvider):
         if raw_encoding not in encodings:
             raise ValueError("AssemblyAI call audio must be raw mono PCM16 or mu-law")
         self._encoding = encodings[raw_encoding]
-        # Use only the terms explicitly saved in the AssemblyAI control. An
-        # empty control must mean no boosting, with no hidden campaign hints.
-        self._keyterms = list(self._settings.keyterms_prompt)
+        # The tenant's saved terms first, then (unless the visible "Boost
+        # campaign names" switch is off) this call's brand, agent and product
+        # names. Test calls heard "Dojo" as "Lojo" and "Azian" as "Asian"
+        # because AssemblyAI never received the names Flux was already given.
+        self._keyterms = _merge_keyterms(
+            self._settings.keyterms_prompt,
+            config.get("keyterms") if self._settings.auto_campaign_keyterms else None,
+        )
         self._api_key = api_key.strip()
         logger.info(
             "AssemblyAI initialized model=%s mode=%s region=%s sample_rate=%s",
@@ -365,6 +389,7 @@ class AssemblyAISTTProvider(STTProvider):
         input_exhausted_at = None
         completed_order = -1
         pending_barge = False
+        paused_order: int | None = None
         suppressed_start = False
         suppressed_orders: set[int] = set()
         from app.domain.services.voice_pipeline.backchannel import (
@@ -515,16 +540,24 @@ class AssemblyAISTTProvider(STTProvider):
                 if not isinstance(text, str):
                     raise RuntimeError("AssemblyAI turn is missing valid transcript text")
                 text = text.strip()
-                if (
-                    pending_barge
-                    and text
-                    and (
-                        is_hard_interrupt(text) or not (is_backchannel(text) or is_disfluency(text))
-                    )
-                ):
+                real_interruption = bool(text) and (
+                    is_hard_interrupt(text) or not (is_backchannel(text) or is_disfluency(text))
+                )
+                if pending_barge and text and not real_interruption and not final and paused_order != order:
+                    # Pause first, decide later: the caller has started
+                    # talking but so far only said "uh"/"yeah". AssemblyAI sends
+                    # the next words about a second later, and waiting for them
+                    # made the agent talk over callers for 1.2-3.1 s (test call
+                    # 850b885e, 2026-10-13). Hold the agent's audio now; the
+                    # words that follow either confirm the interruption or, if
+                    # the turn ends as a backchannel, resume from where it held.
+                    paused_order = order
+                    yield BargeInSignal(text=text, phase="pause")
+                if pending_barge and real_interruption:
                     # A partial can begin with "uh" or "yes" and grow into
                     # a real interruption. Keep evaluating until it does.
                     pending_barge = False
+                    paused_order = None
                     if on_barge_in:
                         # Contained like Flux and Nova: a failing session
                         # callback must not end this STT stream (and push the
@@ -553,6 +586,11 @@ class AssemblyAISTTProvider(STTProvider):
                 for key in ("speaker_label", "language_code", "language_confidence"):
                     if key in event:
                         metadata[key] = event[key]
+                if final and paused_order == order:
+                    # The turn ended as only a backchannel or filler: the agent
+                    # was never really interrupted, so it carries on.
+                    paused_order = None
+                    yield BargeInSignal(text=text, phase="resume")
                 if text:
                     yield TranscriptChunk(
                         text=text, is_final=final, confidence=confidence, metadata=metadata

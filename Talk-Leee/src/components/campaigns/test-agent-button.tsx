@@ -145,6 +145,17 @@ export function TestAgentButton({
         }
     }, []);
 
+    // Pause-then-decide barge-in: the server holds the agent the moment the
+    // caller starts talking (tts_pause) and either continues it (tts_resume) or
+    // interrupts it for good (tts_interrupted). Suspending the player freezes
+    // every scheduled chunk in place, so a resume picks up mid-word.
+    const setPlayerRunning = useCallback((running: boolean) => {
+        const ctx = playCtxRef.current;
+        const action = ctx ? (running ? ctx.resume : ctx.suspend) : undefined;
+        if (!ctx || typeof action !== "function") return;
+        void action.call(ctx).catch(() => undefined);
+    }, []);
+
     const resetPlayback = useCallback(() => {
         awaitingPlaybackRef.current = false;
         playbackUtteranceRef.current = undefined;
@@ -331,8 +342,15 @@ export function TestAgentButton({
                 break;
             case "playback_start":
                 resetPlayback();
+                setPlayerRunning(true);
                 playbackUtteranceRef.current = typeof data.utterance_id === "string" ? data.utterance_id : undefined;
                 dropAudioRef.current = false;
+                break;
+            case "tts_pause":
+                setPlayerRunning(false);
+                break;
+            case "tts_resume":
+                setPlayerRunning(true);
                 break;
             case "tts_audio_complete":
                 if (data.utterance_id !== playbackUtteranceRef.current) break;
@@ -347,6 +365,8 @@ export function TestAgentButton({
             case "tts_interrupted":
                 dropAudioRef.current = true;
                 resetPlayback();
+                // A hold may have suspended the player; the next reply must play.
+                setPlayerRunning(true);
                 setPhase("listening");
                 break;
             case "error":
@@ -360,7 +380,7 @@ export function TestAgentButton({
             default:
                 break;
         }
-    }, [endSession, firstSpeaker, queueAudioChunk, resetPlayback, startMicrophone]);
+    }, [endSession, firstSpeaker, queueAudioChunk, resetPlayback, setPlayerRunning, startMicrophone]);
 
     const connect = useCallback(async (fs: "agent" | "user") => {
         const session = ++sessionRef.current;

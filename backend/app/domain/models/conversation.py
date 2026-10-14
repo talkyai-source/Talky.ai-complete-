@@ -2,7 +2,7 @@
 Conversation Domain Models
 """
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 from enum import Enum
 
@@ -57,6 +57,12 @@ class BargeInSignal(BaseModel):
     """
     timestamp: datetime = None
     text: Optional[str] = None
+    # "confirm" interrupts for good (every existing signal). "pause" holds the
+    # agent's audio the moment the caller starts talking, before their words
+    # are known; "resume" releases it when those words turn out to be only a
+    # backchannel ("yeah", "mhm"). Pause-then-decide is how LiveKit and other
+    # production agents stop instantly without dropping a reply on "uh-huh".
+    phase: Literal["confirm", "pause", "resume"] = "confirm"
 
     class Config:
         arbitrary_types_allowed = True

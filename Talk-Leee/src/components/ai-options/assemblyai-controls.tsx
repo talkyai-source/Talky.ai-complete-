@@ -11,13 +11,23 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
     return <div className="space-y-1.5"><label htmlFor={id} className="block text-sm font-medium">{label}</label>{children(id)}{hint && <p className="text-xs text-muted-foreground">{hint}</p>}</div>;
 }
 
-function NumberOverride({ label, hint, value, onChange, min, max, step = 1, disabled = false }: {
+function NumberOverride({ label, hint, value, onChange, min, max, step = 1, disabled = false, placeholder = "Use provider default" }: {
     label: string; hint: string; value?: number | null; onChange: (value: number | null) => void;
-    min: number; max?: number; step?: number; disabled?: boolean;
+    min: number; max?: number; step?: number; disabled?: boolean; placeholder?: string;
 }) {
-    return <Field label={label} hint={hint}>{(id) => <input id={id} type="number" className={inputClass} placeholder="Use provider default" value={value ?? ""} min={min} max={max} step={step} disabled={disabled}
+    return <Field label={label} hint={hint}>{(id) => <input id={id} type="number" className={inputClass} placeholder={placeholder} value={value ?? ""} min={min} max={max} step={step} disabled={disabled}
         onChange={(event) => onChange(event.target.value === "" ? null : Number(event.target.value))} />}</Field>;
 }
+
+// What a blank timing field means for each mode: AssemblyAI's 3.6 Pro presets
+// for turn silence, and our voice-agent default for the interruption delay
+// (the backend sends it so the agent stops quickly when a caller cuts in).
+const MODE_TIMING: Record<NonNullable<AssemblyAISettings["mode"]>, { minSilence: number; maxSilence: number; interruption: number }> = {
+    min_latency: { minSilence: 128, maxSilence: 640, interruption: 0 },
+    balanced: { minSilence: 128, maxSilence: 1280, interruption: 120 },
+    max_accuracy: { minSilence: 512, maxSilence: 2560, interruption: 250 },
+};
+const SHORTEST_PRESET_SILENCE_MS = 128;
 
 function Toggle({ label, hint, checked, onChange }: { label: string; hint: string; checked: boolean; onChange: (checked: boolean) => void }) {
     return <div><label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" className="accent-emerald-500" checked={checked} onChange={(event) => onChange(event.target.checked)} />{label}</label><p className="mt-1 text-xs text-muted-foreground">{hint}</p></div>;
@@ -28,6 +38,8 @@ export function AssemblyAIControls({ value, onChange }: { value?: AssemblyAISett
     const set = <K extends keyof AssemblyAISettings>(field: K, next: AssemblyAISettings[K]) => onChange({ ...settings, [field]: next });
     const mode = settings.mode ?? "balanced";
     const partials = settings.include_partial_turns == null ? "auto" : String(settings.include_partial_turns);
+    const timing = MODE_TIMING[mode];
+    const timingOverridden = [settings.min_turn_silence, settings.max_turn_silence, settings.interruption_delay, settings.vad_threshold].some((field) => field != null);
 
     return <div className="space-y-5" aria-label="AssemblyAI 3.6 Pro settings">
         <Field label="Transcription language" hint="English is fixed for AssemblyAI calls, including calls started from campaigns.">{(id) => <input id={id} className={inputClass} value="English (en)" readOnly disabled />}</Field>
@@ -41,6 +53,7 @@ export function AssemblyAIControls({ value, onChange }: { value?: AssemblyAISett
             <div className="mt-4 space-y-4">
                 <Field label="Audio context prompt" hint="Optional. Describe the call topic or unusual vocabulary in a short paragraph. Start without a prompt; this is separate from your agent instructions. Up to 1,750 characters.">{(id) => <textarea id={id} className={inputClass} rows={3} maxLength={1750} value={settings.prompt ?? ""} onChange={(event) => set("prompt", event.target.value)} placeholder="English appointment booking calls for a dental clinic." />}</Field>
                 <Field label="Keyterms" hint="One name or specialist term per line. Maximum 100 terms, 50 characters each. Avoid generic words and letter lists.">{(id) => <textarea id={id} className={inputClass} rows={4} value={(settings.keyterms_prompt ?? []).join("\n")} onChange={(event) => set("keyterms_prompt", event.target.value.split("\n"))} onBlur={(event) => set("keyterms_prompt", event.target.value.split("\n").map((term) => term.trim()).filter(Boolean))} placeholder={"Talky\nAcme Dental"} />}</Field>
+                <Toggle label="Boost campaign names" checked={settings.auto_campaign_keyterms ?? true} onChange={(next) => set("auto_campaign_keyterms", next)} hint="Adds each call's brand, agent and product names to the keyterms above, so names like your company or agent are recognized. Turn off to send only the terms you list." />
                 <Toggle label="Use agent replies as recognition context" checked={settings.auto_agent_context ?? true} onChange={(next) => set("auto_agent_context", next)} hint="Shares the agent's spoken reply with AssemblyAI to help recognize the caller's next answer, including names and email addresses." />
                 <NumberOverride label="Previous conversation turns" hint="Provider default: 5. Choose 0 to disable conversation history, or up to 100 turns." min={0} max={100} value={settings.previous_context_n_turns} onChange={(next) => set("previous_context_n_turns", next)} />
             </div>
@@ -49,12 +62,15 @@ export function AssemblyAIControls({ value, onChange }: { value?: AssemblyAISett
         <details className="rounded-lg border border-border p-3">
             <summary className="cursor-pointer text-sm font-semibold">Turn detection and interruptions</summary>
             <div className="mt-4 space-y-4">
-                <NumberOverride label="Minimum turn silence (ms)" hint="Wait before checking whether an answer is complete. Longer pauses can help with spelling and phone numbers. Range: 50–10,000 ms." min={50} max={10000} value={settings.min_turn_silence} onChange={(next) => set("min_turn_silence", next)} />
-                <NumberOverride label="Maximum turn silence (ms)" hint="Force the turn to finish after this pause. Must be at least the minimum silence when both are set." min={1} value={settings.max_turn_silence} onChange={(next) => set("max_turn_silence", next)} />
-                <NumberOverride label="Interruption delay (ms)" hint="Additional delay before the first partial transcript, from 0–1,000 ms. AssemblyAI adds 256 ms to this value." min={0} max={1000} value={settings.interruption_delay} onChange={(next) => set("interruption_delay", next)} />
+                <p className="text-xs text-muted-foreground">Blank fields use the timing recommended for the selected mode, shown in each box.</p>
+                <NumberOverride label="Minimum turn silence (ms)" hint="Wait before checking whether an answer is complete. Longer pauses can help with spelling and phone numbers. Range: 50–10,000 ms." min={50} max={10000} placeholder={`Mode default: ${timing.minSilence} ms`} value={settings.min_turn_silence} onChange={(next) => set("min_turn_silence", next)} />
+                {settings.min_turn_silence != null && settings.min_turn_silence < SHORTEST_PRESET_SILENCE_MS && <p role="alert" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs">Below {SHORTEST_PRESET_SILENCE_MS} ms the agent may answer before callers finish speaking. AssemblyAI&apos;s fastest preset uses {SHORTEST_PRESET_SILENCE_MS} ms; leave this blank unless you have tested a shorter value.</p>}
+                <NumberOverride label="Maximum turn silence (ms)" hint="Force the turn to finish after this pause. Must be at least the minimum silence when both are set." min={1} placeholder={`Mode default: ${timing.maxSilence} ms`} value={settings.max_turn_silence} onChange={(next) => set("max_turn_silence", next)} />
+                <NumberOverride label="Interruption delay (ms)" hint="How long AssemblyAI waits before sending the caller's first words (it adds 256 ms). Shorter values let the agent stop sooner when interrupted; backchannels like “yeah” never interrupt it. Range: 0–1,000 ms." min={0} max={1000} placeholder={`Voice-agent default: ${timing.interruption} ms`} value={settings.interruption_delay} onChange={(next) => set("interruption_delay", next)} />
                 <NumberOverride label="Speech detection threshold" hint="Lower values hear quieter speech; higher values reject more noise. Leave blank for the provider's default, which also depends on speaker labels." min={0} max={1} step={0.01} value={settings.vad_threshold} onChange={(next) => set("vad_threshold", next)} />
                 <Field label="Partial transcripts" hint="Auto follows the provider: enabled normally, disabled with PII redaction. The agent uses finalized turns for answers.">{(id) => <Select id={id} ariaLabel="Partial transcripts" value={partials} onChange={(next) => set("include_partial_turns", next === "auto" ? null : next === "true")}><option value="auto">Auto (provider default)</option><option value="true">On</option><option value="false">Off</option></Select>}</Field>
                 {settings.redact_pii && settings.include_partial_turns === true && <p role="alert" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs">Partial transcripts contain unredacted personal details even when PII redaction is enabled. Use Auto or Off to receive only redacted finals.</p>}
+                {timingOverridden && <button type="button" className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted" onClick={() => onChange({ ...settings, min_turn_silence: null, max_turn_silence: null, interruption_delay: null, vad_threshold: null })}>Use recommended timing</button>}
             </div>
         </details>
 

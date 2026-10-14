@@ -122,3 +122,23 @@ test("blank numeric overrides preserve provider defaults and invalid configurati
     assert.match(assemblyAISettingsError({ speaker_labels_revision_interval_ms: 1000 }) || "", /at least 120000/);
     assert.match(assemblyAISettingsError({ keyterms_prompt: ["x".repeat(51)] }) || "", /keyterms prompt/);
 });
+
+test("blank timing shows each mode's recommended values, a very short silence warns, and recommended timing resets overrides", async () => {
+    // 2026-10-14: a saved 50 ms minimum silence (below every AssemblyAI preset)
+    // let the agent answer before callers finished; the page gave no hint.
+    let draft: AssemblyAISettings = { mode: "balanced", min_turn_silence: 50, interruption_delay: 600 };
+    function Editor() {
+        const [value, setValue] = useState(draft);
+        return <AssemblyAIControls value={value} onChange={(next) => { draft = next; setValue(next); }} />;
+    }
+    render(<Editor />);
+    assert.equal((screen.getByLabelText("Maximum turn silence (ms)") as HTMLInputElement).placeholder, "Mode default: 1280 ms");
+    assert.match(screen.getByRole("alert").textContent || "", /Below 128 ms the agent may answer before callers finish speaking/);
+    fireEvent.click(screen.getByRole("button", { name: "Use recommended timing" }));
+    assert.equal(draft.min_turn_silence, null);
+    assert.equal(draft.interruption_delay, null);
+    assert.equal(screen.queryByRole("alert"), null);
+    assert.equal(screen.queryByRole("button", { name: "Use recommended timing" }), null);
+    assert.equal((screen.getByLabelText("Minimum turn silence (ms)") as HTMLInputElement).placeholder, "Mode default: 128 ms");
+    assert.equal((screen.getByLabelText("Interruption delay (ms)") as HTMLInputElement).placeholder, "Voice-agent default: 120 ms");
+});

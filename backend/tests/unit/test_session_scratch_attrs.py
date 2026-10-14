@@ -73,6 +73,7 @@ def _sum_sq(rms: float, n: int = 640) -> float:
     "_tts_fallback_attempted",
     "_tts_failure_clip_count",
     "_tts_terminal_failure_hangup",
+    "_tts_paused_at",
 ])
 def test_scratch_attribute_is_writable_on_the_real_model(name):
     """Every per-call scratch field the pipeline sets, asserted against the

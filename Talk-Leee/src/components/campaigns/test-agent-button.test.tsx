@@ -67,7 +67,10 @@ class FakeAudioContext {
     closed = false;
     destination = {};
     constructor() { FakeAudioContext.instances.push(this); }
-    resume() { return Promise.resolve(); }
+    suspends = 0;
+    resumes = 0;
+    resume() { this.resumes += 1; this.state = "running"; return Promise.resolve(); }
+    suspend() { this.suspends += 1; this.state = "suspended"; return Promise.resolve(); }
     close() { this.closed = true; return Promise.resolve(); }
     createMediaStreamSource() { return { connect() {} }; }
     createScriptProcessor() { return { connect() {}, disconnect() {}, onaudioprocess: null }; }
@@ -175,4 +178,27 @@ test("the auth_required retry still opens the second socket after the refresh", 
     await act(async () => { FakeWebSocket.instances[1].serverSends(READY); });
     await waitFor(() => assert.equal(streams.length, 1), { timeout: SLOW });
     assert.ok(streams[0].tracks.every((t) => !t.stopped), "retry session must keep its microphone");
+});
+
+test("the agent holds on tts_pause, continues on tts_resume, and an interruption clears the hold", async () => {
+    // Pause-then-decide barge-in (test call 850b885e, 2026-10-13): the server
+    // holds the agent the moment the caller starts talking.
+    mock.method(sharedHttpClient(), "request", async () => ({}));
+    render(<TestAgentButton campaignId="camp-1" />);
+    startTest();
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1), { timeout: SLOW });
+    const ws = FakeWebSocket.instances[0];
+    await act(async () => { ws.serverSends(READY); });
+    // The player starts with the agent's first audio (a few ms, below the jitter buffer).
+    await act(async () => { ws.onmessage?.({ data: new ArrayBuffer(160) }); });
+    const total = (key: "suspends" | "resumes") => FakeAudioContext.instances.reduce((n, c) => n + c[key], 0);
+    const resumesBefore = total("resumes");
+    await act(async () => { ws.serverSends({ type: "tts_pause" }); });
+    assert.equal(total("suspends"), 1);
+    await act(async () => { ws.serverSends({ type: "tts_resume" }); });
+    assert.equal(total("resumes"), resumesBefore + 1);
+    await act(async () => { ws.serverSends({ type: "tts_pause" }); });
+    await act(async () => { ws.serverSends({ type: "tts_interrupted", reason: "barge_in" }); });
+    assert.equal(total("suspends"), 2);
+    assert.equal(total("resumes"), resumesBefore + 2, "an interruption must leave the player able to play the next reply");
 });

@@ -27,6 +27,7 @@ export const AssemblyAISettingsSchema = z.object({
     prompt: z.string().max(1750).optional(),
     keyterms_prompt: z.array(z.string().trim().min(1).max(50)).max(100).optional(),
     auto_agent_context: z.boolean().optional(),
+    auto_campaign_keyterms: z.boolean().optional(),
     previous_context_n_turns: z.number().int().min(0).max(100).nullish(),
     language_detection: z.boolean().optional(),
     speaker_labels: z.boolean().optional(),

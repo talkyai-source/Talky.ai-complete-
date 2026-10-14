@@ -509,6 +509,33 @@ class TtsPlayback:
                         )
                     except Exception:
                         pass
+                # Pause-then-decide (barge_in_pause): hold unsent audio while the
+                # caller's first words are still unclear. A resume continues with
+                # this very chunk; a confirmed interruption skips it below.
+                if getattr(session, "_tts_paused_at", None) is not None:
+                    from app.domain.services.voice_pipeline.barge_in_pause import (
+                        wait_while_paused,
+                    )
+                    await wait_while_paused(session, websocket, barge_in_event=barge_in_event)
+                    if barge_in_event and barge_in_event.is_set():
+                        logger.info(f"Barge-in during hold interrupted TTS for call {call_id}")
+                        interrupted = True
+                        barge_in_event.clear()
+                        try:
+                            await self._p.media_gateway.clear_output_buffer(call_id)
+                        except Exception as _exc:
+                            logger.debug("clear_output_buffer after hold failed: %s", _exc)
+                        self._record_barge_in_stop(session)
+                        if websocket:
+                            try:
+                                await websocket.send_json({"type": "tts_interrupted", "reason": "barge_in"})
+                            except Exception as _exc:
+                                logger.debug("tts_interrupted after-hold WS send failed: %s", _exc)
+                        try:
+                            await _tts_iter.aclose()
+                        except Exception:  # noqa: BLE001
+                            pass
+                        break
                 await self._p.media_gateway.send_audio(call_id, raw)
                 first_chunk_sent = True  # at least one chunk reached the gateway
                 # WHEN DID AUDIO LAST LEAVE FOR THE CALLER?

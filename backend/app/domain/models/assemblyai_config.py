@@ -16,6 +16,15 @@ from pydantic import (
 )
 
 ASSEMBLYAI_MODEL = "universal-3-6-pro"
+
+# First-partial delay we send when the tenant leaves "interruption_delay" blank.
+# AssemblyAI's own mode presets (500 ms for balanced/max_accuracy, plus the
+# fixed 256 ms it always adds) are tuned to suppress false barge-ins in apps
+# that interrupt on any speech. Our pipeline already refuses to barge in on
+# fillers and backchannels ("uh", "yeah", "mhm"), so waiting 756 ms for the
+# first words only made the agent talk over callers: test call 850b885e
+# (2026-10-13) took 1.2-3.1 s to stop on half of its interruptions.
+VOICE_AGENT_INTERRUPTION_DELAY_MS = {"min_latency": 0, "balanced": 120, "max_accuracy": 250}
 AssemblyAIKeyterm = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)
 ]
@@ -89,6 +98,10 @@ class AssemblyAISettings(BaseModel):
     prompt: str = Field(default="", max_length=1750)
     keyterms_prompt: list[AssemblyAIKeyterm] = Field(default_factory=list, max_length=100)
     auto_agent_context: bool = True
+    # Boost the call's own campaign names (brand, agent, products) as keyterms,
+    # merged after the tenant's saved terms. AssemblyAI recommends exactly
+    # these terms for voice agents; off means only the saved list is sent.
+    auto_campaign_keyterms: bool = True
     previous_context_n_turns: int | None = Field(default=None, ge=0, le=100)
     language_detection: bool = False
     voice_focus: Literal["near-field", "far-field"] | None = None
@@ -137,8 +150,10 @@ class AssemblyAISettings(BaseModel):
         provider. Sending an unconditional true here would expose unredacted PII.
         """
         params = self.model_dump(exclude_none=True)
-        for key in ("region", "auto_agent_context"):
+        for key in ("region", "auto_agent_context", "auto_campaign_keyterms"):
             params.pop(key)
+        if self.interruption_delay is None:
+            params["interruption_delay"] = VOICE_AGENT_INTERRUPTION_DELAY_MS[self.mode]
         if not self.prompt.strip():
             params.pop("prompt")
         if not self.keyterms_prompt:

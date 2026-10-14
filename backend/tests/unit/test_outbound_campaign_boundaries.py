@@ -1585,3 +1585,44 @@ async def test_get_trunk_assignment_rejects_malformed_uuid_before_database():
     assert response.status_code == 422
     assert conn.campaign_reads == 0
     assert conn.trunk_reads == 0
+
+
+def _conn_recording_legs(legs, *, fail=False):
+    conn = _ProviderIdentityConn("talky-out-planned")
+    original = conn.execute
+
+    async def execute(query, *args):
+        if " ".join(query.split()).lower().startswith("update call_legs"):
+            if fail:
+                raise RuntimeError("synthetic database hiccup")
+            legs.append(args)
+            return "UPDATE 1"
+        return await original(query, *args)
+
+    conn.execute = execute
+    return conn
+
+
+@pytest.mark.asyncio
+async def test_the_number_a_call_is_dialled_from_is_recorded_on_its_leg():
+    # 2026-10-14: the dialer creates the outbound leg before the bridge picks
+    # the line and caller ID, so every leg kept from_number NULL and call
+    # history showed "From not recorded".
+    legs = []
+    conn = _conn_recording_legs(legs)
+    await telephony_bridge._bind_durable_outbound_call_provider(
+        _Pool(conn), tenant_id=TENANT_ID, durable_call_id=VOICE_CALL_ID,
+        provider="asterisk", provider_call_id="talky-out-planned", from_number="+17789249977",
+    )
+    assert conn.status == "dialing"
+    assert legs == [(VOICE_CALL_ID, TENANT_ID, "+17789249977")]
+
+
+@pytest.mark.asyncio
+async def test_recording_the_from_number_never_fails_a_ringing_call():
+    conn = _conn_recording_legs([], fail=True)
+    await telephony_bridge._bind_durable_outbound_call_provider(
+        _Pool(conn), tenant_id=TENANT_ID, durable_call_id=VOICE_CALL_ID,
+        provider="asterisk", provider_call_id="talky-out-planned", from_number="+17789249977",
+    )
+    assert conn.status == "dialing"

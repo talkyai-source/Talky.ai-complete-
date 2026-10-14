@@ -75,10 +75,22 @@ class TranscriptHandler:
         call_id = session.call_id
 
         if isinstance(transcript, BargeInSignal):
-            await self._p.handle_barge_in(
-                session, websocket,
-                transcript_text=sanitize_explicit_secrets(getattr(transcript, "text", "") or ""),
+            from app.domain.services.voice_pipeline.barge_in_pause import (
+                end_pause_for_interruption,
+                pause_for_caller,
+                resume_after_caller,
             )
+
+            phase = getattr(transcript, "phase", "confirm")
+            text = sanitize_explicit_secrets(getattr(transcript, "text", "") or "")
+            if phase == "pause":
+                await pause_for_caller(session, websocket, text=text)
+                return
+            if phase == "resume":
+                await resume_after_caller(session, websocket, reason="backchannel")
+                return
+            end_pause_for_interruption(session)
+            await self._p.handle_barge_in(session, websocket, transcript_text=text)
             return
 
         # Before websocket, history, contact parsing and transcript persistence.

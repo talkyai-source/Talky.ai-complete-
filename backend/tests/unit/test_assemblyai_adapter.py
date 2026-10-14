@@ -97,7 +97,8 @@ async def test_each_mode_pins_model_english_headers_and_preserves_preset(monkeyp
     assert query["encoding"] == ["pcm_s16le"]
     assert query["session_heartbeat"] == ["true"]
     assert "min_turn_silence" not in query and "max_turn_silence" not in query
-    assert "interruption_delay" not in query and "format_turns" not in query
+    assert query["interruption_delay"] == [str({"min_latency": 0, "balanced": 120, "max_accuracy": 250}[mode])]
+    assert "format_turns" not in query
     assert "end_of_turn_confidence_threshold" not in query
     assert options["additional_headers"] == {"Authorization": "private-test-key"}
     assert "private-test-key" not in url
@@ -141,7 +142,9 @@ async def test_advanced_settings_are_encoded_without_unrelated_flux_fields(monke
     query = parse_qs(urlsplit(url).query)
     assert urlsplit(url).hostname == "streaming.eu.assemblyai.com"
     assert query["prompt"] == [settings["prompt"]]
-    assert json.loads(query["keyterms_prompt"][0]) == ["A&B", "López"]
+    # Saved terms first, then the call's campaign names: "A&B" is not repeated
+    # and a 51-character term (which AssemblyAI ignores) is dropped.
+    assert json.loads(query["keyterms_prompt"][0]) == ["A&B", "López", "Product"]
     assert json.loads(query["redact_pii_policies"][0]) == settings["redact_pii_policies"]
     assert query["agent_context"] == ["What is your email address?"]
     for name in (
@@ -166,13 +169,21 @@ async def test_advanced_settings_are_encoded_without_unrelated_flux_fields(monke
     await provider.cleanup()
 
 
-async def test_empty_keyterms_control_does_not_apply_hidden_campaign_boosts(monkeypatch):
+async def test_campaign_names_follow_the_visible_boost_switch(monkeypatch):
+    # On by default: the call's brand/agent/product names reach AssemblyAI, as
+    # its voice-agent guidance recommends (test calls heard "Dojo" as "Lojo").
+    provider, _, connects = await setup_provider(monkeypatch, keyterms=["Campaign Product", "Brand"])
+    await provider.pre_connect("call")
+    query = parse_qs(urlsplit(connects[0][0]).query)
+    assert json.loads(query["keyterms_prompt"][0]) == ["Campaign Product", "Brand"]
+    await provider.cleanup()
+    # Switched off on the AI Options page: an empty saved list means no boosting.
     provider, _, connects = await setup_provider(
-        monkeypatch, keyterms=["Campaign Product", "Brand"]
+        monkeypatch, settings={"auto_campaign_keyterms": False}, keyterms=["Campaign Product", "Brand"],
     )
     await provider.pre_connect("call")
     query = parse_qs(urlsplit(connects[0][0]).query)
-    assert "keyterms_prompt" not in query
+    assert "keyterms_prompt" not in query and "auto_campaign_keyterms" not in query
     await provider.cleanup()
 
 
@@ -303,7 +314,42 @@ async def test_backchannel_partial_can_grow_into_one_real_interruption(monkeypat
         chunk async for chunk in provider.stream_transcribe(audio(), on_barge_in=callbacks.append)
     ]
     assert callbacks == [expanded]
-    assert [chunk.text for chunk in chunks if isinstance(chunk, BargeInSignal)] == [expanded]
+    # The agent holds on the opening word, then the grown partial confirms one
+    # interruption; nothing resumes because the caller really did interrupt.
+    assert [(chunk.phase, chunk.text) for chunk in chunks if isinstance(chunk, BargeInSignal)] == [
+        ("pause", opening), ("confirm", expanded),
+    ]
+
+
+async def test_a_backchannel_turn_holds_the_agent_then_resumes_it(monkeypatch):
+    # Pause first, decide later (test call 850b885e, 2026-10-13): the agent
+    # stops the moment the caller says "yeah", and carries on when the turn ends
+    # as only a backchannel, instead of talking over a real interruption for
+    # the second AssemblyAI waits before sending the next words.
+    provider, ws, _ = await setup_provider(monkeypatch)
+    ws.on_terminate = [{"type": "SpeechStarted"}, turn(0, "yeah"), turn(0, "yeah", True)]
+    callbacks = []
+    chunks = [
+        chunk async for chunk in provider.stream_transcribe(audio(), on_barge_in=callbacks.append)
+    ]
+    assert not callbacks
+    assert [(chunk.phase, chunk.text) for chunk in chunks if isinstance(chunk, BargeInSignal)] == [
+        ("pause", "yeah"), ("resume", "yeah"),
+    ]
+
+
+async def test_a_real_first_word_confirms_without_a_pause(monkeypatch):
+    provider, ws, _ = await setup_provider(monkeypatch)
+    ws.on_terminate = [{"type": "SpeechStarted"}, turn(0, "Actually I wanted"), turn(0, "Actually I wanted to ask.", True)]
+    chunks = [chunk async for chunk in provider.stream_transcribe(audio())]
+    assert [chunk.phase for chunk in chunks if isinstance(chunk, BargeInSignal)] == ["confirm"]
+
+
+async def test_a_filler_turn_that_ends_empty_still_resumes(monkeypatch):
+    provider, ws, _ = await setup_provider(monkeypatch)
+    ws.on_terminate = [{"type": "SpeechStarted"}, turn(0, "um"), turn(0, "", True)]
+    chunks = [chunk async for chunk in provider.stream_transcribe(audio())]
+    assert [chunk.phase for chunk in chunks if isinstance(chunk, BargeInSignal)] == ["pause", "resume"]
 
 
 async def test_muted_turn_is_not_replayed_after_unmute(monkeypatch):

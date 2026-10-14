@@ -44,10 +44,12 @@ def test_defaults_keep_mode_defaults_and_paid_addons_off():
     assert params["mode"] == "balanced"
     assert not params["speaker_labels"] and not params["redact_pii"]
     assert not params["filter_profanity"]
+    # The one non-provider default: first words early enough to stop the
+    # agent when the caller interrupts (see VOICE_AGENT_INTERRUPTION_DELAY_MS).
+    assert params["interruption_delay"] == 120
     for field in (
         "min_turn_silence",
         "max_turn_silence",
-        "interruption_delay",
         "vad_threshold",
         "include_partial_turns",
         "prompt",
@@ -104,3 +106,17 @@ def test_advanced_boundary_values_and_no_invented_max_silence_cap():
     assert settings.keyterms_prompt == ["Acme"]
     assert settings.redact_pii_policies == ["email_address"]
     assert settings.connection_parameters()["previous_context_n_turns"] == 0
+
+
+
+@pytest.mark.parametrize(("mode", "expected"), [("min_latency", 0), ("balanced", 120), ("max_accuracy", 250)])
+def test_a_blank_interruption_delay_gets_the_voice_agent_value_for_its_mode(mode, expected):
+    # AssemblyAI's balanced preset waits 500 + 256 ms for the first words, so
+    # test call 850b885e (2026-10-13) took 1.2-3.1 s to stop on half its
+    # interruptions. Fillers are filtered downstream, so early words are safe.
+    assert AssemblyAISettings(mode=mode).connection_parameters()["interruption_delay"] == expected
+
+
+def test_an_explicit_interruption_delay_is_sent_unchanged():
+    assert AssemblyAISettings(interruption_delay=750).connection_parameters()["interruption_delay"] == 750
+    assert AssemblyAISettings(interruption_delay=0, mode="max_accuracy").connection_parameters()["interruption_delay"] == 0
