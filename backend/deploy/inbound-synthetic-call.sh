@@ -78,4 +78,23 @@ if ! timeout "$((wait_seconds + 20))" asterisk -rx "$command_text"; then
     echo "INBOUND_SYNTHETIC CRITICAL: Asterisk rejected or timed out originating the probe" >&2
     exit 1
 fi
-echo "inbound synthetic: originate accepted; Prometheus must prove returned first audio"
+
+# Prove the hairpin came back in. An accepted originate only means Asterisk took
+# the request: from 2026-09-22 the probe's carrier account was rejected and the
+# DID's line was off, yet every hourly run still printed "accepted" and the unit
+# succeeded. Fail it (journal, systemctl --failed) unless a channel reaches the
+# inbound call plan while the probe waits.
+arrive_window=$((wait_seconds + 10))
+arrived=""
+for _ in $(seq 1 "$arrive_window"); do
+    if timeout 5 asterisk -rx "core show channels concise" 2>/dev/null | grep -q '!from-talky-inbound!'; then
+        arrived=1
+        break
+    fi
+    sleep 1
+done
+if [ -z "$arrived" ]; then
+    echo "INBOUND_SYNTHETIC CRITICAL: the probe never came back in on the inbound call plan within ${arrive_window}s (did=${did} endpoint=${endpoint})" >&2
+    exit 1
+fi
+echo "inbound synthetic: the probe reached the inbound call plan; Prometheus must prove returned first audio"
