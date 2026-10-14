@@ -1,0 +1,13 @@
+[Unit]
+Description=Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ)
+After=asterisk.service docker.service talky-api.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/talky/backend
+ExecStart=/bin/bash /opt/talky/backend/deploy/asterisk-reconcile-on-drift.sh
+TimeoutStartSec=180
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=talky-asterisk-reconcile
