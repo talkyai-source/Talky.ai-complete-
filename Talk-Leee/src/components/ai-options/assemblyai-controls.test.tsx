@@ -106,6 +106,32 @@ test("PII redaction explains lead capture loss and unredacted partials; dependen
     assert.equal(draft.max_speakers, 2);
 });
 
+test("partial transcripts switched off, directly or by PII redaction, warn that interruptions are noticed late", async () => {
+    // Barge-in decides on partial transcripts; without them the agent hears an
+    // interruption only when the caller's turn ends.
+    let draft: AssemblyAISettings = {};
+    function Editor() {
+        const [value, setValue] = useState(draft);
+        return <AssemblyAIControls value={value} onChange={(next) => { draft = next; setValue(next); }} />;
+    }
+    render(<Editor />);
+    const note = () => screen.queryByRole("note", { hidden: true })?.textContent || "";
+    const select = async (option: string) => {
+        fireEvent.click(screen.getByLabelText("Partial transcripts"));
+        fireEvent.click(await screen.findByRole("option", { name: option }));
+    };
+    assert.equal(note(), "");
+    await select("Off");
+    assert.match(note(), /only notices an interruption once the caller stops talking/);
+    await select("Auto (provider default)");
+    assert.equal(note(), "");
+    fireEvent.click(screen.getByLabelText("Redact personal information (PII)"));
+    assert.match(note(), /only notices an interruption/, "redaction turns the provider's partials off");
+    await select("On");
+    assert.equal(note(), "");
+    assert.equal(draft.include_partial_turns, true);
+});
+
 test("blank numeric overrides preserve provider defaults and invalid configurations have actionable errors", () => {
     let draft: AssemblyAISettings = { mode: "max_accuracy", min_turn_silence: 800, max_turn_silence: 900 };
     function Editor() {
