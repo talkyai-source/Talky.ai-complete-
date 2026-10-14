@@ -58,6 +58,63 @@ async def test_a_hold_with_no_decision_releases_itself(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_backchannel_hold_resumes_as_soon_as_the_caller_goes_quiet(monkeypatch):
+    # Live test 2026-10-14: the provider closed a lone "Yeah." 1.1 s after the
+    # caller stopped, and the agent sat silent 1.5 s. The hold now ends on the
+    # caller's own silence, with no playback loop waiting (the reply was
+    # already with the player).
+    import time
+
+    monkeypatch.setattr(barge_in_pause, "PAUSE_MAX_S", 5.0)
+    monkeypatch.setattr(barge_in_pause, "PAUSE_QUIET_RESUME_S", 0.15)
+    session, ws = _session(), _Socket()
+    session._caller_voice_last_at = time.monotonic()  # the "Yeah." just ended
+    started = time.monotonic()
+    await pause_for_caller(session, ws, text="yeah")
+    for _ in range(100):
+        if not barge_in_pause.is_paused(session):
+            break
+        await asyncio.sleep(0.02)
+    assert not barge_in_pause.is_paused(session)
+    assert 0.1 <= time.monotonic() - started < 1.0, "released by the caller's silence, not the 5 s cap"
+    assert ws.sent == ["tts_pause", "tts_resume"]
+
+
+@pytest.mark.asyncio
+async def test_a_caller_who_keeps_talking_keeps_the_hold(monkeypatch):
+    import time
+
+    monkeypatch.setattr(barge_in_pause, "PAUSE_MAX_S", 5.0)
+    monkeypatch.setattr(barge_in_pause, "PAUSE_QUIET_RESUME_S", 0.15)
+    session, ws = _session(), _Socket()
+
+    async def voiced_frames(seconds):
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            session._caller_voice_last_at = time.monotonic()
+            await asyncio.sleep(0.02)
+
+    session._caller_voice_last_at = time.monotonic()
+    await pause_for_caller(session, ws, text="uh")
+    await voiced_frames(0.4)
+    assert barge_in_pause.is_paused(session), "still speaking: no resume over the caller"
+    await asyncio.sleep(0.4)
+    assert not barge_in_pause.is_paused(session) and ws.sent == ["tts_pause", "tts_resume"]
+
+
+@pytest.mark.asyncio
+async def test_without_an_audio_measurement_the_hold_waits_for_the_decision(monkeypatch):
+    monkeypatch.setattr(barge_in_pause, "PAUSE_MAX_S", 5.0)
+    monkeypatch.setattr(barge_in_pause, "PAUSE_QUIET_RESUME_S", 0.05)
+    session, ws = _session(), _Socket()  # no _caller_voice_last_at: no opinion
+    await pause_for_caller(session, ws, text="yeah")
+    await asyncio.sleep(0.3)
+    assert barge_in_pause.is_paused(session)
+    await resume_after_caller(session, ws, reason="backchannel")
+    assert ws.sent == ["tts_pause", "tts_resume"]
+
+
+@pytest.mark.asyncio
 async def test_a_confirmed_interruption_ends_the_wait_at_once():
     session, event = _session(), asyncio.Event()
     await pause_for_caller(session)
