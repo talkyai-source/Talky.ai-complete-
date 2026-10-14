@@ -12,6 +12,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api as sharedApi } from "@/lib/api";
+import { ApiClientError, isApiClientError } from "@/lib/http-client";
 import { z } from "zod";
 
 // ----- Types ----------------------------------------------------------------
@@ -92,6 +93,25 @@ export interface VonageCredentials {
 
 export type ProviderCredentials = TwilioCredentials | VonageCredentials;
 
+/**
+ * One check inside a line test. `key` is "address", "reachability", "credentials"
+ * or "registration" today; `ok: null` means skipped or inconclusive.
+ */
+export interface SipTestStep {
+    key: string;
+    ok: boolean | null;
+    label: string;
+    detail: string;
+    sip_code?: number | string | null;
+}
+
+export type SipTestStatus =
+    | "connected"
+    | "credentials_rejected"
+    | "unreachable"
+    | "not_registered"
+    | "reachable";
+
 export interface SipTrunkTestResult {
     ok: boolean;
     latency_ms?: number;
@@ -99,9 +119,14 @@ export interface SipTrunkTestResult {
     target?: string;
     error?: string | null;
     detail?: string | null;
-    sip_code?: string | null;
+    sip_code?: string | number | null;
     timeout_code?: number | null;
     inconclusive?: boolean;
+    /** Absent on results saved before the step-by-step test existed. */
+    steps?: SipTestStep[];
+    /** One plain sentence about the outcome; absent on older saved results. */
+    verdict?: string | null;
+    status?: SipTestStatus | null;
 }
 
 export interface SipTrunkRow {
@@ -133,6 +158,93 @@ export interface SipTrunkTestResponse extends SipTrunkTestResult {
     tested_at: string;
 }
 
+/** What DELETE /telephony/sip/trunks/{id} reports. Counts are absent on a replayed or older response. */
+export interface SipTrunkDeleteResult {
+    id: string;
+    deleted: boolean;
+    /** "archived" when call history or inbound bindings are kept; "removed" when nothing referenced the line. */
+    mode?: "removed" | "archived";
+    archived_inbound_numbers?: number;
+    unpinned_campaigns?: number;
+    /** Inbound campaigns paused because the deleted line was the one that answered their number. */
+    paused_inbound_campaigns?: number;
+}
+
+// ----- Reading the server's own explanation of a failure ---------------------
+//
+// The SIP endpoints report failures as RFC 9457 `application/problem+json`
+// ({ title, detail }). The shared HTTP client only parses bodies whose
+// content-type contains "application/json", so for these responses it reports
+// the generic message "Request failed" and keeps the raw JSON text as `details`.
+// That hid WHY a delete, save or test was refused. This puts the server's own
+// `detail` (or the field messages of a 422) back into the error message.
+
+const FIELD_LABELS: Record<string, string> = {
+    sip_domain: "provider address",
+    trunk_name: "line name",
+    auth_username: "username",
+    auth_password: "password",
+    outbound_proxy: "outbound proxy",
+    auth_realm: "auth realm",
+    caller_id: "number to show",
+    register_interval: "register interval",
+    dtmf_mode: "DTMF mode",
+};
+
+function readProblem(details: unknown): string | null {
+    let value = details;
+    if (typeof value === "string") {
+        try {
+            value = JSON.parse(value) as unknown;
+        } catch {
+            return null;
+        }
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const { detail, title } = value as { detail?: unknown; title?: unknown };
+    for (const candidate of [detail, title]) {
+        if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    }
+    return null;
+}
+
+function readFieldProblems(details: unknown): string | null {
+    if (!Array.isArray(details)) return null;
+    const messages: string[] = [];
+    for (const item of details) {
+        if (!item || typeof item !== "object") continue;
+        const { msg, loc } = item as { msg?: unknown; loc?: unknown };
+        if (typeof msg !== "string" || !msg.trim()) continue;
+        let text = msg.replace(/^Value error,\s*/i, "").trim();
+        for (const [name, label] of Object.entries(FIELD_LABELS)) text = text.replace(new RegExp(`\\b${name}\\b`, "g"), label);
+        const field = Array.isArray(loc) ? FIELD_LABELS[String(loc[loc.length - 1])] : undefined;
+        if (field && !text.toLowerCase().includes(field)) text = `${field}: ${text}`;
+        text = text.charAt(0).toUpperCase() + text.slice(1);
+        if (!messages.includes(text)) messages.push(text);
+    }
+    return messages.length ? messages.slice(0, 3).join(" ") : null;
+}
+
+/**
+ * Returns `err` with the server's explanation as its message when the shared
+ * client could only report "Request failed"; any other value is returned as is.
+ */
+export function surfaceProblemDetail(err: unknown): unknown {
+    if (!isApiClientError(err)) return err;
+    const message = readProblem(err.details) ?? readFieldProblems(err.details);
+    if (!message || message === err.message) return err;
+    return new ApiClientError({
+        status: err.status,
+        code: err.code,
+        message,
+        details: err.details,
+        retryAfterMs: err.retryAfterMs,
+        requestId: err.requestId,
+        url: err.url,
+        method: err.method,
+    });
+}
+
 // ----- Fetch helper ---------------------------------------------------------
 //
 // Phase 5 universal-auth-state: delegates to the shared `api` client so
@@ -158,7 +270,11 @@ async function api<T>(path: string, init?: ApiInit): Promise<T> {
             body = init.body;
         }
     }
-    return await sharedApi.request<T>({ path, method, body, headers: init?.headers });
+    try {
+        return await sharedApi.request<T>({ path, method, body, headers: init?.headers });
+    } catch (err) {
+        throw surfaceProblemDetail(err);
+    }
 }
 
 // ----- Query keys -----------------------------------------------------------
@@ -431,8 +547,11 @@ export function useTestSipTrunk() {
 export function useDeleteSipTrunk() {
     const qc = useQueryClient();
     return useMutation({
+        // The server deactivates the line, unpins campaigns and disconnects
+        // inbound numbers itself, so the caller deletes directly. Invalidating
+        // the sipTrunks family also refreshes the outbound-route summary.
         mutationFn: (id: string) =>
-            api<{ id: string; deleted: boolean }>(`/telephony/sip/trunks/${id}`, { method: "DELETE", headers: { "Idempotency-Key": newIdempotencyKey() } }),
+            api<SipTrunkDeleteResult>(`/telephony/sip/trunks/${id}`, { method: "DELETE", headers: { "Idempotency-Key": newIdempotencyKey() } }),
         onSuccess: () => {
             void qc.invalidateQueries({ queryKey: telephonyKeys.sipTrunks });
         },

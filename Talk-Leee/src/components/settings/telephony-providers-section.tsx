@@ -54,7 +54,7 @@ function ActiveBanner({ active, availability }: { active: ActiveProvider; availa
     }
     const map: Record<"sip" | "none", { label: string; className: string }> = {
         sip: {
-            label: "Local PBX (SIP) is selected",
+            label: "Calls use your own PBX",
             className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
         },
         none: {
@@ -431,7 +431,7 @@ export function TelephonyProvidersSection() {
 
             {data.active === "sip" && (
                 <div role="note" className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
-                    Local SIP is selected. Each call must pass readiness checks for its assigned route before dialing.
+                    Your PBX is the active provider. Each call is checked for a ready line before it is dialed.
                 </div>
             )}
 
@@ -443,7 +443,7 @@ export function TelephonyProvidersSection() {
                         size="sm"
                         disabled={activateMutation.isPending}
                     >
-                        <Power className="mr-1 h-3 w-3" aria-hidden /> Use local SIP trunk as active provider
+                        <Power className="mr-1 h-3 w-3" aria-hidden /> Use my PBX for calls
                     </Button>
                 </div>
             )}
