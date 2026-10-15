@@ -51,12 +51,12 @@ test.describe("Dashboard Audit", () => {
     const mobileSidebar = page.getByRole("dialog", { name: "Sidebar" });
     await expect(mobileSidebar).toBeHidden();
 
-    // Try to open using the hidden strip (not ideal UX, but current implementation)
-    const triggerStrip = page.locator('div[role="button"][aria-label="Open sidebar"]');
-    await expect(triggerStrip).toBeVisible();
-    
-    // Click the strip
-    await triggerStrip.click();
+    // The invisible 12px left-edge strip is gone (it opened the drawer on
+    // accidental edge taps); the visible header hamburger is the trigger.
+    await expect(page.locator('div[role="button"][aria-label="Open sidebar"]')).toHaveCount(0);
+    const hamburger = page.getByRole("button", { name: "Open sidebar" });
+    await expect(hamburger).toBeVisible();
+    await hamburger.click();
 
     // Sidebar should be visible now
     await expect(mobileSidebar).toBeVisible();

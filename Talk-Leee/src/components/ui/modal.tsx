@@ -133,7 +133,7 @@ export function Modal({
                             }
                         }}
                         className={cn(
-                            "absolute left-1/2 top-1/2 w-[calc(100%-24px)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-background/90 text-foreground shadow-2xl outline-none backdrop-blur-xl",
+                            "absolute left-1/2 top-1/2 flex max-h-[calc(100dvh-24px)] w-[calc(100%-24px)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-border bg-background/90 text-foreground shadow-2xl outline-none backdrop-blur-xl",
                             sizeClass
                         )}
                     >
@@ -151,7 +151,7 @@ export function Modal({
                                 ) : null}
                             </div>
                         )}
-                        <div className="max-h-[70vh] overflow-y-auto px-5 py-4">{children}</div>
+                        <div className="min-h-0 max-h-[70vh] overflow-y-auto px-5 py-4">{children}</div>
                         {footer ? <div className="border-t border-border px-5 py-4">{footer}</div> : null}
                     </div>
                 </div>
@@ -208,7 +208,7 @@ export function Modal({
                                 }
                             }}
                             className={cn(
-                                "absolute left-1/2 top-1/2 w-[calc(100%-24px)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-background/90 text-foreground shadow-2xl outline-none backdrop-blur-xl",
+                                "absolute left-1/2 top-1/2 flex max-h-[calc(100dvh-24px)] w-[calc(100%-24px)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-border bg-background/90 text-foreground shadow-2xl outline-none backdrop-blur-xl",
                                 sizeClass
                             )}
                             initial={{ y: 12, opacity: 0, scale: 0.985 }}
@@ -230,7 +230,7 @@ export function Modal({
                                     ) : null}
                                 </div>
                             )}
-                            <div className="max-h-[70vh] overflow-y-auto px-5 py-4">{children}</div>
+                            <div className="min-h-0 max-h-[70vh] overflow-y-auto px-5 py-4">{children}</div>
                             {footer ? <div className="border-t border-border px-5 py-4">{footer}</div> : null}
                         </motion.div>
                     </div>

@@ -25,7 +25,7 @@ import {
     statusBadgeClass,
 } from "@/lib/campaign-performance";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight, Pause, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Pause, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { CampaignStartControl } from "@/components/campaigns/campaign-readiness";
@@ -911,23 +911,40 @@ export function CampaignPerformanceTable({
             </div>
 
             {bulkCount > 0 ? (
-                <div className="content-card flex flex-wrap items-center justify-between gap-3">
+                <div className="content-card flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="text-sm font-semibold text-foreground">
                         {bulkCount} selected
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                        <Button type="button" variant="outline" size="sm" onClick={bulkPause}>
+                    {/* Two layouts, split at the sm token (640px): phones below it, tablets
+                        and desktop from it upward.
+                        Phones: one left-aligned column at natural button widths - count,
+                        Pause, Resume, readiness notice, then Export and Delete sharing a
+                        wrapping row that drops Delete to its own line when the pair no
+                        longer fits.
+                        sm and up: a 3-column grid - Pause above Resume at the left, Export
+                        above Delete at the right, each 160px wide (w-40) with icon and label
+                        left-aligned, and the readiness notice centred in the flexible gap.
+                        CampaignStartControl renders its button, notice and error inside one
+                        div (the first div child here); `[&>div:first-of-type]:contents`
+                        lifts those three into this container so the notice can sit in the
+                        column/gap without changing that component. The Export/Delete row is
+                        the second div child and becomes `contents` from sm as well. */}
+                    <div className="flex flex-col items-start gap-2 [&>div:first-of-type]:contents [&>div:first-of-type>div]:[overflow-wrap:anywhere] sm:grid sm:min-w-0 sm:flex-1 sm:grid-cols-[max-content_minmax(0,1fr)_max-content] sm:items-center sm:gap-x-4 sm:[&>div:first-of-type>button]:col-start-1 sm:[&>div:first-of-type>button]:row-start-2 sm:[&>div:first-of-type>button]:w-40 sm:[&>div:first-of-type>button]:justify-start sm:[&>div:first-of-type>div]:col-start-2 sm:[&>div:first-of-type>div]:row-start-1 sm:[&>div:first-of-type>div]:row-span-2 sm:[&>div:first-of-type>div]:mt-0 sm:[&>div:first-of-type>div]:self-center sm:[&>div:first-of-type>div]:justify-self-center sm:[&>div:first-of-type>div]:text-center sm:[&>div:first-of-type>p]:col-start-2 sm:[&>div:first-of-type>p]:row-start-3 sm:[&>div:first-of-type>p]:justify-self-center">
+                        <Button type="button" variant="outline" size="sm" className="sm:col-start-1 sm:row-start-1 sm:w-40 sm:justify-start" onClick={bulkPause}>
                             <Pause className="h-4 w-4" />
                             Pause Selected
                         </Button>
                         <CampaignStartControl campaignIds={resumableSelectedIds} onStart={bulkResume} label="Resume Selected" />
-                        <Button type="button" variant="secondary" size="sm" onClick={() => setExportOpen(true)}>
-                            Export Selected
-                        </Button>
-                        <Button type="button" variant="destructive" size="sm" onClick={() => setConfirmDeleteId("__bulk__")}>
-                            <Trash2 className="h-4 w-4" />
-                            Delete Selected
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-2 sm:contents">
+                            <Button type="button" variant="secondary" size="sm" className="sm:col-start-3 sm:row-start-1 sm:w-40 sm:justify-start" onClick={() => setExportOpen(true)}>
+                                <Download className="h-4 w-4" />
+                                Export Selected
+                            </Button>
+                            <Button type="button" variant="destructive" size="sm" className="sm:col-start-3 sm:row-start-2 sm:w-40 sm:justify-start" onClick={() => setConfirmDeleteId("__bulk__")}>
+                                <Trash2 className="h-4 w-4" />
+                                Delete Selected
+                            </Button>
+                        </div>
                     </div>
                 </div>
             ) : null}

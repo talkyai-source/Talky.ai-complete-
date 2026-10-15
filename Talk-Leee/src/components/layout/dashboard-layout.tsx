@@ -35,7 +35,7 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
     const router = useRouter();
     const { user, isLoading: authLoading } = useAuth();
     const { state: suspensionState } = useSuspensionState();
-    const { collapsed, mobileOpen } = useSidebarState();
+    const { collapsed } = useSidebarState();
     const { setMobileOpen } = useSidebarActions();
     const [isDesktop, setIsDesktop] = useState(false);
     const mainContentRef = useRef<HTMLDivElement | null>(null);
@@ -133,22 +133,6 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
             {/* Animated Background Shapes */}
             <div className="shape-1"></div>
             <div className="shape-2"></div>
-
-            {!isDesktop && !mobileOpen ? (
-                <div
-                    role="button"
-                    tabIndex={0}
-                    aria-label="Open sidebar"
-                    title="Open sidebar"
-                    className="fixed left-0 top-0 z-[60] h-full w-3 bg-transparent lg:hidden"
-                    onClick={() => setMobileOpen(true)}
-                    onKeyDown={(e) => {
-                        if (e.key !== "Enter" && e.key !== " ") return;
-                        e.preventDefault();
-                        setMobileOpen(true);
-                    }}
-                />
-            ) : null}
 
             <Sidebar />
 
