@@ -83,7 +83,7 @@ def test_render_with_register_includes_registration_object():
     assert "type=registration" in conf
     assert "server_uri=sip:sip.acme.example:5060" in conf
     assert "client_uri=sip:acmeuser@sip.acme.example" in conf
-    assert "retry_interval=1800" in conf
+    assert "expiration=1800" in conf
 
 
 def test_render_register_block_has_resilience_params():
@@ -94,9 +94,33 @@ def test_render_register_block_has_resilience_params():
     assert "max_retries=10000" in conf
     assert "fatal_retry_interval=30" in conf
     assert "forbidden_retry_interval=60" in conf
-    # retry_interval + expiration still track the configured interval.
-    assert "retry_interval=1800" in conf
-    assert "expiration=1800" in conf
+    # expiration still tracks the configured interval; the retry after a failed
+    # REGISTER does NOT (it was 3600 s by default, so one dropped REGISTER left a
+    # trunk unregistered for an hour). Retry in 60 s regardless of expiration.
+    lines = conf.splitlines()
+    assert "retry_interval=60" in lines
+    assert "expiration=1800" in lines
+    assert "retry_interval=1800" not in lines
+
+
+@pytest.mark.parametrize("interval", [60, 300, 3600, 86400])
+def test_render_retry_interval_is_capped_at_60_and_expiration_is_unchanged(interval):
+    lines = render_trunk_conf(_input(register=True, register_interval=interval)).splitlines()
+    assert "retry_interval=60" in lines
+    assert f"expiration={interval}" in lines
+    if interval != 60:
+        assert f"retry_interval={interval}" not in lines
+
+
+def test_render_default_interval_retries_every_60s_not_every_hour():
+    # Default (and out-of-range) intervals fall back to 3600 for expiration.
+    for interval in (None, 0, 5, 999999):
+        lines = render_trunk_conf(
+            _input(register=True, register_interval=interval)
+        ).splitlines()
+        assert "expiration=3600" in lines
+        assert "retry_interval=60" in lines
+        assert "retry_interval=3600" not in lines
 
 
 def test_render_caller_id_and_source_host_overrides():

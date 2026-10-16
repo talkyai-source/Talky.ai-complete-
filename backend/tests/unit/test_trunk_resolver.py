@@ -102,17 +102,117 @@ def test_own_trunk_wins_over_active_platform_default():
     assert route.is_default is False
 
 
-def test_multiple_own_trunks_picks_most_recently_updated():
+def test_multiple_own_trunks_picks_newest_created_not_most_recently_updated():
+    # The status updater rewrites updated_at on every trunk every ~10 s (a
+    # BEFORE UPDATE trigger), so "most recently updated" picked an arbitrary
+    # line that flipped between calls. created_at is stable.
     now = datetime(2026, 7, 1, 12, 0, 0)
     trunks = [
-        TrunkRow(id="old", trunk_name="byo-old", is_active=True, updated_at=now),
+        TrunkRow(
+            id="old", trunk_name="byo-old", is_active=True,
+            created_at=now, updated_at=now + timedelta(hours=5),
+        ),
         TrunkRow(
             id="new", trunk_name="byo-new", is_active=True,
-            updated_at=now + timedelta(hours=1),
+            created_at=now + timedelta(hours=1), updated_at=now,
         ),
     ]
     route = _route(trunks)
     assert route.endpoint == "trunk-new"
+    # ...and rewriting updated_at (the status churn) does not change the pick.
+    churned = [
+        TrunkRow(
+            id=t.id, trunk_name=t.trunk_name, is_active=True,
+            created_at=t.created_at, updated_at=now + timedelta(days=1),
+        )
+        for t in reversed(trunks)
+    ]
+    assert _route(churned).endpoint == "trunk-new"
+
+
+def test_own_trunk_choice_is_independent_of_input_order_and_breaks_ties_by_id():
+    created = datetime(2026, 7, 1, 12, 0, 0)
+    trunks = [
+        TrunkRow(id="trunk-a", trunk_name="a", is_active=True, created_at=created),
+        TrunkRow(id="trunk-c", trunk_name="c", is_active=True, created_at=created),
+        TrunkRow(id="trunk-b", trunk_name="b", is_active=True, created_at=created),
+    ]
+    picks = {
+        _route(list(order)).endpoint
+        for order in (trunks, trunks[::-1], [trunks[1], trunks[2], trunks[0]])
+    }
+    assert picks == {"trunk-trunk-c"}
+
+
+def test_trunk_without_created_at_is_treated_as_oldest_and_never_crashes():
+    created = datetime(2026, 7, 1, 12, 0, 0, tzinfo=timezone.utc)
+    trunks = [
+        TrunkRow(id="unknown-age", trunk_name="u", is_active=True),
+        TrunkRow(id="dated", trunk_name="d", is_active=True, created_at=created),
+    ]
+    assert _route(trunks).endpoint == "trunk-dated"
+    assert _route(trunks[::-1]).endpoint == "trunk-dated"
+
+
+def test_a_ready_own_trunk_is_not_shadowed_by_a_newer_not_ready_or_inbound_only_one():
+    # An inbound-only / rejected / stale line has runtime_ready False. Picking
+    # the newest line first and checking readiness afterwards let it shadow a
+    # working older line, refusing every call with selected_trunk_not_ready.
+    created = datetime(2026, 7, 1, 12, 0, 0)
+    trunks = [
+        TrunkRow(id="working", trunk_name="w", is_active=True, created_at=created),
+        TrunkRow(
+            id="inbound-only", trunk_name="i", is_active=True,
+            created_at=created + timedelta(days=3), runtime_ready=False,
+        ),
+        TrunkRow(
+            id="rejected", trunk_name="r", is_active=True,
+            created_at=created + timedelta(days=9), runtime_ready=False,
+        ),
+    ]
+    dids = [DidRow("+15550001111", "verified", "tok")]  # own-trunk-only mode needs a caller ID
+    for shared in (True, False):
+        route = _route(trunks, dids, shared_default_enabled=shared)
+        assert route.refused is False
+        assert route.endpoint == "trunk-working"
+        assert route.trunk_id == "working"
+        assert route.reason == "own_trunk"
+
+
+def test_among_ready_own_trunks_the_newest_created_wins():
+    created = datetime(2026, 7, 1, 12, 0, 0)
+    trunks = [
+        TrunkRow(id="ready-old", trunk_name="a", is_active=True, created_at=created),
+        TrunkRow(
+            id="ready-new", trunk_name="b", is_active=True,
+            created_at=created + timedelta(days=1),
+        ),
+        TrunkRow(
+            id="newest-down", trunk_name="c", is_active=True,
+            created_at=created + timedelta(days=2), runtime_ready=False,
+        ),
+    ]
+    assert _route(trunks).endpoint == "trunk-ready-new"
+
+
+def test_when_no_own_trunk_is_ready_the_refusal_names_the_newest_created_one():
+    created = datetime(2026, 7, 1, 12, 0, 0)
+    trunks = [
+        TrunkRow(
+            id="down-old", trunk_name="a", is_active=True,
+            created_at=created, runtime_ready=False,
+        ),
+        TrunkRow(
+            id="down-new", trunk_name="b", is_active=True,
+            created_at=created + timedelta(days=1), runtime_ready=False,
+        ),
+    ]
+    for shared in (True, False):
+        route = _route(trunks, shared_default_enabled=shared)
+        assert route.refused is True
+        assert route.endpoint is None
+        assert route.reason == "selected_trunk_not_ready"
+        assert route.trunk_id == "down-new"
 
 
 def test_own_trunk_with_no_dialable_number_yields_no_caller_id_override():
@@ -406,3 +506,159 @@ async def test_assigned_route_uses_current_number_and_requires_trunk_ownership(m
         assert route.endpoint is None
     else:
         assert route.caller_id == "+14165550123"
+
+
+# --- resolve_outbound_trunk: DB projection + logging --------------------
+
+TENANT = "22222222-2222-2222-2222-222222222222"
+OLD_TRUNK = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+NEW_TRUNK = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+
+class _TrunkListConn:
+    """Serves the tenant_sip_trunks / tenant_phone_numbers SELECTs."""
+
+    def __init__(self, trunk_rows, did_rows=()):
+        self.trunk_rows = trunk_rows
+        self.did_rows = list(did_rows)
+        self.trunk_sql = None
+
+    async def fetch(self, query, *args):
+        normalized = " ".join(query.split())
+        if "FROM tenant_sip_trunks" in normalized:
+            self.trunk_sql = normalized
+            assert args == (TENANT,), "the trunk SELECT must carry the tenant predicate"
+            return self.trunk_rows
+        if "FROM tenant_phone_numbers" in normalized:
+            return self.did_rows
+        raise AssertionError(f"unexpected query: {normalized}")
+
+
+def _trunk_row(trunk_id, *, created_at, updated_at, status="registered", direction="both"):
+    return {
+        "id": trunk_id,
+        "trunk_name": f"byo-{trunk_id[:4]}",
+        "is_active": True,
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "direction": direction,
+        "metadata": {"register": True},
+        "live_registration_status": status,
+        "live_status_detail": None,
+        "live_status_checked_at": datetime.now(timezone.utc),
+    }
+
+
+async def _no_assignment(*_args, **_kwargs):
+    return None
+
+
+async def _resolve_with(monkeypatch, conn):
+    from app.core import db_utils
+    from app.domain.services.telephony import trunk_resolver
+
+    @asynccontextmanager
+    async def acquire(*_args, **_kwargs):
+        yield conn
+
+    monkeypatch.setattr(db_utils, "acquire_with_tenant", acquire)
+    monkeypatch.setattr(trunk_resolver, "_resolve_campaign_trunk", _no_assignment)
+    monkeypatch.setattr(trunk_resolver, "_resolve_pool_assignment", _no_assignment)
+    return await trunk_resolver.resolve_outbound_trunk(
+        object(), tenant_id=TENANT, environment="test"
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolver_selects_created_at_and_prefers_the_ready_line(monkeypatch):
+    t0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    conn = _TrunkListConn(
+        [
+            # the newest line was just touched by the status updater but is rejected
+            _trunk_row(
+                NEW_TRUNK, created_at=t0 + timedelta(days=20),
+                updated_at=datetime.now(timezone.utc), status="rejected",
+            ),
+            _trunk_row(OLD_TRUNK, created_at=t0, updated_at=t0, status="registered"),
+        ]
+    )
+
+    route = await _resolve_with(monkeypatch, conn)
+
+    assert "created_at" in conn.trunk_sql
+    assert route.refused is False
+    assert route.trunk_id == OLD_TRUNK
+    assert route.endpoint == f"trunk-{OLD_TRUNK}"
+
+
+@pytest.mark.asyncio
+async def test_resolver_inbound_only_line_cannot_shadow_an_outbound_one(monkeypatch):
+    t0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    conn = _TrunkListConn(
+        [
+            _trunk_row(
+                NEW_TRUNK, created_at=t0 + timedelta(days=1),
+                updated_at=t0, direction="inbound",
+            ),
+            _trunk_row(OLD_TRUNK, created_at=t0, updated_at=t0, direction="outbound"),
+        ]
+    )
+
+    route = await _resolve_with(monkeypatch, conn)
+
+    assert route.refused is False
+    assert route.trunk_id == OLD_TRUNK
+
+
+@pytest.mark.asyncio
+async def test_resolver_logs_the_real_reason_and_refusal_for_assigned_routes(
+    monkeypatch, caplog
+):
+    import logging
+
+    from app.domain.services.telephony import trunk_resolver
+    from app.domain.services.telephony.trunk_resolver import OutboundTrunkRoute
+
+    campaign_refused = OutboundTrunkRoute(
+        None, None, "t1", False, "campaign_assigned_trunk_not_ready", True
+    )
+    pool_refused = OutboundTrunkRoute(
+        None, None, "t3", False, "pool_assigned_trunk_not_ready", True
+    )
+    pool_ok = OutboundTrunkRoute("trunk-t2", None, "t2", False, "pool_assigned", False)
+    caplog.set_level(logging.INFO, logger=trunk_resolver.logger.name)
+
+    async def campaign_route(*_a, **_k):
+        return campaign_refused
+
+    async def pool_route_refused(*_a, **_k):
+        return pool_refused
+
+    async def pool_route_ok(*_a, **_k):
+        return pool_ok
+
+    # A refused campaign route used to be logged as reason=campaign_assigned.
+    monkeypatch.setattr(trunk_resolver, "_resolve_campaign_trunk", campaign_route)
+    await trunk_resolver.resolve_outbound_trunk(
+        object(), tenant_id=TENANT, environment="test",
+        campaign_id="cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    )
+    assert "reason=campaign_assigned_trunk_not_ready" in caplog.text
+    assert "refused=True" in caplog.text
+    assert "reason=campaign_assigned " not in caplog.text
+
+    # Same for a refused pool route.
+    caplog.clear()
+    monkeypatch.setattr(trunk_resolver, "_resolve_campaign_trunk", _no_assignment)
+    monkeypatch.setattr(trunk_resolver, "_resolve_pool_assignment", pool_route_refused)
+    await trunk_resolver.resolve_outbound_trunk(object(), tenant_id=TENANT, environment="test")
+    assert "reason=pool_assigned_trunk_not_ready" in caplog.text
+    assert "refused=True" in caplog.text
+    assert "reason=pool_assigned " not in caplog.text
+
+    # An accepted route still logs its own reason and refused=False.
+    caplog.clear()
+    monkeypatch.setattr(trunk_resolver, "_resolve_pool_assignment", pool_route_ok)
+    await trunk_resolver.resolve_outbound_trunk(object(), tenant_id=TENANT, environment="test")
+    assert "reason=pool_assigned" in caplog.text
+    assert "refused=False" in caplog.text

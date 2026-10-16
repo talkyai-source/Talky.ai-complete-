@@ -480,27 +480,301 @@ async def test_start_heartbeat_writes_immediately_and_is_idempotent(sb_module):
     await backend.shutdown()
 
 
-@pytest.mark.asyncio
-async def test_strict_heartbeat_fences_process_when_redis_becomes_unverifiable(sb_module):
-    class FailingRegistry(FakeRegistry):
-        async def renew_ari_ownership_strict(self, ttl_seconds):
-            self.calls.append(("renew_owner_strict", ttl_seconds))
-            raise ConnectionError("redis unavailable")
+class _ScriptedOwnerRegistry(FakeRegistry):
+    """FakeRegistry whose owner-lock calls follow a script.
 
-    reg = FailingRegistry()
+    ``renew`` / ``acquire`` hold outcomes consumed one per call: a bool is
+    returned, an Exception is raised. When a script runs dry the call keeps
+    returning ``renew_default`` / ``acquire_default`` (an Exception default
+    is raised on every call).
+    """
+
+    def __init__(
+        self,
+        *,
+        renew=(),
+        acquire=(),
+        renew_default=True,
+        acquire_default=True,
+        heartbeat=(),
+    ):
+        super().__init__()
+        self._renew = list(renew)
+        self._acquire = list(acquire)
+        self._heartbeat = list(heartbeat)
+        self._renew_default = renew_default
+        self._acquire_default = acquire_default
+        self.renew_calls = 0
+        self.acquire_calls = 0
+        self.heartbeat_calls = 0
+
+    @staticmethod
+    def _play(script, default):
+        outcome = script.pop(0) if script else default
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    async def write_heartbeat(self, ttl_seconds):
+        self.heartbeat_calls += 1
+        self.calls.append(("heartbeat", ttl_seconds))
+        self._play(self._heartbeat, None)
+
+    async def write_heartbeat_strict(self, ttl_seconds):
+        self.heartbeat_calls += 1
+        self.calls.append(("heartbeat_strict", ttl_seconds))
+        self._play(self._heartbeat, None)
+
+    async def renew_ari_ownership(self, ttl_seconds):
+        self.renew_calls += 1
+        self.calls.append(("renew_owner", ttl_seconds))
+        return self._play(self._renew, self._renew_default)
+
+    async def renew_ari_ownership_strict(self, ttl_seconds):
+        self.renew_calls += 1
+        self.calls.append(("renew_owner_strict", ttl_seconds))
+        return self._play(self._renew, self._renew_default)
+
+    async def try_acquire_ari_ownership(self, ttl_seconds):
+        self.acquire_calls += 1
+        self.calls.append(("acquire_owner", ttl_seconds))
+        return self._play(self._acquire, self._acquire_default)
+
+    async def try_acquire_ari_ownership_strict(self, ttl_seconds):
+        self.acquire_calls += 1
+        self.calls.append(("acquire_owner_strict", ttl_seconds))
+        return self._play(self._acquire, self._acquire_default)
+
+
+async def _wait_until(predicate, timeout=3.0):
+    loop = asyncio.get_running_loop()
+    end = loop.time() + timeout
+    while loop.time() < end:
+        if predicate():
+            return True
+        await asyncio.sleep(0.005)
+    return predicate()
+
+
+def _fast_heartbeat(backend, *, deadline=30.0):
+    """Shrink the heartbeat timings so a loop test runs in milliseconds."""
+    backend._HEARTBEAT_INTERVAL_S = 0.005
+    backend._HEARTBEAT_RETRY_INTERVAL_S = 0.005
+    backend._OWNERSHIP_FENCE_DEADLINE_S = deadline
+
+
+@pytest.mark.asyncio
+async def test_strict_heartbeat_fences_process_when_redis_stays_unverifiable_past_deadline(
+    sb_module,
+):
+    """Redis errors for longer than the fence deadline: fence (split-brain
+    safety), but only AFTER retrying -- not on the first error."""
+    reg = _ScriptedOwnerRegistry(renew_default=ConnectionError("redis unavailable"))
     backend = sb_module.RedisBackedStateBackend(reg)
-    backend._HEARTBEAT_INTERVAL_S = 0
+    _fast_heartbeat(backend, deadline=0.05)
 
     assert await backend.acquire_telephony_ownership_strict() is True
     await backend.start_heartbeat_strict()
     task = backend._heartbeat_task
     assert task is not None
-    await task
+    await asyncio.wait_for(task, timeout=5)
 
     assert backend.strict_ownership_active is True
     assert backend.is_telephony_owner() is False
     assert ("heartbeat_strict", backend._HEARTBEAT_TTL_S) in reg.calls
     assert ("renew_owner_strict", backend._HEARTBEAT_TTL_S) in reg.calls
+    # Production S4: it used to fence on the FIRST error, so a single Redis
+    # blip switched telephony off until restart. It must have retried.
+    assert reg.renew_calls > 1
+    await backend.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_strict_heartbeat_survives_one_transient_redis_error(sb_module, caplog):
+    """One failed renew inside the deadline: still owner, loop still alive,
+    a WARNING says it is retrying, and the next good renew carries on."""
+    reg = _ScriptedOwnerRegistry(renew=[ConnectionError("redis blip")])
+    backend = sb_module.RedisBackedStateBackend(reg)
+    _fast_heartbeat(backend)
+
+    with caplog.at_level("WARNING"):
+        assert await backend.acquire_telephony_ownership_strict() is True
+        await backend.start_heartbeat_strict()
+        task = backend._heartbeat_task
+        assert await _wait_until(lambda: reg.renew_calls >= 3)
+
+    assert backend.is_telephony_owner() is True
+    assert task is not None and not task.done()
+    assert "retrying" in caplog.text
+    await backend.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_strict_heartbeat_reacquires_when_the_lock_merely_expired(sb_module):
+    """Renew says 0 because the key EXPIRED (nobody holds it): re-acquire with
+    the strict SET NX and keep serving, instead of fencing."""
+    # acquire[0] is the startup claim; acquire[1] is the loop's re-acquire.
+    reg = _ScriptedOwnerRegistry(renew=[False], acquire=[True, True])
+    backend = sb_module.RedisBackedStateBackend(reg)
+    _fast_heartbeat(backend)
+
+    assert await backend.acquire_telephony_ownership_strict() is True
+    await backend.start_heartbeat_strict()
+    task = backend._heartbeat_task
+    assert await _wait_until(lambda: reg.renew_calls >= 3)
+
+    assert ("acquire_owner_strict", backend._HEARTBEAT_TTL_S) in reg.calls
+    assert backend.is_telephony_owner() is True
+    assert task is not None and not task.done()
+    await backend.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_strict_heartbeat_fences_when_another_process_holds_the_lock(sb_module):
+    """Renew says 0 and the SET NX loses: another pod owns telephony."""
+    # acquire[0] is the startup claim; acquire[1] is the loop's re-acquire.
+    reg = _ScriptedOwnerRegistry(renew=[False], acquire=[True, False])
+    backend = sb_module.RedisBackedStateBackend(reg)
+    _fast_heartbeat(backend)
+
+    assert await backend.acquire_telephony_ownership_strict() is True
+    await backend.start_heartbeat_strict()
+    task = backend._heartbeat_task
+    assert task is not None
+    await asyncio.wait_for(task, timeout=5)
+
+    assert reg.acquire_calls == 2  # startup claim + the one failed re-acquire
+    assert backend.is_telephony_owner() is False
+    await backend.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_strict_reacquire_error_is_transient_not_a_fence(sb_module):
+    """The renew said 0 but the re-acquire itself hit a Redis error: ownership
+    is unproven, not lost -- retry within the deadline rather than fence."""
+    # acquire[0] is the startup claim; then one Redis error, then success.
+    # The renew says 0 on both ticks (the key stays absent until we re-acquire).
+    reg = _ScriptedOwnerRegistry(
+        renew=[False, False], acquire=[True, ConnectionError("redis blip"), True]
+    )
+    backend = sb_module.RedisBackedStateBackend(reg)
+    _fast_heartbeat(backend)
+
+    assert await backend.acquire_telephony_ownership_strict() is True
+    await backend.start_heartbeat_strict()
+    task = backend._heartbeat_task
+    assert await _wait_until(lambda: reg.acquire_calls >= 3)
+    assert await _wait_until(lambda: reg.renew_calls >= 3)
+
+    assert backend.is_telephony_owner() is True
+    assert task is not None and not task.done()
+    await backend.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_hung_redis_call_cannot_postpone_the_fence(sb_module):
+    """A renew that never answers must still be cut off by the per-attempt
+    timeout so the fence deadline is honoured before the lock can expire."""
+
+    class HangingRegistry(_ScriptedOwnerRegistry):
+        async def renew_ari_ownership_strict(self, ttl_seconds):
+            self.renew_calls += 1
+            await asyncio.Event().wait()
+
+    reg = HangingRegistry()
+    backend = sb_module.RedisBackedStateBackend(reg)
+    _fast_heartbeat(backend, deadline=0.05)
+    backend._OWNERSHIP_ATTEMPT_TIMEOUT_S = 0.01
+
+    assert await backend.acquire_telephony_ownership_strict() is True
+    await backend.start_heartbeat_strict()
+    task = backend._heartbeat_task
+    assert task is not None
+    await asyncio.wait_for(task, timeout=5)
+
+    assert backend.is_telephony_owner() is False
+    await backend.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_non_strict_heartbeat_loop_survives_an_exception(sb_module, caplog):
+    """Non-strict (dev/test) mode: an exception inside the loop is logged and
+    the loop carries on -- it used to log once and exit for good."""
+    # heartbeat[0] is start_heartbeat()'s immediate first write; [1] is in-loop.
+    reg = _ScriptedOwnerRegistry(heartbeat=[None, RuntimeError("boom")])
+    backend = sb_module.RedisBackedStateBackend(reg)
+    _fast_heartbeat(backend)
+
+    with caplog.at_level("WARNING"):
+        await backend.start_heartbeat()
+        task = backend._heartbeat_task
+        assert await _wait_until(lambda: reg.heartbeat_calls >= 4)
+
+    assert task is not None and not task.done()
+    assert backend.is_telephony_owner() is True
+    assert "boom" in caplog.text
+    await backend.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_non_strict_heartbeat_reacquires_an_expired_lock(sb_module):
+    reg = _ScriptedOwnerRegistry(renew=[False], acquire=[True])
+    backend = sb_module.RedisBackedStateBackend(reg)
+    _fast_heartbeat(backend)
+
+    await backend.start_heartbeat()
+    task = backend._heartbeat_task
+    assert await _wait_until(lambda: reg.renew_calls >= 3)
+
+    assert ("acquire_owner", backend._HEARTBEAT_TTL_S) in reg.calls
+    assert backend.is_telephony_owner() is True
+    assert task is not None and not task.done()
+    await backend.shutdown()
+
+
+def test_fence_deadline_leaves_room_before_the_lock_can_expire(sb_module):
+    """Worst case the fence lands at deadline + one attempt timeout + one
+    retry sleep after the last good renew. That must be below the lock TTL
+    with real margin, or a peer could take the lock before we stand down."""
+    cls = sb_module.RedisBackedStateBackend
+    worst_case_fence_s = (
+        cls._OWNERSHIP_FENCE_DEADLINE_S
+        + cls._OWNERSHIP_ATTEMPT_TIMEOUT_S
+        + cls._HEARTBEAT_RETRY_INTERVAL_S
+    )
+    assert worst_case_fence_s <= cls._HEARTBEAT_TTL_S - 5
+    # Quick retries while failing (2-5 s), not a full heartbeat interval.
+    assert 2 <= cls._HEARTBEAT_RETRY_INTERVAL_S <= 5
+
+
+@pytest.mark.asyncio
+async def test_real_registry_expired_lock_is_reacquired_and_foreign_lock_fences(sb_module):
+    """End to end on the real SessionRegistry + FakeRedis: the Lua renew
+    returns 0 for an absent key, and the loop must tell that apart from a key
+    another pod holds."""
+    from app.domain.services.telephony.session_registry import SessionRegistry
+
+    shared = FakeRedis()
+    mine = SessionRegistry(shared, "host:mine")
+    backend = sb_module.RedisBackedStateBackend(mine)
+    _fast_heartbeat(backend)
+    assert await backend.acquire_telephony_ownership_strict() is True
+    owner_key = "telephony:ari_owner"
+    assert shared.strings[owner_key] == "host:mine"
+
+    # The key expired (nobody holds it).
+    shared.strings.pop(owner_key)
+    await backend.start_heartbeat_strict()
+    assert await _wait_until(lambda: shared.strings.get(owner_key) == "host:mine")
+    assert backend.is_telephony_owner() is True
+    task = backend._heartbeat_task
+    assert task is not None and not task.done()
+
+    # Another pod now holds it: this one must stand down.
+    shared.strings[owner_key] = "host:other"
+    await asyncio.wait_for(task, timeout=5)
+    assert backend.is_telephony_owner() is False
+    assert shared.strings[owner_key] == "host:other"
     await backend.shutdown()
 
 

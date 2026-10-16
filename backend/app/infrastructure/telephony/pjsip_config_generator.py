@@ -69,6 +69,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_PJSIP_D_DIR = "/etc/asterisk/pjsip.d"
 _DEFAULT_REGISTER_INTERVAL = 3600
+_REGISTER_RETRY_INTERVAL_MAX = 60
 _ALLOWED_TRANSPORTS = {"udp", "tcp", "tls"}
 
 
@@ -267,7 +268,12 @@ def render_trunk_conf(inp: TrunkConfigInput) -> str:
         # with the SIP login — exactly how the working primary registers.
         lines.append(f"client_uri=sip:{reg_identity}@{domain}")
         lines.append(f"contact_user={reg_identity}")
-        lines.append(f"retry_interval={interval}")
+        # retry_interval is how long PJSIP waits before re-sending a REGISTER
+        # that failed (timeout / 5xx). It used to equal ``expiration`` (3600 by
+        # default, up to 86400), so ONE dropped REGISTER left the trunk
+        # unregistered for an hour or more. Retry within a minute; the
+        # registration lifetime (expiration) is unchanged.
+        lines.append(f"retry_interval={min(interval, _REGISTER_RETRY_INTERVAL_MAX)}")
         lines.append(f"expiration={interval}")
         # Registration resilience (telephony-audit #4, 2026-07-02). PJSIP
         # defaults (max_retries=10, auth_rejection_permanent=yes) let a

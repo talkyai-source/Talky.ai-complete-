@@ -87,6 +87,63 @@ async def _event_loop_lag_heartbeat(stop_event: asyncio.Event) -> None:
             deadline = loop.time() + period
 
 
+# Backoff between background ARI connect retries after a failed boot attempt;
+# the last value repeats until the connect succeeds or the app shuts down.
+_BOOT_ARI_RETRY_DELAYS_S = (2.0, 5.0, 10.0, 30.0, 60.0)
+
+
+async def _retry_boot_ari_connect(
+    connect,
+    state_backend,
+    *,
+    delays=_BOOT_ARI_RETRY_DELAYS_S,
+    sleep=asyncio.sleep,
+    on_connected=None,
+) -> bool:
+    """Keep retrying the boot ARI connect after the first attempt failed.
+
+    The boot path used to try ``_auto_connect_telephony`` exactly once: with
+    Asterisk still starting, a non-strict process kept the owner lock but never
+    connected, and every originate then failed "adapter not connected" until a
+    restart or a manual /connect. Retries with capped backoff until ``connect``
+    succeeds (returns True), the process stops being the telephony owner
+    (returns False), or the task is cancelled on shutdown.
+    """
+    attempt = 0
+    while True:
+        delay = delays[min(attempt, len(delays) - 1)]
+        attempt += 1
+        await sleep(delay)
+        if not state_backend.is_telephony_owner():
+            logger.warning(
+                "boot_ari_connect_retry_stopped: no longer the telephony owner "
+                "after %d attempt(s)",
+                attempt - 1,
+            )
+            return False
+        try:
+            await connect()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - keep retrying until shutdown
+            logger.warning(
+                "boot_ari_connect_retry_failed attempt %d: %s (next retry in %.0fs)",
+                attempt,
+                exc,
+                delays[min(attempt, len(delays) - 1)],
+            )
+            continue
+        logger.info("Telephony bridge connected on boot retry attempt %d", attempt)
+        if on_connected is not None:
+            try:
+                await on_connected()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - the connection stands
+                logger.warning("boot_ari_connect_retry_on_connected_failed: %s", exc)
+        return True
+
+
 async def _terminate_active_telephony_sessions_for_shutdown(
     state_backend,
     adapter=None,
@@ -798,7 +855,32 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             if strict_validation and _production_inbound_enabled:
                 raise
-            logger.warning(f"Telephony bridge auto-connect failed (non-fatal): {e}")
+            logger.warning(
+                f"Telephony bridge auto-connect failed (non-fatal): {e} "
+                "- retrying in the background"
+            )
+
+            async def _recover_after_delayed_connect() -> None:
+                from app.domain.services.telephony.lifecycle import (
+                    recover_orphaned_calls,
+                    wait_for_telephony_application,
+                )
+
+                await wait_for_telephony_application()
+                recovered = await recover_orphaned_calls()
+                if recovered:
+                    logger.info(
+                        "telephony delayed-connect recovery: reclaimed %d orphaned call(s)",
+                        recovered,
+                    )
+
+            app.state.boot_ari_retry_task = asyncio.create_task(
+                _retry_boot_ari_connect(
+                    _auto_connect_telephony,
+                    _state_backend,
+                    on_connected=_recover_after_delayed_connect,
+                )
+            )
 
         # Phase 1 item 1 — telephony state recovery. Reclaim any calls a
         # dead predecessor left in the Redis ledger (hang them up + record
@@ -819,6 +901,12 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Telephony state recovery failed (non-fatal): {e}")
 
     yield
+
+    # A boot-time ARI connect retry must not reconnect during teardown.
+    _boot_retry = getattr(app.state, "boot_ari_retry_task", None)
+    if _boot_retry is not None and not _boot_retry.done():
+        _boot_retry.cancel()
+        await asyncio.gather(_boot_retry, return_exceptions=True)
 
     # Phase 1.4 — flip readiness to NOT_READY immediately so the load
     # balancer stops sending new calls. Existing calls finish; the loop

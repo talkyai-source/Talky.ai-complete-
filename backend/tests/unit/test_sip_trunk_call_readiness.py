@@ -23,16 +23,39 @@ def test_ip_auth_outbound_requires_live_qualified_contact(status, ready):
     assert evaluate_trunk_runtime(row, require_inbound=False).ready is False
 
 
-def test_selected_down_trunk_never_falls_back_to_other_trunk():
+def test_down_own_trunk_never_falls_back_to_the_shared_platform_default():
+    # The tenant's own line is down: refuse, never silently dial the shared
+    # platform line instead (an explicit campaign/pool assignment is likewise
+    # never replaced -- see test_trunk_resolver).
     now = datetime.now(timezone.utc)
     route = choose_outbound_route(
-        active_trunks=[TrunkRow("older", "other", True, now - timedelta(minutes=1)),
-                       TrunkRow("selected", "selected", True, now, runtime_ready=False)],
+        active_trunks=[TrunkRow("platform", "platform-default", True, now - timedelta(minutes=1)),
+                       TrunkRow("selected", "selected", True, now, runtime_ready=False, created_at=now)],
         dialable_numbers=[DidRow("+14165550123", "verified")],
         env_default_endpoint="platform", platform_default_trunk_name="platform-default",
         is_production=True, shared_default_enabled=True,
     )
     assert route.refused and route.trunk_id == "selected" and route.endpoint is None
+    assert route.reason == "selected_trunk_not_ready"
+
+
+def test_ready_own_trunk_is_used_when_a_newer_own_trunk_is_down():
+    # This test used to assert the opposite (the newer, down own trunk was
+    # "selected" by updated_at and refused the call although an older own trunk
+    # was registered). A not-ready or inbound-only line must not shadow a ready
+    # one: readiness is part of the selection, created_at breaks ties.
+    now = datetime.now(timezone.utc)
+    route = choose_outbound_route(
+        active_trunks=[TrunkRow("older", "other", True, now - timedelta(minutes=1),
+                                created_at=now - timedelta(days=2)),
+                       TrunkRow("selected", "selected", True, now, runtime_ready=False,
+                                created_at=now - timedelta(days=1))],
+        dialable_numbers=[DidRow("+14165550123", "verified")],
+        env_default_endpoint="platform", platform_default_trunk_name="platform-default",
+        is_production=True, shared_default_enabled=True,
+    )
+    assert route.refused is False
+    assert route.trunk_id == "older" and route.endpoint == "trunk-older"
 
 
 def test_ip_auth_needs_no_credentials_or_registration_configuration():
@@ -134,8 +157,11 @@ async def test_campaign_start_blocks_before_mutations_when_trunk_down(monkeypatc
     service._get_pending_leads = AsyncMock()
     service._update_campaign_status = AsyncMock()
     monkeypatch.setattr(trunk_resolver, "resolve_outbound_trunk", AsyncMock(return_value=SimpleNamespace(refused=True, reason="selected_trunk_not_ready", trunk_id=None, caller_id=None)))
-    with pytest.raises(CampaignError, match="selected_trunk_not_ready") as exc:
+    # The machine code stays on the exception; the message is plain language
+    # (it no longer echoes the raw code to the user).
+    with pytest.raises(CampaignError, match="not registered with the carrier") as exc:
         await service.start_campaign("campaign", tenant_id="tenant")
+    assert exc.value.reason_code == "selected_trunk_not_ready"
     assert exc.value.status_code == 409
     service._get_pending_leads.assert_not_awaited()
     service._update_campaign_status.assert_not_awaited()

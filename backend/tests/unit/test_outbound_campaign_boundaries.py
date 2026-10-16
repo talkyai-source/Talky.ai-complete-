@@ -737,6 +737,32 @@ async def test_internal_dialer_intent_is_claimed_and_session_stamped_before_ari(
 
 
 @pytest.mark.asyncio
+async def test_resolved_line_is_handed_to_the_durable_bind_for_the_leg_record(monkeypatch):
+    # calls.route_snapshot is '{}' on every outbound call and nothing stored
+    # the trunk: make_call must pass the line it resolved to the bind step.
+    path = _install_call_path(
+        monkeypatch,
+        campaign_rows=[_campaign(), _campaign()],
+    )
+    real_bind = telephony_bridge._bind_durable_outbound_call_provider
+    seen = {}
+
+    async def spy_bind(*args, **kwargs):
+        seen.update(kwargs)
+        return await real_bind(*args, **kwargs)
+
+    monkeypatch.setattr(telephony_bridge, "_bind_durable_outbound_call_provider", spy_bind)
+
+    await telephony_bridge.make_call(path.request, path.body)
+
+    assert seen["route_meta"] == {
+        "trunk_id": None,
+        "endpoint": "carrier",
+        "route_reason": "test",
+    }
+
+
+@pytest.mark.asyncio
 async def test_internal_dialer_provider_replay_returns_without_guard_warmup_or_ari(monkeypatch):
     row = _internal_intent_row(
         status="dialing",

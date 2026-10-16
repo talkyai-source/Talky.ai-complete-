@@ -6,7 +6,7 @@
 #
 # What this script protects:
 #   - SIP port 5080 restricted to known carrier IPs only
-#   - RTP range 16384-32768 restricted to carrier IPs
+#   - RTP range 10000-20000 (Asterisk rtp.conf) restricted to carrier IPs
 #   - PostgreSQL 5432 blocked from host interface (internal only)
 #   - Redis 6379 blocked from host interface (internal only)
 #   - pgAdmin 5050 blocked from host interface (SSH tunnel access)
@@ -87,7 +87,7 @@ for ip in "${CARRIER_IPS[@]}"; do
   ufw allow from "$ip" to any port 5080 proto udp comment "SIP UDP from carrier"
   ufw allow from "$ip" to any port 5080 proto tcp comment "SIP TLS from carrier"
   ufw allow from "$ip" to any port 5060 proto udp comment "SIP UDP alt from carrier"
-  ufw allow from "$ip" to any port 16384:32768 proto udp comment "RTP range from carrier"
+  ufw allow from "$ip" to any port 10000:20000 proto udp comment "RTP range from carrier"
 done
 
 # ── Internal services — block from external interface ─────────

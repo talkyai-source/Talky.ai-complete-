@@ -1097,6 +1097,7 @@ async def _bind_durable_outbound_call_provider(
     provider: str,
     provider_call_id: str,
     from_number: Optional[str] = None,
+    route_meta: Optional[dict] = None,
 ) -> None:
     """Bind provider identity after originate; loss of this write is fatal."""
     try:
@@ -1148,6 +1149,10 @@ async def _bind_durable_outbound_call_provider(
         await _record_outbound_from_number(
             db_pool, tenant_id=tenant_id, durable_call_id=durable_call_id, from_number=from_number,
         )
+    if route_meta:
+        await _record_outbound_route(
+            db_pool, tenant_id=tenant_id, durable_call_id=durable_call_id, route_meta=route_meta,
+        )
 
 
 async def _record_outbound_from_number(
@@ -1183,6 +1188,44 @@ async def _record_outbound_from_number(
     except Exception as exc:  # noqa: BLE001 - history only, never fail the call
         logger.warning(
             "outbound_from_number_record_failed call=%s err=%s",
+            durable_call_id[:8], type(exc).__name__,
+        )
+
+
+async def _record_outbound_route(
+    db_pool, *, tenant_id: str, durable_call_id: str, route_meta: dict,
+) -> None:
+    """Record which line carried the call on its outbound leg.
+
+    ``calls.route_snapshot`` stays ``'{}'`` on every outbound call and nothing
+    else stored the trunk, so an operator could not tell which line a call used
+    (2026-10-16). Merges ``{trunk_id, endpoint, route_reason}`` into the
+    ``pstn_outbound`` leg's metadata (jsonb ``||``: other keys survive). Best
+    effort like :func:`_record_outbound_from_number`: a failure here never
+    fails a call that is already ringing.
+    """
+    try:
+        from app.core.db_utils import acquire_with_tenant
+
+        async with acquire_with_tenant(
+            db_pool, str(tenant_id), timeout=_OUTBOUND_BOUNDARY_DB_TIMEOUT_S
+        ) as conn:
+            await conn.execute(
+                """
+                UPDATE call_legs l
+                   SET metadata = COALESCE(l.metadata, '{}'::jsonb) || $3::jsonb
+                 WHERE l.call_id = $1::uuid
+                   AND l.direction = 'outbound'
+                   AND l.leg_type = 'pstn_outbound'
+                   AND EXISTS (SELECT 1 FROM calls c WHERE c.id = l.call_id AND c.tenant_id = $2::uuid)
+                """,
+                durable_call_id,
+                str(tenant_id),
+                json.dumps(route_meta),
+            )
+    except Exception as exc:  # noqa: BLE001 - history only, never fail the call
+        logger.warning(
+            "outbound_route_record_failed call=%s err=%s",
             durable_call_id[:8], type(exc).__name__,
         )
 
@@ -1777,7 +1820,18 @@ async def make_call(request: Request, body: MakeCallRequest):
         )
 
     if not _adapter or not _adapter.connected:
-        raise HTTPException(status_code=400, detail="Telephony adapter not connected")
+        # A coded, retryable 503 (same shape as telephony_not_active_on_node):
+        # the bare 400 carried no code, so the dialer classified it INTERNAL
+        # and failed the lead after one retry for what is a transient outage
+        # (ARI still connecting, or reconnecting after a drop).
+        raise HTTPException(
+            status_code=503,
+            headers={"Retry-After": "2"},
+            detail={
+                "error": "telephony_adapter_unavailable",
+                "message": "The telephony adapter is not connected yet.",
+            },
+        )
 
     # Phase 1.4 — refuse new calls EARLY when the pod is full or draining.
     # 503 + Retry-After is the contract the LB / dialer worker reads to
@@ -2462,6 +2516,15 @@ async def make_call(request: Request, body: MakeCallRequest):
                 provider=str(getattr(_adapter, "name", "unknown") or "unknown"),
                 provider_call_id=call_id,
                 from_number=caller_id,
+                route_meta=(
+                    {
+                        "trunk_id": getattr(_outbound_route, "trunk_id", None),
+                        "endpoint": _outbound_route.endpoint,
+                        "route_reason": _outbound_route.reason,
+                    }
+                    if _outbound_route is not None
+                    else None
+                ),
             )
 
         # Non-Asterisk adapters do not expose a pre-generated channel ID, so we

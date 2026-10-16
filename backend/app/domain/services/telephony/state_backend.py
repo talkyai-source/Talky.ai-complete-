@@ -784,6 +784,22 @@ class RedisBackedStateBackend:
     # dead. 20s interval / 60s TTL gives 3 missed beats of slack.
     _HEARTBEAT_INTERVAL_S = 20
     _HEARTBEAT_TTL_S = 60
+    # Redis errors in the heartbeat loop are retried, not fatal (S4: one Redis
+    # error used to fence the process and nothing ever re-acquired, so every
+    # originate 503'd until talky-api was restarted). While failing we retry
+    # every _HEARTBEAT_RETRY_INTERVAL_S, cap each attempt at
+    # _OWNERSHIP_ATTEMPT_TIMEOUT_S so a hung call cannot outlast the deadline,
+    # and fence only once _OWNERSHIP_FENCE_DEADLINE_S has passed since the last
+    # good renew. Split-brain safety: the lock (and heartbeat) last
+    # _HEARTBEAT_TTL_S after the last good renew and a peer can only take the
+    # lock after that, so the worst-case fence (deadline + one attempt + one
+    # retry sleep = 48 s) lands well inside the 60 s TTL. The first failing
+    # tick comes one interval (20 s) after the last renew, so a deadline of
+    # TTL - 2 intervals (20 s) would leave no retry at all; TTL - 1 interval
+    # leaves ~7 retries and still fences ~12 s before expiry.
+    _HEARTBEAT_RETRY_INTERVAL_S = 3.0
+    _OWNERSHIP_ATTEMPT_TIMEOUT_S = 5.0
+    _OWNERSHIP_FENCE_DEADLINE_S = 40.0
     _OWNERSHIP_LOSS_CLEANUP_TIMEOUT_S = 5.0
     _OWNERSHIP_LOSS_SESSION_TIMEOUT_S = 2.0
 
@@ -1280,45 +1296,93 @@ class RedisBackedStateBackend:
             return
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
+    async def _heartbeat_tick(self) -> Optional[str]:
+        """One heartbeat write plus owner-lock renewal.
+
+        Returns a reason string when another process now holds the owner lock
+        (the caller must fence), else ``None``. Raises on any Redis error so
+        the loop can retry. The renew Lua returns 0 both when the key EXPIRED
+        and when another process holds it, so a 0 is followed by a SET NX
+        re-acquire: it wins when the key is merely absent, and loses (false)
+        only when another owner really holds it.
+        """
+        if self._strict_ownership:
+            await self._registry.write_heartbeat_strict(self._HEARTBEAT_TTL_S)
+        else:
+            await self._registry.write_heartbeat(self._HEARTBEAT_TTL_S)
+        # Renew the owner lock on the same cadence so it never lapses under a
+        # live owner. In-flight calls are left alone either way.
+        if not self._is_owner:
+            return None
+        if self._strict_ownership:
+            still_ours = await self._registry.renew_ari_ownership_strict(
+                self._HEARTBEAT_TTL_S,
+            )
+        else:
+            still_ours = await self._registry.renew_ari_ownership(
+                self._HEARTBEAT_TTL_S,
+            )
+        if still_ours:
+            return None
+        if self._strict_ownership:
+            reacquired = await self._registry.try_acquire_ari_ownership_strict(
+                self._HEARTBEAT_TTL_S,
+            )
+        else:
+            reacquired = await self._registry.try_acquire_ari_ownership(
+                self._HEARTBEAT_TTL_S,
+            )
+        if not reacquired:
+            return "the ARI ownership lock is held by another process"
+        logger.warning(
+            "telephony ownership lock had expired; re-acquired pod=%s",
+            self._registry.pod_id,
+        )
+        return None
+
     async def _heartbeat_loop(self) -> None:
         import asyncio
+        import time
 
-        try:
-            while True:
-                await asyncio.sleep(self._HEARTBEAT_INTERVAL_S)
-                if self._strict_ownership:
-                    await self._registry.write_heartbeat_strict(
-                        self._HEARTBEAT_TTL_S,
-                    )
-                else:
-                    await self._registry.write_heartbeat(self._HEARTBEAT_TTL_S)
-                # Renew the owner lock on the same cadence so it never
-                # lapses under a live owner. If renew reports we no longer
-                # hold it (another process took over after our heartbeat
-                # lapsed — only possible under a long Redis stall), flip to
-                # non-owner so new originates 503 instead of two processes
-                # both driving ARI. In-flight calls are left alone.
-                if self._is_owner:
-                    if self._strict_ownership:
-                        still_ours = await self._registry.renew_ari_ownership_strict(
-                            self._HEARTBEAT_TTL_S,
-                        )
-                    else:
-                        still_ours = await self._registry.renew_ari_ownership(
-                            self._HEARTBEAT_TTL_S,
-                        )
-                    if not still_ours:
-                        await self._handle_ownership_loss(
-                            "the ARI ownership lock was replaced or expired"
-                        )
-                        return
-        except asyncio.CancelledError:
-            return
-        except Exception as exc:  # never let the loop die silently
-            if self._strict_ownership:
-                await self._handle_ownership_loss(f"Redis ownership could not be verified: {exc}")
+        last_ok = time.monotonic()
+        delay = self._HEARTBEAT_INTERVAL_S
+        while True:
+            try:
+                await asyncio.sleep(delay)
+                # Stamp BEFORE the attempt: Redis applies the renew (starting a
+                # fresh TTL) at or after this instant, so measuring the fence
+                # deadline from it keeps the documented margin exact.
+                attempt_started = time.monotonic()
+                lost_reason = await asyncio.wait_for(
+                    self._heartbeat_tick(),
+                    timeout=self._OWNERSHIP_ATTEMPT_TIMEOUT_S,
+                )
+            except asyncio.CancelledError:
                 return
-            logger.warning("telephony heartbeat loop error: %s", exc)
+            except Exception as exc:  # never let the loop die silently
+                failing_for = time.monotonic() - last_ok
+                if self._strict_ownership and failing_for >= self._OWNERSHIP_FENCE_DEADLINE_S:
+                    await self._handle_ownership_loss(
+                        f"Redis ownership could not be verified for {failing_for:.0f}s: "
+                        f"{exc!r}"
+                    )
+                    return
+                logger.warning(
+                    "telephony heartbeat loop error pod=%s: %r — retrying in %.0fs "
+                    "(failing for %.0fs, fence deadline %.0fs)",
+                    self._registry.pod_id,
+                    exc,
+                    self._HEARTBEAT_RETRY_INTERVAL_S,
+                    failing_for,
+                    self._OWNERSHIP_FENCE_DEADLINE_S,
+                )
+                delay = self._HEARTBEAT_RETRY_INTERVAL_S
+                continue
+            if lost_reason is not None:
+                await self._handle_ownership_loss(lost_reason)
+                return
+            last_ok = attempt_started
+            delay = self._HEARTBEAT_INTERVAL_S
 
     async def _handle_ownership_loss(self, reason: str) -> None:
         """Fence and quiesce this process when ownership becomes uncertain.

@@ -92,7 +92,10 @@ def test_with_carrier_ips_rules_are_port_scoped_never_all_udp(tmp_path):
     assert carrier_rules, "carrier rules must be installed"
     for line in carrier_rules:
         assert " port " in line, f"carrier rule without a port scope: {line}"
-    assert any("port 16384:32768 proto udp" in line for line in carrier_rules), "RTP range rule must remain"
+    # The RTP rule must match Asterisk's live rtp.conf (10000-20000); the old
+    # 16384:32768 range left most of the real media ports closed.
+    assert any("port 10000:20000 proto udp" in line for line in carrier_rules), "RTP range rule must remain"
+    assert not any("16384" in line or "32768" in line for line in carrier_rules)
     assert any("port 5060 proto udp" in line for line in carrier_rules)
 
 
@@ -106,3 +109,20 @@ def test_existing_rules_are_snapshotted_before_the_reset(tmp_path):
     backups = list(tmp_path.glob("ufw-rules-before-*.txt"))
     assert len(backups) == 1
     assert "hand-added rule" in backups[0].read_text(encoding="utf-8")
+
+
+def test_firewall_rtp_range_matches_the_asterisk_rtp_conf():
+    """The ufw RTP range is derived from nothing but a comment: pin it to the
+    range setup-asterisk.sh actually writes to rtp.conf."""
+    import re
+
+    asterisk = (ROOT / "setup-asterisk.sh").read_text(encoding="utf-8")
+    start = re.search(r"^rtpstart=(\d+)$", asterisk, re.MULTILINE)
+    end = re.search(r"^rtpend=(\d+)$", asterisk, re.MULTILINE)
+    assert start and end, "setup-asterisk.sh no longer writes rtpstart/rtpend"
+    rtp = f"{start.group(1)}:{end.group(1)}"
+
+    firewall = SCRIPT.read_text(encoding="utf-8")
+    assert f"port {rtp} proto udp" in firewall
+    assert f"RTP range {start.group(1)}-{end.group(1)}" in firewall
+    assert "16384" not in firewall and "32768" not in firewall

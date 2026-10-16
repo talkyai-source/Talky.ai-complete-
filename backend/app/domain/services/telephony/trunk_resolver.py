@@ -1,8 +1,10 @@
-"""Resolve tenant outbound routing without silently changing a selected trunk.
+"""Resolve tenant outbound routing; an explicit campaign or pool selection is never silently changed.
 
-Campaign assignment wins, then tenant pool assignment, then the most recently
-activated own trunk. A down/missing route or failed lookup is a refusal. Caller
-IDs come from the current trunk record; assignment snapshots are display caches.
+Campaign assignment wins, then tenant pool assignment, then the newest-created
+runtime-ready own trunk (an auto-picked own line may move to another ready own
+line when the newest one is down). A down/missing route or failed lookup is a refusal.
+Caller IDs come from the current trunk record; assignment snapshots are display
+caches.
 """
 from __future__ import annotations
 
@@ -77,6 +79,7 @@ class TrunkRow:
     caller_id: Optional[str] = None
     runtime_ready: bool = True
     is_internal_extension: bool = False
+    created_at: Optional[datetime] = None
 
 
 @dataclass(frozen=True)
@@ -167,8 +170,12 @@ def choose_outbound_route(
 
     Precedence when a tenant has BOTH the seeded platform-default row and
     their own active trunk: the **own** trunk wins (an explicitly activated
-    BYO trunk is the tenant's intent). Among multiple own active trunks the
-    most-recently-updated one is chosen (deterministic, id tie-break).
+    BYO trunk is the tenant's intent). Among multiple own active trunks a
+    runtime-ready one is preferred, so a rejected / stale / inbound-only line
+    can never shadow a working one; the newest-created wins, with an id
+    tie-break (``updated_at`` is rewritten every ~10 s by the status updater
+    and must not decide anything). When none is ready the refusal names the
+    newest-created one (``selected_trunk_not_ready``).
 
     ``shared_default_enabled`` = the flag. When True (transition/back-compat)
     a tenant with no own trunk falls back to the shared platform endpoint —
@@ -194,14 +201,17 @@ def choose_outbound_route(
     ]
 
     if own_trunks:
-        # Most recently updated own trunk wins; stable id tie-break.
-        own = sorted(
-            own_trunks,
-            key=lambda t: (
-                t.updated_at or datetime.min,
-                str(t.id),
-            ),
-        )[-1]
+        # Ready lines first, then newest-created, then id: a stable key (unlike
+        # updated_at) that cannot be shadowed by a not-ready line. A trunk with
+        # no created_at sorts as the oldest.
+        def _newest_first_key(t: TrunkRow):
+            created = (
+                t.created_at.timestamp() if t.created_at is not None else float("-inf")
+            )
+            return (created, str(t.id))
+
+        ready_own = [t for t in own_trunks if t.runtime_ready]
+        own = max(ready_own or own_trunks, key=_newest_first_key)
         if not own.runtime_ready:
             return OutboundTrunkRoute(None, None, str(own.id), False, "selected_trunk_not_ready", True)
         # An explicitly configured number must never be replaced by a different
@@ -550,8 +560,9 @@ async def resolve_outbound_trunk(
         )
         if campaign_route is not None:
             logger.info(
-                "trunk_resolved tenant=%s campaign=%s endpoint=%s reason=campaign_assigned",
+                "trunk_resolved tenant=%s campaign=%s endpoint=%s refused=%s reason=%s",
                 str(tenant_id)[:8], str(campaign_id)[:8], campaign_route.endpoint,
+                campaign_route.refused, campaign_route.reason,
             )
             return campaign_route
 
@@ -562,8 +573,9 @@ async def resolve_outbound_trunk(
     )
     if pool_route is not None:
         logger.info(
-            "trunk_resolved tenant=%s endpoint=%s reason=pool_assigned",
+            "trunk_resolved tenant=%s endpoint=%s refused=%s reason=%s",
             str(tenant_id)[:8], pool_route.endpoint,
+            pool_route.refused, pool_route.reason,
         )
         return pool_route
 
@@ -573,8 +585,8 @@ async def resolve_outbound_trunk(
         async with acquire_with_tenant(db_pool, str(tenant_id)) as conn:
             trunk_rows = await conn.fetch(
                 """
-                SELECT id, trunk_name, is_active, updated_at, direction, metadata,
-                       live_registration_status, live_status_detail,
+                SELECT id, trunk_name, is_active, created_at, updated_at, direction,
+                       metadata, live_registration_status, live_status_detail,
                        live_status_checked_at
                 FROM tenant_sip_trunks
                 WHERE tenant_id = $1 AND is_active = TRUE
@@ -604,6 +616,7 @@ async def resolve_outbound_trunk(
             id=str(r["id"]),
             trunk_name=r["trunk_name"],
             is_active=bool(r["is_active"]),
+            created_at=r["created_at"],
             updated_at=r["updated_at"],
             caller_id=_extract_trunk_caller_id(r["metadata"]),
             runtime_ready=(
