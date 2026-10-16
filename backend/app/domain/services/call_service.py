@@ -9,6 +9,7 @@ by CampaignService.
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Iterator, Optional
@@ -951,7 +952,12 @@ class CallService:
                 # non-dialable number is corrupt data, not an extension call:
                 # stay fail-closed exactly as before.
                 raise
-            # Outbound to a short / non-E.164 destination (a PBX extension).
+            if not re.fullmatch(r"\d{3,8}", str(call_row["phone_number"] or "").strip()):
+                # Not an extension either (e.g. "anonymous"): a malformed
+                # destination must never gain retry permission -- stay
+                # fail-closed exactly as before.
+                raise
+            # Outbound to a PBX extension (3-8 digits, not E.164).
             # This used to re-raise: the settlement transaction rolled back on
             # every retry, the dialer job stayed 'processing' and the lead
             # 'calling' forever. No dnc_entries row can exist for it, so the

@@ -203,7 +203,7 @@ def test_rejected_is_terminal_without_retry_in_the_policy():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("destination", ["940005", "1234", "40005", "not a number"])
+@pytest.mark.parametrize("destination", ["940005", "1234", "40005"])
 async def test_pbx_extension_destination_settles_with_no_dnc_claim(destination, caplog):
     conn = _conn(phone=destination)
     with caplog.at_level(logging.WARNING, logger=call_service_module.logger.name):
@@ -333,3 +333,17 @@ async def test_extension_destination_without_an_opt_out_still_settles_normally()
     conn = _conn(lead_status="calling", phone="940005")
     await _settle(conn, CallOutcome.ANSWERED)
     assert conn.leads_row["status"] != "dnc"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("destination", ["not a number", "anonymous", "12"])
+async def test_malformed_outbound_destination_with_dialer_work_still_fails_closed(destination):
+    # Only an extension-shaped destination (3-8 digits) may settle without a
+    # suppression lookup; anything else must never gain retry permission.
+    conn = _conn(phone=destination)
+    service = _service(conn)
+    service._effective_attempt_number = AsyncMock(return_value=1)
+    result = await service.handle_call_status("call-1", CallOutcome.BUSY, 0)
+
+    assert result.durable is False
+    service._queue_service.schedule_retry_once.assert_not_awaited()
