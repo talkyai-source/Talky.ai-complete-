@@ -44,6 +44,16 @@
 }
 
 :root {
+  /* `font-mono` (and the preflight code/kbd/samp/pre rule) resolve through
+     `--font-geist-mono` via @theme inline above. No Geist font is loaded, so
+     without this definition the utility is invalid at computed-value time and
+     `font-mono` text silently inherited the sans stack. The value is Tailwind's
+     own default mono stack - the same list bare <code> elements already fall
+     back to - so nothing new is loaded. `--font-geist-sans` is deliberately
+     left undefined: `font-sans` sits on <body> and on the homepage hero, and
+     the hero relies on it staying invalid so it inherits Satoshi from
+     <main id="home">. */
+  --font-geist-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --radius: 0.625rem;
   --sidebar-expanded-width: 232px;
   --sidebar-collapsed-width: 72px;

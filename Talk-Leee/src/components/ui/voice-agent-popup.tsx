@@ -1257,13 +1257,14 @@ export function VoiceAgentPopup() {
             its width and radius follow the navbar only in the one-row form
             — the phone form is sized by CSS alone. Portaled into the
             homepage's <main id="home"> (document.body as the fallback for
-            any other host) — rendered inside the hero's z-10 container it
-            would be painted over by every sibling section below, and
-            <main> is where page.tsx scopes `--font-manrope`, so the bar
-            inherits the same Manrope the navbar uses; in document.body that
-            variable is undefined and the bar fell back to the system font.
-            Rendered by this same component instance, so swapping to and
-            from it can never touch the call. */}
+            any other host) purely for z-order: rendered inside the hero's
+            z-10 container it would be painted over by every sibling section
+            below. Its typeface no longer depends on the target — the root
+            layout (layout.tsx) puts `--font-manrope` on <body>, so
+            .askAiCallBar's `font-family: var(--font-manrope, inherit)`
+            resolves to Manrope under either parent. Rendered by this same
+            component instance, so swapping to and from it can never touch
+            the call. */}
         {typeof document !== "undefined" && (isActive || barSticky) &&
             createPortal(
                 <div
