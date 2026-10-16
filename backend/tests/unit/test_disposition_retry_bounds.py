@@ -106,8 +106,11 @@ class _FakeConn:
                 self.calls_row["outcome"] = args[1]
             return
         if "UPDATE leads" in q:
-            lead_id, lead_status, last_call_result, call_attempts = args
+            # (lead_id, status, last_call_result, attempts, tenant_id, keep_dnc)
+            lead_id, lead_status, last_call_result, call_attempts, *scope = args
             if self.leads_row["id"] == lead_id:
+                if scope and scope[1] and self.leads_row.get("status") == "dnc":
+                    lead_status = "dnc"
                 self.leads_row["status"] = lead_status
                 self.leads_row["last_call_result"] = last_call_result
                 self.leads_row["call_attempts"] = call_attempts
@@ -155,7 +158,9 @@ class _FakeConn:
         if "SELECT call_attempts FROM leads" in q:
             return self.leads_row.get("call_attempts", 0)
         if q.startswith("UPDATE dialer_jobs") and "RETURNING id" in q:
-            job_id, status_val, outcome_val, reason, allowed_statuses = args
+            # (job_id, status, outcome, reason, in_flight, tenant_id,
+            #  pre_flight_statuses, call_dialer_attempt_number)
+            job_id, status_val, outcome_val, reason, allowed_statuses, *_scope = args
             row = self.dialer_jobs_row
             if (
                 row["id"] != job_id
@@ -165,8 +170,10 @@ class _FakeConn:
             row["status"] = status_val
             row["last_outcome"] = outcome_val
             row["failure_reason"] = reason
-            if "attempt_number" in q:
+            if "attempt_number = GREATEST" in q:
                 # Mirrors: attempt_number = GREATEST(COALESCE(x, 1), 1) + 1
+                # (matched on the SET expression: the shared WHERE guard also
+                # mentions attempt_number, for the pre-flight attempt check.)
                 row["attempt_number"] = max(row.get("attempt_number") or 1, 1) + 1
             if "completed_at" in q:
                 row["completed_at"] = "NOW"

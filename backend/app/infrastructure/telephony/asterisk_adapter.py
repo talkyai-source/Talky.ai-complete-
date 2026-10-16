@@ -203,24 +203,38 @@ class _AsteriskTransferLeg:
 
 
 # Q.850 cause code → a snake-case string the outcome resolver recognises
-# (see outcome_resolver._BUSY_CAUSES / _NO_ANSWER_CAUSES / _REJECT_CAUSES).
-# Only the codes that change a dial outcome are mapped; everything else falls
-# through to the resolver's session-state heuristic.
+# (see outcome_resolver._CAUSE_TEXT_Q850 / _Q850_OUTCOME, which resolve this
+# text, Asterisk's own cause_txt wording and the bare number to the SAME
+# outcome). Only the codes that change a dial outcome are mapped; everything
+# else falls through to the resolver's session-state heuristic.
+#   17 busy; 18/19/20 no answer; 21 rejected;
+#   1/22/28 number not routable → INVALID (terminal, not do-not-call);
+#   3/27/34/38/41/42/44/127 network / infrastructure fault → FAILED.
+# The existing strings are kept verbatim: inbound_metrics maps them for
+# transfer-target reasons.
 _Q850_CAUSE_TEXT: Dict[int, str] = {
-    1: "unallocated_number",  # not active / invalid → INVALID/UNREACHABLE
+    1: "unallocated_number",  # not active / invalid → INVALID
+    3: "no_route_to_destination",  # routing failed → FAILED
     17: "user_busy",  # busy
     18: "no_user_response",  # no answer
     19: "no_answer",  # no answer (user alerted, no pickup)
     20: "no_answer",  # subscriber absent / phone off
     21: "call_rejected",  # declined
-    22: "unallocated_number",  # number changed
-    27: "destination_out_of_order",  # destination unreachable
-    28: "unallocated_number",  # invalid number format
-    34: "switch_congestion",  # no circuit available
-    38: "switch_congestion",  # network out of order
-    42: "switch_congestion",  # switching equipment congestion
-    44: "switch_congestion",  # requested channel unavailable
+    22: "unallocated_number",  # number changed → INVALID
+    27: "destination_out_of_order",  # destination unreachable → FAILED
+    28: "unallocated_number",  # invalid number format → INVALID
+    34: "switch_congestion",  # no circuit available → FAILED
+    38: "switch_congestion",  # network out of order → FAILED
+    41: "temporary_failure",  # temporary failure → FAILED
+    42: "switch_congestion",  # switching equipment congestion → FAILED
+    44: "switch_congestion",  # requested channel unavailable → FAILED
+    127: "interworking_unspecified",  # interworking, unspecified → FAILED
 }
+
+# How long a captured hangup cause stays readable after its first read.
+# ``get_hangup_cause`` no longer consumes the entry, because terminal
+# settlement can be retried and each retry re-resolves the outcome.
+_HANGUP_CAUSE_RETENTION_S = 3600.0
 
 # Only responses that prove the Answer operation could not have been applied
 # may turn a durable answer intent back into a pre-answer release.  Throttling,
@@ -612,13 +626,36 @@ class AsteriskAdapter(CallControlAdapter):
         await self._on_outbound_stasis_start(channel_id)
 
     def get_hangup_cause(self, channel_id: str) -> Optional[str]:
-        """Return (and consume) the captured Q.850 hangup cause for a channel.
+        """Return the captured Q.850 hangup cause for a channel (non-destructive).
 
         The lifecycle's call-ended hook calls this so the outcome resolver can
         classify no-answer / busy / rejected from the real PBX cause instead of
-        defaulting to an agent-side hangup. Popped so the map stays bounded.
+        defaulting to an agent-side hangup.
+
+        The read does NOT consume the entry: terminal settlement can be retried
+        (durable outbox / orphan recovery) and every retry re-resolves the
+        outcome, so a popped cause turned a busy / rejected call into
+        NO_ANSWER (+24 h redial) on the second pass. Memory stays bounded two
+        ways: an entry expires ``_HANGUP_CAUSE_RETENTION_S`` after its first
+        read (expired entries are swept on every read), and entries nobody ever
+        reads are still capped by the writer's 2000-entry eviction.
         """
-        return self._hangup_causes.pop(channel_id, None)
+        now = time.monotonic()
+        # Lazily created: the bookkeeping lives beside ``_hangup_causes``
+        # without touching the constructor.
+        first_read = self.__dict__.setdefault("_hangup_cause_first_read", {})
+        for stale in [
+            cid
+            for cid, read_at in first_read.items()
+            if cid not in self._hangup_causes
+            or now - read_at > _HANGUP_CAUSE_RETENTION_S
+        ]:
+            first_read.pop(stale, None)
+            self._hangup_causes.pop(stale, None)
+        cause = self._hangup_causes.get(channel_id)
+        if cause is not None:
+            first_read.setdefault(channel_id, now)
+        return cause
 
     async def _emit_outbound_channel_alias(
         self,
@@ -2754,10 +2791,11 @@ class AsteriskAdapter(CallControlAdapter):
                         else None
                     )
             if _cause_txt and channel_id not in self._hangup_causes:
-                # Bound memory: get_hangup_cause() pops entries it consumes, but a
-                # call that ends pre-answer with no voice session is never
-                # consumed, so cap the map and evict the oldest half (dicts keep
-                # insertion order) to prevent unbounded growth over a long run.
+                # Bound memory: get_hangup_cause() reads non-destructively (a
+                # settlement retry must still see the cause) and expires entries
+                # an hour after their first read; a cause nobody reads is only
+                # bounded here, so cap the map and evict the oldest half (dicts
+                # keep insertion order) to prevent unbounded growth.
                 if len(self._hangup_causes) >= 2000:
                     for _old in list(self._hangup_causes)[:1000]:
                         self._hangup_causes.pop(_old, None)

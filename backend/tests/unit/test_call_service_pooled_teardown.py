@@ -99,8 +99,13 @@ class _FakeConn:
             return
 
         if "UPDATE leads" in q:
-            lead_id, lead_status, last_call_result, call_attempts = args
+            # Settlement shape: (lead_id, status, last_call_result, attempts,
+            # tenant_id, keep_dnc). ``keep_dnc`` mirrors the SQL CASE that never
+            # downgrades an existing 'dnc' on a non-retryable call outcome.
+            lead_id, lead_status, last_call_result, call_attempts, *scope = args
             if self.leads_row and self.leads_row["id"] == lead_id:
+                if scope and scope[1] and self.leads_row.get("status") == "dnc":
+                    lead_status = "dnc"
                 self.leads_row["status"] = lead_status
                 self.leads_row["last_call_result"] = last_call_result
                 self.leads_row["call_attempts"] = call_attempts
@@ -164,6 +169,13 @@ class _FakeConn:
         if "FROM dnc_entries" in q:
             return False
 
+        if "last_call_result = 'caller_opt_out'" in q and "FROM leads" in q:
+            # Non-E.164 destination: the lead projection is the only opt-out record.
+            row = self.leads_row
+            if row and row["id"] == args[0]:
+                return row.get("status") == "dnc" and row.get("last_call_result") == "caller_opt_out"
+            return None
+
         if "SELECT id FROM leads" in q:
             return self.leads_row["id"] if self.leads_row and self.leads_row["id"] == args[0] else None
 
@@ -174,12 +186,25 @@ class _FakeConn:
             return None
 
         if q.startswith("UPDATE dialer_jobs") and "RETURNING id" in q:
-            job_id, status_val, outcome_val, reason, allowed_statuses = args
+            # (job_id, status, outcome, reason, in_flight, tenant_id,
+            #  pre_flight_statuses, call_dialer_attempt_number)
+            job_id, status_val, outcome_val, reason, allowed_statuses, *scope = args
             row = self.dialer_jobs_row
+            allowed = set(allowed_statuses)
+            if row and scope:
+                _tenant, pre_flight, call_attempt = scope
+                job_attempt = row.get("attempt_number")
+                if (
+                    row.get("status") in set(pre_flight)
+                    and call_attempt is not None
+                    and job_attempt is not None
+                    and int(call_attempt) == int(job_attempt)
+                ):
+                    allowed |= set(pre_flight)
             if (
                 row
                 and row["id"] == job_id
-                and row.get("status") in set(allowed_statuses)
+                and row.get("status") in allowed
             ):
                 row["status"] = status_val
                 row["last_outcome"] = outcome_val

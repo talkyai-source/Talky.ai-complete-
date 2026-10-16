@@ -258,7 +258,7 @@ async def test_overdue_schedule_is_flagged_once_and_finalizer_still_releases_own
         service = CallService.__new__(CallService)
         service._queue_service = queue
         async with acquire_with_tenant(db.pool, str(db.tenant)) as conn:
-            terminal, retry = await service._handle_job_completion_pooled(conn, db.job_id, CallOutcome.GOAL_ACHIEVED, db.campaign, db.lead)
+            terminal, retry = await service._handle_job_completion_pooled(conn, db.job_id, CallOutcome.GOAL_ACHIEVED, db.campaign, db.lead, scope_tenant_id=db.tenant)
         assert terminal is True and retry is None
         assert await db.admin.fetchval("SELECT status FROM dialer_jobs WHERE id=$1", db.job_id) == "goal_achieved"
     finally:

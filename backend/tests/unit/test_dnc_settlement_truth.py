@@ -115,9 +115,13 @@ async def test_removed_suppression_keeps_existing_failed_call_retry_policy():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("conn", [SuppressionConn(suppression=RuntimeError("synthetic storage outage")),
-                                  SuppressionConn(phone="not a number")])
+@pytest.mark.parametrize("conn", [SuppressionConn(suppression=RuntimeError("synthetic storage outage"))])
 async def test_unavailable_suppression_proof_cannot_book_retry(conn):
+    # A storage failure while reading suppression still aborts settlement (we
+    # cannot prove the number is not opted out). A destination that is not
+    # strict E.164 (``phone="not a number"``, PBX extensions) is NOT this case
+    # any more: no suppression row can exist for it, so settlement proceeds --
+    # see tests/unit/test_call_settlement_w2.py.
     service = _service(conn)
     service._effective_attempt_number = AsyncMock(return_value=1)
     result = await service.handle_call_status("call-1", CallOutcome.FAILED, 42)
@@ -141,21 +145,45 @@ async def test_non_dialable_inbound_and_browser_records_can_settle_without_dnc_c
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("direction,is_test", [("inbound", False), ("outbound", True), ("outbound", False)])
-async def test_non_dialable_record_with_dialer_owner_still_fails_closed(direction, is_test):
+async def test_inbound_record_with_dialer_owner_and_non_dialable_number_still_fails_closed():
+    # An INBOUND row that owns dialer retry work but carries a non-dialable
+    # number is corrupt data; settlement still refuses it.
     conn = SuppressionConn(phone="anonymous")
-    conn.calls_row.update(direction=direction, is_test=is_test)
+    conn.calls_row.update(direction="inbound", is_test=False)
     result = await _service(conn).handle_call_status("call-1", CallOutcome.FAILED, 42)
     assert not result.durable
     assert conn.calls_row["terminal_retry_payload"] is None
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("is_test", [True, False])
+async def test_outbound_non_dialable_destination_settles_without_dnc_claim(is_test, caplog):
+    # W2 item 6: an OUTBOUND destination that is not strict E.164 (a PBX
+    # extension such as 940005, or "anonymous") can never have a suppression
+    # row. It used to abort settlement on every retry, leaving the job
+    # 'processing' and the lead 'calling' forever; it now settles and says why.
+    conn = SuppressionConn(phone="anonymous")
+    conn.calls_row.update(direction="outbound", is_test=is_test)
+    # This lead never opted out (the fixture's default lead row is an
+    # opted-out projection, which a non-E.164 destination now honours).
+    conn.leads_row.update(status="calling", last_call_result=None)
+    service = _service(conn)
+    service._effective_attempt_number = AsyncMock(return_value=1)
+    with caplog.at_level("WARNING"):
+        result = await service.handle_call_status("call-1", CallOutcome.FAILED, 42)
+    assert result.durable, result.error
+    assert conn.calls_row["terminal_settled_at"] == "NOW"
+    assert not any("FROM dnc_entries" in query for query, _ in conn.executed)
+    assert any("not strict E.164" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("is_test,payload", [(False, None), (True, {"pending": "retry"})])
-async def test_absent_job_alone_does_not_authorize_invalid_phone(is_test, payload):
+async def test_absent_job_with_non_dialable_outbound_destination_still_settles(is_test, payload):
     conn = SuppressionConn(phone="anonymous")
     conn.calls_row.update(direction="outbound", is_test=is_test, lead_id=None,
                          dialer_job_id=None, terminal_retry_payload=payload)
     result = await _service(conn).handle_call_status("call-1", CallOutcome.FAILED, 42)
-    assert not result.durable
-    assert conn.calls_row["terminal_retry_payload"] == payload
+    assert result.durable, result.error
+    assert conn.calls_row["terminal_settled_at"] == "NOW"
+    assert not any("FROM dnc_entries" in query for query, _ in conn.executed)

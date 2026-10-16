@@ -31,18 +31,31 @@ next-day-only 2026-07-07):
     Busy          5m → 15m → 45m              4
     No-answer     24h → 24h                   3
     Voicemail     24h (once)                  2
-    Unavailable   no retry — DNC              1
-    Rejected      no retry — DNC              1
+    Unavailable   no retry (operator-marked)  1
+    Rejected      no retry, NOT do-not-call   1
+    Invalid       no retry, NOT do-not-call   1
     Failed        30s → 2m                    3
     Timeout       30s → 2m                    3
     Answered      done — never redial         —
     Goal achieved done — never redial         —
 
-This module also owns ``DNC_OUTCOMES`` — the outcomes that put the lead
-on do-not-call. ``call_service`` imports that set instead of keeping its
-own copy, because the two lists MUST NOT disagree (see the compliance
-note below), and ``_assert_disjoint()`` re-checks the invariant on every
-import so a future edit cannot reintroduce the contradiction silently.
+This module also owns ``DNC_OUTCOMES`` — the terminal "could not reach"
+outcomes (the name is historical). ``call_service`` imports that set
+instead of keeping its own copy, because the two lists MUST NOT disagree
+(see the compliance note below), and ``_assert_disjoint()`` re-checks the
+invariant on every import so a future edit cannot reintroduce the
+contradiction silently.
+
+Membership means "never retried automatically and counted in
+``calls_failed``". It does NOT mean the lead is written ``dnc``
+(2026-10-16): a call outcome never sets ``leads.status = 'dnc'``. REJECTED
+is the case that mattered — a carrier refusing OUR line (SIP 403 on INVITE)
+arrives as Q.850 cause 21 exactly like a callee declining, and a decline is
+not a do-not-call request; marking the lead ``dnc`` made manual redial and
+campaign restart refuse a perfectly callable contact. Those leads become
+``failed`` (restart resets them, redial accepts them). ``dnc`` is written
+only by the explicit suppression paths: the caller opt-out check at
+settlement, the opt-out purge and the operator ``mark_as_spam``.
 
 CAP is the maximum *total* dial attempts for the lead (initial + all
 retries). The schedule for a retryable outcome therefore has
@@ -127,10 +140,14 @@ _SUCCESS_OUTCOMES: frozenset[CallOutcome] = frozenset(
 )
 
 # Outcomes that are terminal failures — record the result, never retry.
-# REJECTED: they actively declined. GOAL_NOT_ACHIEVED: a real
+# REJECTED: the callee declined OR the carrier refused the call (both
+# arrive as Q.850 21) — never auto-redialled, and never do-not-call (see
+# the module docstring). GOAL_NOT_ACHIEVED: a real
 # conversation that didn't convert — redialing is a human decision, not
 # an automatic one. SPAM/INVALID/DISCONNECTED: dead input — the number is
-# not active, so redialing it is pointless.
+# not active, so redialing it is pointless. INVALID is also what the
+# telephony resolver emits for Q.850 1/22/28 (unallocated / changed /
+# malformed number): terminal and not retried, but not do-not-call either.
 #
 # UNAVAILABLE (compliance fix 2026-07-28): this used to sit in the retry
 # schedule at [24h, 24h] / cap 3 while ``call_service`` simultaneously
@@ -138,8 +155,8 @@ _SUCCESS_OUTCOMES: frozenset[CallOutcome] = frozenset(
 # at once: we flagged the lead do-not-call and then dialled it twice
 # more — a TCPA/Ofcom breach. Nothing in the telephony path ever emits
 # it (``telephony/outcome_resolver.py`` and ``call_status.py`` map every
-# Q.850 / SIP cause to BUSY / NO_ANSWER / REJECTED / FAILED, never to
-# UNAVAILABLE); its ONLY producer is the operator-driven
+# Q.850 / SIP cause to BUSY / NO_ANSWER / REJECTED / INVALID / FAILED, never
+# to UNAVAILABLE); its ONLY producer is the operator-driven
 # ``CallService.mark_as_spam(reason="unavailable")`` suppression
 # endpoint. A human saying "stop calling this number" is unambiguously
 # DNC, so UNAVAILABLE is terminal here and the two tables now agree.
@@ -157,8 +174,10 @@ _TERMINAL_NO_RETRY: frozenset[CallOutcome] = frozenset(
 # ── Public, cross-module contract ────────────────────────────────────
 #
 # RETRYABLE_OUTCOMES: outcomes this module will ever schedule again.
-# DNC_OUTCOMES:       outcomes that mark the LEAD do-not-call and count
-#                     as "could not reach" (calls_failed).
+# DNC_OUTCOMES:       terminal, never-retried outcomes that count as "could
+#                     not reach" (calls_failed). Historical name: a call
+#                     outcome NEVER writes leads.status='dnc' — those leads
+#                     become 'failed'. Only explicit suppression paths do.
 #
 # ``call_service.NON_RETRYABLE_OUTCOMES`` is built from DNC_OUTCOMES —
 # it does not maintain a second list. GOAL_NOT_ACHIEVED is terminal but
