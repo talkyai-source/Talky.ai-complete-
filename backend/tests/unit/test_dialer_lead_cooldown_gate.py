@@ -56,6 +56,7 @@ def _cooldown_worker() -> DialerWorker:
     worker._db_pool = None
     worker._load_existing_call_intent = AsyncMock(return_value=None)
     worker._get_campaign_status = AsyncMock(return_value="running")
+    worker._stale_payload_reason = AsyncMock(return_value=None)
     worker._tenant_minutes_exhausted = AsyncMock(return_value=False)
     worker._get_tenant_rules = AsyncMock(
         return_value=CallingRules(min_hours_between_calls=2)

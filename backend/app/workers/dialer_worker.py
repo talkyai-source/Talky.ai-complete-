@@ -138,7 +138,9 @@ _GUARD_PERMANENT_ACCOUNT_REASONS = frozenset(
 )
 # An infrastructure error inside a fail-closed check (CallGuard blocks rather
 # than allow). The query failed; nothing is known about the number itself.
-_GUARD_INFRA_REASON_PREFIXES = ("check_error_blocked", "dnc_check_unavailable")
+_GUARD_INFRA_REASON_PREFIXES = (
+    "check_error_blocked", "dnc_check_unavailable", "configuration_load_error",
+)
 # Seconds to hold a deferred job. Every guard evaluation INCRs the rate-limit
 # counter and writes a call_guard_decisions row, so a platform pause must never
 # be polled on a short loop.
@@ -439,9 +441,13 @@ class DialerWorker:
                     if not provider_absent:
                         await self._park_uncertain_origination(job, call_intent)
                         return
-                await self._publish_block(job, reason)
-                await self.queue_service.mark_skipped(job.job_id, reason="campaign_stopped")
-                await self._update_job_status(job, JobStatus.SKIPPED, error=reason)
+                await self._end_or_hold_non_runnable_campaign_job(
+                    job, campaign_status, block_reason=reason, error=reason,
+                    # A paused hold keeps the SAME attempt; an attempt whose
+                    # intent row was just terminalised would replay into the
+                    # settled-failed path and burn the lead while paused.
+                    allow_hold=call_intent is None,
+                )
                 return
 
             # A transport-ambiguous attempt is re-deferred with the SAME
@@ -452,6 +458,19 @@ class DialerWorker:
             # count rate-limit side effects.
             if call_intent is not None:
                 await self._resume_existing_call_intent(job, call_intent)
+                return
+
+            # 0.4 Stale-payload gate. A Redis payload is only a delivery of work
+            # that Postgres still wants done: a lead removed from the campaign,
+            # a job the stop/remove paths cancelled, or a contact flagged
+            # do-not-call after it was queued all leave their payload behind.
+            # Checked BEFORE every deferring gate below so a removed contact is
+            # never re-deferred (a redefer writes the lead back to 'pending').
+            # An unreadable state raises ComplianceLookupUnavailable (-> defer,
+            # never dial).
+            stale_reason = await self._stale_payload_reason(job)
+            if stale_reason is not None:
+                await self._drop_stale_payload(job, stale_reason)
                 return
 
             # 0.5 Minutes quota gate. Stop originating once the tenant has burned
@@ -472,8 +491,10 @@ class DialerWorker:
                 )
                 await self._publish_block(job, "out_of_minutes")
                 await self._emit_out_of_minutes_event(job)
-                await self.queue_service.mark_skipped(job.job_id, reason="out_of_minutes")
-                await self._update_job_status(job, JobStatus.SKIPPED, error="out_of_minutes")
+                # Keep the DB job ACTIVE (retry_scheduled) while the payload
+                # waits: a SKIPPED write here made the stale-payload gate drop
+                # the lead for good, so a top-up never resumed it.
+                await self._redefer_before_intent_resolution(job, reason="out_of_minutes")
                 return
 
             # 1. Calling rules: tenant defaults overlaid with the campaign's
@@ -513,21 +534,15 @@ class DialerWorker:
                 phone_number=job.phone_number,
             )
 
-            # 3. Check scheduling rules. Gate concurrency on the telephony
-            # bridge's authoritative live-call count (global_concurrency Redis
-            # ledger), NOT the dialer's in-memory counter — the latter had no
-            # decrement signal, so it leaked monotonically to the cap and
-            # wedged every outbound call (the 10/10 outage). A None count
-            # (Redis unavailable) falls through to the in-memory fallback.
-            active_override = None
-            try:
-                from app.domain.services.global_concurrency import current_count
-
-                if self._redis is not None:
-                    active_override = await current_count(self._redis)
-            except Exception as exc:
-                logger.debug("dialer_active_count_failed err=%s", exc)
-                active_override = None
+            # 3. Check scheduling rules. Gate concurrency on THIS TENANT's live
+            # calls read from Postgres, NOT the dialer's in-memory counter (it
+            # had no decrement signal, so it leaked monotonically to the cap and
+            # wedged every outbound call: the 10/10 outage) and NOT the bridge's
+            # platform-wide global_concurrency set (one SCARD over every
+            # tenant's calls: ten live calls on one tenant read as "10/10" for
+            # all of them). A None count (DB unavailable) falls through to the
+            # in-memory fallback.
+            active_override = await self._tenant_live_call_count(job.tenant_id)
 
             # Daily per-lead cap: only pay the COUNT query when the tenant
             # actually enabled the ceiling (default off → zero overhead).
@@ -719,10 +734,10 @@ class DialerWorker:
                 )
                 return
 
-            # 4. Concurrency is now tracked authoritatively by the telephony
-            # bridge's global_concurrency ledger (acquired on answer, released
-            # on hangup, self-healed by the watchdog reconcile) and read above
-            # via active_calls_override. The dialer no longer feeds its own
+            # 4. Concurrency: active_calls_override (read above) is THIS
+            # tenant's own answered/in_call count from _tenant_live_call_count.
+            # (The bridge's global_concurrency ledger is platform-wide and is
+            # enforced as the global cap elsewhere.) The dialer no longer feeds its own
             # in-memory counter: it had no decrement signal, so it leaked to
             # the cap and wedged all calls. (register_call_start/end remain on
             # the rules engine for unit tests.)
@@ -751,11 +766,10 @@ class DialerWorker:
                     campaign_status or "missing",
                     job.job_id,
                 )
-                await self._publish_block(job, "campaign_stopped_before_originate")
-                await self.queue_service.mark_skipped(job.job_id, reason="campaign_stopped")
-                await self._update_job_status(
+                await self._end_or_hold_non_runnable_campaign_job(
                     job,
-                    JobStatus.SKIPPED,
+                    campaign_status,
+                    block_reason="campaign_stopped_before_originate",
                     error="campaign_stopped_before_originate",
                 )
                 return
@@ -998,6 +1012,14 @@ class DialerWorker:
                     if not await self._held_intent_has_headroom(
                         job, call_intent, defer_delay
                     ):
+                        if defer_reason == self._LINE_REFUSAL_CODE:
+                            # A refused line is not a failure of the lead: do
+                            # not classify it (that burns attempts and finally
+                            # fails the lead). Release the never-sent intent and
+                            # wait for the line on the SAME attempt.
+                            await release_tenant_dial_slot(self._redis, job.tenant_id)
+                            await self._defer_refused_line(job, call_intent, rules)
+                            return
                         # Too old to keep holding: the classifier (which saw the
                         # stashed bridge status/code) decides, capped.
                         raise HeldIntentExpired(
@@ -1009,11 +1031,12 @@ class DialerWorker:
                         job.job_id, job.attempt_number, defer_reason, defer_delay,
                     )
                     await release_tenant_dial_slot(self._redis, job.tenant_id)
+                    block_reason, job_reason = self._bridge_defer_labels(defer_reason)
                     await self._publish_block(
-                        job, defer_reason, rules=rules, retry_after_seconds=defer_delay,
+                        job, block_reason, rules=rules, retry_after_seconds=defer_delay,
                     )
                     await self._redefer_before_intent_resolution(
-                        job, reason=defer_reason, delay_seconds=defer_delay,
+                        job, reason=job_reason, delay_seconds=defer_delay,
                     )
                     return
 
@@ -1102,16 +1125,27 @@ class DialerWorker:
                             state_exc,
                         )
 
-                    # 7. Update lead status to 'calling'
-                    await self._update_lead_status(job, "calling")
-
-                    # 8. Update job with the internal DB call UUID
                     job.call_id = internal_call_id
-                    job.status = JobStatus.PROCESSING
-                    job.processed_at = datetime.now(timezone.utc)
-                    await self._update_job_status(
-                        job, JobStatus.PROCESSING, call_id=internal_call_id
-                    )
+                    if await self._attempt_call_settled(job, call_intent):
+                        # A pre-answer failure settled this attempt between the
+                        # bridge's reply and these writes. Its finalizer owns
+                        # the job/lead disposition; writing 'calling' /
+                        # PROCESSING now would strand both on a dead call.
+                        logger.warning(
+                            "dialer_attempt_settled_before_processing job=%s "
+                            "attempt=%s call=%s — skipping calling/processing writes",
+                            job.job_id, job.attempt_number, internal_call_id,
+                        )
+                    else:
+                        # 7. Update lead status to 'calling'
+                        await self._update_lead_status(job, "calling")
+
+                        # 8. Update job with the internal DB call UUID
+                        job.status = JobStatus.PROCESSING
+                        job.processed_at = datetime.now(timezone.utc)
+                        await self._update_job_status(
+                            job, JobStatus.PROCESSING, call_id=internal_call_id
+                        )
 
                     # 9. Voice worker notification DISABLED — telephony bridge
                     #    handles the full call lifecycle via ARI callbacks
@@ -1385,6 +1419,27 @@ class DialerWorker:
     # deliberately absent: it covers DNC / compliance blocks and is never retried.
     _BRIDGE_DEFER_CODES = {"call_throttled": 60, "tenant_pbx_required": 120}
     _BRIDGE_DEFER_MAX_SECONDS = 900
+    # The bridge refused the tenant's phone line (422: no ready line, line not
+    # registered, caller ID unverified). Held like the other tenant-fixable
+    # codes, but an EXPIRED hold never goes through the attempt-consuming
+    # classifier -- that burned every lead of the campaign in ~30 minutes. The
+    # intent is released and the SAME attempt re-deferred this long, for as long
+    # as the line stays refused (only campaign status ends it).
+    _LINE_REFUSAL_CODE = "tenant_pbx_required"
+    _LINE_REFUSED_REDEFER_SECONDS = 300
+    # 503 codes that mean the calling service is not connected to the phone
+    # system (adapter down, pod draining / full, telephony off on this node).
+    # They are held exactly like a voice-pipeline 503 but are NOT a TTS/STT
+    # problem, so they must not be labelled "voice provider not ready".
+    _TELEPHONY_UNAVAILABLE_CODES = frozenset(
+        {
+            "telephony_not_active_on_node",
+            "telephony_disabled_on_node",
+            "pod_draining",
+            "pod_at_capacity",
+            "telephony_adapter_unavailable",
+        }
+    )
 
     # The HTTP result is unknown after a transport timeout/disconnect, or the
     # bridge explicitly reports proof-aware cleanup in progress. Retrying as a
@@ -1465,6 +1520,31 @@ class DialerWorker:
             logger.debug("block_reason classify failed raw=%s err=%s", raw_reason, exc)
             return
         await self._publish_reason(job, reason)
+
+    def _bridge_defer_labels(self, defer_reason: str) -> tuple[str, str]:
+        """``(block reason to publish, dialer_jobs reason)`` for a same-attempt
+        bridge hold. A refused line publishes the dedicated ``line_not_ready``
+        reason carrying the bridge's own cause (read from the stashed 422 body);
+        the job row keeps the bare token so the Call Issues panel's substring
+        advice cannot mistake the cause for a caller-ID page that does not
+        exist."""
+        if defer_reason != self._LINE_REFUSAL_CODE:
+            return defer_reason, defer_reason
+        from app.workers.retry_policy import parse_bridge_reason
+
+        cause = parse_bridge_reason(self._last_bridge_body)
+        return (f"line_not_ready:{cause}" if cause else "line_not_ready"), "line_not_ready"
+
+    def _pipeline_hold_reason(self) -> str:
+        """Why a 503 hold is happening, from the bridge code stashed by
+        ``_make_call``: the phone system is unreachable, or (default) the voice
+        pipeline was not ready."""
+        from app.workers.retry_policy import parse_bridge_error
+
+        code, _ = parse_bridge_error(self._last_bridge_body)
+        if code in self._TELEPHONY_UNAVAILABLE_CODES:
+            return "telephony_unavailable"
+        return "voice_pipeline_unavailable"
 
     async def _make_call(
         self,
@@ -1572,7 +1652,8 @@ class DialerWorker:
                         self._last_bridge_http_status = resp.status
                         self._last_bridge_body = body
                         logger.warning(
-                            "Voice pipeline unavailable (503) — holding the same "
+                            "Bridge unavailable (503: voice pipeline or phone system) "
+                            "— holding the same "
                             "attempt (no attempt budget consumed). dest=%s body=%s",
                             job.phone_number,
                             body[:300],
@@ -1889,6 +1970,127 @@ class DialerWorker:
                 f"campaign status unavailable for {campaign_id}"
             ) from exc
 
+    #: ``mark_skipped`` reason for a job whose campaign can never run it again.
+    #: Deliberately NOT in ``DialerQueueService.NON_TERMINAL_SKIP_REASONS``: those
+    #: reasons re-defer the payload, which made a DELETED campaign's job cycle
+    #: every 120 s forever.
+    _CAMPAIGN_NOT_RUNNABLE_SKIP = "campaign_not_runnable"
+
+    async def _end_or_hold_non_runnable_campaign_job(
+        self,
+        job: DialerJob,
+        campaign_status: Optional[str],
+        *,
+        block_reason: str,
+        error: str,
+        allow_hold: bool = True,
+    ) -> None:
+        """A dequeued job whose campaign is not running.
+
+        ``paused`` is temporary: the payload is re-deferred and the DB job stays
+        ACTIVE, so a resume finds the same job instead of minting a second one
+        for the lead (the old terminal SKIPPED write freed the lead's slot while
+        the payload survived, so both dialled). Every other status (deleted,
+        stopped, completed, cancelled, draft, archived, missing) is final: the
+        payload leaves Redis and the DB job is SKIPPED, which also releases the
+        lead's one-active-job slot so a restart re-queues it (``start_campaign``
+        enqueues leads that are still pending/calling).
+        """
+        if campaign_status == "paused" and allow_hold:
+            # A contact removed (or flagged dnc) while the campaign is paused
+            # must not be written back to 'pending' by the hold's projection.
+            stale_reason = await self._stale_payload_reason(job)
+            if stale_reason is not None:
+                await self._drop_stale_payload(job, stale_reason)
+                return
+            await self._publish_block(job, "campaign_paused")
+            await self._redefer_before_intent_resolution(
+                job, reason="campaign_paused",
+            )
+            return
+        await self._publish_block(job, block_reason)
+        await self.queue_service.mark_skipped(
+            job.job_id, reason=self._CAMPAIGN_NOT_RUNNABLE_SKIP
+        )
+        await self._update_job_status(job, JobStatus.SKIPPED, error=error)
+
+    async def _stale_payload_reason(self, job: DialerJob) -> Optional[str]:
+        """Why this dequeued payload must NOT be dialled, or ``None``.
+
+        ONE tenant-scoped query reads the DB job and the lead together. The
+        payload is only a delivery of work Postgres still wants:
+
+        * ``job_not_active`` -- the DB job is missing or outside
+          ``ACTIVE_STATUSES`` (cancelled by a stop / lead removal, already
+          settled, skipped ...);
+        * ``lead_not_dialable`` -- the lead is gone, soft-deleted / ``dnc``, or
+          flagged ``do_not_call`` after it was queued.
+
+        A failed read raises ``ComplianceLookupUnavailable`` (the caller
+        defers; an unreadable state is never a licence to dial).
+        """
+        from app.domain.services.dialer.job_states import ACTIVE_STATUSES
+
+        try:
+            async with self._acquire_db() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT j.status       AS job_status,
+                           l.id           AS lead_row_id,
+                           l.status       AS lead_status,
+                           l.do_not_call  AS lead_do_not_call
+                      FROM (SELECT 1) AS base
+                      LEFT JOIN dialer_jobs AS j
+                        ON j.id = $1::uuid AND j.tenant_id = $2::uuid
+                      LEFT JOIN leads AS l
+                        ON l.id = $3::uuid AND l.tenant_id = $2::uuid
+                    """,
+                    str(job.job_id),
+                    str(job.tenant_id),
+                    str(job.lead_id),
+                )
+        except Exception as exc:
+            logger.warning(
+                "dialer_payload_state_unavailable job=%s err=%s", job.job_id, exc
+            )
+            raise ComplianceLookupUnavailable("dialer job/lead state unavailable") from exc
+        if row is None:
+            # The query always yields one row; none means the read is unusable.
+            raise ComplianceLookupUnavailable("dialer job/lead state unavailable")
+        if str(row["job_status"] or "") not in ACTIVE_STATUSES:
+            return "job_not_active"
+        if (
+            row["lead_row_id"] is None
+            or str(row["lead_status"] or "") in ("deleted", "dnc")
+            or bool(row["lead_do_not_call"])
+        ):
+            return "lead_not_dialable"
+        return None
+
+    async def _drop_stale_payload(self, job: DialerJob, reason: str) -> None:
+        """Terminal-skip a payload Postgres no longer wants dialled.
+
+        The payload always leaves Redis (``reason`` is not in
+        ``NON_TERMINAL_SKIP_REASONS``). ``job_not_active`` leaves the DB alone:
+        the job is already ended and its history must not be rewritten.
+        ``lead_not_dialable`` ends the still-active job. The lead is never
+        touched: a removed contact must not be written back to 'pending', so a
+        failed job write is logged, not raised into the failure boundary.
+        """
+        logger.warning(
+            "dialer_stale_payload_dropped job=%s lead=%s campaign=%s reason=%s",
+            job.job_id, job.lead_id, job.campaign_id, reason,
+        )
+        await self.queue_service.mark_skipped(job.job_id, reason=reason)
+        if reason == "lead_not_dialable":
+            try:
+                await self._update_job_status(job, JobStatus.SKIPPED, error=reason)
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "dialer_stale_payload_job_write_failed job=%s reason=%s err=%s",
+                    job.job_id, reason, exc,
+                )
+
     async def _get_tenant_rules(self, tenant_id: str) -> CallingRules:
         """Get calling rules for a tenant.
 
@@ -2006,6 +2208,44 @@ class DialerWorker:
                 exc,
             )
             return 0
+
+    async def _tenant_live_call_count(self, tenant_id: str) -> Optional[int]:
+        """THIS tenant's connected calls, for the max-concurrent-calls gate.
+
+        Counts the tenant's ``answered`` / ``in_call`` rows (the same meaning as
+        the bridge's answer-to-hangup ledger) with an explicit ``tenant_id``
+        predicate (the production role bypasses RLS). The recency bound is the
+        stuck-call reaper's own connected-call ceiling: a row older than that is
+        already headed for ``termination_pending`` and must not hold a slot
+        forever. Browser test sessions hold no channel and are excluded.
+
+        ``None`` (query failed) lets the caller fall back to the in-memory
+        counter, exactly as the old Redis-unavailable path did.
+        """
+        try:
+            from app.domain.services.dialer.stuck_job_reaper import (
+                connected_call_stuck_timeout_seconds,
+            )
+
+            async with self._acquire_db() as conn:
+                val = await conn.fetchval(
+                    """
+                    SELECT count(*) FROM calls
+                     WHERE tenant_id = $1::uuid
+                       AND status IN ('answered', 'in_call')
+                       AND COALESCE(answered_at, created_at)
+                           > now() - make_interval(secs => $2::int)
+                       AND NOT is_test
+                    """,
+                    str(tenant_id),
+                    int(connected_call_stuck_timeout_seconds()),
+                )
+            return int(val or 0)
+        except Exception as exc:
+            logger.warning(
+                "dialer_tenant_live_count_failed tenant=%s err=%s", tenant_id, exc
+            )
+            return None
 
     def _resolve_call_gap(self, campaign_cfg: Optional[dict]) -> int:
         """Resolve the per-campaign inter-call gap in seconds — the minimum wait
@@ -2132,7 +2372,11 @@ class DialerWorker:
                     "SELECT COUNT(*) FROM calls "
                     "WHERE lead_id = $1 AND created_at >= date_trunc('day', now()) "
                     # Testing an agent must not burn a lead's daily attempt quota.
-                    "AND NOT is_test",
+                    "AND NOT is_test "
+                    # Nor may intents released while the line was refused:
+                    # those calls were never handed to a carrier.
+                    "AND NOT (provider_call_id IS NULL AND COALESCE(failure_reason, '') "
+                    "IN ('line_not_ready', 'telephony_unavailable'))",
                     lead_id,
                 )
                 return int(val or 0)
@@ -2450,6 +2694,10 @@ class DialerWorker:
         if provider_call_id == self._BRIDGE_TRANSIENT_REJECT:
             defer_reason, defer_delay = self._last_bridge_defer
             if not await self._held_intent_has_headroom(job, intent, defer_delay):
+                if defer_reason == self._LINE_REFUSAL_CODE:
+                    # See process_job: a refused line never burns the attempt.
+                    await self._defer_refused_line(job, intent, rules)
+                    return
                 raise HeldIntentExpired(
                     f"{defer_reason}: held attempt reached the stuck-call horizon"
                 )
@@ -2458,11 +2706,12 @@ class DialerWorker:
                 "hold=%ss (same attempt re-deferred)",
                 job.job_id, job.attempt_number, defer_reason, defer_delay,
             )
+            block_reason, job_reason = self._bridge_defer_labels(defer_reason)
             await self._publish_block(
-                job, defer_reason, rules=rules, retry_after_seconds=defer_delay,
+                job, block_reason, rules=rules, retry_after_seconds=defer_delay,
             )
             await self._redefer_before_intent_resolution(
-                job, reason=defer_reason, delay_seconds=defer_delay,
+                job, reason=job_reason, delay_seconds=defer_delay,
             )
             return
         if provider_call_id == self._PIPELINE_UNAVAILABLE:
@@ -2509,15 +2758,22 @@ class DialerWorker:
                 exc,
             )
 
-        await self._update_lead_status(job, "calling")
         job.call_id = intent.call_id
-        job.status = JobStatus.PROCESSING
-        job.processed_at = datetime.now(timezone.utc)
-        await self._update_job_status(
-            job,
-            JobStatus.PROCESSING,
-            call_id=intent.call_id,
-        )
+        if await self._attempt_call_settled(job, intent):
+            logger.warning(
+                "dialer_attempt_settled_before_processing job=%s attempt=%s "
+                "call=%s — skipping calling/processing writes",
+                job.job_id, job.attempt_number, intent.call_id,
+            )
+        else:
+            await self._update_lead_status(job, "calling")
+            job.status = JobStatus.PROCESSING
+            job.processed_at = datetime.now(timezone.utc)
+            await self._update_job_status(
+                job,
+                JobStatus.PROCESSING,
+                call_id=intent.call_id,
+            )
         self._jobs_processed += 1
         await self._mark_campaign_dialed(job.campaign_id)
         try:
@@ -2692,23 +2948,102 @@ class DialerWorker:
         outlive the stuck-call reaper) so the generic failure boundary
         classifies the outage (consuming capped attempts) instead of looping.
         """
+        hold_reason = self._pipeline_hold_reason()
         spent = await self._pipeline_unavailable_defer_count(job)
-        if spent > self._pipeline_unavailable_max_defers():
-            raise RuntimeError(
-                f"voice pipeline unavailable after {spent - 1} same-attempt holds"
-            )
-        if not await self._held_intent_has_headroom(job, intent, 60):
+        over_budget = spent > self._pipeline_unavailable_max_defers()
+        if over_budget or not await self._held_intent_has_headroom(job, intent, 60):
+            if hold_reason == "telephony_unavailable" and intent is not None:
+                # The PHONE SYSTEM is down (adapter disconnected, telephony
+                # owner fenced, pod draining). Like a refused line this is not
+                # the lead's fault: never burn its attempts on an outage.
+                await self._defer_telephony_outage(job, intent, rules)
+                return
+            if over_budget:
+                raise RuntimeError(
+                    f"voice pipeline unavailable after {spent - 1} same-attempt holds"
+                )
             raise HeldIntentExpired(
                 "voice pipeline unavailable: held attempt reached the stuck-call horizon"
             )
         await self._publish_block(
             job,
-            "voice_pipeline_unavailable",
+            hold_reason,
             rules=rules,
             retry_after_seconds=60,
         )
         await self._redefer_before_intent_resolution(
-            job, reason="voice_pipeline_unavailable", delay_seconds=60,
+            job, reason=hold_reason, delay_seconds=60,
+        )
+
+    async def _defer_telephony_outage(
+        self,
+        job: DialerJob,
+        intent: DialerCallIntent,
+        rules: Optional[CallingRules],
+    ) -> None:
+        """A held telephony-outage 503 ran past its bound.
+
+        Same treatment as :meth:`_defer_refused_line`: release the never-sent
+        intent (``failure_reason='telephony_unavailable'``) and re-defer the
+        SAME attempt, so a platform outage longer than the hold window does not
+        fail every queued lead after four attempts.
+        """
+        if not await self._release_intent_line_not_ready(
+            job, intent, reason="telephony_unavailable",
+        ):
+            await self._park_uncertain_origination(job, intent)
+            return
+        logger.warning(
+            "dialer_telephony_outage_deferred job=%s attempt=%s redefer=%ss "
+            "(same attempt, nothing consumed)",
+            job.job_id, job.attempt_number, self._LINE_REFUSED_REDEFER_SECONDS,
+        )
+        await self._publish_block(
+            job, "telephony_unavailable", rules=rules,
+            retry_after_seconds=self._LINE_REFUSED_REDEFER_SECONDS,
+        )
+        await self._redefer_before_intent_resolution(
+            job, reason="telephony_unavailable",
+            delay_seconds=self._LINE_REFUSED_REDEFER_SECONDS,
+        )
+
+    async def _defer_refused_line(
+        self,
+        job: DialerJob,
+        intent: DialerCallIntent,
+        rules: Optional[CallingRules],
+    ) -> None:
+        """A held line refusal (422 ``tenant_pbx_required``) ran out of time.
+
+        The lead is not at fault and no call was sent, so nothing is classified
+        and no attempt is consumed (the old ``HeldIntentExpired`` route made
+        every lead of the campaign ``failed`` after four ~4-minute holds). The
+        never-sent intent is released as ``line_not_ready`` and the SAME attempt
+        is re-deferred ``_LINE_REFUSED_REDEFER_SECONDS`` out, so dialling
+        resumes by itself once the line is ready. That wait is the loop's only
+        pace; it ends when the campaign is stopped, paused or deleted.
+        """
+        if not await self._release_intent_line_not_ready(job, intent):
+            # Absence is no longer provable (a provider id appeared, or the row
+            # settled): never guess -- keep the attempt owned.
+            await self._park_uncertain_origination(job, intent)
+            return
+        block_reason, job_reason = self._bridge_defer_labels(self._LINE_REFUSAL_CODE)
+        logger.warning(
+            "dialer_line_not_ready_deferred job=%s attempt=%s redefer=%ss "
+            "(same attempt, nothing consumed)",
+            job.job_id, job.attempt_number, self._LINE_REFUSED_REDEFER_SECONDS,
+        )
+        await self._publish_block(
+            job,
+            block_reason,
+            rules=rules,
+            retry_after_seconds=self._LINE_REFUSED_REDEFER_SECONDS,
+        )
+        await self._redefer_before_intent_resolution(
+            job,
+            reason=job_reason,
+            delay_seconds=self._LINE_REFUSED_REDEFER_SECONDS,
         )
 
     async def _attempt_settled_failed_unanswered(self, job: DialerJob) -> bool:
@@ -2937,6 +3272,111 @@ class DialerWorker:
                 exc,
             )
             return False
+
+    async def _release_intent_line_not_ready(
+        self,
+        job: DialerJob,
+        intent: DialerCallIntent,
+        *,
+        reason: str = "line_not_ready",
+    ) -> bool:
+        """Release a never-sent intent the bridge refused for a not-ready line.
+
+        Same absence proof as :meth:`_mark_call_intent_not_originated` (no
+        provider identity, still ``queued``/``initiated``, tenant-scoped), but
+        the row is written ``cancelled`` -- it never was a call, so it must not
+        count as a failed one -- with ``failure_reason='line_not_ready'``, and:
+
+        * ``dialer_attempt_number = NULL`` frees the ``(job, attempt)`` unique
+          key, so the SAME attempt number gets a fresh intent when the
+          re-deferred payload is dequeued (otherwise the replay finds this
+          terminal row and the attempt is either dropped or burned);
+        * ``terminal_settled_at`` marks it settled, so the telephony
+          termination sweep (``terminal_settled_at IS NULL``) never runs the
+          job finalizer on a call that was never placed.
+        """
+        # Whitelisted literal (never caller text): which outage released it.
+        reason_literal = (
+            "telephony_unavailable" if reason == "telephony_unavailable" else "line_not_ready"
+        )
+        try:
+            async with self._acquire_db() as conn:
+                updated = await conn.execute(
+                    f"""
+                    UPDATE calls
+                       SET status = 'cancelled',
+                           failure_reason = COALESCE(failure_reason, '{reason_literal}'),
+                           ended_at = COALESCE(ended_at, NOW()),
+                           terminal_settled_at = COALESCE(terminal_settled_at, NOW()),
+                           dialer_attempt_number = NULL,
+                           updated_at = NOW()
+                     WHERE id = $1::uuid
+                       AND tenant_id = $2::uuid
+                       AND dialer_job_id = $3::uuid
+                       AND dialer_attempt_number = $4
+                       AND direction = 'outbound'
+                       AND provider_call_id IS NULL
+                       AND external_call_uuid IS NULL
+                       AND status IN ('queued', 'initiated')
+                    """,
+                    intent.call_id,
+                    str(job.tenant_id),
+                    str(job.job_id),
+                    int(job.attempt_number),
+                )
+                return updated == "UPDATE 1"
+        except Exception as exc:
+            logger.error(
+                "dialer_line_not_ready_release_failed call=%s err=%s",
+                intent.call_id,
+                exc,
+            )
+            return False
+
+    async def _attempt_call_settled(
+        self,
+        job: DialerJob,
+        intent: DialerCallIntent,
+    ) -> bool:
+        """True when THIS attempt's call is already terminal / settled.
+
+        A pre-answer failure can settle the call between the bridge's reply and
+        the worker's own 'calling' / PROCESSING writes; those writes must then
+        be skipped (the finalizer owns the disposition). Fail-open: when the
+        row cannot be read the previous behaviour (write) is kept, because the
+        writes need the same database.
+        """
+        try:
+            from app.domain.services.call_status import TERMINAL_CALL_STATUSES
+
+            async with self._acquire_db() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT status, terminal_settled_at
+                      FROM calls
+                     WHERE id = $1::uuid
+                       AND tenant_id = $2::uuid
+                       AND dialer_job_id = $3::uuid
+                       AND dialer_attempt_number = $4
+                       AND direction = 'outbound'
+                    """,
+                    intent.call_id,
+                    str(job.tenant_id),
+                    str(job.job_id),
+                    int(job.attempt_number),
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "dialer_attempt_settled_check_failed job=%s attempt=%s err=%s",
+                job.job_id, job.attempt_number, exc,
+            )
+            return False
+        if row is None:
+            return False
+        return (
+            str(row["status"] or "").strip().lower() in TERMINAL_CALL_STATUSES
+            or row["terminal_settled_at"] is not None
+        )
 
     async def _park_uncertain_origination(
         self,

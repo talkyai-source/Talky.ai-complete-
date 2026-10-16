@@ -157,6 +157,10 @@ _CODE_TO_CATEGORY: dict[str, FailureCategory] = {
     "pod_at_capacity": FailureCategory.TRANSIENT_NETWORK,
     "pod_draining": FailureCategory.TRANSIENT_NETWORK,
     "telephony_not_active_on_node": FailureCategory.TRANSIENT_NETWORK,
+    "telephony_disabled_on_node": FailureCategory.TRANSIENT_NETWORK,
+    # The bridge has no connected telephony adapter (the PBX/ARI link is down).
+    # A 503 like the codes above, instead of the old bare 400.
+    "telephony_adapter_unavailable": FailureCategory.TRANSIENT_NETWORK,
     # Tenant-fixable / self-clearing: a trunk that is re-registering, the
     # bridge guard's rate limiter. (dialer_worker re-defers the SAME attempt
     # for these two; this table is the backstop.)
@@ -345,6 +349,36 @@ def parse_bridge_error(body_text: str | None) -> tuple[Optional[str], Optional[s
             message = container.get("message")
             return raw_code, message if isinstance(message, str) else None
     return None, None
+
+
+def parse_bridge_reason(body_text: str | None) -> Optional[str]:
+    """The machine ``reason`` the bridge attached to a refusal, if any.
+
+    ``tenant_pbx_required`` (422) carries *why* the line was refused
+    (``selected_trunk_not_ready``, ``trunk_caller_id_not_verified``,
+    ``no_own_trunk`` ...). Looks in the canonical envelope's ``details``, the
+    flat body and FastAPI's ``detail``; only a snake_case token counts, so free
+    text is never mistaken for a reason.
+    """
+    if not body_text:
+        return None
+    try:
+        import json
+        parsed: Any = json.loads(body_text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    candidates = [parsed]
+    if isinstance(parsed.get("detail"), dict):
+        candidates.append(parsed["detail"])
+    if isinstance(parsed.get("error"), dict) and isinstance(parsed["error"].get("details"), dict):
+        candidates.append(parsed["error"]["details"])
+    for container in candidates:
+        value = container.get("reason")
+        if isinstance(value, str) and _CODE_SHAPE.match(value):
+            return value
+    return None
 
 
 def parse_bridge_retry_after(body_text: str | None) -> Optional[int]:

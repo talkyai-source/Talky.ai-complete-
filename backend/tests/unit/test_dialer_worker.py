@@ -27,9 +27,11 @@ async def test_process_job_skips_stopped_campaign_before_originate():
 
     await worker.process_job(job)
 
+    # Terminal skip: the reason must NOT be one of the NON_TERMINAL_SKIP_REASONS
+    # ('campaign_stopped' re-deferred the payload every 120 s forever).
     worker.queue_service.mark_skipped.assert_awaited_once_with(
         job.job_id,
-        reason="campaign_stopped",
+        reason="campaign_not_runnable",
     )
     worker._update_job_status.assert_awaited_once_with(
         job,

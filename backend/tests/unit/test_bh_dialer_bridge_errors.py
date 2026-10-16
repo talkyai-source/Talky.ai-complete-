@@ -230,6 +230,7 @@ def _base_worker() -> DialerWorker:
     w._redis = None
     w._db_pool = None
     w._get_campaign_status = AsyncMock(return_value="running")
+    w._stale_payload_reason = AsyncMock(return_value=None)
     w._load_existing_call_intent = AsyncMock(return_value=None)
     w._tenant_minutes_exhausted = AsyncMock(return_value=False)
     w._get_tenant_rules = AsyncMock(return_value=CallingRules.default())

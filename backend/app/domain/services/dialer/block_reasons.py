@@ -71,6 +71,13 @@ class BlockCode(str, Enum):
     VOICE_PIPELINE_UNAVAILABLE = "voice_pipeline_unavailable"
     CALLER_ID_NOT_VERIFIED = "caller_id_not_verified"
     ORIGINATE_FAILED = "originate_failed"
+    # The bridge refused the tenant's phone line (422 tenant_pbx_required): no
+    # ready line, the line is not registered, or its caller ID is unverified.
+    LINE_NOT_READY = "line_not_ready"
+    # The calling service itself is not connected to the phone system (adapter
+    # down, pod draining/at capacity, telephony off on this node). Not a
+    # voice-provider (TTS/STT) problem.
+    TELEPHONY_UNAVAILABLE = "telephony_unavailable"
 
     UNKNOWN = "unknown"
 
@@ -320,6 +327,79 @@ def _schedule_reason(
     )
 
 
+_LINE_NOT_READY_TAIL = " Calls resume automatically once it is fixed."
+
+# trunk_resolver refusal reasons and the bridge's 422 code for them.
+_RAW_LINE_REASON_TOKENS = (
+    "tenant_pbx_required",
+    "no_ready_trunk",
+    "no_own_trunk",
+    "trunk_not_ready",
+    "trunk_caller_id_not_verified",
+    "trunk_invalid",
+    "trunk_lookup_failed",
+    "trunk_not_authorized",
+)
+
+# Bridge 503 codes that mean the phone system (not the voice provider) is down.
+_TELEPHONY_DOWN_TOKENS = (
+    "telephony_unavailable",
+    "telephony_adapter_unavailable",
+    "telephony_not_active_on_node",
+    "telephony_disabled_on_node",
+    "pod_draining",
+    "pod_at_capacity",
+)
+
+
+def _line_not_ready_reason(
+    line_reason: str,
+    extra: dict[str, Any],
+    next_eligible_at: Optional[datetime],
+    retry_after_seconds: Optional[int],
+) -> BlockReason:
+    """Name WHY the bridge refused the tenant's line.
+
+    ``line_reason`` is the ``reason`` token of ``trunk_resolver`` (carried in
+    the 422 body); matching is by substring so every ``campaign_/pool_assigned_*``
+    variant is covered.
+    """
+    if "caller_id" in line_reason:
+        cause = (
+            "The caller ID for this phone line is not verified (or not set), so "
+            "the carrier would refuse the call. Ask support to verify the "
+            "number."
+        )
+    elif "not_ready" in line_reason:
+        cause = (
+            "The phone line chosen for this campaign is not registered with the "
+            "carrier right now, so no calls can go out on it."
+        )
+    elif line_reason in ("no_ready_trunk", "no_own_trunk"):
+        cause = (
+            "There is no ready phone line for this account: none is set up, "
+            "active and registered with the carrier."
+        )
+    elif "invalid" in line_reason or "lookup_failed" in line_reason:
+        cause = (
+            "The phone line assigned to this campaign is missing or could not "
+            "be checked."
+        )
+    else:
+        cause = (
+            "The phone line for this campaign is not ready: it is not "
+            "registered, or its caller ID is not verified."
+        )
+    return BlockReason(
+        BlockCode.LINE_NOT_READY,
+        cause + _LINE_NOT_READY_TAIL,
+        severity="error", stage="carrier",
+        next_eligible_at=next_eligible_at,
+        retry_after_seconds=retry_after_seconds,
+        details={**extra, "line_reason": line_reason or None},
+    )
+
+
 def classify(
     raw_reason: Optional[str],
     *,
@@ -348,6 +428,19 @@ def classify(
             return None
         return now + timedelta(seconds=max(0, int(retry_after_seconds)))
 
+    # ---- refused phone line ---------------------------------------------
+    # First: ``line_not_ready:<bridge reason>`` embeds the bridge's own reason
+    # token (e.g. ``trunk_caller_id_not_verified``), which the older substring
+    # branches below would otherwise claim.
+    if low.startswith("line_not_ready"):
+        return _line_not_ready_reason(
+            low.partition(":")[2].strip(), extra, _fallback_next(), retry_after_seconds,
+        )
+    # Raw route-refusal tokens (stored on older rows, or a bare 422 code)
+    # describe the same thing: a phone-line problem, not a generic failure.
+    if any(token in low for token in _RAW_LINE_REASON_TOKENS):
+        return _line_not_ready_reason(low, extra, _fallback_next(), retry_after_seconds)
+
     # ---- schedule -------------------------------------------------------
     # ``calling_not_allowed_on_Tue`` (day gate) and
     # ``outside_time_window_14:00_17:00`` (hour gate) both come from
@@ -373,7 +466,15 @@ def classify(
             "start the campaign again.",
             severity="error", stage="quota", details=extra,
         )
-    if "campaign_stopped" in low or "campaign_not_runnable" in low or "campaign_paused" in low:
+    if "campaign_paused" in low:
+        # Paused is temporary and loses nothing: the queued calls are HELD.
+        return BlockReason(
+            BlockCode.CAMPAIGN_NOT_RUNNING,
+            "The campaign is paused, so its queued calls are on hold. Resume "
+            "the campaign to continue dialling.",
+            severity="warning", stage="campaign", details=extra,
+        )
+    if "campaign_stopped" in low or "campaign_not_runnable" in low:
         return BlockReason(
             BlockCode.CAMPAIGN_NOT_RUNNING,
             "The campaign isn't running, so queued calls are skipped. Press Start "
@@ -511,10 +612,19 @@ def classify(
     if "caller_id_not_verified" in low:
         return BlockReason(
             BlockCode.CALLER_ID_NOT_VERIFIED,
-            "No verified caller ID is set for this account, so the carrier "
-            "refused the call. Register and verify a number in Settings → Phone "
-            "Numbers, then set it as the campaign's caller ID.",
+            "The caller ID this call would use is not verified for this "
+            "account, so the call was not placed. Ask support to verify the "
+            "number (only a platform administrator can verify numbers).",
             severity="error", stage="caller_id", details=extra,
+        )
+    if any(token in low for token in _TELEPHONY_DOWN_TOKENS):
+        return BlockReason(
+            BlockCode.TELEPHONY_UNAVAILABLE,
+            "The calling service is not connected to the phone system. Calls "
+            "resume automatically when it reconnects — no action needed.",
+            severity="warning", stage="carrier",
+            next_eligible_at=_fallback_next(),
+            retry_after_seconds=retry_after_seconds, details=extra,
         )
     if "voice_pipeline_unavailable" in low or "pre_originate_warmup" in low:
         return BlockReason(

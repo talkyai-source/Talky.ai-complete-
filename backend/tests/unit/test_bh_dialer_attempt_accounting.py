@@ -41,6 +41,7 @@ def _base_worker(order: list | None = None) -> DialerWorker:
     w._redis = None
     w._db_pool = None
     w._get_campaign_status = AsyncMock(return_value="running")
+    w._stale_payload_reason = AsyncMock(return_value=None)
     w._load_existing_call_intent = AsyncMock(return_value=None)
     w._tenant_minutes_exhausted = AsyncMock(return_value=False)
     w._get_tenant_rules = AsyncMock(return_value=CallingRules.default())
@@ -139,7 +140,10 @@ async def test_pipeline_hold_is_bounded_then_goes_through_the_classifier(monkeyp
 
     async def fake_make_call(job, rules, *, call_intent=None):
         w._last_bridge_http_status = 503
-        w._last_bridge_body = json.dumps({"error": {"code": "pod_draining", "message": "m"}})
+        # A VOICE-PIPELINE 503 (TTS/STT warmup). A phone-system 503 such as
+        # pod_draining is now a telephony outage that waits on the same attempt
+        # without consuming it (see test_w1_dialer_job_lifecycle.py).
+        w._last_bridge_body = json.dumps({"error": {"code": "voice_pipeline_unavailable", "message": "m"}})
         return DialerWorker._PIPELINE_UNAVAILABLE
 
     w._make_call = fake_make_call
@@ -449,7 +453,10 @@ async def test_pipeline_hold_past_the_reaper_ceiling_is_written_off_not_held():
 
     async def fake_make_call(job, rules, *, call_intent=None):
         w._last_bridge_http_status = 503
-        w._last_bridge_body = json.dumps({"error": {"code": "pod_draining", "message": "m"}})
+        # A VOICE-PIPELINE 503 (TTS/STT warmup). A phone-system 503 such as
+        # pod_draining is now a telephony outage that waits on the same attempt
+        # without consuming it (see test_w1_dialer_job_lifecycle.py).
+        w._last_bridge_body = json.dumps({"error": {"code": "voice_pipeline_unavailable", "message": "m"}})
         return DialerWorker._PIPELINE_UNAVAILABLE
 
     w._make_call = fake_make_call
@@ -480,17 +487,45 @@ async def test_throttle_hold_past_the_reaper_ceiling_is_written_off_not_held():
 
 @pytest.mark.asyncio
 async def test_replayed_hold_past_the_reaper_ceiling_is_written_off_not_held():
+    """A THROTTLE hold that outlives the reaper still goes through the
+    classifier (attempt N+1). The refused-line (422 tenant_pbx_required) hold
+    used to share this route and burned every lead of the campaign; its
+    contract is pinned separately below and in test_w1_dialer_job_lifecycle.
+    """
     order: list = []
     w = _base_worker(order)
     w._load_existing_call_intent = AsyncMock(return_value=_held_intent())
     w._held_intent_has_headroom = AsyncMock(return_value=False)
-    _transient_reject(w, status=422, code="tenant_pbx_required", hold=120)
+    _transient_reject(w, status=429, code="call_throttled", hold=60)
     await w.process_job(_job())
 
     w.queue_service._redefer_inflight.assert_not_awaited()
     assert order == [("persist", 2), ("schedule", 1)], order
     _, kw = w._record_job_failure_classification.call_args
-    assert kw["reason"] == "tenant_pbx_required"
+    assert kw["reason"] == "call_throttled"
+
+
+@pytest.mark.asyncio
+async def test_replayed_refused_line_past_the_reaper_ceiling_keeps_the_attempt():
+    """tenant_pbx_required (no ready line / unverified caller ID) is not a
+    failure of the lead: the expired hold releases the never-sent intent and
+    re-defers the SAME attempt, never persisting or scheduling attempt N+1."""
+    order: list = []
+    w = _base_worker(order)
+    w._release_intent_line_not_ready = AsyncMock(return_value=True)
+    w._load_existing_call_intent = AsyncMock(return_value=_held_intent())
+    w._held_intent_has_headroom = AsyncMock(return_value=False)
+    _transient_reject(w, status=422, code="tenant_pbx_required", hold=120)
+    job = _job()
+    await w.process_job(job)
+
+    assert order == [], order  # no attempt persisted, none scheduled
+    assert job.attempt_number == 1
+    w._release_intent_line_not_ready.assert_awaited_once()
+    w._record_job_failure_classification.assert_not_awaited()
+    w.queue_service.mark_failed.assert_not_awaited()
+    w.queue_service._redefer_inflight.assert_awaited_once()
+    assert w.queue_service._redefer_inflight.call_args.kwargs["delay_seconds"] == 300
 
 
 def _age_worker(age=None, error=None):

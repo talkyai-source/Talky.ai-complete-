@@ -32,7 +32,11 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from app.domain.services.dialer.block_reasons import BlockCode, BlockReason
+from app.domain.services.dialer.block_reasons import (
+    SELF_CLEARING_CODES,
+    BlockCode,
+    BlockReason,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,27 +58,43 @@ def state_key(campaign_id: str) -> str:
     return f"dialer:block_state:{campaign_id}"
 
 
+#: Pacing/cooldown codes that come and go on EVERY dial cycle: the worker
+#: publishes one, then ``clear_block_reason`` runs after the next origination,
+#: so each cycle looked like a "change" and wrote a fresh "Calls are paused"
+#: stream_events row. They keep their Redis state (the campaign page still
+#: reads them) but never write an Event Stream row.
+_QUIET_CODES = SELF_CLEARING_CODES | {BlockCode.LEAD_COOLDOWN}
+
+_TITLES: dict[BlockCode, str] = {
+    BlockCode.TESTING_MODE_SCHEDULE_BYPASSED: "TESTING MODE: schedule bypassed",
+    BlockCode.SCHEDULE_DAY_NOT_ALLOWED: "Waiting for the next calling day",
+    BlockCode.SCHEDULE_OUTSIDE_WINDOW: "Waiting for the calling window to open",
+    BlockCode.OUT_OF_MINUTES: "Out of plan minutes",
+    BlockCode.METERING_UNAVAILABLE: "Plan minutes could not be checked",
+    BlockCode.CAMPAIGN_NOT_RUNNING: "Campaign is not running",
+    BlockCode.CALLER_ID_NOT_VERIFIED: "Caller ID not verified",
+    BlockCode.CALL_GUARD_BLOCKED: "Blocked by safety rules",
+    BlockCode.DNC: "Number is on a Do-Not-Call list",
+    BlockCode.VOICE_PIPELINE_UNAVAILABLE: "Voice provider not ready",
+    BlockCode.LINE_NOT_READY: "Phone line not ready",
+    BlockCode.TELEPHONY_UNAVAILABLE: "Calling service not connected",
+    BlockCode.MAX_CONCURRENT_CALLS: "Waiting for a free call slot",
+    BlockCode.DAILY_LEAD_CAP: "Daily call limit reached",
+    BlockCode.ORIGINATE_FAILED: "Call could not be placed",
+    # Self-clearing codes never reach the Event Stream, but the title is part
+    # of the stored state the campaign page reads.
+    BlockCode.LEAD_COOLDOWN: "Contact was called recently",
+    BlockCode.BATCH_CAPACITY: "Waiting for the current batch",
+    BlockCode.CALL_GAP: "Pacing between calls",
+    BlockCode.TENANT_GAP: "Taking turns with another campaign",
+    BlockCode.CALL_GUARD_THROTTLED: "Call rate limit reached",
+    BlockCode.CALL_GUARD_QUEUED: "Queued behind the rate limiter",
+}
+
+
 def _title_for(reason: BlockReason) -> str:
     """Short Event Stream headline. The full sentence goes in description."""
-    if reason.code is BlockCode.TESTING_MODE_SCHEDULE_BYPASSED:
-        return "TESTING MODE: schedule bypassed"
-    if reason.code is BlockCode.SCHEDULE_DAY_NOT_ALLOWED:
-        return "Waiting for the next calling day"
-    if reason.code is BlockCode.SCHEDULE_OUTSIDE_WINDOW:
-        return "Waiting for the calling window to open"
-    if reason.code is BlockCode.OUT_OF_MINUTES:
-        return "Out of plan minutes"
-    if reason.code is BlockCode.CAMPAIGN_NOT_RUNNING:
-        return "Campaign is not running"
-    if reason.code is BlockCode.CALLER_ID_NOT_VERIFIED:
-        return "Caller ID not verified"
-    if reason.code is BlockCode.CALL_GUARD_BLOCKED:
-        return "Blocked by safety rules"
-    if reason.code is BlockCode.DNC:
-        return "Number is on a Do-Not-Call list"
-    if reason.code is BlockCode.VOICE_PIPELINE_UNAVAILABLE:
-        return "Voice provider not ready"
-    return "Calls are paused"
+    return _TITLES.get(reason.code, "Calls are paused")
 
 
 def _payload(reason: BlockReason, *, emitted_at: datetime) -> dict[str, Any]:
@@ -165,6 +185,10 @@ async def publish_block_reason(
         # still persisted on the job row and logged.
         payload["emitted_at"] = now.isoformat()
         should_emit = False
+
+    if reason.code in _QUIET_CODES:
+        # State is stored above; a self-clearing pace never writes an event.
+        return False
 
     if not should_emit or db_pool is None or not tenant_id:
         return False
