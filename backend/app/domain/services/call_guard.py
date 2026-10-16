@@ -129,6 +129,40 @@ class CheckResult:
         }
 
 
+# Reason prefix of a check that could not be answered because of an
+# infrastructure error. It is the vocabulary ``dialer_worker`` recognises
+# (``_GUARD_INFRA_REASON_PREFIXES``) as a TRANSIENT denial: the job is deferred
+# ~60 s and retried, never terminally blocked and never dialled.
+_CHECK_ERROR_BLOCKED = "check_error_blocked"
+# Reason of an account gate that passed only because its schema is not there.
+_SCHEMA_CHECK_SKIPPED = "schema_check_skipped"
+
+
+def _is_missing_schema_error(exc: BaseException) -> bool:
+    """True only when ``exc`` means "that table / column does not exist".
+
+    This is the single case in which an account gate or the limits loader may
+    stand down (the deployment predates the column). Every other database
+    error -- a dropped connection, a timeout, a server in recovery -- says
+    nothing about the tenant's state, so it must not be read as "fine".
+    """
+    return isinstance(exc, (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError))
+
+
+def _check_unavailable(check: GuardCheck, exc: BaseException) -> CheckResult:
+    """Fail-closed result for a check whose lookup errored (transient)."""
+    logger.warning(
+        "guard check %s could not be answered -- failing CLOSED (call deferred): %s: %s",
+        check.value, type(exc).__name__, exc,
+    )
+    return CheckResult(
+        check=check,
+        passed=False,
+        reason=f"{_CHECK_ERROR_BLOCKED}: {type(exc).__name__}",
+        details={"error": str(exc)},
+    )
+
+
 @dataclass
 class GuardResult:
     """Complete result from call guard evaluation."""
@@ -501,12 +535,14 @@ class CallGuard:
                     check=GuardCheck.TENANT_ACTIVE,
                     passed=True,
                 )
-        except asyncpg.PostgresError as e:
-            logger.debug(f"tenant active check failed (column may not exist): {e}")
+        except Exception as e:
+            if not _is_missing_schema_error(e):
+                return _check_unavailable(GuardCheck.TENANT_ACTIVE, e)
+            logger.debug(f"tenant active check skipped (column may not exist): {e}")
             return CheckResult(
                 check=GuardCheck.TENANT_ACTIVE,
                 passed=True,
-                reason="schema_check_skipped",
+                reason=_SCHEMA_CHECK_SKIPPED,
             )
 
     async def _check_partner_active(
@@ -554,12 +590,14 @@ class CallGuard:
                     check=GuardCheck.PARTNER_ACTIVE,
                     passed=True,
                 )
-        except asyncpg.PostgresError as e:
-            logger.debug(f"partner active check failed: {e}")
+        except Exception as e:
+            if not _is_missing_schema_error(e):
+                return _check_unavailable(GuardCheck.PARTNER_ACTIVE, e)
+            logger.debug(f"partner active check skipped (schema missing): {e}")
             return CheckResult(
                 check=GuardCheck.PARTNER_ACTIVE,
                 passed=True,
-                reason="schema_check_skipped",
+                reason=_SCHEMA_CHECK_SKIPPED,
             )
 
     async def _check_subscription(self, tenant_id: str, **kwargs) -> CheckResult:
@@ -591,7 +629,11 @@ class CallGuard:
 
         result = await self._check_subscription_uncached(tenant_id)
 
-        if self._redis:
+        # Never cache a degraded answer: an error ("check_error_blocked") would
+        # hold the tenant blocked for 60 s after the database recovered, and a
+        # skipped schema check is not a verdict about the tenant at all.
+        degraded = (result.reason or "").startswith((_CHECK_ERROR_BLOCKED, _SCHEMA_CHECK_SKIPPED))
+        if self._redis and not degraded:
             try:
                 await self._redis.setex(
                     cache_key,
@@ -648,12 +690,14 @@ class CallGuard:
                     passed=True,
                     details={"status": status},
                 )
-        except asyncpg.PostgresError as e:
-            logger.debug(f"subscription check failed (column may not exist): {e}")
+        except Exception as e:
+            if not _is_missing_schema_error(e):
+                return _check_unavailable(GuardCheck.SUBSCRIPTION_VALID, e)
+            logger.debug(f"subscription check skipped (column may not exist): {e}")
             return CheckResult(
                 check=GuardCheck.SUBSCRIPTION_VALID,
                 passed=True,
-                reason="schema_check_skipped",
+                reason=_SCHEMA_CHECK_SKIPPED,
             )
 
     async def _check_feature_enabled(
@@ -1299,7 +1343,13 @@ class CallGuard:
                     tenant_id,
                 )
         except asyncpg.PostgresError as e:
-            # Table may not exist yet — return permissive defaults
+            # Permissive defaults only when the table/column is not there yet.
+            # Any other error (dropped connection, recovery mode, ...) used to
+            # fall through to the same defaults, silently dropping the tenant's
+            # blocked countries, spend cap and business hours for that call.
+            # Re-raise: evaluate() turns it into a BLOCK the dialer defers.
+            if not _is_missing_schema_error(e):
+                raise
             logger.debug(f"tenant_call_limits query failed (table may not exist): {e}")
             return TenantCallLimits()
 
@@ -1418,6 +1468,10 @@ class CallGuard:
                     partner_id,
                 )
         except asyncpg.PostgresError as e:
+            # Same rule as _get_tenant_limits: only a missing table means "no
+            # partner limits"; any other error must not drop the partner caps.
+            if not _is_missing_schema_error(e):
+                raise
             logger.debug(f"partner_limits query failed (table may not exist): {e}")
             return None
 
@@ -1498,7 +1552,11 @@ class CallGuard:
                 )
                 return str(row["partner_id"]) if row and row.get("partner_id") else None
         except asyncpg.PostgresError as e:
-            # partner_id column may not exist yet
+            # Only a missing partner_id column means "no partner". Any other
+            # error must not read as "no partner": that would let
+            # _check_partner_active pass a suspended partner's tenant.
+            if not _is_missing_schema_error(e):
+                raise
             logger.debug(f"partner_id lookup failed (column may not exist): {e}")
             return None
 

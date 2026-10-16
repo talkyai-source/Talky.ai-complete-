@@ -56,6 +56,53 @@ def test_schedule_ignored():
     assert schedule_ignored(None) is False
 
 
+# ── DIALER_ALLOW_IGNORE_SCHEDULE platform kill switch (packet W6 item 4) ──
+# A tenant-settable "call anytime" dials around the clock. The platform can
+# turn the override off for everyone with DIALER_ALLOW_IGNORE_SCHEDULE=false;
+# unset keeps today's behaviour (honoured).
+def test_ignore_schedule_is_honoured_when_the_switch_is_unset(monkeypatch):
+    monkeypatch.delenv("DIALER_ALLOW_IGNORE_SCHEDULE", raising=False)
+    assert schedule_ignored({"ignore_schedule": True}) is True
+
+
+@pytest.mark.parametrize("value", ["true", "TRUE", "1", "yes", "on", "", "  true  ", "anything-else"])
+def test_ignore_schedule_is_honoured_unless_the_switch_is_off(monkeypatch, value):
+    monkeypatch.setenv("DIALER_ALLOW_IGNORE_SCHEDULE", value)
+    assert schedule_ignored({"ignore_schedule": True}) is True
+
+
+@pytest.mark.parametrize("value", ["false", "FALSE", " False ", "0", "no", "off"])
+def test_kill_switch_makes_call_anytime_a_no_op(monkeypatch, value):
+    monkeypatch.setenv("DIALER_ALLOW_IGNORE_SCHEDULE", value)
+    assert schedule_ignored({"ignore_schedule": True}) is False
+
+
+def test_kill_switch_does_not_invent_an_override(monkeypatch):
+    monkeypatch.setenv("DIALER_ALLOW_IGNORE_SCHEDULE", "false")
+    assert schedule_ignored({"ignore_schedule": False}) is False
+    assert schedule_ignored({}) is False
+    assert schedule_ignored(None) is False
+
+
+def test_kill_switch_re_enforces_the_window_in_the_rules_engine(monkeypatch):
+    # The worker passes enforce_window=not schedule_ignored(cfg): with the
+    # switch off a closed window must block a "call anytime" campaign again.
+    monkeypatch.setenv("DIALER_ALLOW_IGNORE_SCHEDULE", "false")
+    eng = SchedulingRuleEngine()
+    rules = CallingRules(
+        timezone="UTC", time_window_start="09:00", time_window_end="19:00",
+        allowed_days=[],
+    )
+    cfg = {"ignore_schedule": True}
+
+    allowed, reason = asyncio.run(
+        eng.can_make_call("t", "c", rules, enforce_window=not schedule_ignored(cfg))
+    )
+
+    assert allowed is False
+    assert reason.startswith("calling_not_allowed_on_")
+
+
 # ── enforce_window override in the rules engine ───────────────────
 def test_enforce_window_false_bypasses_closed_window():
     eng = SchedulingRuleEngine()

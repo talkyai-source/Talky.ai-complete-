@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import json
+import re
 from datetime import datetime
 from typing import Any, Optional
 
@@ -232,6 +233,38 @@ class TenantPhoneNumberService:
         assert model is not None
         return model
 
+    async def _other_tenant_holding_verified(self, tenant_id: str, e164: str) -> Optional[str]:
+        """Id of ANOTHER tenant that already holds ``e164`` as ``verified``.
+
+        The comparison is on the normalised number (digits only), so
+        ``+442046132300``, ``442046132300`` and ``+44 20 4613 2300`` are one
+        number. ``tenant_phone_numbers`` is under RLS, so a tenant-scoped
+        connection cannot see other tenants' rows: this genuinely cross-tenant
+        read uses the bypass context (``tenant_id=None``) and excludes the
+        requesting tenant with an explicit predicate. Read-only; no row is
+        changed.
+        """
+        from app.core.db_utils import acquire_with_tenant
+        from app.domain.services.phone_number_normalizer import normalize_e164_digits
+
+        digits = re.sub(r"\D", "", normalize_e164_digits(e164))
+        if not digits:
+            return None
+        async with acquire_with_tenant(self._db_pool, None) as conn:
+            holder = await conn.fetchrow(
+                """
+                SELECT tenant_id
+                FROM tenant_phone_numbers
+                WHERE tenant_id <> $1
+                  AND status = 'verified'
+                  AND regexp_replace(e164, '[^0-9]', '', 'g') = $2
+                LIMIT 1
+                """,
+                tenant_id,
+                digits,
+            )
+        return str(holder["tenant_id"]) if holder else None
+
     async def mark_verified(
         self,
         *,
@@ -268,6 +301,23 @@ class TenantPhoneNumberService:
                 raise TenantPhoneNumberError(f"DID {did_id} not found for tenant {tenant_id}")
             if before["status"] == "revoked":
                 raise TenantPhoneNumberError("A revoked DID cannot be self-restored; register new proof")
+            # A verified number is the proof that this tenant may present it as
+            # its caller ID. Ownership checks are per tenant, so a second
+            # tenant verifying the same number could impersonate the first.
+            # The advisory lock serialises verifications of one number across
+            # tenants, so two admins cannot both pass the check at once.
+            from app.domain.services.phone_number_normalizer import normalize_e164_digits
+
+            lock_digits = re.sub(r"\D", "", normalize_e164_digits(before["e164"]))
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtext($1))", f"tpn_verify:{lock_digits}"
+            )
+            holder = await self._other_tenant_holding_verified(tenant_id, before["e164"])
+            if holder:
+                raise TenantPhoneNumberConflictError(
+                    f"This number is already verified for another tenant ({holder}); "
+                    "revoke it there before verifying it for this tenant"
+                )
             row = await conn.fetchrow(
                 """
                 UPDATE tenant_phone_numbers
