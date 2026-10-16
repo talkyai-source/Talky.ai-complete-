@@ -21,6 +21,23 @@ export class ContactSubmissionError extends Error {
   constructor(message: string, public readonly canEdit = false) { super(message); }
 }
 
+// The two honest things the form can say when no receipt came back. The route
+// handler reports `outcome: "not_sent"` when it never forwarded the message
+// (so retrying now will not help); everything else — an upstream failure, a
+// timeout, a lost response, a platform error page — leaves the fate unknown,
+// and retrying the saved message is safe because the request reference is
+// reused. Neither names anything internal.
+const NOT_SENT_MESSAGE = "This form is not accepting messages right now. Please try again later or email contact@talk-lee.com. Your message is kept here for a safe retry.";
+const UNCONFIRMED_MESSAGE = "We could not confirm receipt. Your message may have been received; it is kept here, and retrying the saved message is safe.";
+
+async function readOutcome(response: Response): Promise<string | undefined> {
+  try {
+    const body: unknown = await response.json();
+    const outcome = typeof body === "object" && body !== null ? (body as { outcome?: unknown }).outcome : undefined;
+    return typeof outcome === "string" ? outcome : undefined;
+  } catch { return undefined; }
+}
+
 // Intentionally independent of the authenticated API client: no token, cookies,
 // refresh, automatic retries, or browser-selected backend destination.
 export async function submitContactEnquiry(payload: ContactRequest, timeoutMs = 15_000): Promise<ContactReceipt> {
@@ -37,12 +54,14 @@ export async function submitContactEnquiry(payload: ContactRequest, timeoutMs = 
     }
     if (response.status === 429) throw new ContactSubmissionError("Too many requests. Please wait before retrying your saved message.");
     if (response.status === 409) throw new ContactSubmissionError("This request reference has conflicting details. Keep the reference below when contacting us.");
-    if (response.status !== 200 && response.status !== 201) throw new ContactSubmissionError("We could not confirm receipt. Your message is kept here; retry the saved message.");
+    if (response.status !== 200 && response.status !== 201) {
+      throw new ContactSubmissionError((await readOutcome(response)) === "not_sent" ? NOT_SENT_MESSAGE : UNCONFIRMED_MESSAGE);
+    }
     const receipt = contactReceiptSchema.safeParse(await response.json());
-    if (!receipt.success || receipt.data.receipt_id !== payload.request_id.toLowerCase()) throw new ContactSubmissionError("We could not confirm receipt. Retry the saved message to check safely.");
+    if (!receipt.success || receipt.data.receipt_id !== payload.request_id.toLowerCase()) throw new ContactSubmissionError(UNCONFIRMED_MESSAGE);
     return receipt.data;
   } catch (error) {
     if (error instanceof ContactSubmissionError) throw error;
-    throw new ContactSubmissionError("We could not confirm receipt. Retry the saved message to check safely.");
+    throw new ContactSubmissionError(UNCONFIRMED_MESSAGE);
   } finally { clearTimeout(timeout); }
 }

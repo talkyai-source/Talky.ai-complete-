@@ -1255,11 +1255,15 @@ export function VoiceAgentPopup() {
             call is live and the hero has scrolled away (plus the sticky
             error state). Its top offset follows the navbar at every size;
             its width and radius follow the navbar only in the one-row form
-            — the phone form is sized by CSS alone. Portaled to
-            document.body — rendered inside the hero's z-10 container it
-            would be painted over by every sibling section below. Rendered
-            by this same component instance, so swapping to and from it can
-            never touch the call. */}
+            — the phone form is sized by CSS alone. Portaled into the
+            homepage's <main id="home"> (document.body as the fallback for
+            any other host) — rendered inside the hero's z-10 container it
+            would be painted over by every sibling section below, and
+            <main> is where page.tsx scopes `--font-manrope`, so the bar
+            inherits the same Manrope the navbar uses; in document.body that
+            variable is undefined and the bar fell back to the system font.
+            Rendered by this same component instance, so swapping to and
+            from it can never touch the call. */}
         {typeof document !== "undefined" && (isActive || barSticky) &&
             createPortal(
                 <div
@@ -1289,7 +1293,7 @@ export function VoiceAgentPopup() {
                         </button>
                     )}
                 </div>,
-                document.body,
+                document.getElementById("home") ?? document.body,
             )}
         </>
     );

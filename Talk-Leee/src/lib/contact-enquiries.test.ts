@@ -68,3 +68,18 @@ it("keeps an expired unknown reference blocked in memory even if storage becomes
     assert.equal(result.saved?.draft, undefined);
   } finally { proto.setItem = originalSet; }
 });
+
+it("tells a never-forwarded failure apart from an unconfirmed one without exposing anything internal", async () => {
+  const messages: string[] = [];
+  const attempt = async (make: () => Response | Promise<Response>) => {
+    globalThis.fetch = async () => make();
+    await assert.rejects(submitContactEnquiry(payload), (error: unknown) => { messages.push((error as Error).message); return error instanceof ContactSubmissionError && !error.canEdit; });
+    return messages.at(-1)!;
+  };
+  assert.match(await attempt(() => Response.json({ error: "Contact intake is unavailable", outcome: "not_sent" }, { status: 503 })), /not accepting messages right now.*contact@talk-lee\.com/);
+  assert.match(await attempt(() => Response.json({ error: "Invalid request origin", outcome: "not_sent" }, { status: 403 })), /not accepting messages right now/);
+  assert.match(await attempt(() => Response.json({ error: "Contact intake is unavailable", outcome: "unconfirmed" }, { status: 503 })), /could not confirm receipt.*retrying the saved message is safe/);
+  assert.match(await attempt(() => new Response("<html>503 Service Unavailable</html>", { status: 503, headers: { "content-type": "text/html" } })), /could not confirm receipt/);
+  assert.match(await attempt(() => { throw new TypeError("offline"); }), /could not confirm receipt/);
+  for (const message of messages) assert.doesNotMatch(message, /CONTACT_ENQUIRY|API_BASE|https?:\/\/|localhost|backend|\bat \w+ \(|not_sent|unconfirmed|ECONN|50[23]/);
+});

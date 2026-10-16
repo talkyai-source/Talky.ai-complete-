@@ -292,8 +292,13 @@
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  backdrop-filter: blur(20px) saturate(1.5);
+  /* Prefixed form FIRST. The production CSS pass (Lightning CSS, run by
+     @tailwindcss/postcss) drops the unprefixed declaration when the
+     -webkit- one follows it, shipping only -webkit-backdrop-filter — which
+     Chromium does not implement, so the blur never rendered in Chrome/Edge.
+     In this order both declarations survive. */
   -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  backdrop-filter: blur(20px) saturate(1.5);
   z-index: -1;
   pointer-events: none;
 }
@@ -1301,8 +1306,9 @@ details > summary.home-menu-toggle {
     border: 1px solid rgba(255, 255, 255, 0.14);
     background: rgba(2, 14, 28, 0.92);
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25), 0 1px 2px rgba(0, 0, 0, 0.12);
-    backdrop-filter: blur(20px) saturate(1.5);
+    /* -webkit- first, unprefixed second: see .home-navbar-fixed::before. */
     -webkit-backdrop-filter: blur(20px) saturate(1.5);
+    backdrop-filter: blur(20px) saturate(1.5);
   }
 }
 
@@ -1404,8 +1410,12 @@ details > summary.home-menu-toggle {
   color: #fff;
   border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(20px) saturate(1.5);
+  /* -webkit- first, unprefixed second: see .home-navbar-fixed::before. */
   -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  backdrop-filter: blur(20px) saturate(1.5);
+  /* Mounted in the root layout, outside the homepage <main>, so it never
+     inherited Manrope; ask for it the same way .askAiCallBar does. */
+  font-family: var(--font-manrope, inherit);
   font-size: 13px;
   line-height: 1.4;
 }

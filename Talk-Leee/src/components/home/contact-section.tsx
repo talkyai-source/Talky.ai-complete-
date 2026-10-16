@@ -35,6 +35,7 @@ export function ContactSection({ sectionClassName }: ContactSectionProps = {}) {
   useEffect(() => {
     alive.current = true;
     const restored = loadContactDraft();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sessionStorage restore after hydration: the saved draft / pending submission cannot be read during render (no storage on the server, and the hydrated markup must match the server's), so this mount-only effect is the first point it can be adopted into state
     setStorageAvailable(restored.storageAvailable);
     if (restored.saved?.draft) setFormData(restored.saved.draft);
     if (restored.saved?.submission) {

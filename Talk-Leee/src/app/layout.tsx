@@ -1,8 +1,18 @@
 import type { Metadata, Viewport } from "next";
+import { Manrope } from "next/font/google";
 import "./globals.css";
 import { SuspensionStateProvider } from "@/components/admin/suspension-state-provider";
 import { AppProviders } from "@/components/providers/app-providers";
 import { CallEndedNotice } from "@/components/ui/call-ended-notice";
+
+// Manrope is the navbar's typeface (navbar.tsx sets `font-family: var(--font-manrope)`
+// inline) and the navbar renders on every public page, so the variable has to be
+// in scope for the whole document, not only the homepage's <main id="home">.
+// `.variable` defines the custom property only; body's own font-family is unchanged.
+const manrope = Manrope({
+  subsets: ["latin"],
+  variable: "--font-manrope",
+});
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -40,7 +50,7 @@ export default function RootLayout({
         {apiBaseUrl && <link rel="preconnect" href={apiBaseUrl} />}
         {apiBaseUrl && <link rel="dns-prefetch" href={apiBaseUrl} />}
       </head>
-      <body className="font-sans antialiased">
+      <body className={`font-sans antialiased ${manrope.variable}`}>
         <AppProviders>
           <SuspensionStateProvider>
             {children}

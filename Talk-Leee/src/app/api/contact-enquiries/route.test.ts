@@ -121,3 +121,54 @@ it("preserves a safe throttling response without leaking upstream content", asyn
   assert.equal(result.headers.get("retry-after"), "60");
   assert.ok(!(await result.text()).includes("private"));
 });
+
+it("logs one line per failure that tells the causes apart, labels the outcome, and stays silent on success", async () => {
+  const originalError = console.error;
+  const lines: string[] = [];
+  console.error = (...args: unknown[]) => { lines.push(args.map(String).join(" ")); };
+  try {
+    const line = () => { const last = lines.at(-1); lines.length = 0; return last ?? ""; };
+    process.env.NEXT_PUBLIC_API_BASE_URL = "https://backend.example/api/v1";
+    globalThis.fetch = async () => Response.json(receipt, { status: 201 });
+    assert.equal((await POST(request())).status, 201);
+    assert.deepEqual(lines, []);
+
+    delete process.env.CONTACT_ENQUIRY_PUBLIC_ORIGIN;
+    let res = await POST(request());
+    assert.equal((await res.json()).outcome, "not_sent");
+    assert.match(line(), /^\[contact-enquiries\] reason=public_origin_missing status=503 upstream_status=- duration_ms=\d+ request_id=-$/);
+
+    process.env.CONTACT_ENQUIRY_PUBLIC_ORIGIN = "https://app.example";
+    res = await POST(request({ Origin: "https://other.example" }));
+    assert.equal((await res.json()).outcome, "not_sent");
+    assert.match(line(), /reason=origin_mismatch status=403 .* request_origin=https:\/\/other\.example$/);
+
+    process.env.NEXT_PUBLIC_API_BASE_URL = "https://backend.example/other";
+    res = await POST(request());
+    assert.equal((await res.json()).outcome, "not_sent");
+    assert.match(line(), /reason=api_base_invalid status=503 /);
+    process.env.NEXT_PUBLIC_API_BASE_URL = "https://backend.example/api/v1";
+
+    globalThis.fetch = async () => Response.json({ detail: "boom" }, { status: 500 });
+    res = await POST(request());
+    assert.equal((await res.json()).outcome, "unconfirmed");
+    assert.match(line(), new RegExp(`reason=upstream_status status=503 upstream_status=500 duration_ms=\\d+ request_id=${body.request_id}$`));
+
+    globalThis.fetch = async () => Response.json({ status: "accepted" });
+    res = await POST(request());
+    assert.equal((await res.json()).outcome, "unconfirmed");
+    assert.match(line(), /reason=receipt_invalid status=502 upstream_status=200 /);
+
+    globalThis.fetch = async () => { throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } }); };
+    res = await POST(request());
+    assert.equal((await res.json()).outcome, "unconfirmed");
+    assert.match(line(), /reason=upstream_error status=503 .* error=TypeError error_code=ECONNREFUSED$/);
+
+    globalThis.fetch = async (_url, init) => new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError"))));
+    const timers = { set: globalThis.setTimeout };
+    globalThis.setTimeout = ((fn: () => void) => timers.set(fn, 0)) as typeof setTimeout;
+    try { res = await POST(request()); } finally { globalThis.setTimeout = timers.set; }
+    assert.equal(res.status, 503);
+    assert.match(line(), /reason=upstream_timeout status=503 /);
+  } finally { console.error = originalError; }
+});

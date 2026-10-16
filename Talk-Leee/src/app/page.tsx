@@ -2,7 +2,7 @@ import { Navbar } from "@/components/home/navbar";
 import { HomeLazySections } from "@/components/home/home-lazy-sections";
 import type { Metadata } from "next";
 import localFont from "next/font/local";
-import { Manrope, Orbitron } from "next/font/google";
+import { Orbitron } from "next/font/google";
 
 const satoshi = localFont({
   src: [
@@ -11,11 +11,6 @@ const satoshi = localFont({
     { path: "../fonts/satoshi/Satoshi-700.woff2", weight: "700", style: "normal" },
   ],
   display: "swap",
-});
-
-const manrope = Manrope({
-  subsets: ["latin"],
-  variable: "--font-manrope",
 });
 
 const orbitron = Orbitron({
@@ -44,7 +39,7 @@ export default function Home() {
             'if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",a);else a()});',
         }}
       />
-      <main id="home" className={`home-navbar-offset homepage-bg ${satoshi.className} ${manrope.variable} ${orbitron.variable}`}>
+      <main id="home" className={`home-navbar-offset homepage-bg ${satoshi.className} ${orbitron.variable}`}>
         <Navbar />
         <HomeLazySections />
       </main>
