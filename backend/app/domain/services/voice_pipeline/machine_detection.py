@@ -223,11 +223,30 @@ async def handle_machine_interim(
                 from app.domain.services.telephony.adapter_registry import (
                     get_adapter,
                 )
+                from app.domain.services.dialer.opt_out import (
+                    locate_live_voice_session,
+                )
 
+                # The bridge adapter addresses the PBX channel, not the pipeline
+                # UUID: a DELETE for the UUID returns 404, which the adapter
+                # treats as "already gone", so the call stayed up while this
+                # path reported success. Use the registry key, and count it as
+                # hung up only when the adapter can confirm it.
+                pbx_channel, _vs = locate_live_voice_session(str(call_id), session)
                 adapter = get_adapter()
-                if adapter is not None:
-                    await adapter.hangup(str(call_id))
-                    hung_up = True
+                if adapter is not None and pbx_channel:
+                    confirmed = getattr(adapter, "hangup_confirmed", None)
+                    if callable(confirmed):
+                        hung_up = bool(await confirmed(pbx_channel))
+                    else:
+                        await adapter.hangup(pbx_channel)
+                        hung_up = True
+                elif adapter is not None:
+                    logger.warning(
+                        "machine_hangup_no_pbx_channel call=%s — no live telephony "
+                        "session resolved for the fallback hangup",
+                        str(call_id)[:12],
+                    )
                 else:
                     logger.warning(
                         "machine_hangup_no_adapter call=%s — no bridge adapter "

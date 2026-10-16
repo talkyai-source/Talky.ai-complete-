@@ -5447,17 +5447,21 @@ async def _on_call_ended(
 
                 _c3 = _gc3()
                 if _c3.is_initialized:
-                    from app.domain.services.dialer.opt_out import purge_lead_on_opt_out, record_purge_result
+                    from app.domain.services.dialer.opt_out import purge_lead_on_opt_out_with_retry
 
-                    purge_result = await asyncio.wait_for(purge_lead_on_opt_out(
+                    # Bounded retry (3 x 2.5 s): a busy pool must not lose the
+                    # opt-out. An ERROR naming the call/tenant is logged inside
+                    # when the DNC row is still unconfirmed.
+                    purge_result = await purge_lead_on_opt_out_with_retry(
                         db_pool=_c3.db_pool,
                         db_client=_c3.db_client,
                         tenant_id=getattr(voice_session, "_dialer_tenant_id", None),
                         lead_id=getattr(voice_session, "_dialer_lead_id", None),
                         phone_number=getattr(voice_session, "_dialer_phone", None),
                         call_id=getattr(voice_session, "_dialer_call_id", None),
-                    ), timeout=2.5)
-                    record_purge_result(voice_session, purge_result)
+                        voice_session=voice_session,
+                        call_ref=call_id[:12],
+                    )
                     if not purge_result.get("purge_complete"):
                         logger.warning("opt_out_teardown_incomplete call_id=%s dnc_written=%s",
                                        call_id[:12], bool(purge_result.get("dnc_added")))

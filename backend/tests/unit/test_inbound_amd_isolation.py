@@ -63,11 +63,22 @@ async def test_interim_amd_keeps_outbound_voicemail_hangup_behavior():
 
 @pytest.mark.asyncio
 async def test_interim_amd_keeps_outbound_adapter_fallback(monkeypatch):
+    # The fallback addresses the PBX channel the telephony registry is keyed
+    # by, never the pipeline UUID (an ARI DELETE for the UUID 404s and the
+    # adapter treated that as "already gone" while the call stayed up).
     session = SimpleNamespace(_call_direction="outbound", turn_id=0)
+    voice_session = SimpleNamespace(call_session=session)
+    registry = {"1790168826.42": voice_session}
+    state = SimpleNamespace(
+        get_voice_session=registry.get,
+        iter_voice_session_items=lambda: list(registry.items()),
+    )
     adapter = SimpleNamespace(hangup=AsyncMock())
 
     import app.domain.services.telephony.adapter_registry as adapter_registry
+    import app.domain.services.telephony.lifecycle as lifecycle
 
+    monkeypatch.setattr(lifecycle, "_state", lambda: state)
     monkeypatch.setattr(adapter_registry, "get_adapter", lambda: adapter)
 
     handled = await handle_machine_interim(
@@ -76,7 +87,27 @@ async def test_interim_amd_keeps_outbound_adapter_fallback(monkeypatch):
 
     assert handled is True
     assert session._amd_voicemail is True
-    adapter.hangup.assert_awaited_once_with("outbound-interim-fallback")
+    adapter.hangup.assert_awaited_once_with("1790168826.42")
+
+
+@pytest.mark.asyncio
+async def test_interim_amd_fallback_never_claims_a_uuid_hangup(monkeypatch, caplog):
+    session = SimpleNamespace(_call_direction="outbound", turn_id=0)
+    state = SimpleNamespace(get_voice_session=lambda _k: None, iter_voice_session_items=lambda: [])
+    adapter = SimpleNamespace(hangup=AsyncMock(), hangup_confirmed=AsyncMock(return_value=True))
+
+    import app.domain.services.telephony.adapter_registry as adapter_registry
+    import app.domain.services.telephony.lifecycle as lifecycle
+
+    monkeypatch.setattr(lifecycle, "_state", lambda: state)
+    monkeypatch.setattr(adapter_registry, "get_adapter", lambda: adapter)
+
+    with caplog.at_level("ERROR"):
+        await handle_machine_interim("outbound-interim-uuid", session, _VOICEMAIL_GREETING)
+
+    adapter.hangup.assert_not_awaited()
+    adapter.hangup_confirmed.assert_not_awaited()
+    assert any("NOT actually hung up" in r.getMessage() for r in caplog.records)
 
 
 def _install_live_session(monkeypatch, *, direction: Direction):
