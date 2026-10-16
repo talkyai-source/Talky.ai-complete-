@@ -35,7 +35,12 @@ export function useCampaignReadiness(campaignIds: string[], enabled = true) {
 
 export function CampaignReadinessNotice({ readiness }: { readiness: ReturnType<typeof useCampaignReadiness> }) {
     if (readiness.ready) return null;
-    return <div className="mt-1 max-w-sm text-xs text-muted-foreground" role="status">
+    // A refusal is something the user has to act on: make it a visible warning.
+    // The in-progress "Checking…" line stays quiet helper text.
+    const tone = readiness.checking
+        ? "text-xs text-muted-foreground"
+        : "rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-sm font-medium text-amber-800 dark:text-amber-300";
+    return <div className={`mt-1 max-w-sm ${tone}`} role="status">
         {readiness.reason}{" "}
         {!readiness.checking && <button type="button" className="font-semibold underline" onClick={() => void readiness.retry()}>Check again</button>}
     </div>;

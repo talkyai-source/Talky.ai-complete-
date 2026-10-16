@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { dashboardApi, campaignStartErrorMessage, Campaign, Contact, ContactList, MinutesStatus } from "@/lib/dashboard-api";
-import type { ContactMutation } from "@/lib/dashboard-api";
+import type { CampaignActivity, CampaignBlockingReason, ContactMutation } from "@/lib/dashboard-api";
 import { OPTIONAL_CONTACT_FIELDS, contactPayload, type OptionalContactFieldKey } from "@/lib/contact-fields";
 import { SmartCsvImport } from "@/components/campaigns/smart-csv-import";
 import { ContactLists, ActiveContactsSummary } from "@/components/campaigns/contact-lists";
@@ -59,6 +59,56 @@ function getStatusStyle(status: string) {
     }
 }
 
+// Normal pacing between calls (mirrors the backend's SELF_CLEARING_CODES): the
+// campaign IS dialing, so these never earn a "Not dialing" banner.
+const PACING_BLOCK_CODES = new Set([
+    "batch_capacity", "call_gap", "tenant_gap", "call_guard_throttled", "call_guard_queued",
+]);
+
+// Reasons that stop the WHOLE campaign. The block state is per campaign and
+// last-writer-wins, so a per-contact reason (one number's cooldown, DNC, daily
+// cap or guard block) must not read as "the campaign is not dialing".
+const CAMPAIGN_LEVEL_BLOCK_CODES = new Set([
+    "schedule_day_not_allowed", "schedule_outside_window", "out_of_minutes", "metering_unavailable",
+    "max_concurrent_calls", "voice_pipeline_unavailable", "caller_id_not_verified", "line_not_ready",
+    "telephony_unavailable", "testing_mode_schedule_bypassed",
+]);
+
+type DialBlock = { message: string; testing: boolean; error: boolean; nextEligibleAt: string | null };
+
+/** Why a RUNNING campaign is not placing calls, from the stats the page polls. */
+function dialBlockFor(
+    status: string | undefined,
+    reason: CampaignBlockingReason | null | undefined,
+    activity: CampaignActivity | null | undefined,
+    minutesExhausted?: boolean,
+): DialBlock | null {
+    if (status !== "running" && status !== "active") return null;
+    const code = reason?.code ?? activity?.reason_code ?? null;
+    if (code && PACING_BLOCK_CODES.has(code)) return null;
+    // Left over from before a Start/Resume: the block state is only cleared
+    // by the next placed call, so trust the campaign status instead.
+    if (code === "campaign_not_running") return null;
+    // Stale after a top-up: the page's own minutes status is fresher.
+    if (code === "out_of_minutes" && minutesExhausted === false) return null;
+    const waiting = activity?.waiting_on_schedule === true || activity?.state === "waiting_for_calling_window";
+    if (code && !waiting && !CAMPAIGN_LEVEL_BLOCK_CODES.has(code)) return null;
+    const message = reason?.message?.trim() || (waiting ? "Waiting for the calling window to open." : code);
+    if (!message) return null;
+    return {
+        message,
+        testing: code === "testing_mode_schedule_bypassed",
+        error: reason?.severity === "error",
+        nextEligibleAt: reason?.next_eligible_at ?? activity?.next_eligible_at ?? null,
+    };
+}
+
+function fmtNextAttempt(iso: string | null): string {
+    const t = iso ? Date.parse(iso) : NaN;
+    if (Number.isNaN(t)) return "";
+    return new Date(t).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
 function getContactStatusStyle(result: string) {
     switch (result) {
         case "goal_achieved":
@@ -93,6 +143,8 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
         goals_achieved: number;
         job_status_counts: Record<string, number>;
         call_outcome_counts: Record<string, number>;
+        blocking_reason?: CampaignBlockingReason | null;
+        activity?: CampaignActivity | null;
     } | null>(null);
     const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState(false);
@@ -109,6 +161,10 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     // Out of plan minutes ⇒ the backend will 402 a Start, so we disable the
     // button up front and explain why. `unlimited` plans are never blocked.
     const outOfMinutes = !!minutes && !minutes.unlimited && minutes.exhausted;
+    const dialBlock = dialBlockFor(
+        campaign?.status, stats?.blocking_reason, stats?.activity,
+        minutes ? outOfMinutes : undefined,
+    );
 
     // CSV Upload (smart import modal)
     const [csvModalOpen, setCsvModalOpen] = useState(false);
@@ -489,6 +545,32 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                         </div>
                     </motion.div>
                     {canStart && <CampaignReadinessNotice readiness={readiness} />}
+
+                    {/* Running but not placing calls: say why, in the dialer's own
+                        words, and when it will try again. */}
+                    {dialBlock && (
+                        <div
+                            role="status"
+                            className={`content-card flex items-start gap-3 ${
+                                dialBlock.error ? "border-red-500/30 bg-red-500/5" : "border-amber-500/30 bg-amber-500/5"
+                            }`}
+                        >
+                            <AlertTriangle
+                                className={`w-5 h-5 shrink-0 mt-0.5 ${dialBlock.error ? "text-red-500" : "text-amber-500"}`}
+                                aria-hidden
+                            />
+                            <div className="text-sm">
+                                <p className={`font-medium ${dialBlock.error ? "text-red-600 dark:text-red-400" : "text-amber-700 dark:text-amber-400"}`}>
+                                    {`${dialBlock.testing ? "Testing mode" : "Not dialing"}: ${dialBlock.message}`}
+                                </p>
+                                {fmtNextAttempt(dialBlock.nextEligibleAt) ? (
+                                    <p className="text-muted-foreground mt-0.5">
+                                        {`Next attempt: ${fmtNextAttempt(dialBlock.nextEligibleAt)}`}
+                                    </p>
+                                ) : null}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Out-of-minutes banner — the campaign can't be started
                         until the tenant has plan minutes again. */}

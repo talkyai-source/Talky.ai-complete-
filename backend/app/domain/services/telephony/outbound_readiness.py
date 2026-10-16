@@ -11,6 +11,30 @@ from app.domain.services.telephony import caller_id_guard, trunk_resolver
 from app.domain.services.telephony.provider_availability import TelephonySelectionError, require_production_outbound_selection
 
 
+_NO_LINE = "No phone line is ready to dial out. Connect or switch on a line in Settings → Telephony."
+_LINE_NOT_REGISTERED = (
+    "The phone line for this campaign is not registered with the carrier right now. "
+    "Check it in Settings → Telephony."
+)
+_CALLER_ID_UNVERIFIED = "The caller ID on this line is not verified yet. Ask support to verify it."
+
+# Plain-language text for each route refusal. ``reason_code`` stays the machine
+# value; only the sentence shown to the user is mapped.
+_REFUSAL_MESSAGES = {
+    "no_ready_trunk": _NO_LINE,
+    "no_own_trunk": _NO_LINE,
+    "selected_trunk_not_ready": _LINE_NOT_REGISTERED,
+    "campaign_assigned_trunk_not_ready": _LINE_NOT_REGISTERED,
+    "trunk_caller_id_not_verified": _CALLER_ID_UNVERIFIED,
+}
+
+
+def _refusal_message(code: str) -> str:
+    return _REFUSAL_MESSAGES.get(
+        code, f"Selected SIP trunk is not ready ({code}). Check its live status in Settings."
+    )
+
+
 def _object(raw) -> dict:
     value = json.loads(raw) if isinstance(raw, str) else raw
     return value if isinstance(value, dict) else {}
@@ -39,15 +63,16 @@ async def evaluate_outbound_readiness(
         return result
     if not await trunk_resolver.requires_sip_readiness(db_pool, tenant_id=tenant_id, campaign=campaign):
         return result
-    environment = environment or os.getenv("ENVIRONMENT", "development")
+    # Same normalisation as telephony_bridge: caller_id_guard compares the
+    # value to "production" exactly, so "Production " would read as non-prod.
+    environment = (environment or os.getenv("ENVIRONMENT", "development")).strip().lower()
     route = await trunk_resolver.resolve_outbound_trunk(
         db_pool, tenant_id=tenant_id, environment=environment, campaign_id=campaign_id,
     )
     result.update(trunk_id=route.trunk_id, caller_id=route.caller_id or result["caller_id"])
     if route.refused or not route.endpoint:
         code = route.reason if route.refused else "trunk_endpoint_missing"
-        result.update(ready=False, reason_code=code,
-                      reason=f"Selected SIP trunk is not ready ({code}). Check its live status in Settings.")
+        result.update(ready=False, reason_code=code, reason=_refusal_message(code))
         return result
     if not result["caller_id"]:
         if calling_rules is None:
@@ -59,7 +84,7 @@ async def evaluate_outbound_readiness(
     )
     if not ownership.allowed:
         result.update(ready=False, reason_code="caller_id_not_verified",
-                      reason="Verify the selected trunk's caller ID before dialing.")
+                      reason=_CALLER_ID_UNVERIFIED)
     else:
         result["reason_code"] = "ready"
     return result

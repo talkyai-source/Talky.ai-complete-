@@ -1098,7 +1098,9 @@ async def list_call_issues(
       * A later successful call for the same lead supersedes the issue
         (``NOT EXISTS`` newer ``calls`` row).
       * ``out_of_minutes`` is dropped if the tenant now has minutes again.
-      * ``campaign_stopped`` is dropped if the campaign is now running.
+      * ``campaign_stopped``, ``campaign_not_runnable:<status>`` (the gate's
+        stored form) and ``campaign_paused`` are dropped if the campaign is
+        now running.
     One card per phone number (the latest unresolved attempt), tenant-scoped.
     """
     from datetime import datetime, timezone
@@ -1220,7 +1222,9 @@ async def list_call_issues(
         # Drop resolved account-level conditions.
         if "out_of_minutes" in low and minutes_ok:
             continue
-        if "campaign_stopped" in low and (r["campaign_status"] in ("running", "active")):
+        if r["campaign_status"] in ("running", "active") and any(
+            code in low for code in ("campaign_stopped", "campaign_not_runnable", "campaign_paused")
+        ):
             continue
         category = r["failure_category"]
         adv = advise(reason, category=category)

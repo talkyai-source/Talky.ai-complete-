@@ -207,6 +207,12 @@ export interface CallIssue {
     stage: string;
     attempts: number;
     updated_at?: string | null;
+    /** Stable outbound block code (e.g. `schedule_outside_window`); absent on inbound. */
+    block_code?: string | null;
+    /** The dialer's plain-language reason this call was not placed. */
+    block_message?: string | null;
+    /** When the call becomes eligible again, if the server can compute it. */
+    next_eligible_at?: string | null;
 }
 
 export interface RejectedInboundCallItem {

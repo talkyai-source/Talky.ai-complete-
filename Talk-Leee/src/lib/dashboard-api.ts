@@ -36,6 +36,27 @@ export interface MinutesStatus {
     exhausted: boolean;
 }
 
+// What GET /campaigns/{id}/stats returns under `blocking_reason`: the dialer's
+// current structured reason for not placing calls (backend BlockReason.to_dict()).
+export interface CampaignBlockingReason {
+    code: string;
+    message: string;
+    severity?: string;
+    stage?: string;
+    next_eligible_at?: string | null;
+    retry_after_seconds?: number | null;
+}
+
+// ...and under `activity` (backend `_campaign_activity`).
+export interface CampaignActivity {
+    state: string;
+    work_remaining: boolean;
+    waiting_on_schedule: boolean;
+    schedule_override_active: boolean;
+    reason_code: string | null;
+    next_eligible_at: string | null;
+}
+
 /**
  * Whether the tenant's monthly minute quota is exhausted — the same signal
  * that gates outbound Start (`outOfMinutes` above) and, on the inbound side,
@@ -606,6 +627,10 @@ class DashboardApi {
         job_status_counts: Record<string, number>;
         call_outcome_counts: Record<string, number>;
         goals_achieved: number;
+        /** Why the dialer is not placing calls right now (null/absent when nothing blocks). */
+        blocking_reason?: CampaignBlockingReason | null;
+        /** What the campaign is doing, derived server-side from the block reason. */
+        activity?: CampaignActivity | null;
     }> {
         return this.client.request({
             path: `/campaigns/${id}/stats`,

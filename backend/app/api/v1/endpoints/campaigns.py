@@ -574,6 +574,34 @@ def _calling_config_from_schedule(schedule) -> Optional[dict]:
     return cfg
 
 
+# The keys ``_calling_config_from_schedule`` can emit. An edit REPLACES these
+# (an omitted key means "use the tenant default") and leaves every other
+# ``calling_config`` key (trunk pin, batch_size, call_gap_seconds, ...) alone.
+_SCHEDULE_CONFIG_KEYS = (
+    "ignore_schedule", "timezone", "time_window_start", "time_window_end", "allowed_days",
+)
+
+
+def _merge_calling_config_schedule(existing, schedule_cfg: dict) -> dict:
+    """Overlay the schedule keys onto the campaign's existing calling_config.
+
+    The adapter's UPDATE is a full SET of the column, so sending only the
+    schedule keys wiped the line pin, batch size and inter-call gap.
+    """
+    if isinstance(existing, str):
+        try:
+            existing = json.loads(existing)
+        except ValueError:
+            existing = None
+    kept = {
+        key: value
+        for key, value in (existing if isinstance(existing, dict) else {}).items()
+        if key not in _SCHEDULE_CONFIG_KEYS
+    }
+    kept.update(schedule_cfg)
+    return kept
+
+
 @router.post("/", dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.CAMPAIGNS_CREATE))])
 async def create_campaign(
     campaign_data: CampaignCreateRequest,
@@ -761,8 +789,9 @@ async def update_campaign(
         if ai_config is None:
             ai_config = AIProviderConfig()
         from app.api.v1.endpoints.campaign_voice_config import build_campaign_voice_config
-        previous = db_client.table("campaigns").select("script_config").eq("id", campaign_id).eq("tenant_id", current_user.tenant_id).execute()
+        previous = db_client.table("campaigns").select("script_config, calling_config").eq("id", campaign_id).eq("tenant_id", current_user.tenant_id).execute()
         existing_script = (previous.data or [{}])[0].get("script_config") or {}
+        existing_calling_config = (previous.data or [{}])[0].get("calling_config")
         if isinstance(existing_script, str):
             import json
             existing_script = json.loads(existing_script)
@@ -783,7 +812,18 @@ async def update_campaign(
         }
         _sched = _calling_config_from_schedule(campaign_data.calling_schedule)
         if _sched is not None:
-            update_payload["calling_config"] = _sched
+            # Re-read just before the write: build_campaign_voice_config can
+            # await a provider check over the network, and a line pin assigned
+            # meanwhile must not be overwritten with the earlier snapshot.
+            fresh = (
+                db_client.table("campaigns").select("calling_config")
+                .eq("id", campaign_id).eq("tenant_id", current_user.tenant_id).execute()
+            )
+            if fresh.data:
+                existing_calling_config = fresh.data[0].get("calling_config")
+            update_payload["calling_config"] = _merge_calling_config_schedule(
+                existing_calling_config, _sched,
+            )
 
         updated_campaign = _update_owned_outbound_campaign(
             db_client,

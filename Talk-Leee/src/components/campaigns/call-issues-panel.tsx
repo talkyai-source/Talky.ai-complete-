@@ -62,11 +62,30 @@ function fmtTime(iso?: string | null): string {
     return new Date(t).toLocaleTimeString();
 }
 
+function fmtWhen(iso?: string | null): string {
+    if (!iso) return "";
+    const t = Date.parse(iso);
+    if (Number.isNaN(t)) return "";
+    return new Date(t).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+// The classifier's catch-all codes carry a generic sentence that says nothing
+// the card's own title does not; the raw reason code is the more specific fact.
+const GENERIC_BLOCK_CODES = new Set(["originate_failed", "unknown"]);
+
+function issueReason(it: CallIssue): string {
+    const generic = Boolean(it.block_code && GENERIC_BLOCK_CODES.has(it.block_code));
+    return (generic ? null : it.block_message) || it.reason_code || it.block_message || "";
+}
+
 type IssueGroup = {
     key: string;
     title: string;
     suggestion: string;
     severity: string;
+    /** The dialer's own reason (block_message), else the raw reason code. */
+    reason: string;
+    nextEligibleAt: string | null;
     items: CallIssue[];
     latestAt: string | null;
 };
@@ -85,6 +104,9 @@ function groupIssues(items: CallIssue[]): IssueGroup[] {
                 title: it.title,
                 suggestion: it.suggestion,
                 severity: it.severity,
+                // Items arrive newest first, so the first one speaks for the group.
+                reason: issueReason(it),
+                nextEligibleAt: it.next_eligible_at ?? null,
                 items: [it],
                 latestAt: it.updated_at ?? null,
             });
@@ -221,6 +243,15 @@ function CallIssuesPanelScope({ campaignId, direction, title = "Call issues" }: 
                                             )}
                                         </div>
                                         <p className="mt-0.5 text-xs text-muted-foreground">{g.suggestion}</p>
+                                        {/* Outbound only: the inbound feed's reason codes are internal. */}
+                                        {direction !== "inbound" && g.reason ? (
+                                            <p className="mt-0.5 text-xs font-medium text-foreground/80">
+                                                {`Reason: ${g.reason}`}
+                                                {g.nextEligibleAt && fmtWhen(g.nextEligibleAt)
+                                                    ? ` · Next attempt: ${fmtWhen(g.nextEligibleAt)}`
+                                                    : ""}
+                                            </p>
+                                        ) : null}
                                     </div>
                                     {isOpen ? (
                                         <ChevronDown className="h-3.5 w-3.5 mt-1 text-muted-foreground shrink-0" aria-hidden />

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 
 import { CallIssuesPanel } from "@/components/campaigns/call-issues-panel";
@@ -170,4 +170,90 @@ test("switching campaigns immediately removes an already-loaded issue feed", asy
         await second.promise;
     });
     assert.ok(await screen.findByText(/Current campaign failure/));
+});
+
+function outboundIssue(over: Partial<CallIssue>): CallIssue {
+    return {
+        job_id: "job-1",
+        phone_number: "+15550001111",
+        campaign_id: "campaign-out",
+        status: "pending",
+        reason_code: "outside_time_window_14:00_17:00",
+        category: null,
+        title: "Outside calling hours",
+        suggestion: "It will dial automatically when the window opens.",
+        severity: "warning",
+        stage: "schedule",
+        attempts: 1,
+        updated_at: "2026-10-16T08:00:00Z",
+        ...over,
+    };
+}
+
+async function expandSummary() {
+    fireEvent.click(await screen.findByRole("button", { name: /Call issues/ }));
+}
+
+test("an outbound problem shows the dialer's own reason and when it is next eligible", async () => {
+    api.listCallIssues = async () => ({
+        items: [
+            outboundIssue({
+                block_code: "schedule_outside_window",
+                block_message: "Outside this campaign's calling hours (Mon & Fri, 14:00-17:00 Europe/London).",
+                next_eligible_at: "2026-10-19T13:00:00Z",
+            }),
+        ],
+        server_time: "2026-10-16T08:00:05Z",
+    });
+
+    render(<CallIssuesPanel campaignId="campaign-out" direction="outbound" />);
+    await expandSummary();
+
+    assert.ok(await screen.findByText(/Reason: Outside this campaign's calling hours/));
+    assert.ok(screen.getByText(/Next attempt:/));
+});
+
+test("without a block message the raw reason code is shown instead of nothing", async () => {
+    api.listCallIssues = async () => ({
+        items: [outboundIssue({ reason_code: "rejected", block_message: null, block_code: null })],
+        server_time: "2026-10-16T08:00:05Z",
+    });
+
+    render(<CallIssuesPanel campaignId="campaign-out" />);
+    await expandSummary();
+
+    assert.ok(await screen.findByText("Reason: rejected"));
+    assert.equal(screen.queryByText(/Next attempt:/), null);
+});
+
+test("the inbound issue panel does not gain a reason line", async () => {
+    api.listCallIssues = async () => ({
+        items: [inboundIssue("campaign-in", "Inbound call processing failed")],
+        server_time: "2026-10-16T08:00:05Z",
+    });
+
+    render(<CallIssuesPanel campaignId="campaign-in" direction="inbound" />);
+    await expandSummary();
+
+    assert.ok((await screen.findAllByText(/Inbound call processing failed/)).length >= 2, "group row is expanded");
+    assert.equal(screen.queryByText(/Reason:/), null);
+});
+
+test("a generic catch-all block message does not hide the specific reason code", async () => {
+    api.listCallIssues = async () => ({
+        items: [
+            outboundIssue({
+                reason_code: "no_ready_trunk",
+                block_code: "originate_failed",
+                block_message: "The call could not be placed. If it doesn't clear on its own, check the campaign's settings.",
+            }),
+        ],
+        server_time: "2026-10-16T08:00:05Z",
+    });
+
+    render(<CallIssuesPanel campaignId="campaign-out" direction="outbound" />);
+    await expandSummary();
+
+    assert.ok(await screen.findByText("Reason: no_ready_trunk"));
+    assert.equal(screen.queryByText(/The call could not be placed/), null);
 });

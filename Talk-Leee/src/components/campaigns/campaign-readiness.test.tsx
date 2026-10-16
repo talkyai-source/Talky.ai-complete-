@@ -116,3 +116,20 @@ test("command-bar keyboard execution cannot bypass unavailable resume routes", a
     assert.equal(resumed, 0);
     assert.ok(screen.getByRole("dialog"));
 });
+
+test("a refused route is shown as a visible warning, not grey helper text", async () => {
+    api.request = async <T,>() => ({ ready: false, reason_code: "no_ready_trunk", reason: "No phone line is ready to dial out. Connect or switch on a line in Settings → Telephony." }) as T;
+    mount(<CampaignStartControl campaignIds={["campaign-a"]} onStart={async () => {}} label="Start" />);
+    const notice = (await screen.findByText(/No phone line is ready to dial out/)).closest("[role='status']") as HTMLElement;
+    assert.ok(notice, "the reason must sit in a status region");
+    assert.match(notice.className, /amber/);
+    assert.doesNotMatch(notice.className, /text-muted-foreground/);
+});
+
+test("the in-progress check stays quiet helper text", () => {
+    api.request = (() => new Promise(() => {})) as typeof api.request;
+    mount(<CampaignStartControl campaignIds={["campaign-a"]} onStart={async () => {}} label="Start" />);
+    const notice = screen.getByText(/Checking calling readiness/).closest("[role='status']") as HTMLElement;
+    assert.match(notice.className, /text-muted-foreground/);
+    assert.doesNotMatch(notice.className, /amber/);
+});

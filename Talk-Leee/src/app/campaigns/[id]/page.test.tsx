@@ -84,3 +84,74 @@ test("a failed first load still shows the error banner (nothing to keep on scree
     await waitFor(() => assert.ok(screen.getByText(/getCampaign 500/)), { timeout: SLOW });
     assert.ok(screen.queryByRole("button", { name: /Stop/ }) === null);
 });
+
+function mockRunningCampaign(statsOverride: Record<string, unknown>, status = "running") {
+    mock.method(dashboardApi, "getCampaign", async () => ({ campaign: { ...campaign, status } }));
+    mock.method(dashboardApi, "getCampaignStats", async () => ({ ...stats, ...statsOverride }));
+    mock.method(dashboardApi, "getMinutesStatus", async () => { throw new Error("quota"); });
+    mock.method(dashboardApi, "listContacts", async () => ({ items: [], total: 0 }));
+}
+
+test("a running campaign that is blocked says why it is not dialing, and when it will", async () => {
+    mockRunningCampaign({
+        blocking_reason: {
+            code: "line_not_ready",
+            message: "No phone line is ready to dial out. Connect or switch on a line in Settings → Telephony.",
+            severity: "error",
+            next_eligible_at: "2026-10-19T13:00:00Z",
+        },
+        activity: { state: "blocked", work_remaining: true, waiting_on_schedule: false, schedule_override_active: false, reason_code: "line_not_ready", next_eligible_at: "2026-10-19T13:00:00Z" },
+    });
+    render(<Page />);
+    const banner = await screen.findByText(/Not dialing: No phone line is ready to dial out/, undefined, { timeout: SLOW });
+    assert.equal(banner.closest("[role='status']")?.textContent?.includes("Next attempt:"), true);
+});
+
+test("a campaign waiting for its calling window is described as waiting, not as finished", async () => {
+    mockRunningCampaign({
+        blocking_reason: null,
+        activity: { state: "waiting_for_calling_window", work_remaining: true, waiting_on_schedule: true, schedule_override_active: false, reason_code: null, next_eligible_at: null },
+    });
+    render(<Page />);
+    await screen.findByText(/Not dialing: Waiting for the calling window to open/, undefined, { timeout: SLOW });
+});
+
+test("normal pacing between calls is not reported as a block", async () => {
+    mockRunningCampaign({
+        blocking_reason: { code: "call_gap", message: "The campaign spaces its calls.", severity: "info", stage: "pacing" },
+        activity: { state: "blocked", work_remaining: true, waiting_on_schedule: false, schedule_override_active: false, reason_code: "call_gap", next_eligible_at: null },
+    });
+    render(<Page />);
+    await waitFor(() => assert.ok(screen.getByRole("button", { name: /Stop/ })), { timeout: SLOW });
+    assert.equal(screen.queryByText(/Not dialing/), null);
+});
+
+test("a stale block on a campaign that is not running shows no banner", async () => {
+    mockRunningCampaign({
+        blocking_reason: { code: "out_of_minutes", message: "Out of minutes.", severity: "error" },
+        activity: { state: "paused", work_remaining: false, waiting_on_schedule: false, schedule_override_active: false, reason_code: "out_of_minutes", next_eligible_at: null },
+    }, "paused");
+    render(<Page />);
+    await waitFor(() => assert.ok(screen.getByRole("button", { name: /Start/ })), { timeout: SLOW });
+    assert.equal(screen.queryByText(/Not dialing/), null);
+});
+
+test("a just-resumed campaign does not show the stale 'not running' block", async () => {
+    mockRunningCampaign({
+        blocking_reason: { code: "campaign_not_running", message: "The campaign isn't running, so queued calls are skipped.", severity: "warning" },
+        activity: { state: "blocked", work_remaining: true, waiting_on_schedule: false, schedule_override_active: false, reason_code: "campaign_not_running", next_eligible_at: null },
+    });
+    render(<Page />);
+    await waitFor(() => assert.ok(screen.getByRole("button", { name: /Stop/ })), { timeout: SLOW });
+    assert.equal(screen.queryByText(/Not dialing/), null);
+});
+
+test("a per-contact reason does not read as the whole campaign not dialing", async () => {
+    mockRunningCampaign({
+        blocking_reason: { code: "dnc", message: "This number is on a Do-Not-Call list and will not be dialled.", severity: "error" },
+        activity: { state: "blocked", work_remaining: true, waiting_on_schedule: false, schedule_override_active: false, reason_code: "dnc", next_eligible_at: null },
+    });
+    render(<Page />);
+    await waitFor(() => assert.ok(screen.getByRole("button", { name: /Stop/ })), { timeout: SLOW });
+    assert.equal(screen.queryByText(/Not dialing/), null);
+});

@@ -99,7 +99,9 @@ async def test_a_refused_route_says_calls_cannot_go_out_and_why(monkeypatch):
              calling_rules={"caller_id": "+442046132300"}, trunk_names={"9406fd7f": "17789249977"})
     result = await trunks.get_outbound_route(_request(), USER, object())
     assert result.ready is False and result.reason_code == "selected_trunk_not_ready"
-    assert "not ready" in (result.reason or "")
+    # Plain-language sentence (the raw code stays in reason_code).
+    assert "not registered with the carrier" in (result.reason or "")
+    assert "selected_trunk_not_ready" not in (result.reason or "")
 
 
 @pytest.mark.asyncio
