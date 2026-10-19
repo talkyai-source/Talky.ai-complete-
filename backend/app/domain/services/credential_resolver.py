@@ -34,6 +34,7 @@ import time
 from typing import Any, Optional
 
 from app.core.db_utils import acquire_with_tenant
+from app.infrastructure.providers.key_pool import POOLED_ENV_VARS, platform_key_rotation
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,9 @@ def resolve_sync_env_only(
     name = env_var or env_var_for_provider(provider)
     if not name:
         return None
+    if name in POOLED_ENV_VARS:
+        # <NAME> plus the <NAME>S pool, rotated per session (2026-10-19).
+        return platform_key_rotation(name).next_key()
     value = os.getenv(name)
     return value.strip() if value else None
 

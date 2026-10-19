@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -259,3 +260,89 @@ def parse_keys_csv(value: Optional[str]) -> list[str]:
     if not value:
         return []
     return [k.strip() for k in value.split(",") if k.strip()]
+
+
+# Platform key pools (owner request 2026-10-19). For these providers the
+# resolver itself rotates the platform's keys, because the orchestrator always
+# passes a resolved api_key and so never reaches the per-instance KeyPool path.
+POOLED_ENV_VARS = frozenset({"ASSEMBLYAI_API_KEY", "DEEPSEEK_API_KEY"})
+
+# How long a refused platform key sits out. A dead, unfunded or disabled key
+# needs a person (new key, top-up) and a restart clears the bench; a rate or
+# concurrency limit recovers by itself.
+BENCH_REFUSED_KEY_S = 6 * 3600.0
+BENCH_RATE_LIMITED_KEY_S = 60.0
+
+
+class PlatformKeyRotation:
+    """Process-wide rotation over the platform's own keys for one provider:
+    ``<NAME>`` plus the comma-separated ``<NAME>S``, read on every call so an
+    .env change needs only a restart. Each new session takes the next key that
+    is not benched. Unlike KeyPool (one per provider instance) the bench is
+    shared by every session in the process, so a refused key is skipped by
+    later calls too."""
+
+    def __init__(self, env_var: str) -> None:
+        self.env_var = env_var
+        self._cursor = 0
+        self._benched_until: dict[str, float] = {}
+
+    def keys(self) -> list[str]:
+        single = (os.getenv(self.env_var) or "").strip()
+        out: list[str] = []
+        for key in ([single] if single else []) + parse_keys_csv(os.getenv(self.env_var + "S")):
+            if key not in out:
+                out.append(key)
+        return out
+
+    def next_key(self, *, exclude: Iterable[str] = (), allow_benched: bool = True) -> Optional[str]:
+        """A new session's key: the next unbenched key in rotation."""
+        skip = set(exclude)
+        keys = [k for k in self.keys() if k not in skip]
+        if not keys:
+            return None
+        now = time.monotonic()
+        ready = [k for k in keys if self._benched_until.get(k, 0.0) <= now]
+        if not ready:
+            if not allow_benched:
+                return None
+            # Every key is benched: the one that recovers first beats none.
+            return min(keys, key=lambda k: self._benched_until.get(k, 0.0))
+        key = ready[self._cursor % len(ready)]
+        self._cursor += 1
+        return key
+
+    def retry_key(self, *, exclude: Iterable[str]) -> Optional[str]:
+        """The key to retry a refused request on: the first unbenched key in
+        .env order, not the next in rotation, so several refused keys in a row
+        cost one extra round trip instead of one per refused key."""
+        skip = set(exclude)
+        now = time.monotonic()
+        for key in self.keys():
+            if key not in skip and self._benched_until.get(key, 0.0) <= now:
+                return key
+        return None
+
+    def bench(self, key: str, seconds: float) -> bool:
+        """Sit a refused key out. False when the key is not one of the
+        platform's (a tenant's own key is never benched or swapped)."""
+        keys = self.keys()
+        if key not in keys:
+            return False
+        self._benched_until[key] = time.monotonic() + seconds
+        # Position only, never key material: #n matches the order in the .env.
+        logger.warning(
+            "platform_key_benched env=%s key=#%d/%d cooldown_s=%.0f",
+            self.env_var, keys.index(key) + 1, len(keys), seconds,
+        )
+        return True
+
+
+_ROTATIONS: dict[str, PlatformKeyRotation] = {}
+
+
+def platform_key_rotation(env_var: str) -> PlatformKeyRotation:
+    rotation = _ROTATIONS.get(env_var)
+    if rotation is None:
+        rotation = _ROTATIONS[env_var] = PlatformKeyRotation(env_var)
+    return rotation

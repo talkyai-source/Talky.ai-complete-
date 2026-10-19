@@ -29,6 +29,11 @@ import httpx
 
 from app.infrastructure.llm.cerebras import CerebrasLLMProvider
 from app.infrastructure.llm.groq import DEFAULT_LLM_TIMEOUT
+from app.infrastructure.providers.key_pool import (
+    BENCH_RATE_LIMITED_KEY_S,
+    BENCH_REFUSED_KEY_S,
+    platform_key_rotation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,23 +57,49 @@ class _ChatCompletions:
         api_key: str,
         url: str = _DEEPSEEK_CHAT_URL,
         label: str = "DeepSeek chat",
+        pool_env: Optional[str] = None,
     ) -> None:
         self._http = http
         self._api_key = api_key
         # Any OpenAI-compatible chat-completions endpoint (DeepSeek reuses it).
         self._url = url
         self._label = label
+        # Env var of the platform key pool this key may come from (2026-10-19).
+        self._pool_env = pool_env
+
+    def _next_pool_key(self, status: int, tried: set[str]) -> Optional[str]:
+        """Bench a refused platform key and return another one to try, or None
+        (a tenant's own key, a non-key error, or no unbenched key left)."""
+        if status in (401, 402, 403):
+            seconds = BENCH_REFUSED_KEY_S
+        elif status == 429:
+            seconds = BENCH_RATE_LIMITED_KEY_S
+        else:
+            return None
+        if not self._pool_env:
+            return None
+        rotation = platform_key_rotation(self._pool_env)
+        if not rotation.bench(self._api_key, seconds):
+            return None
+        tried.add(self._api_key)
+        return rotation.retry_key(exclude=tried)
 
     async def create(self, **request: Any):
         """Open the stream first so an HTTP error raises here (and is retried
         by the caller before any token is spoken), then yield chunks."""
-        headers = {"Authorization": f"Bearer {self._api_key}"}
-        cm = self._http.stream("POST", self._url, headers=headers, json=request)
-        response = await cm.__aenter__()
-        if response.status_code != 200:
+        tried: set[str] = set()
+        while True:
+            headers = {"Authorization": f"Bearer {self._api_key}"}
+            cm = self._http.stream("POST", self._url, headers=headers, json=request)
+            response = await cm.__aenter__()
+            if response.status_code == 200:
+                break
             body = (await response.aread()).decode(errors="replace")[:500]
             await cm.__aexit__(None, None, None)
-            raise RuntimeError(f"{self._label} HTTP {response.status_code}: {body}")
+            next_key = self._next_pool_key(response.status_code, tried)
+            if next_key is None:
+                raise RuntimeError(f"{self._label} HTTP {response.status_code}: {body}")
+            self._api_key = next_key
 
         async def chunks():
             try:
@@ -92,10 +123,13 @@ class _DeepSeekChatClient:
         timeout: float,
         url: str = _DEEPSEEK_CHAT_URL,
         label: str = "DeepSeek chat",
+        pool_env: Optional[str] = None,
     ) -> None:
         self._http = httpx.AsyncClient(timeout=timeout)
         self.chat = SimpleNamespace(
-            completions=_ChatCompletions(self._http, api_key, url=url, label=label)
+            completions=_ChatCompletions(
+                self._http, api_key, url=url, label=label, pool_env=pool_env
+            )
         )
 
     async def close(self) -> None:
@@ -135,6 +169,7 @@ class DeepSeekLLMProvider(CerebrasLLMProvider):
             timeout=config.get("timeout", DEFAULT_LLM_TIMEOUT),
             url=_DEEPSEEK_CHAT_URL,
             label="DeepSeek chat",
+            pool_env="DEEPSEEK_API_KEY",
         )
         logger.info(
             "DeepSeekLLMProvider initialized: model=%s max_tokens=%s thinking=disabled",

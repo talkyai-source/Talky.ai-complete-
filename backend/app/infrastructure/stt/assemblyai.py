@@ -24,6 +24,11 @@ import websockets
 from app.domain.interfaces.stt_provider import STTProvider
 from app.domain.models.assemblyai_config import ASSEMBLYAI_MODEL, AssemblyAISettings
 from app.domain.models.conversation import AudioChunk, BargeInSignal, TranscriptChunk
+from app.infrastructure.providers.key_pool import (
+    BENCH_RATE_LIMITED_KEY_S,
+    BENCH_REFUSED_KEY_S,
+    platform_key_rotation,
+)
 from app.infrastructure.providers.provider_concurrency import get_provider_guard
 
 logger = logging.getLogger(__name__)
@@ -60,6 +65,21 @@ def _safe_error(exc: BaseException, stage: str) -> RuntimeError:
     if isinstance(code, int):
         return RuntimeError(f"AssemblyAI {stage} failed (close code {code})")
     return RuntimeError(f"AssemblyAI {stage} failed")
+
+
+def _key_refusal_seconds(exc: BaseException) -> float | None:
+    """How long to bench the key behind a refused connection, or None when the
+    failure says nothing about the key. v3 closes with 1008 for an invalid key,
+    no balance or a disabled account, and 3009 for the concurrency limit."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    code = getattr(getattr(exc, "rcvd", None), "code", None)
+    if code is None:
+        code = getattr(exc, "provider_code", None)
+    if status in (401, 402, 403) or code in (1008, 4001, 4002, 4003):
+        return BENCH_REFUSED_KEY_S
+    if status == 429 or code == 3009:
+        return BENCH_RATE_LIMITED_KEY_S
+    return None
 
 
 @dataclass(eq=False)
@@ -201,6 +221,29 @@ class AssemblyAISTTProvider(STTProvider):
         return params
 
     async def _open_connection(self, call_id: str | None) -> _Connection:
+        """Open a session; when AssemblyAI refuses a platform pool key, bench
+        it and reconnect on another unbenched key (2026-10-19). A tenant's own
+        key is never swapped."""
+        generation = self._generation
+        tried: set[str] = set()
+        while True:
+            key = self._api_key
+            try:
+                return await self._open_connection_once(call_id)
+            except RuntimeError as error:
+                seconds = getattr(error, "key_refusal_s", None)
+                if seconds is None or not key or generation != self._generation:
+                    raise
+                rotation = platform_key_rotation("ASSEMBLYAI_API_KEY")
+                if not rotation.bench(key, seconds):
+                    raise
+                tried.add(key)
+                next_key = rotation.retry_key(exclude=tried)
+                if next_key is None:
+                    raise
+                self._api_key = next_key
+
+    async def _open_connection_once(self, call_id: str | None) -> _Connection:
         if not self._api_key:
             raise RuntimeError("AssemblyAI is not initialized")
         generation = self._generation
@@ -238,9 +281,11 @@ class AssemblyAISTTProvider(STTProvider):
             message = json.loads(await asyncio.wait_for(ws.recv(), timeout=_BEGIN_TIMEOUT))
             if message.get("type") == "Error":
                 code = message.get("error_code")
-                raise RuntimeError(
+                rejected = RuntimeError(
                     f"AssemblyAI session rejected (code {code if isinstance(code, int) else 'unknown'})"
                 )
+                rejected.provider_code = code
+                raise rejected
             configuration = message.get("configuration") or {}
             if (
                 message.get("type") != "Begin"
@@ -265,8 +310,11 @@ class AssemblyAISTTProvider(STTProvider):
             if isinstance(exc, asyncio.CancelledError):
                 raise
             if isinstance(exc, RuntimeError) and str(exc).startswith("AssemblyAI "):
-                raise exc from None
-            raise _safe_error(exc, "connection") from None
+                error = exc
+            else:
+                error = _safe_error(exc, "connection")
+            error.key_refusal_s = _key_refusal_seconds(exc)
+            raise error from None
 
     async def _keep_alive(self, connection: _Connection) -> None:
         interval = min(10.0, self._settings.inactivity_timeout / 2)
