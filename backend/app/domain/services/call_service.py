@@ -1058,7 +1058,11 @@ class CallService:
         before the retry decision, so a single busy lead redialled four
         times bumped `calls_completed` four times.
         """
-        non_reachable = NON_RETRYABLE_OUTCOMES - {CallOutcome.GOAL_ACHIEVED}
+        # INVALID is retried once to confirm it (disposition_policy), but a
+        # confirmed dead number is still a lead we could not reach.
+        non_reachable = (
+            NON_RETRYABLE_OUTCOMES - {CallOutcome.GOAL_ACHIEVED}
+        ) | {CallOutcome.INVALID}
         counter = "calls_failed" if outcome in non_reachable else "calls_completed"
         # `counter` is one of two hard-coded literals above — never
         # interpolated from caller input — so this is not SQL-injectable.
@@ -1356,7 +1360,11 @@ class CallService:
         # (because we don't retry a successful call); split that out so
         # we can route GOAL_ACHIEVED to calls_completed without it
         # falling through to the calls_failed branch below.
-        non_reachable = NON_RETRYABLE_OUTCOMES - {CallOutcome.GOAL_ACHIEVED}
+        # INVALID is retried once to confirm it (disposition_policy), but a
+        # confirmed dead number is still a lead we could not reach.
+        non_reachable = (
+            NON_RETRYABLE_OUTCOMES - {CallOutcome.GOAL_ACHIEVED}
+        ) | {CallOutcome.INVALID}
         try:
             if outcome in non_reachable:
                 counter = "calls_failed"

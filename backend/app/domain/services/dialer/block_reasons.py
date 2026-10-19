@@ -50,6 +50,10 @@ class BlockCode(str, Enum):
     # dialer/testing_override.py before changing anything here)
     SCHEDULE_DAY_NOT_ALLOWED = "schedule_day_not_allowed"
     SCHEDULE_OUTSIDE_WINDOW = "schedule_outside_window"
+    # The window itself is unreadable or ends before it starts: it never opens,
+    # so it is NOT in SCHEDULE_BLOCK_CODES (no testing bypass, no "wait for the
+    # window"). A person has to fix the calling hours.
+    SCHEDULE_INVALID = "schedule_invalid"
 
     # Per-lead
     LEAD_COOLDOWN = "lead_cooldown"
@@ -445,6 +449,15 @@ def classify(
     # ``calling_not_allowed_on_Tue`` (day gate) and
     # ``outside_time_window_14:00_17:00`` (hour gate) both come from
     # CallingRules.is_within_time_window.
+    if "invalid_time_window" in low or "schedule_invalid" in low:
+        return BlockReason(
+            BlockCode.SCHEDULE_INVALID,
+            "No calls are going out because this campaign's calling hours are "
+            "invalid: the start time must be before the end time on the same "
+            "day (24-hour HH:MM; calling hours can't run past midnight). Fix "
+            "the calling hours and calls resume within the hour.",
+            severity="error", stage="schedule", details=extra,
+        )
     if "calling_not_allowed_on" in low:
         return _schedule_reason(BlockCode.SCHEDULE_DAY_NOT_ALLOWED, raw, rules, now)
     if "outside_time_window" in low or "outside_calling_window" in low:

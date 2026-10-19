@@ -121,6 +121,12 @@ _RETRY_SCHEDULES: dict[CallOutcome, list[int]] = {
     # own deeper [30, 2m, 10m] schedule; this is the post-answer path.
     CallOutcome.FAILED: [30, 2 * _MINUTE],
     CallOutcome.TIMEOUT: [30, 2 * _MINUTE],
+    # Invalid (carrier Q.850 1/22/28: unallocated / changed / malformed):
+    # also exactly what a line with the wrong dial format returns for EVERY
+    # number, so the first one is confirmed by one dial a day later and the
+    # second is final. One misconfigured line must not finish a whole list
+    # in one pass (review 2026-10-20).
+    CallOutcome.INVALID: [_DAY],
 }
 
 # Maximum *total* attempts per lead for each retryable disposition. This
@@ -132,6 +138,7 @@ _ATTEMPT_CAPS: dict[CallOutcome, int] = {
     CallOutcome.VOICEMAIL: 2,
     CallOutcome.FAILED: 3,
     CallOutcome.TIMEOUT: 3,
+    CallOutcome.INVALID: 2,
 }
 
 # Outcomes that mean the lead is done and must never be redialled.
@@ -144,10 +151,10 @@ _SUCCESS_OUTCOMES: frozenset[CallOutcome] = frozenset(
 # arrive as Q.850 21) — never auto-redialled, and never do-not-call (see
 # the module docstring). GOAL_NOT_ACHIEVED: a real
 # conversation that didn't convert — redialing is a human decision, not
-# an automatic one. SPAM/INVALID/DISCONNECTED: dead input — the number is
-# not active, so redialing it is pointless. INVALID is also what the
-# telephony resolver emits for Q.850 1/22/28 (unallocated / changed /
-# malformed number): terminal and not retried, but not do-not-call either.
+# an automatic one. SPAM/DISCONNECTED: dead input — the number is not
+# active, so redialing it is pointless. INVALID (Q.850 1/22/28) is NOT
+# here: it gets one confirming dial (see _RETRY_SCHEDULES) and is never
+# do-not-call.
 #
 # UNAVAILABLE (compliance fix 2026-07-28): this used to sit in the retry
 # schedule at [24h, 24h] / cap 3 while ``call_service`` simultaneously
@@ -165,7 +172,6 @@ _TERMINAL_NO_RETRY: frozenset[CallOutcome] = frozenset(
         CallOutcome.REJECTED,
         CallOutcome.GOAL_NOT_ACHIEVED,
         CallOutcome.SPAM,
-        CallOutcome.INVALID,
         CallOutcome.DISCONNECTED,
         CallOutcome.UNAVAILABLE,
     }

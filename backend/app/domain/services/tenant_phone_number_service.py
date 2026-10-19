@@ -233,36 +233,45 @@ class TenantPhoneNumberService:
         assert model is not None
         return model
 
-    async def _other_tenant_holding_verified(self, tenant_id: str, e164: str) -> Optional[str]:
+    async def _other_tenant_holding_verified(
+        self, conn, tenant_id: str, e164: str
+    ) -> Optional[str]:
         """Id of ANOTHER tenant that already holds ``e164`` as ``verified``.
 
         The comparison is on the normalised number (digits only), so
         ``+442046132300``, ``442046132300`` and ``+44 20 4613 2300`` are one
         number. ``tenant_phone_numbers`` is under RLS, so a tenant-scoped
         connection cannot see other tenants' rows: this genuinely cross-tenant
-        read uses the bypass context (``tenant_id=None``) and excludes the
+        read turns the RLS bypass on for this one statement and excludes the
         requesting tenant with an explicit predicate. Read-only; no row is
         changed.
+
+        It runs on the caller's connection, inside the transaction that holds
+        the row lock and the advisory lock: a second pool connection here (no
+        acquire timeout) could wait forever on a saturated pool while the first
+        is held. The bypass is switched off again before the caller's
+        tenant-scoped write; if the read fails, the transaction aborts and the
+        SET LOCAL goes with it.
         """
-        from app.core.db_utils import acquire_with_tenant
         from app.domain.services.phone_number_normalizer import normalize_e164_digits
 
         digits = re.sub(r"\D", "", normalize_e164_digits(e164))
         if not digits:
             return None
-        async with acquire_with_tenant(self._db_pool, None) as conn:
-            holder = await conn.fetchrow(
-                """
-                SELECT tenant_id
-                FROM tenant_phone_numbers
-                WHERE tenant_id <> $1
-                  AND status = 'verified'
-                  AND regexp_replace(e164, '[^0-9]', '', 'g') = $2
-                LIMIT 1
-                """,
-                tenant_id,
-                digits,
-            )
+        await conn.execute("SET LOCAL app.bypass_rls = 'on'")
+        holder = await conn.fetchrow(
+            """
+            SELECT tenant_id
+            FROM tenant_phone_numbers
+            WHERE tenant_id <> $1
+              AND status = 'verified'
+              AND regexp_replace(e164, '[^0-9]', '', 'g') = $2
+            LIMIT 1
+            """,
+            tenant_id,
+            digits,
+        )
+        await conn.execute("SET LOCAL app.bypass_rls = 'off'")
         return str(holder["tenant_id"]) if holder else None
 
     async def mark_verified(
@@ -312,7 +321,7 @@ class TenantPhoneNumberService:
             await conn.execute(
                 "SELECT pg_advisory_xact_lock(hashtext($1))", f"tpn_verify:{lock_digits}"
             )
-            holder = await self._other_tenant_holding_verified(tenant_id, before["e164"])
+            holder = await self._other_tenant_holding_verified(conn, tenant_id, before["e164"])
             if holder:
                 raise TenantPhoneNumberConflictError(
                     f"This number is already verified for another tenant ({holder}); "

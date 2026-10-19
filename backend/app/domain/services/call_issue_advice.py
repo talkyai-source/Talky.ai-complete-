@@ -27,6 +27,12 @@ class IssueAdvice:
     stage: str      # quota | schedule | campaign | caller_id | voice | safety | concurrency | carrier | other
 
 
+_SCHEDULE_INVALID = IssueAdvice(
+    "Calling hours are invalid",
+    "No calls are going out because the calling hours can't be used: the start time must be before the end time on the same day (24-hour HH:MM, not past midnight). Fix the calling hours in the campaign's calling rules and calls resume within the hour.",
+    "error", "schedule",
+)
+
 _LINE_CALLER_ID_UNVERIFIED = IssueAdvice(
     "Phone line caller ID not verified",
     "The caller ID on this phone line is not verified yet. Ask support to verify it; calls resume automatically once it is.",
@@ -171,6 +177,10 @@ _RULES: list[tuple[str, IssueAdvice]] = [
         "Calls are going out even though the current time is outside the configured calling hours, because the testing override is switched on. This is for testing only — turn it off before real calling, since calling-hour rules exist for legal/compliance reasons.",
         "warning", "schedule",
     )),
+    # The window itself is invalid (unreadable, or ends before it starts): it
+    # never opens, so it needs a person, not a wait.
+    ("invalid_time_window", _SCHEDULE_INVALID),
+    ("schedule_invalid", _SCHEDULE_INVALID),
     # Day-of-week gate. The raw dialer code is `calling_not_allowed_on_Tue`
     # (from CallingRules.is_within_time_window) — it contains neither
     # "time_window" nor "day", so before this rule existed it fell through to

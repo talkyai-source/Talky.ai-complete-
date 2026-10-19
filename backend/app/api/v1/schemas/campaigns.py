@@ -143,6 +143,21 @@ class CampaignCallingSchedule(BaseModel):
             raise ValueError("allowed_days entries must be 0–6 (Mon–Sun)")
         return sorted(set(v))
 
+    @model_validator(mode="after")
+    def _window_starts_before_it_ends(self) -> "CampaignCallingSchedule":
+        # The dialer keeps an inverted window closed (invalid_time_window);
+        # refuse it here so the user hears about it at save, not as silence.
+        start, end = self.time_window_start, self.time_window_end
+        if start and end:
+            sh, sm = (int(x) for x in start.split(":"))
+            eh, em = (int(x) for x in end.split(":"))
+            if (sh, sm) > (eh, em):
+                raise ValueError(
+                    "calling hours must start before they end on the same day "
+                    "(calling hours can't run past midnight)"
+                )
+        return self
+
 
 from app.realtime.config import RealtimePrompt, RealtimeSettings
 

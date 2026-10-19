@@ -226,10 +226,18 @@ def test_amd_flag_still_flags_voicemail_without_any_text():
 
 
 def test_tts_terminal_failure_hangup_maps_to_failed():
-    vs = _voice_session(
-        started_offset_s=30, user_turns=2, tts_terminal_failure=True
-    )
+    vs = _voice_session(started_offset_s=30, tts_terminal_failure=True)
     assert resolve_call_outcome(vs) is CallOutcome.FAILED
+
+
+def test_tts_terminal_failure_after_the_callee_spoke_is_not_failed():
+    # FAILED is redialled 30 s and 2 min later: someone who just talked with
+    # the agent must not be rung back twice within minutes (review 2026-10-20).
+    # Same rule as the network-cause branch: a conversation happened.
+    vs = _voice_session(
+        started_offset_s=120, user_turns=2, tts_terminal_failure=True
+    )
+    assert resolve_call_outcome(vs) is CallOutcome.ANSWERED
 
 
 def test_tts_terminal_failure_does_not_override_goal_achieved():
@@ -332,13 +340,16 @@ def test_congestion_is_a_network_failure_not_busy():
         assert resolve_call_outcome(vs, hangup_reason=reason) is CallOutcome.FAILED
 
 
-def test_invalid_number_outcome_is_terminal_without_dnc_or_retry():
+def test_invalid_number_outcome_is_terminal_once_confirmed_without_dnc():
     from app.workers.disposition_policy import decide
 
     vs = _voice_session()
     outcome = resolve_call_outcome(vs, hangup_reason="Unallocated (unassigned) number")
     assert outcome is CallOutcome.INVALID
-    decision = decide(outcome, 1)
+    # One confirming dial a day later (a misconfigured line returns this for
+    # every number), then final.
+    assert decide(outcome, 1).should_retry is True
+    decision = decide(outcome, 2)
     assert decision.should_retry is False and decision.is_success is False
 
 

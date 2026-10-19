@@ -283,10 +283,13 @@ def resolve_call_outcome(
     # caller (voice_pipeline/tts_playback.py). The inbound resolver already
     # reads this flag; without it here an outbound call whose agent went mute
     # fell through to ANSWERED -- a terminal success that is never redialled.
+    # Only when the callee never spoke: FAILED is redialled 30 s and 2 min
+    # later, and someone who just talked with the agent must not be rung back
+    # twice within minutes (same rule as the network-cause branch below).
     if (
         getattr(cs, "_tts_terminal_failure_hangup", False) is True
         or getattr(voice_session, "_tts_terminal_failure_hangup", False) is True
-    ):
+    ) and _conversation_user_turns(voice_session) == 0:
         return CallOutcome.FAILED
 
     cause_outcome = _classify_cause(hangup_reason)

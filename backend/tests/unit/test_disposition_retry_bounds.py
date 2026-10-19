@@ -338,7 +338,6 @@ async def test_terminal_dispositions_are_never_redialled():
         CallOutcome.GOAL_ACHIEVED,
         CallOutcome.GOAL_NOT_ACHIEVED,
         CallOutcome.SPAM,
-        CallOutcome.INVALID,
         CallOutcome.DISCONNECTED,
         CallOutcome.UNAVAILABLE,
     ):
@@ -346,6 +345,17 @@ async def test_terminal_dispositions_are_never_redialled():
         dials = await _dial_until_exhausted(conn, service, outcome)
         assert dials == 1, f"{outcome.value} must never be redialled"
         assert queue.scheduled == []
+
+
+@pytest.mark.asyncio
+async def test_carrier_invalid_is_confirmed_once_then_never_redialled():
+    # A first INVALID (Q.850 1/22/28) gets one confirming dial a day later,
+    # because a misconfigured line returns it for every number; the second
+    # INVALID is final (review 2026-10-20).
+    conn, queue, service = _make_case()
+    dials = await _dial_until_exhausted(conn, service, CallOutcome.INVALID)
+    assert dials == 2
+    assert len(queue.scheduled) == 1
 
 
 # ──────────────────────────────────────────────────────────────────

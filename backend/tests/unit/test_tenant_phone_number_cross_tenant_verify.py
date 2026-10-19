@@ -58,6 +58,9 @@ class _Table:
         self.audit_events = []
         self.cross_tenant_args = []
         self.events = []
+        self.bypass_during_update = []
+        self.open_connections = 0
+        self.max_open_connections = 0
 
 
 class _Tx:
@@ -85,7 +88,7 @@ class _Conn:
 
     async def execute(self, sql, *args):
         if "app.bypass_rls" in sql:
-            self.bypass = True
+            self.bypass = "'on'" in sql
         match = re.search(r"app\.current_tenant_id = '([^']+)'", sql)
         if match:
             self.tenant = match.group(1)
@@ -115,6 +118,7 @@ class _Conn:
                     return dict(r)
             return None
         if sql.lstrip().startswith("UPDATE tenant_phone_numbers"):
+            self.table.bypass_during_update.append(self.bypass)
             tenant_id, did_id, method, verified_by, _token = args
             for r in self._visible():
                 if r["tenant_id"] == tenant_id and r["id"] == did_id:
@@ -131,9 +135,13 @@ class _AcquireCtx:
         self._conn = conn
 
     async def __aenter__(self):
+        table = self._conn.table
+        table.open_connections += 1
+        table.max_open_connections = max(table.max_open_connections, table.open_connections)
         return self._conn
 
     async def __aexit__(self, *exc):
+        self._conn.table.open_connections -= 1
         return None
 
 
@@ -280,3 +288,15 @@ async def test_verifications_of_one_number_are_serialised_before_the_holder_look
     kinds = [kind for kind, _ in table.events]
     assert kinds[:2] == ["lock", "lookup"], kinds
     assert table.events[0][1] == ("tpn_verify:442046132300",)
+
+
+async def test_verification_holds_one_connection_and_scopes_the_bypass_to_the_lookup():
+    """Review 2026-10-20: the holder lookup took a SECOND pool connection (no
+    acquire timeout) while the first held the row and advisory locks, so a
+    saturated pool could hang every verification and the calls sharing it."""
+    svc, table = _service(_row(DID_B, TENANT_B, NUMBER, "pending_verification"))
+
+    await _verify(svc)
+
+    assert table.max_open_connections == 1
+    assert table.bypass_during_update == [False]  # the write stays tenant-scoped

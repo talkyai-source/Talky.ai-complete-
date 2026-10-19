@@ -226,6 +226,8 @@ class DialerWorker:
         self._last_scheduled_check = datetime(2000, 1, 1, tzinfo=timezone.utc)
         # Stuck-job reaper cadence (epoch → run on first iteration).
         self._last_reap_check = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        # campaign_id -> monotonic time of its last persistent-outage ERROR.
+        self._line_outage_alerted_at: dict[str, float] = {}
 
     async def initialize(self) -> None:
         """Initialize connections to Redis and PostgreSQL."""
@@ -577,6 +579,7 @@ class DialerWorker:
             if not can_call:
                 from app.domain.services.dialer.block_reasons import (
                     SCHEDULE_BLOCK_CODES,
+                    BlockCode,
                     classify,
                     describe_schedule,
                     testing_override_notice,
@@ -643,6 +646,16 @@ class DialerWorker:
                         f"window={rules.time_window_start}-{rules.time_window_end}, "
                         f"days={rules.allowed_days}). "
                         f"Retrying in {delay}s (~{delay/3600:.1f}h)"
+                    )
+                elif blocked.code is BlockCode.SCHEDULE_INVALID:
+                    # The window never opens until a person fixes it: re-check
+                    # hourly, not every 5 minutes for every queued lead.
+                    delay = self._INVALID_WINDOW_RECHECK_SECONDS
+                    logger.warning(
+                        "Invalid calling window %s-%s for campaign %s: not dialling; "
+                        "re-checking in %ds",
+                        rules.time_window_start, rules.time_window_end,
+                        job.campaign_id, delay,
                     )
                 elif "lead_cooldown" in reason:
                     # The cooldown timestamp was set at call *origination* (not at answer)
@@ -1427,6 +1440,12 @@ class DialerWorker:
     # as the line stays refused (only campaign status ends it).
     _LINE_REFUSAL_CODE = "tenant_pbx_required"
     _LINE_REFUSED_REDEFER_SECONDS = 300
+    # ...doubling per consecutive refusal up to this (see
+    # _line_outage_redefer_seconds), so a line down for a day is not polled
+    # 288 times per queued lead.
+    _LINE_OUTAGE_MAX_REDEFER_SECONDS = 3600
+    # An invalid calling window (invalid_time_window) never opens on its own.
+    _INVALID_WINDOW_RECHECK_SECONDS = 3600
     # 503 codes that mean the calling service is not connected to the phone
     # system (adapter down, pod draining / full, telephony off on this node).
     # They are held exactly like a voice-pipeline 503 but are NOT a TTS/STT
@@ -2993,18 +3012,71 @@ class DialerWorker:
         ):
             await self._park_uncertain_origination(job, intent)
             return
+        delay = await self._line_outage_redefer_seconds(job)
         logger.warning(
             "dialer_telephony_outage_deferred job=%s attempt=%s redefer=%ss "
             "(same attempt, nothing consumed)",
-            job.job_id, job.attempt_number, self._LINE_REFUSED_REDEFER_SECONDS,
+            job.job_id, job.attempt_number, delay,
         )
+        self._alert_persistent_line_outage(job, "telephony_unavailable", delay)
         await self._publish_block(
             job, "telephony_unavailable", rules=rules,
-            retry_after_seconds=self._LINE_REFUSED_REDEFER_SECONDS,
+            retry_after_seconds=delay,
         )
         await self._redefer_before_intent_resolution(
             job, reason="telephony_unavailable",
-            delay_seconds=self._LINE_REFUSED_REDEFER_SECONDS,
+            delay_seconds=delay,
+        )
+
+    async def _line_outage_redefer_seconds(self, job: DialerJob) -> int:
+        """How long a down line or phone-system outage waits before the next
+        try: 5 min, doubling for each never-sent intent this job released for
+        it in the last 24 h (the one just released included), capped at 1 h.
+        A line down for a day costs about 24 cycles per lead instead of 288,
+        each of which re-runs CallGuard and the bridge. A failed count read
+        keeps the base delay."""
+        released = 0
+        try:
+            async with self._acquire_db() as conn:
+                released = await conn.fetchval(
+                    """
+                    SELECT count(*)
+                      FROM calls
+                     WHERE tenant_id = $1::uuid
+                       AND dialer_job_id = $2::uuid
+                       AND status = 'cancelled'
+                       AND provider_call_id IS NULL
+                       AND failure_reason IN ('line_not_ready', 'telephony_unavailable')
+                       AND created_at > NOW() - INTERVAL '24 hours'
+                    """,
+                    str(job.tenant_id),
+                    str(job.job_id),
+                )
+        except Exception as exc:
+            logger.warning(
+                "dialer_line_outage_count_failed job=%s error_type=%s",
+                job.job_id, type(exc).__name__,
+            )
+        doublings = min(max(int(released or 0) - 1, 0), 4)
+        return min(
+            self._LINE_REFUSED_REDEFER_SECONDS * (2 ** doublings),
+            self._LINE_OUTAGE_MAX_REDEFER_SECONDS,
+        )
+
+    def _alert_persistent_line_outage(self, job: DialerJob, kind: str, delay: int) -> None:
+        """One ERROR per campaign per hour once the backoff reaches its cap,
+        so an outage nobody fixes is not only a campaign banner."""
+        if delay < self._LINE_OUTAGE_MAX_REDEFER_SECONDS:
+            return
+        now = time.monotonic()
+        key = str(job.campaign_id)
+        if now - self._line_outage_alerted_at.get(key, float("-inf")) < 3600:
+            return
+        self._line_outage_alerted_at[key] = now
+        logger.error(
+            "dialer_line_outage_persistent campaign=%s tenant=%s kind=%s: calls have "
+            "waited on the phone line for about 1.5 h and now retry hourly",
+            job.campaign_id, job.tenant_id, kind,
         )
 
     async def _defer_refused_line(
@@ -3029,21 +3101,23 @@ class DialerWorker:
             await self._park_uncertain_origination(job, intent)
             return
         block_reason, job_reason = self._bridge_defer_labels(self._LINE_REFUSAL_CODE)
+        delay = await self._line_outage_redefer_seconds(job)
         logger.warning(
             "dialer_line_not_ready_deferred job=%s attempt=%s redefer=%ss "
             "(same attempt, nothing consumed)",
-            job.job_id, job.attempt_number, self._LINE_REFUSED_REDEFER_SECONDS,
+            job.job_id, job.attempt_number, delay,
         )
+        self._alert_persistent_line_outage(job, "line_not_ready", delay)
         await self._publish_block(
             job,
             block_reason,
             rules=rules,
-            retry_after_seconds=self._LINE_REFUSED_REDEFER_SECONDS,
+            retry_after_seconds=delay,
         )
         await self._redefer_before_intent_resolution(
             job,
             reason=job_reason,
-            delay_seconds=self._LINE_REFUSED_REDEFER_SECONDS,
+            delay_seconds=delay,
         )
 
     async def _attempt_settled_failed_unanswered(self, job: DialerJob) -> bool:
@@ -3305,7 +3379,7 @@ class DialerWorker:
                     f"""
                     UPDATE calls
                        SET status = 'cancelled',
-                           failure_reason = COALESCE(failure_reason, '{reason_literal}'),
+                           failure_reason = '{reason_literal}',
                            ended_at = COALESCE(ended_at, NOW()),
                            terminal_settled_at = COALESCE(terminal_settled_at, NOW()),
                            dialer_attempt_number = NULL,

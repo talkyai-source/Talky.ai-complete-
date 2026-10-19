@@ -69,6 +69,7 @@ _TITLES: dict[BlockCode, str] = {
     BlockCode.TESTING_MODE_SCHEDULE_BYPASSED: "TESTING MODE: schedule bypassed",
     BlockCode.SCHEDULE_DAY_NOT_ALLOWED: "Waiting for the next calling day",
     BlockCode.SCHEDULE_OUTSIDE_WINDOW: "Waiting for the calling window to open",
+    BlockCode.SCHEDULE_INVALID: "Calling hours are invalid",
     BlockCode.OUT_OF_MINUTES: "Out of plan minutes",
     BlockCode.METERING_UNAVAILABLE: "Plan minutes could not be checked",
     BlockCode.CAMPAIGN_NOT_RUNNING: "Campaign is not running",

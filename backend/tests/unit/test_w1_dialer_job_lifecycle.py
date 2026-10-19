@@ -818,3 +818,82 @@ async def test_release_helper_names_a_telephony_outage():
         _job(), intent, reason="telephony_unavailable") is True
     sql = conn.execute.call_args.args[0]
     assert "'telephony_unavailable'" in sql and "'line_not_ready'" not in sql
+
+
+# ═══ review 2026-10-20: a down line backs off instead of polling forever ════
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "released, expected",
+    [(0, 300), (1, 300), (2, 600), (3, 1200), (4, 2400), (5, 3600), (40, 3600)],
+)
+async def test_line_outage_backoff_doubles_from_five_minutes_to_an_hour(released, expected):
+    # ``released`` counts this job's never-sent intents released for a down
+    # line in the last 24 h, including the one just released.
+    w = DialerWorker()
+    _conn_pool(w, fetchval=released)
+    assert await w._line_outage_redefer_seconds(_job()) == expected
+
+
+@pytest.mark.asyncio
+async def test_line_outage_backoff_query_is_tenant_scoped_and_reads_only_never_sent_rows():
+    w = DialerWorker()
+    conn = _conn_pool(w, fetchval=2)
+    await w._line_outage_redefer_seconds(_job())
+    sql = conn.fetchval.call_args.args[0]
+    assert "tenant_id = $1::uuid" in sql and "dialer_job_id = $2::uuid" in sql
+    assert "status = 'cancelled'" in sql and "provider_call_id IS NULL" in sql
+    assert "'line_not_ready'" in sql and "'telephony_unavailable'" in sql
+    assert conn.fetchval.call_args.args[1:] == (TENANT_A, _job().job_id)
+
+
+@pytest.mark.asyncio
+async def test_line_outage_backoff_keeps_the_base_delay_when_the_count_cannot_be_read():
+    w = DialerWorker()
+    _conn_pool(w, error=RuntimeError("db down"))
+    assert await w._line_outage_redefer_seconds(_job()) == 300
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["line", "outage"])
+async def test_expired_hold_uses_the_backed_off_delay(kind):
+    w = _worker()
+    w._held_intent_has_headroom = AsyncMock(return_value=False)
+    w._line_outage_redefer_seconds = AsyncMock(return_value=2400)
+    intent = DialerCallIntent("call-1", "tk-1", "leg-1", "initiated", None, True)
+    if kind == "line":
+        await w._defer_refused_line(_job(), intent, None)
+    else:
+        await w._defer_telephony_outage(_job(), intent, None)
+    assert w.queue_service._redefer_inflight.call_args.kwargs["delay_seconds"] == 2400
+
+
+@pytest.mark.asyncio
+async def test_a_persistent_outage_raises_one_error_per_campaign(caplog):
+    w = _worker()
+    w._line_outage_redefer_seconds = AsyncMock(return_value=3600)  # at the cap
+    intent = DialerCallIntent("call-1", "tk-1", "leg-1", "initiated", None, True)
+    with caplog.at_level("ERROR", logger="app.workers.dialer_worker"):
+        await w._defer_refused_line(_job(), intent, None)
+        await w._defer_refused_line(_job(attempt=2), intent, None)
+    alerts = [r for r in caplog.records if "dialer_line_outage_persistent" in r.getMessage()]
+    assert len(alerts) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason, literal", [
+    ("line_not_ready", "'line_not_ready'"),
+    ("telephony_unavailable", "'telephony_unavailable'"),
+])
+async def test_release_always_stamps_the_outage_reason(reason, literal):
+    # The daily per-lead cap and the outage backoff both recognise a never-sent
+    # intent by this failure_reason; COALESCE kept an earlier value, so a
+    # released row could count as a real dial against the lead's daily cap.
+    w = DialerWorker()
+    conn = _conn_pool(w)
+    intent = DialerCallIntent("call-1", "tk-1", "leg-1", "initiated", None, False)
+    await w._release_intent_line_not_ready(_job(), intent, reason=reason)
+    sql = conn.execute.call_args.args[0]
+    assert f"failure_reason = {literal}" in sql
+    assert "COALESCE(failure_reason" not in sql
