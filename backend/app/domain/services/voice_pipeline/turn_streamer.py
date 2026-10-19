@@ -38,6 +38,7 @@ from app.domain.services.end_session_action import (
 from app.domain.services.voice_pipeline.speech_guard import guard_spoken_sentence
 from app.domain.services.voice_pipeline.figure_grounding import guard_figures
 from app.domain.services.voice_pipeline.end_call import strip_and_flag
+from app.domain.services.voice_pipeline.tool_filler import ToolFiller
 from app.domain.services.llm_guardrails import get_guardrails
 from app.domain.services.voice_pipeline import expressive_caps
 from app.services.scripts.prompts.guardrails import (
@@ -447,6 +448,19 @@ class TurnStreamer:
         t_tts_first: Optional[float] = None
         t_tts_end: Optional[float] = None
 
+        async def _speak_filler(text: str) -> bool:
+            session.tts_active = True
+            return await self._p.synthesize_and_send_audio(
+                session, text, websocket, track_latency=False,
+            )
+
+        # One short line if a tool step leaves the caller in silence; never in
+        # the reply history or the measured reply time (tool_filler.py).
+        tool_filler = ToolFiller(
+            _speak_filler, turn_start=t_llm_start,
+            turn_index=int(getattr(session, "turn_id", 0) or 0),
+        )
+
         # One conversational model owns wording and chooses its available tools.
         if context_failure:
             logger.warning("voice_context_unavailable call_id=%s reason=%s", call_id, context_failure)
@@ -457,6 +471,9 @@ class TurnStreamer:
             _token_iter = _context_recovery()
         elif offered_tools:
             async def _voice_tool_runner(_name: str, _args: dict) -> str:
+                # Recording the caller's details is silent bookkeeping, not a wait.
+                if _name != CONTACT_TOOL_NAME and t_tts_first is None and not _barged():
+                    tool_filler.arm()
                 if _name == KB_TOOL_NAME:
                     result = await run_knowledge_lookup(session, _args)
                     evidence = getattr(session, "_knowledge_evidence", None) or {}
@@ -633,6 +650,7 @@ class TurnStreamer:
                     if not sentence:
                         continue
 
+                    await tool_filler.settle()
                     if _barged():
                         tts_was_interrupted = True
                         break
@@ -746,6 +764,7 @@ class TurnStreamer:
                 if sentence:
                     sentence = guard_figures(session, sentence, _figure_sources)
                 if sentence:
+                    await tool_filler.settle()
                     if t_tts_first is None:
                         t_tts_first = time.monotonic()
                         self._p.latency_tracker.mark_tts_start(call_id)
@@ -778,6 +797,7 @@ class TurnStreamer:
             and not _barged()
         ):
             recovery = "Goodbye." if caller_finished else "Sorry, I didn't quite catch that — could you say it again?"
+            await tool_filler.settle()
             if caller_finished:
                 session._end_call_requested = True
             logger.warning(
@@ -797,6 +817,8 @@ class TurnStreamer:
             if not tts_was_interrupted:
                 session._spoken_sentences.append(recovery)
 
+        # No filler may outlive its turn (a barge-in can end the turn first).
+        await tool_filler.settle()
         llm_latency_ms = (t_llm_done - t_llm_start) * 1000
         tts_latency_ms = (
             (t_tts_end - t_tts_first) * 1000

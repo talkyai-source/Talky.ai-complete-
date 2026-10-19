@@ -21,6 +21,7 @@ from app.domain.models.ai_config import AIProviderConfig
 from app.domain.services.voice_orchestrator import Direction, VoiceSessionConfig
 from app.domain.services.global_ai_config import get_global_config
 from app.domain.services.campaign_brief import campaign_guidance_text
+from app.domain.services.voice_pipeline.spoken_pronunciations import tts_pronunciation_pairs
 from app.domain.services.voice_tuning import (
     VoiceTuning,
     get_voice_tuning_resolver,
@@ -1771,6 +1772,9 @@ def build_telephony_session_config(
         # T3.9 lookup above to keep the call sites consistent.
         tenant_id=_tenant_id,
         contact_phone_region=_contact_phone_region,
+        tts_pronunciations=tuple(tts_pronunciation_pairs(
+            (script_config.get("campaign_slots") or {}).get("pronunciations")
+        )),
         agent_config=agent_config,
         system_prompt=system_prompt,
         campaign_guidance=campaign_guidance_text(_tenant_additional_instructions, _campaign_brief),

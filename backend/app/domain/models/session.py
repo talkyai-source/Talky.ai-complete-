@@ -93,6 +93,10 @@ class CallSession(BaseModel):
             "means non-E.164 numbers must ask for country context; never US by default."
         ),
     )
+    tts_pronunciations: List[tuple[str, str]] = Field(
+        default_factory=list,
+        description="Campaign (written, spoken) pairs applied only to the text sent to the voice",
+    )
     
     # ========== Conversation State (Day 5) ==========
     conversation_state: ConversationState = Field(

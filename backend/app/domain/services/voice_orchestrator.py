@@ -308,6 +308,9 @@ class VoiceSessionConfig(RealtimeSessionConfig):
     # number. None is fail-closed: the agent asks for a country code rather than
     # silently assuming US.
     contact_phone_region: Optional[str] = None
+    # Campaign pronunciations applied to what the voice says
+    # (voice_pipeline/spoken_pronunciations.py).
+    tts_pronunciations: tuple = ()
     # Only enable this when the session is backed by a real row in `calls`.
     # Browser demos generate ephemeral call_ids that do not satisfy the FK.
     event_logging_enabled: bool = False
@@ -620,6 +623,7 @@ class VoiceOrchestrator:
             stt_language=config.stt_language or "en",
             voice_id=config.voice_id,
             contact_phone_region=config.contact_phone_region,
+            tts_pronunciations=list(config.tts_pronunciations),
             started_at=datetime.utcnow(),
             last_activity_at=datetime.utcnow(),
         )

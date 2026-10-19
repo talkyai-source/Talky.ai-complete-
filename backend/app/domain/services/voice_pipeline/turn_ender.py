@@ -22,6 +22,7 @@ from app.core.telemetry import pipeline_span, voice_span
 from app.domain.models.conversation import Message, MessageRole
 from app.domain.models.session import CallSession, CallState
 from app.domain.services.voice_pipeline.backchannel import is_backchannel as _is_backchannel
+from app.domain.services.voice_pipeline.turn_latency import turn_latency_report
 from app.services.scripts.echo_guard import strip_self_echo_multi
 from app.domain.services.voice_pipeline.identity_disposition import (
     contains_dnc,
@@ -730,6 +731,9 @@ class TurnEnder:
             session._current_turn_epoch = _epoch
             self._p.latency_tracker.mark_speech_end(call_id)
             self._p.latency_tracker.mark_llm_start(call_id)
+            # When the caller's voice last had energy, frozen now: later noise
+            # during the reply must not move this turn's end of speech.
+            session._turn_voice_last_at = getattr(session, "_caller_voice_last_at", None)
 
             # NOTE: user message is appended inside _run_turn, which owns the
             # history snapshot + rollback on error/cancellation.  Do NOT append
@@ -866,6 +870,20 @@ class TurnEnder:
                     },
                 )
 
+                # Reply time from the caller's real end of speech, in parts
+                # that add up (2026-10-20). In the message, not `extra`, which
+                # the console formatter drops; phone calls have no Test agent
+                # socket, so this line is their record.
+                latency_report = turn_latency_report(
+                    tracked, getattr(session, "_turn_voice_last_at", None)
+                )
+                if latency_report:
+                    logger.info(
+                        "turn_latency call_id=%s turn=%s %s",
+                        call_id[:12], session.turn_id,
+                        " ".join(f"{k}={v}" for k, v in latency_report.items()),
+                    )
+
                 # Slow-turn marker. Per Hamming.ai's 2026 production benchmarks
                 # (P50 1.4s, P95 4.3s, P99 8.4s) and Twilio's mouth-to-ear
                 # upper limit of 1400ms, anything past 1500ms response_start
@@ -897,9 +915,11 @@ class TurnEnder:
                     try:
                         await websocket.send_json({
                             "type": "turn_complete",
+                            "turn_id": session.turn_id,
                             "llm_latency_ms": round(llm_latency, 1),
                             "tts_latency_ms": round(tts_latency, 1),
                             "total_latency_ms": round(total_wall, 1),
+                            "latency": latency_report,
                         })
                     except Exception as e:
                         logger.warning(f"Failed to send turn_complete to websocket: {e}")

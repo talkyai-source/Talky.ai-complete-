@@ -202,3 +202,19 @@ test("the agent holds on tts_pause, continues on tts_resume, and an interruption
     assert.equal(total("suspends"), 2);
     assert.equal(total("resumes"), resumesBefore + 2, "an interruption must leave the player able to play the next reply");
 });
+
+test("each finished turn shows how fast the agent replied", async () => {
+    mock.method(sharedHttpClient(), "request", async () => ({}));
+    render(<TestAgentButton campaignId="camp-1" />);
+    startTest();
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1), { timeout: SLOW });
+    const ws = FakeWebSocket.instances[0];
+    await act(async () => { ws.serverSends(READY); });
+    await act(async () => {
+        ws.serverSends({
+            type: "turn_complete", turn_id: 1,
+            latency: { reply_ms: 1240, end_of_turn_ms: 500, ai_first_word_ms: 300, voice_first_audio_ms: 200, other_ms: 240 },
+        });
+    });
+    assert.match(screen.getByTestId("test-reply-time").textContent || "", /Last reply: 1\.24 s/);
+});

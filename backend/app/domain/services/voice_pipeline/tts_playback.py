@@ -26,6 +26,7 @@ from typing import Optional
 from fastapi import WebSocket
 
 from app.domain.models.session import CallSession
+from app.domain.services.voice_pipeline.spoken_pronunciations import apply_pronunciations
 from app.infrastructure.telephony.browser_media_gateway import SessionGoneError
 
 # TtsDeliveryError is imported lazily inside synthesize_and_send, not here at
@@ -175,6 +176,9 @@ class TtsPlayback:
         submission alone never certifies that the caller heard the audio.
         """
         call_id = session.call_id
+        # The voice gets the campaign's spoken forms; everything else (logs,
+        # recognition context, transcript) keeps the real spelling.
+        spoken_text = apply_pronunciations(text, getattr(session, "tts_pronunciations", None))
         session._tts_playout_completed = False
         session._tts_playback_receipt = None
         session._tts_playback_utterance_id = None
@@ -313,7 +317,7 @@ class TtsPlayback:
             # under one second; three seconds per attempt preserves a retry
             # without leaving a caller in ten seconds of unexplained silence.
             _tts_iter = self._p.tts_provider.stream_synthesize(
-                text,
+                spoken_text,
                 voice_id=session.voice_id,
                 sample_rate=self._p.tts_sample_rate,
                 call_id=call_id,
@@ -402,7 +406,7 @@ class TtsPlayback:
                         except Exception:
                             pass
                         _tts_iter = self._p.tts_provider.stream_synthesize(
-                            text,
+                            spoken_text,
                             voice_id=session.voice_id,
                             sample_rate=self._p.tts_sample_rate,
                             call_id=call_id,
@@ -428,7 +432,7 @@ class TtsPlayback:
                         except Exception:
                             pass
                         _tts_iter = self._p.tts_provider.stream_synthesize(
-                            text,
+                            spoken_text,
                             voice_id=session.voice_id,
                             sample_rate=self._p.tts_sample_rate,
                             call_id=call_id,

@@ -24,7 +24,10 @@ import { useAccessToken } from "@/lib/auth-hooks";
 import { sharedHttpClient } from "@/lib/api";
 import {
     buildCampaignTestWsUrl,
+    describeReplyTime,
     describeTestSession,
+    parseTurnLatency,
+    type TurnLatency,
 } from "@/components/campaigns/test-agent-session";
 
 function resolveBackendWsBaseUrl(): string {
@@ -69,6 +72,8 @@ export function TestAgentButton({
     const [activeEngine, setActiveEngine] = useState("");
     const [phase, setPhase] = useState<Phase>("idle");
     const [error, setError] = useState<string | null>(null);
+    // How fast the agent answered the last turn (from the end of your speech).
+    const [lastReply, setLastReply] = useState<TurnLatency | null>(null);
     const inCall = phase !== "idle";
 
     // WebSocket + audio refs (same shape as voice-agent-popup).
@@ -337,9 +342,12 @@ export function TestAgentButton({
                 dropAudioRef.current = false;
                 setPhase("speaking");
                 break;
-            case "turn_complete":
+            case "turn_complete": {
                 setPhase("listening");
+                const latency = parseTurnLatency(data.latency);
+                if (latency) setLastReply(latency);
                 break;
+            }
             case "playback_start":
                 resetPlayback();
                 setPlayerRunning(true);
@@ -385,6 +393,7 @@ export function TestAgentButton({
     const connect = useCallback(async (fs: "agent" | "user") => {
         const session = ++sessionRef.current;
         setError(null);
+        setLastReply(null);
         setPhase("connecting");
 
         const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
@@ -550,6 +559,11 @@ export function TestAgentButton({
             )}
 
             {activeEngine && <p className="text-xs text-muted-foreground">Running: {activeEngine}</p>}
+            {lastReply && (
+                <p className="text-xs text-muted-foreground" data-testid="test-reply-time">
+                    {describeReplyTime(lastReply)}
+                </p>
+            )}
                 {error && !inCall && (
                 <span role="alert" className="text-xs text-red-600 dark:text-red-400 max-w-[220px]">
                     {error}

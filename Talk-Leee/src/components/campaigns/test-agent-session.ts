@@ -40,6 +40,45 @@ export interface TestSessionDescription {
     opening: string;
 }
 
+/**
+ * The backend's per-turn reply time (`turn_complete.latency`): from the moment
+ * the tester actually stopped talking to the agent's first audio, with its
+ * parts. A part the server could not measure is null.
+ */
+export interface TurnLatency {
+    reply_ms: number;
+    end_of_turn_ms: number | null;
+    ai_first_word_ms: number | null;
+    voice_first_audio_ms: number | null;
+}
+
+function optionalMs(value: unknown): number | null {
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+export function parseTurnLatency(value: unknown): TurnLatency | null {
+    if (!value || typeof value !== "object") return null;
+    const v = value as Record<string, unknown>;
+    const reply = optionalMs(v.reply_ms);
+    if (reply === null) return null;
+    return {
+        reply_ms: reply,
+        end_of_turn_ms: optionalMs(v.end_of_turn_ms),
+        ai_first_word_ms: optionalMs(v.ai_first_word_ms),
+        voice_first_audio_ms: optionalMs(v.voice_first_audio_ms),
+    };
+}
+
+export function describeReplyTime(latency: TurnLatency): string {
+    const secs = (ms: number) => `${(ms / 1000).toFixed(2)} s`;
+    const parts = [
+        latency.end_of_turn_ms !== null ? `waiting for you to finish ${secs(latency.end_of_turn_ms)}` : null,
+        latency.ai_first_word_ms !== null ? `AI ${secs(latency.ai_first_word_ms)}` : null,
+        latency.voice_first_audio_ms !== null ? `voice ${secs(latency.voice_first_audio_ms)}` : null,
+    ].filter((p): p is string => p !== null);
+    return `Last reply: ${secs(latency.reply_ms)}${parts.length ? ` (${parts.join(" · ")})` : ""}`;
+}
+
 export function describeTestSession(input: {
     firstSpeaker: FirstSpeaker;
     agentName: string;
