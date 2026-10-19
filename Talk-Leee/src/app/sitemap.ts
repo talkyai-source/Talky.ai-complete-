@@ -13,6 +13,7 @@ const PUBLIC_ROUTES = [
   "/ai-voice-agent",
   "/ai-voices",
   "/contact",
+  "/pricing",
   "/privacy",
   "/terms",
   "/industries/education",

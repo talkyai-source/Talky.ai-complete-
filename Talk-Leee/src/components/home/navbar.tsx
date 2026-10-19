@@ -35,6 +35,7 @@ export function Navbar() {
     pathname === "/ai-voice-agent" ||
     pathname.startsWith("/ai-voice-agent/");
   const isContactPage = pathname === "/contact" || pathname.startsWith("/contact/");
+  const isPricingPage = pathname === "/pricing" || pathname.startsWith("/pricing/");
   const isLegalPage =
     pathname === "/terms" ||
     pathname.startsWith("/terms/") ||
@@ -42,7 +43,7 @@ export function Navbar() {
     pathname.startsWith("/privacy/");
   // Every standalone marketing page shares one navbar treatment.
   const isStandalonePage =
-    isAiVoices || isUseCasesPage || isIndustriesPage || isProductsPage || isContactPage || isLegalPage;
+    isAiVoices || isUseCasesPage || isIndustriesPage || isProductsPage || isPricingPage || isContactPage || isLegalPage;
   const mobileMenuRef = useRef<HTMLDetailsElement | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
@@ -165,6 +166,7 @@ export function Navbar() {
         ],
       },
       { label: "Industries", items: [...industryNavItems] },
+      { label: "Pricing", href: "/pricing" },
       { label: "Contact Us", href: "/contact" },
     ];
   }, []);
@@ -342,11 +344,11 @@ export function Navbar() {
         }}
       >
         <div className="w-full">
-          <div className="navbarInnerGrid grid h-full grid-cols-[1fr_auto] md:grid-cols-[auto_auto_auto] items-center gap-3 md:gap-7">
+          <div className="navbarInnerGrid grid h-full grid-cols-[1fr_auto] lg:grid-cols-[auto_auto_auto] items-center gap-3 md:gap-7">
             <div className="flex items-center gap-3 justify-self-start">
               <details
                 ref={mobileMenuRef}
-                className="navbarMobileMenu relative md:hidden group"
+                className="navbarMobileMenu relative lg:hidden group"
                 onToggle={(event) => {
                   setMobileMenuOpen(event.currentTarget.open);
                 }}
@@ -512,7 +514,7 @@ export function Navbar() {
 
           <ul
             ref={desktopNavRef}
-            className="navbarDesktopNav hidden md:flex items-center justify-center gap-1.5 lg:gap-2.5"
+            className="navbarDesktopNav hidden lg:flex items-center justify-center gap-1.5 lg:gap-2.5"
             role="list"
           >
             {menuItems.map((item) => {
@@ -693,7 +695,7 @@ export function Navbar() {
               <Link
                 href={authAction.href}
                 className={[
-                  "navbarDesktopAction hidden md:inline-flex px-3 text-[13px] font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400 transition-[background-color,box-shadow,transform] duration-200 ease-out shadow-[0_2px_8px_rgba(99,102,241,0.25),0_1px_2px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_16px_rgba(99,102,241,0.35),0_2px_4px_rgba(0,0,0,0.08)] hover:scale-[1.02] active:scale-[1.0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                  "navbarDesktopAction hidden lg:inline-flex px-3 text-[13px] font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400 transition-[background-color,box-shadow,transform] duration-200 ease-out shadow-[0_2px_8px_rgba(99,102,241,0.25),0_1px_2px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_16px_rgba(99,102,241,0.35),0_2px_4px_rgba(0,0,0,0.08)] hover:scale-[1.02] active:scale-[1.0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                   isCompact ? "py-1" : "py-1.5",
                 ].join(" ")}
               >
@@ -713,7 +715,7 @@ export function Navbar() {
                 aria-hidden="true"
                 data-auth-slot
                 className={[
-                  "navbarDesktopAction hidden md:inline-flex px-3 text-[13px] font-medium rounded-lg bg-indigo-600 text-white invisible",
+                  "navbarDesktopAction hidden lg:inline-flex px-3 text-[13px] font-medium rounded-lg bg-indigo-600 text-white invisible",
                   isCompact ? "py-1" : "py-1.5",
                 ].join(" ")}
               >

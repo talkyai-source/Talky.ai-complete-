@@ -29,6 +29,7 @@ export function Footer() {
     { label: "Products", href: "/ai-voice-dialer" },
     { label: "Use Cases", href: "/use-cases/customer-services-support" },
     { label: "Industries", href: "/industries/healthcare" },
+    { label: "Pricing", href: "/pricing" },
     { label: "Contact Us", href: "/contact" },
   ];
 
@@ -57,12 +58,12 @@ export function Footer() {
           {/* Link columns. One grid whose two columns are the outer grid's own
               tracks (column subgrid) and whose rows both lists share (row
               subgrid), so row N of the navigation and row N of the secondary
-              links sit in the same track and take its height. row-span-5 is
-              the longer list's row count; both lists span the same five tracks. */}
+              links sit in the same track and take its height. row-span-6 is
+              the longer list's row count; both lists span the same six tracks. */}
           <div className="col-span-2 grid grid-cols-subgrid content-start gap-y-4">
           {/* Navigation */}
-          <nav className="row-span-5 grid grid-rows-subgrid">
-            <ul className="row-span-5 grid grid-rows-subgrid items-center justify-items-start gap-y-4">
+          <nav className="row-span-6 grid grid-rows-subgrid">
+            <ul className="row-span-6 grid grid-rows-subgrid items-center justify-items-start gap-y-4">
               {navLinks.map((link) => (
                 <li key={link.label}>
                   {/* block: the link box is the row line box (as the
@@ -80,7 +81,7 @@ export function Footer() {
           </nav>
 
           {/* Secondary links */}
-          <div className="row-span-5 grid grid-rows-subgrid items-center justify-items-start gap-y-4 text-sm">
+          <div className="row-span-6 grid grid-rows-subgrid items-center justify-items-start gap-y-4 text-sm">
             <Link
               href="/terms"
               className="font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md relative after:content-[''] after:absolute after:left-0 after:bottom-[-4px] after:w-0 after:h-0.5 after:bg-primary after:transition-all hover:after:w-full"

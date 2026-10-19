@@ -63,6 +63,7 @@ const PAGE_ROUTES = [
     "/industries/travel-industry",
     "/meetings",
     "/notifications",
+    "/pricing",
     "/privacy",
     "/recordings",
     "/reminders",
@@ -88,8 +89,8 @@ test("every page route redirects to its trailing-slashed form", () => {
 });
 
 test("page route count matches the app router page count", () => {
-    // 72 pages: 71 listed above plus "/" itself, which is already canonical.
-    assert.equal(PAGE_ROUTES.length + 1, 72);
+    // 73 pages: 72 listed above plus "/" itself, which is already canonical.
+    assert.equal(PAGE_ROUTES.length + 1, 73);
 });
 
 test("already-canonical paths are not redirected again", () => {
