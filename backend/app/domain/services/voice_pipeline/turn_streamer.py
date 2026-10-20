@@ -16,6 +16,7 @@ the request assembly that uses them.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -58,6 +59,10 @@ from app.domain.services.voice_pipeline.contact_recording import (
     CONTACT_TOOL_NAME, CONTACT_TOOL_SPEC, record_contact,
 )
 from app.domain.services.voice_pipeline.action_tools import (
+    ACTION_SCHEDULE_CALLBACK,
+    ACTION_SEND_EMAIL,
+    ACTION_SUBMIT_FORM,
+    ACTION_TRANSFER_CALL,
     action_results_for_session,
     action_tool_system_addendum,
     action_tools_for_turn,
@@ -79,6 +84,13 @@ _HISTORY_OMISSION_NOTICE = (
     "to remember omitted details; ask the caller when an earlier detail matters."
 )
 
+# Tools that can leave the caller waiting: a knowledge lookup (the model round
+# after it) and the outside actions. Everything else (record_contact, end_call)
+# returns at once and never gets a filler.
+_FILLER_TOOLS = frozenset({
+    KB_TOOL_NAME, ACTION_SCHEDULE_CALLBACK, ACTION_SEND_EMAIL,
+    ACTION_SUBMIT_FORM, ACTION_TRANSFER_CALL,
+})
 _END_SESSION_TOOL_INSTRUCTIONS = build_end_session_tool_instructions()
 
 
@@ -396,6 +408,15 @@ class TurnStreamer:
         # Source hosts help sentence segmentation keep URLs intact.
         turn_grounding: list[str] = []
 
+        def _leak_exempt():
+            # Read-back values, plus vendor names the campaign's own approved
+            # knowledge mentions (a Twilio integrator may say "Twilio").
+            from app.services.scripts.prompts.prompt_safety import vendor_names_in
+            evidence = getattr(session, "_knowledge_evidence", None) or {}
+            return (*_protected_readback, *vendor_names_in(
+                evidence.get("text"), *getattr(session, "_knowledge_grounding", []), *turn_grounding,
+            ))
+
         def _figure_sources():
             # Everything the model was given or heard this turn (HAL-2).
             evidence = getattr(session, "_knowledge_evidence", None) or {}
@@ -450,9 +471,15 @@ class TurnStreamer:
 
         async def _speak_filler(text: str) -> bool:
             session.tts_active = True
-            return await self._p.synthesize_and_send_audio(
+            r = await self._p.synthesize_and_send_audio(
                 session, text, websocket, track_latency=False,
             )
+            if r and getattr(session, "_tts_delivery_failed", False):
+                # A failed filler is not a caller barge-in: the real answer
+                # must still be spoken, and the turn is not tainted.
+                session._tts_delivery_failed = False
+                return False
+            return r
 
         # One short line if a tool step leaves the caller in silence; never in
         # the reply history or the measured reply time (tool_filler.py).
@@ -472,14 +499,22 @@ class TurnStreamer:
         elif offered_tools:
             async def _voice_tool_runner(_name: str, _args: dict) -> str:
                 # Recording the caller's details is silent bookkeeping, not a wait.
-                if _name != CONTACT_TOOL_NAME and t_tts_first is None and not _barged():
+                # Only a lookup or a slow outside action leaves a wait; end_call
+                # and other control tools return at once (no "One moment" on
+                # the way out).
+                if _name in _FILLER_TOOLS and t_tts_first is None and not _barged():
                     tool_filler.arm()
                 if _name == KB_TOOL_NAME:
                     result = await run_knowledge_lookup(session, _args)
                     evidence = getattr(session, "_knowledge_evidence", None) or {}
                     status = evidence.get("status", "unavailable")
-                    available = status == "available"
-                    turn_grounding[:] = getattr(session, "_knowledge_grounding", []) if available else []
+                    # A multi-page section's pages accumulate within the turn;
+                    # any other lookup supersedes the previous facts.
+                    _grounded = list(getattr(session, "_knowledge_grounding", []))
+                    if status == "source_page":
+                        turn_grounding.extend(_grounded)
+                    else:
+                        turn_grounding[:] = _grounded
                     current = getattr(session, "_live_structured_state", _structured)
                     session._live_structured_state = reduce_live_state(
                         current,
@@ -620,7 +655,7 @@ class TurnStreamer:
 
                     sentence = guardrails.clean_response(
                         raw_sentence, tts_model_id=_tts_model_id,
-                        protected_values=_protected_readback,
+                        protected_values=_leak_exempt(),
                     )
                     # Drop only what cannot be SPOKEN — punctuation or
                     # whitespace left over from cleaning. The test used to be
@@ -651,7 +686,7 @@ class TurnStreamer:
                         continue
 
                     await tool_filler.settle()
-                    if _barged():
+                    if tool_filler.interrupted or _barged():
                         tts_was_interrupted = True
                         break
 
@@ -682,6 +717,11 @@ class TurnStreamer:
                 if tts_was_interrupted:
                     break
 
+        except asyncio.CancelledError:
+            # The turn task was cancelled (barge-in, hangup): the filler is a
+            # separate task and would otherwise speak after the caller did.
+            tool_filler.cancel()
+            raise
         except LLMTimeoutError:
             if sentences_done > 0 or t_tts_first is not None:
                 # Partial content already sent to TTS — Groq stalled mid-stream.
@@ -758,13 +798,18 @@ class TurnStreamer:
                 raw_tail = strip_and_flag(session, buf.strip())
                 sentence = guardrails.clean_response(
                     raw_tail, tts_model_id=_tts_model_id,
-                    protected_values=_protected_readback,
+                    protected_values=_leak_exempt(),
                 )
                 sentence = guard_spoken_sentence(session, sentence)
                 if sentence:
                     sentence = guard_figures(session, sentence, _figure_sources)
                 if sentence:
                     await tool_filler.settle()
+                if sentence and tool_filler.interrupted:
+                    # The caller talked over the filler: the answer stays unspoken.
+                    tts_was_interrupted = True
+                    sentence = ""
+                if sentence:
                     if t_tts_first is None:
                         t_tts_first = time.monotonic()
                         self._p.latency_tracker.mark_tts_start(call_id)
@@ -795,6 +840,7 @@ class TurnStreamer:
             and (not suppressed_for_action or caller_finished)
             and not getattr(session, "_tts_delivery_failed", False)
             and not _barged()
+            and not tool_filler.interrupted
         ):
             recovery = "Goodbye." if caller_finished else "Sorry, I didn't quite catch that — could you say it again?"
             await tool_filler.settle()

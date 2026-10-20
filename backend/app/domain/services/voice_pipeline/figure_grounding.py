@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 UNGROUNDED_FIGURE_LINE = "I can't confirm that exact figure from the information I have."
 
 _NUMBER = re.compile(
-    r"(?<![\w.,])(?P<num>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)"
+    r"(?:(?<![\w.,])|(?<=\b[Rr][Ss]\.)|(?<=\b[Rr][Ss])|(?<=\b[A-Z]{3}))(?P<num>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)"
     r"(?:(?P<suffix>[kKmM]|bn)(?!\w)|(?!\w))"
     r"(?:\s+(?P<scale>thousand|million|billion)\b)?"
 )

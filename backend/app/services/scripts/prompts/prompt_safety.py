@@ -187,11 +187,30 @@ def scan_for_injection(text: str) -> bool:
 # deliberately does NOT include "AI" / "assistant" / "artificial intelligence" —
 # HARD RULE 1 explicitly allows the agent to admit "I'm an AI assistant for
 # {company}" when asked. We only catch the *technical* disclosure.
+_VENDOR_NAMES = re.compile(r"\b(groq|gpt-?\d|gpt-oss|openai|anthropic|"
+                           r"cartesia|deepgram|elevenlabs|eleven\s*labs|sonic-?\d|"
+                           r"vonage|twilio|freeswitch|opensips)\b", re.IGNORECASE)
+
+
+def vendor_names_in(*texts: object) -> tuple[str, ...]:
+    """Vendor names that the campaign's own approved text mentions.
+
+    A tenant selling or supporting a product built on these vendors names them
+    as a business fact; passing the result as ``protected_values`` keeps those
+    sentences from being scrubbed. Only pass approved knowledge here, never the
+    system prompt (which names the vendors in order to forbid them).
+    """
+    found: dict[str, None] = {}
+    for text in texts:
+        if text:
+            for match in _VENDOR_NAMES.finditer(str(text)):
+                found.setdefault(match.group(0), None)
+    return tuple(found)
+
+
 _LEAK_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Names that mean nothing else are leaks wherever they appear.
-    re.compile(r"\b(groq|gpt-?\d|gpt-oss|openai|anthropic|"
-               r"cartesia|deepgram|elevenlabs|eleven\s*labs|sonic-?\d|"
-               r"vonage|twilio|freeswitch|opensips)\b", re.IGNORECASE),
+    _VENDOR_NAMES,
     # Names that are also people, streets, products and animals (Claude, Gemini
     # Court, llama trekking, Mistral fans, whisper-quiet, Asterisk Road) only
     # count as disclosure when the sentence says what the agent itself runs on.
@@ -248,13 +267,28 @@ _READBACK_SIGNATURE_RE = re.compile(
 )
 
 
+_SELF_DISCLOSURE_CUE_RE = re.compile(
+    r"\b(?:i|i'm|i\s+am|this\s+(?:assistant|agent|system|bot|ai|call)|"
+    r"the\s+(?:assistant|ai|agent|model|bot)|my\s+\w+)\b"
+    r"[^.\n]{0,40}?\b(?:run|runs|running|use|uses|using|powered|built|based|made|"
+    r"trained|created|developed)\b",
+    re.IGNORECASE,
+)
+
+
 def _is_readback_sentence(sentence: str, protected: tuple[str, ...]) -> bool:
     """True if the sentence contains a pending/captured core value or otherwise
     looks like an email/number read-back — in which case it is EXEMPT from the
     leak scrubber (the confirmation must reach the caller)."""
     low = sentence.lower()
-    if any(v and v.lower() in low for v in protected):
-        return True
+    for v in protected:
+        if v and v.lower() in low:
+            # A vendor name the campaign's knowledge mentions excuses a business
+            # fact ("we integrate with Twilio"), never the agent saying what it
+            # itself runs on ("I am powered by Twilio").
+            if _VENDOR_NAMES.fullmatch(v) and _SELF_DISCLOSURE_CUE_RE.search(sentence):
+                continue
+            return True
     return bool(_READBACK_SIGNATURE_RE.search(sentence))
 
 # Spoken when a reply is entirely redacted — keeps the call graceful instead of

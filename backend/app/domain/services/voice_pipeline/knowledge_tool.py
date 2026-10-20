@@ -223,7 +223,14 @@ async def run_knowledge_lookup(session, arguments: dict) -> str:
     """Read the cached call snapshot; a new request supersedes previous facts."""
     result = run_section_request(_session_catalog(session), arguments)
     session._knowledge_evidence = result
-    session._knowledge_grounding = [p["text"] for p in result["passages"]] if result["status"] == "available" else []
+    if result["status"] == "available":
+        session._knowledge_grounding = [p["text"] for p in result["passages"]]
+    elif result["status"] == "source_page" and result.get("source_text"):
+        # A section too large for passages is read page by page; the page text
+        # is what the agent may quote figures from.
+        session._knowledge_grounding = [result["source_text"]]
+    else:
+        session._knowledge_grounding = []
     # One line per lookup: what the model asked for and what it got (ids and
     # sizes only, never source text). Diagnosing call c8df9107 needed probes.
     args = arguments if isinstance(arguments, dict) else {}

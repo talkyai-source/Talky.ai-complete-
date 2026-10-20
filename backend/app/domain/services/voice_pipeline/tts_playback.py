@@ -599,6 +599,10 @@ class TtsPlayback:
                         raise TtsDeliveryError("Audio output buffer could not be flushed") from exc
                 completed = True
                 session._tts_delivery_status = "submitted"
+                if first_chunk_sent:
+                    # Audio reached the caller: only consecutive TTS failures
+                    # are terminal, not two hiccups minutes apart.
+                    session._tts_failure_clip_count = 0
 
                 # Wait for the browser's OWN playback-complete confirmation
                 # before the finally block below unmutes — same pattern as

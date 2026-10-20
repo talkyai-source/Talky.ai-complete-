@@ -12,6 +12,7 @@ tokenisation isn't needed for a budgeting decision.
 """
 from __future__ import annotations
 
+import logging
 import os
 
 # LEGACY table, kept only so an old stored model id still resolves.
@@ -32,6 +33,8 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "gemini-3.5-flash": 1_000_000,
 }
 _DEFAULT_CONTEXT_WINDOW = 8192
+logger = logging.getLogger(__name__)
+_WARNED_UNKNOWN_WINDOW: set[str] = set()
 
 # Tokens we must leave free in the window for the rest of the turn.
 _RESERVED_PERSONA = 600
@@ -101,9 +104,15 @@ def context_window_for(model: str | None) -> int:
     if declared:
         return declared
     bare = model.strip().rsplit("/", 1)[-1]
-    return MODEL_CONTEXT_WINDOWS.get(
-        model, MODEL_CONTEXT_WINDOWS.get(bare, _DEFAULT_CONTEXT_WINDOW)
-    )
+    window = MODEL_CONTEXT_WINDOWS.get(model, MODEL_CONTEXT_WINDOWS.get(bare))
+    if window is None:
+        # A model missing from the menu (e.g. a hidden one) is budgeted as 8k,
+        # which can leave a ~9k-token voice prompt with no room: say so.
+        if model not in _WARNED_UNKNOWN_WINDOW:
+            _WARNED_UNKNOWN_WINDOW.add(model)
+            logger.warning("context_window_unknown model=%s default=%d", model, _DEFAULT_CONTEXT_WINDOW)
+        return _DEFAULT_CONTEXT_WINDOW
+    return window
 
 
 def max_inline_tokens() -> int:

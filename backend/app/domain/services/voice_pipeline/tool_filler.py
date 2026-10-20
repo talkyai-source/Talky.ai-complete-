@@ -48,6 +48,10 @@ class ToolFiller:
         self.phrase = FILLER_PHRASES[turn_index % len(FILLER_PHRASES)]
         self._task: Optional[asyncio.Task] = None
         self._speaking = False
+        # True when the caller talked over the filler (synthesize_and_send
+        # reports it and clears the shared barge-in event, so the streamer
+        # could not otherwise see it).
+        self.interrupted = False
 
     def arm(self) -> None:
         """A tool started and the caller has heard nothing yet. At most once
@@ -63,7 +67,14 @@ class ToolFiller:
         self._speaking = True
         logger.info("voice_tool_filler phrase=%r after_ms=%d", self.phrase,
                     round((self._clock() - self._turn_start) * 1000))
-        await self._speak(self.phrase)
+        self.interrupted = bool(await self._speak(self.phrase))
+
+    def cancel(self) -> None:
+        """The turn itself was cancelled (barge-in, hangup): no filler may
+        outlive it, speaking or not."""
+        task = self._task
+        if task is not None and not task.done():
+            task.cancel()
 
     async def settle(self) -> None:
         """Before real speech, and at the end of the turn: drop a filler that

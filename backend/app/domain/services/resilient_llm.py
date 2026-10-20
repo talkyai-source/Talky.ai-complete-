@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import AsyncIterator, List, Optional
 
@@ -486,9 +487,35 @@ class ResilientLLMProvider(LLMProvider):
         if runner is not None:
             primary_kwargs["tool_runner"] = tracked_runner
         gen = self._primary.stream_chat_with_tools(*args, **primary_kwargs)
+        has_secondary = self._secondary is not None and self._secondary.supports_tools
+        deadline = self._policy.first_token_deadline_seconds
         try:
             async with self._breaker:
-                async for tok in gen:
+                # The first-token deadline applies until a tool starts running
+                # (a stalled primary must not mean ~10 s of dead air); once a
+                # tool executes, nothing may cancel or replay the turn.
+                stream = gen.__aiter__()
+                loop = asyncio.get_running_loop()
+                started = loop.time()
+                while True:
+                    step = asyncio.ensure_future(stream.__anext__())
+                    try:
+                        while not step.done():
+                            if execution_started or spoken or not has_secondary:
+                                await asyncio.wait({step})
+                                break
+                            remaining = started + deadline - loop.time()
+                            if remaining <= 0:
+                                raise asyncio.TimeoutError("tool turn: no first token before the deadline")
+                            await asyncio.wait({step}, timeout=remaining)
+                        tok = step.result()
+                    except StopAsyncIteration:
+                        break
+                    finally:
+                        if not step.done():
+                            step.cancel()
+                            with suppress(asyncio.CancelledError, Exception):
+                                await step
                     spoken = True
                     yield tok
             return

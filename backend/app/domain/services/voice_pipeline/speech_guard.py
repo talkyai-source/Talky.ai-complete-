@@ -23,7 +23,7 @@ Everything else passes through unchanged.
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 from app.domain.models.conversation import MessageRole
 
@@ -42,6 +42,28 @@ _DONE_CLAIM = re.compile(
     r"(?:booked|scheduled|arranged|transferred|set\s+up)\b",
     re.IGNORECASE,
 )
+# Passive or subject-less forms of the same claims: "The email has been sent",
+# "Your callback has been scheduled", "You're all booked in for Tuesday".
+_SENT_PASSIVE_CLAIM = re.compile(
+    r"\b(?:email|e-mail|message|text|link|confirmation|details|information|copy|"
+    r"brochure|quote|invoice|receipt|it|that|this)(?:'s|\s+has|\s+have)\s+"
+    r"(?:just\s+|now\s+|already\s+)?been\s+(?:sent|emailed|texted|forwarded|delivered)\b",
+    re.IGNORECASE,
+)
+_DONE_PASSIVE_CLAIM = re.compile(
+    r"\b(?:callback|call\s*back|appointment|booking|reservation|slot|meeting|call|"
+    r"demo|visit|consultation|it|that|this)(?:'s|\s+has|\s+have)\s+"
+    r"(?:just\s+|now\s+|already\s+)?been\s+(?:booked|scheduled|arranged|confirmed|set\s+up)\b"
+    r"|\byou(?:'re|\s+are|'ve\s+been|\s+have\s+been)\s+(?:all\s+)?"
+    r"(?:booked|scheduled|set\s+up|signed\s+up)\b",
+    re.IGNORECASE,
+)
+_TRANSFER_PASSIVE_CLAIM = re.compile(
+    r"\byou(?:'re|\s+are)\s+(?:now\s+)?(?:being\s+)?(?:transferred|connected)\b"
+    r"|\byou(?:'ve|\s+have)\s+been\s+(?:transferred|connected)\b",
+    re.IGNORECASE,
+)
+_TRANSFERRED_CLAIM = re.compile(r"\btransferred\b", re.IGNORECASE)
 # "I've passed your details on".
 _PASSED_ON_CLAIM = re.compile(
     r"\b(?:i|we)(?:'ve|\s+have)\s+(?:just\s+|now\s+|already\s+)?passed\s+"
@@ -83,22 +105,49 @@ UNBACKED_ACTION_LINE = "I'm not able to do that from this call."
 RELATIONSHIP_ACK_LINE = "Thanks for clarifying."
 
 
-def _confirmation_allowed(session: Any) -> bool:
+def _confirmed_actions(session: Any) -> set[str]:
     results = getattr(session, "_voice_action_results", None)
     if not isinstance(results, dict):
-        return False
-    return any(
-        isinstance(r, dict) and r.get("confirmation_allowed") is True
-        for r in results.values()
-    )
+        return set()
+    return {
+        str(r.get("action") or name)
+        for name, r in results.items()
+        if isinstance(r, dict) and r.get("confirmation_allowed") is True
+    }
+
+
+def _needed_actions(sentence: str) -> Optional[frozenset[str]]:
+    """Which confirmed action can back this claim; None when it claims nothing.
+
+    A confirmed send_email must not unlock "I've booked you in": each kind of
+    claim is checked against the action that does that thing.
+    """
+    needed: set[str] = set()
+    if _SENT_CLAIM.search(sentence) or _SENT_PASSIVE_CLAIM.search(sentence):
+        needed |= {"send_email", "submit_form"}
+    if _TRANSFER_PASSIVE_CLAIM.search(sentence) or (
+        _DONE_CLAIM.search(sentence) and _TRANSFERRED_CLAIM.search(sentence)
+    ):
+        needed |= {"transfer_call"}
+    if _DONE_PASSIVE_CLAIM.search(sentence) or (
+        _DONE_CLAIM.search(sentence) and not _TRANSFERRED_CLAIM.search(sentence)
+    ):
+        needed |= {"schedule_callback", "submit_form"}
+    if _PASSED_ON_CLAIM.search(sentence):
+        needed |= {"send_email", "submit_form", "schedule_callback", "transfer_call"}
+    return frozenset(needed) if needed else None
+
+
+def _confirmation_allowed(session: Any, sentence: Optional[str] = None) -> bool:
+    confirmed = _confirmed_actions(session)
+    if sentence is None:
+        return bool(confirmed)
+    needed = _needed_actions(sentence)
+    return needed is None or bool(confirmed & needed)
 
 
 def claims_completed_action(sentence: str) -> bool:
-    return bool(
-        _SENT_CLAIM.search(sentence)
-        or _DONE_CLAIM.search(sentence)
-        or _PASSED_ON_CLAIM.search(sentence)
-    )
+    return _needed_actions(sentence) is not None
 
 
 def caller_denied_relationship(history: Iterable[Any]) -> bool:
@@ -119,7 +168,7 @@ def guard_spoken_sentence(session: Any, sentence: str) -> str:
         sentence = _SECTION_ID.sub("", sentence).strip()
         if not any(c.isalnum() for c in sentence):
             return ""
-    if claims_completed_action(sentence) and not _confirmation_allowed(session):
+    if claims_completed_action(sentence) and not _confirmation_allowed(session, sentence):
         return UNBACKED_ACTION_LINE
     if _REMOVED_CLAIM.search(sentence) and getattr(session, "_opt_out_recorded", False) is not True:
         return OPT_OUT_PENDING_LINE

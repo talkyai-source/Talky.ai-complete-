@@ -45,7 +45,10 @@ async def test_latest_read_replaces_prior_factual_evidence_in_same_turn(monkeypa
         assert "Invoices are issued on Friday" in evidence["text"]
         assert session._knowledge_grounding
     else:
-        assert evidence["passages"] == [] and session._knowledge_grounding == []
+        assert evidence["passages"] == []
+        # A source page carries no passages, but the page text it returned is
+        # what the agent may quote figures from (voice-8); nothing else is.
+        assert session._knowledge_grounding == ([evidence["source_text"]] if status == "source_page" else [])
         if status == "source_page":
             assert evidence["context_complete"] is False
             assert evidence["source_offset"] == 0 and evidence["next_source_offset"] > 0
