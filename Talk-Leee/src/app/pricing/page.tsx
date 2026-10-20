@@ -74,6 +74,7 @@ export default function PricingPage() {
     ["Cartesia voices", "Included", "Included"],
     ["Deepgram voices", "Included", "Included"],
     ["Deepgram STT", "Included", "Included"],
+    ["AssemblyAI Universal-3.6 Pro STT", "English-only; selectable when configured", "English-only; selectable when configured"],
     ["ElevenLabs voices", "Paid add-on", "Paid add-on"],
     ["Telephone/PSTN/SIP minutes", "Billed separately", "Billed separately"],
   ];
@@ -95,6 +96,7 @@ export default function PricingPage() {
     "Google voices are included in the subscription.",
     "Cartesia voices are included in the subscription.",
     "Deepgram voices and Deepgram speech-to-text are included in the subscription.",
+    "AssemblyAI Universal-3.6 Pro offers English-only speech-to-text with Fast, Balanced and Accuracy modes. Select it in AI Options when configured; confirm pricing and any included usage in your client agreement.",
     "ElevenLabs is a premium voice option and is charged separately.",
     "Current indicative ElevenLabs add-on: $50/month; the exact included ElevenLabs allowance should be confirmed in the client agreement.",
   ];
@@ -222,13 +224,19 @@ export default function PricingPage() {
         </section>
 
         <section className="mt-14">
-          <h2 className={headingClassName}>Voice providers</h2>
+          <h2 className={headingClassName}>Voice and speech recognition providers</h2>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <ul className={listClassName}>
               {voiceProviders.map((item) => (
                 <li key={item}>&bull; {item}</li>
               ))}
             </ul>
+            <p className={cardBodyClassName}>
+              <Link href="/ai-options" className="font-semibold text-primary underline underline-offset-4 dark:text-foreground">
+                Configure speech recognition in AI Options
+              </Link>
+              {" "}under Standard Pipeline → Speech-to-Text → Engine.
+            </p>
           </div>
         </section>
 

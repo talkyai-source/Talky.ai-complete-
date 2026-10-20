@@ -104,3 +104,35 @@ returned a pull-rate limit and authentication-endpoint timeouts. The frontend
 audit failed on the already recorded `braces` advisory (11 dependency paths).
 These failures remain visible; no workflow gate or vulnerability is suppressed.
 The PR checks provide final-head status separately from these initial results.
+
+## Frontend and pricing follow-up — 21 October 2026
+
+Fresh checks supersede the earlier deployment/key-absence observations above:
+PR 20 is merged, and the backend checkout is now
+`e42cf2606bed45d8e35aad1fdd3a61061f736399`, with the AssemblyAI adapter present.
+A presence-only check found `ASSEMBLYAI_API_KEY` in the private backend environment;
+no credential value was printed. Backend liveness returned HTTP 200. This does not
+prove provider authentication, transcription quality or a successful call.
+
+The production public pricing page was inspected in the browser. It advertises
+Basic at $99/month and Business at $299/month, with annual monthly equivalents of
+$83 and $269. Top-ups are $50/125, $70/175 and $100/250 AI minutes. It previously
+omitted AssemblyAI from its provider information even though the deployed source
+includes the Standard Pipeline selector. The bounded frontend update adds the
+English-only AssemblyAI option and a link to AI Options without asserting a new
+included allowance or surcharge. Existing commercial amounts remain unchanged.
+
+The live anonymous `/api/v1/plans/` catalog disagrees with the public page: it
+contains Basic $29, Professional $79 and Enterprise $199, with billing disabled
+and no paid price options. Those legacy numeric fields are not purchasable offers.
+The intended catalog, currency, annual terms and verified payment-provider price
+mappings need resolution before making paid checkout available. Do not infer
+purchase terms or enable checkout from the static marketing prices alone.
+
+The available browser session was signed out and redirected AI Options to login.
+Authenticated selector/save/reload and a live AssemblyAI call were not verified
+in this follow-up. The wider production-readiness acceptance gates remain open.
+
+The bounded public-page update passed scoped ESLint, the full frontend TypeScript
+check and `git diff --check`. No billing terms, credential behavior or runtime
+selection logic changed.
