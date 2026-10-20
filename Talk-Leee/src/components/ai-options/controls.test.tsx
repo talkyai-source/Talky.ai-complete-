@@ -3,7 +3,7 @@ import { afterEach, describe, test } from "node:test";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
 
-import { RadialKnob } from "./controls";
+import { RadialKnob, canEditAiOptions } from "./controls";
 
 describe("RadialKnob", () => {
     afterEach(cleanup);
@@ -61,5 +61,21 @@ describe("RadialKnob", () => {
         assert.match(slider.getAttribute("class") ?? "", /\bw-full\b/);
         assert.match(slider.getAttribute("class") ?? "", /\bfocus-visible:ring-2\b/);
         assert.match(slider.getAttribute("style") ?? "", /max-width:\s*112px/);
+    });
+});
+
+describe("canEditAiOptions", () => {
+    test("matches the backend roles that hold tenants:update", () => {
+        for (const role of ["tenant_admin", "partner_admin", "platform_admin"]) assert.equal(canEditAiOptions(role), true, role);
+        for (const role of ["user", "readonly", "agent", "campaign_manager", "billing_user", "white_label_admin"]) assert.equal(canEditAiOptions(role), false, role);
+    });
+
+    test("legacy role names the backend aliases (ROLE_ALIASES) are allowed or denied the same way", () => {
+        for (const role of ["admin", "owner", "super_admin"]) assert.equal(canEditAiOptions(role), true, role);
+        for (const role of ["operator", "user", "readonly"]) assert.equal(canEditAiOptions(role), false, role);
+    });
+
+    test("an unknown role is not treated as a restriction, the backend still enforces it", () => {
+        assert.equal(canEditAiOptions(undefined), true);
     });
 });

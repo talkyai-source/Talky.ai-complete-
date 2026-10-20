@@ -185,3 +185,17 @@ export const ACCENT_META: Record<AccentBucket, { flag: string; label: string }> 
 };
 
 export const ACCENT_ORDER: AccentBucket[] = ["US", "UK", "AU", "IN", "INTL"];
+
+// ── Who may change AI settings ────────────────────────────────
+// Mirrors the backend Permission.TENANTS_UPDATE grant (core/security/rbac.py):
+// only tenant_admin, partner_admin and platform_admin hold it. The backend
+// first maps legacy names (ROLE_ALIASES: admin/owner -> tenant_admin,
+// super_admin -> platform_admin), so those are accepted here too. An unknown role
+// (not loaded yet) is not treated as a restriction; the backend still enforces.
+const AI_OPTIONS_EDIT_ROLES = ["tenant_admin", "partner_admin", "platform_admin", "admin", "owner", "super_admin"];
+export const AI_OPTIONS_READ_ONLY_NOTICE = "Only a workspace admin can change AI settings.";
+
+export function canEditAiOptions(role: string | null | undefined): boolean {
+    if (!role) return true;
+    return AI_OPTIONS_EDIT_ROLES.includes(role);
+}

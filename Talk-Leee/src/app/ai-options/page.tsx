@@ -6,6 +6,8 @@ import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { ApplyToCampaignsModal } from "@/components/campaigns/apply-to-campaigns-modal";
 import { VoiceCloneModal } from "@/components/ai-options/voice-clone-modal";
+import { AI_OPTIONS_READ_ONLY_NOTICE, canEditAiOptions } from "@/components/ai-options/controls";
+import { useAuth } from "@/hooks/useAuth";
 import { AssemblyAIControls } from "@/components/ai-options/assemblyai-controls";
 import { assemblyAISettingsError } from "@/lib/assemblyai-settings";
 import {
@@ -148,6 +150,8 @@ function AIOptionsEditor({ scope }: { scope: string }) {
     // on revisit, warmed by the post-login prefetch). Catalogs are read-only;
     // the config is fetched here but EDITED via a local draft (below).
     const queryClient = useQueryClient();
+    const { user: authUser } = useAuth();
+    const canEdit = canEditAiOptions(authUser?.role);
     const providersQuery = useProvidersQuery();
     const voicesQuery = useVoicesQuery();
     const configQuery = useConfigQuery();
@@ -222,7 +226,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
     }, [configQuery.data]);
 
     async function handleSaveConfig() {
-        if (!config || saveInFlightRef.current) return;
+        if (!canEdit || !config || saveInFlightRef.current) return;
         // AssemblyAI controls only show while AssemblyAI is the standard engine;
         // a draft left invalid there must not block saving another engine.
         const assemblySelected = config.pipeline_mode !== "realtime" && config.stt_engine === "assemblyai";
@@ -277,7 +281,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
     }
 
     async function handleTestLLM() {
-        if (!config || !testMessage.trim()) return;
+        if (!canEdit || !config || !testMessage.trim()) return;
         try {
             setTesting(true);
             setError("");
@@ -299,6 +303,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
     }
 
     async function handlePreviewVoiceById(voiceId: string, opts?: { provider?: string }) {
+        if (!canEdit) return;
         const requestId = ++previewRequestRef.current;
         const isRealtime = opts?.provider === "realtime";
         const selectedVoice = voices.find((voice) => voice.id === voiceId);
@@ -351,7 +356,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
     }
 
     async function handleRunBenchmark() {
-        if (!config) return;
+        if (!canEdit || !config) return;
         try {
             setBenchmarking(true);
             setError("");
@@ -472,7 +477,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
         <button
             type="button"
             onClick={handleSaveConfig}
-            disabled={saving}
+            disabled={saving || !canEdit}
             aria-busy={saving}
             className={`${className} items-center gap-2 rounded-lg bg-emerald-500 font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-wait disabled:opacity-70 disabled:hover:bg-emerald-500`}
         >
@@ -504,6 +509,8 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                         <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/25 bg-white/15"><Sparkles className="h-4 w-4" /></div>
                         <p className="text-sm font-medium text-white/90">Tune the brain, the voice, and the rhythm of every call.</p>
                     </motion.div>
+
+                    {!canEdit && <p role="status" className="rounded-lg border border-border bg-muted/60 px-4 py-2 text-sm text-foreground">{AI_OPTIONS_READ_ONLY_NOTICE}</p>}
 
                     {/* Pipeline mode — the single switch that decides which card set
                         renders below. Prominent, top-of-page, own card so it reads as
@@ -565,7 +572,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                             <div className="flex">{saveConfigButton("ml-auto flex px-4 py-2")}</div>
                             <RealtimeControls config={config} catalog={providers?.realtime} onChange={setConfig}
                                 onPreview={(voice) => { void handlePreviewVoiceById(voice, { provider: "realtime" }); }}
-                                previewing={Boolean(previewingVoiceId)} />
+                                previewing={Boolean(previewingVoiceId) || !canEdit} />
                         </div>
                     ) : (
                         <motion.div key="cascaded" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
@@ -743,6 +750,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                                     {ttsProvider === "elevenlabs" && (
                                         <button
                                             onClick={() => setCloneOpen(true)}
+                                            disabled={!canEdit}
                                             className="flex items-center gap-1 rounded-lg border border-emerald-600/40 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
                                             title="Clone a voice with ElevenLabs"
                                         >
@@ -823,6 +831,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                                             className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full transition-transform hover:scale-110"
                                             style={{ backgroundColor: ac + "22" }}
                                             aria-label="Preview voice"
+                                            aria-disabled={!canEdit}
                                         >
                                             {isPlaying ? <Equalizer active color={ac} /> : <Play className="h-3.5 w-3.5" style={{ color: ac }} />}
                                         </span>
@@ -854,7 +863,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                                         <p className="truncate text-sm font-medium text-foreground">{getDisplayVoiceName(selectedVoice)}</p>
                                         <p className="truncate text-xs text-muted-foreground">{selectedVoice.description}</p>
                                     </div>
-                                    <button onClick={() => handlePreviewVoiceById(selectedVoice.id)} disabled={isPlaying} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600 disabled:opacity-60">
+                                    <button onClick={() => handlePreviewVoiceById(selectedVoice.id)} disabled={isPlaying || !canEdit} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600 disabled:opacity-60">
                                         {isPlaying ? <Equalizer active color="#fff" /> : <Play className="h-4 w-4" />}<span>Preview</span>
                                     </button>
                                 </div>
@@ -866,7 +875,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                     <Card delay={0.15} className="xl:col-span-5">
                         <SectionHeader icon={<Zap className="h-5 w-5" />} title="Latency Metrics" subtitle="Real-time pipeline performance"
                             right={
-                                <button onClick={handleRunBenchmark} disabled={benchmarking} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50">
+                                <button onClick={handleRunBenchmark} disabled={benchmarking || !canEdit} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50">
                                     {benchmarking ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}<span>Run Benchmark</span>
                                 </button>
                             }
@@ -947,7 +956,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                         <div className="space-y-4">
                             <div className="flex flex-col gap-3 sm:flex-row">
                                 <input type="text" value={testMessage} onChange={(e) => setTestMessage(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleTestLLM()} placeholder="Type a message to test the LLM…" className="flex-1 rounded-lg border border-border bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40" />
-                                <button onClick={handleTestLLM} disabled={testing || !testMessage.trim()} className="flex items-center justify-center gap-2 rounded-lg bg-emerald-500 px-6 py-2.5 font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50">{testing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}<span>Send</span></button>
+                                <button onClick={handleTestLLM} disabled={testing || !canEdit || !testMessage.trim()} className="flex items-center justify-center gap-2 rounded-lg bg-emerald-500 px-6 py-2.5 font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50">{testing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}<span>Send</span></button>
                                 {saveConfigButton("flex md:hidden w-full sm:w-auto justify-center px-6 py-2.5")}
                             </div>
                             {testResponse && <div className="rounded-lg border border-border bg-muted/40 p-4"><p className="whitespace-pre-wrap text-sm text-foreground">{testResponse}</p></div>}

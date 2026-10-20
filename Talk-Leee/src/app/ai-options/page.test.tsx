@@ -11,7 +11,7 @@ import type { AIProviderConfig } from "@/lib/ai-options-api";
 // dashboard navigation, dialogs and verified identity input are replaced; query scoping remains real.
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
-let identity = { user: { id: "user-a", tenant_id: "tenant-a" }, status: "authenticated", loading: false };
+let identity: { user: { id: string; tenant_id: string; role?: string }; status: string; loading: boolean } = { user: { id: "user-a", tenant_id: "tenant-a", role: "tenant_admin" }, status: "authenticated", loading: false };
 loader._load = function (id, ...args) {
     if (id.includes("hooks/useAuth")) return { useAuth: () => identity };
     if (id.includes("components/layout/dashboard-layout")) return { DashboardLayout: ({ children }: { children: React.ReactNode }) => <>{children}</> };
@@ -94,7 +94,7 @@ for (const [label, mode] of [["Balanced", "balanced"], ["Fast", "min_latency"], 
     });
 }
 
-afterEach(() => { cleanup(); mock.restoreAll(); identity = { user: { id: "user-a", tenant_id: "tenant-a" }, status: "authenticated", loading: false }; });
+afterEach(() => { cleanup(); mock.restoreAll(); identity = { user: { id: "user-a", tenant_id: "tenant-a", role: "tenant_admin" }, status: "authenticated", loading: false }; });
 
 test("leaving AssemblyAI restores the saved language, and an unfinished AssemblyAI draft does not block saving another engine", async () => {
     const stored: AIProviderConfig = {
@@ -293,3 +293,45 @@ for (const operation of ["save", "preview", "overlapping_preview", "playing_prev
         } finally { cleanup(); qc.clear(); globalThis.AudioContext = originalAudio; }
     });
 }
+
+const NOTICE = "Only a workspace admin can change AI settings.";
+async function renderEditable(role: string) {
+    identity = { user: { id: "user-a", tenant_id: "tenant-a", role }, status: "authenticated", loading: false };
+    const stored: AIProviderConfig = {
+        llm_provider: "cerebras", llm_model: "gpt-oss-120b", llm_temperature: 0.6, llm_max_tokens: 90,
+        stt_provider: "deepgram", stt_model: "nova-3", stt_engine: "deepgram_nova", stt_language: "en",
+        tts_provider: "elevenlabs", tts_model: "m", tts_voice_id: "voice", tts_sample_rate: 16000,
+    };
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    mock.method(sharedHttpClient(), "request", async (request: { path: string }) => {
+        if (request.path.endsWith("/providers")) return {
+            llm: { providers: ["cerebras"], models: [] }, tts: { providers: ["elevenlabs"], models: [] },
+            stt: { providers: ["deepgram"], models: [], engines: [{ id: "deepgram_nova", name: "Deepgram Nova", description: "Nova" }] },
+        };
+        if (request.path.endsWith("/voices")) return { voices: [{ id: "voice", name: "Saved Voice", description: "Test", provider: "elevenlabs" }] };
+        return stored;
+    });
+    render(<QueryClientProvider client={qc}><AIOptionsPage /></QueryClientProvider>);
+    await waitFor(() => assert.ok(screen.getByRole("combobox", { name: "Engine" })));
+}
+
+test("a workspace admin sees save, preview, clone and benchmark enabled and no read-only notice", async () => {
+    await renderEditable("tenant_admin");
+    assert.equal(screen.queryByText(NOTICE), null);
+    for (const b of screen.getAllByRole("button", { name: /Save Configuration/ })) assert.equal((b as HTMLButtonElement).disabled, false);
+    assert.equal((screen.getByRole("button", { name: /Preview$/ }) as HTMLButtonElement).disabled, false);
+    assert.equal((screen.getByRole("button", { name: /Clone a voice/ }) as HTMLButtonElement).disabled, false);
+    assert.equal((screen.getByRole("button", { name: /Run Benchmark/ }) as HTMLButtonElement).disabled, false);
+});
+
+test("a non-admin keeps the page readable but save, test, preview, clone and benchmark are disabled with one notice", async () => {
+    await renderEditable("user");
+    assert.equal(screen.getAllByText(NOTICE).length, 1);
+    for (const b of screen.getAllByRole("button", { name: /Save Configuration/ })) assert.equal((b as HTMLButtonElement).disabled, true);
+    assert.equal((screen.getByRole("button", { name: /Preview$/ }) as HTMLButtonElement).disabled, true);
+    assert.equal((screen.getByRole("button", { name: /Clone a voice/ }) as HTMLButtonElement).disabled, true);
+    assert.equal((screen.getByRole("button", { name: /Run Benchmark/ }) as HTMLButtonElement).disabled, true);
+    assert.equal((screen.getByRole("button", { name: /Send/ }) as HTMLButtonElement).disabled, true);
+    assert.equal(screen.getByRole("button", { name: "Preview voice" }).getAttribute("aria-disabled"), "true");
+    assert.ok(screen.getByRole("combobox", { name: "Engine" }));
+});
