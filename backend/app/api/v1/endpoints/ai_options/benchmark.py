@@ -10,6 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.api.v1.dependencies import get_current_user
+from app.core.security.api_security import rate_limit_dependency
+from app.core.security.rbac import Permission, require_permission
 from app.domain.models.ai_config import AIProviderConfig, CEREBRAS_MODELS, DEEPSEEK_MODELS, GEMINI_MODELS, OPENAI_MODELS
 from app.domain.models.conversation import Message, MessageRole
 from app.infrastructure.llm.cerebras import CerebrasLLMProvider
@@ -83,7 +85,11 @@ def _select_benchmark_llm(config: AIProviderConfig, *, openai_key=None):
     return GroqLLMProvider(), key
 
 
-@router.post("/benchmark", response_model=LatencyBenchmarkResponse)
+@router.post(
+    "/benchmark",
+    response_model=LatencyBenchmarkResponse,
+    dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.TENANTS_UPDATE))],
+)
 async def run_benchmark(config: AIProviderConfig, current_user=Depends(get_current_user)):
     """
     Run a full pipeline latency benchmark.

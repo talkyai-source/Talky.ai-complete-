@@ -19,6 +19,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 
 from app.api.v1.dependencies import get_current_user, get_db_client
 from app.core.postgres_adapter import Client
+from app.core.security.api_security import rate_limit_dependency
+from app.core.security.rbac import Permission, require_permission
 from app.domain.services import voice_clone_service as vcs
 from app.infrastructure.tts.elevenlabs_catalog import (
     elevenlabs_enabled,
@@ -58,7 +60,11 @@ async def list_cloned_voices(
     return {"items": items, "max_per_tenant": vcs.MAX_PER_TENANT, "used": len(items)}
 
 
-@router.post("/voices/clone", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/voices/clone",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.TENANTS_UPDATE))],
+)
 async def clone_voice(
     name: str = Form(..., min_length=1, max_length=80),
     consent: bool = Form(...),
@@ -120,7 +126,10 @@ async def clone_voice(
     return row
 
 
-@router.delete("/voices/cloned/{clone_id}")
+@router.delete(
+    "/voices/cloned/{clone_id}",
+    dependencies=[Depends(require_permission(Permission.TENANTS_UPDATE))],
+)
 async def delete_cloned_voice(
     clone_id: str,
     current_user=Depends(get_current_user),

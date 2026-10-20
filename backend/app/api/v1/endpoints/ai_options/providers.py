@@ -59,7 +59,7 @@ async def list_providers(current_user=Depends(get_current_user)):
         ProviderListResponse with LLM, STT, and TTS options
     """
     from app.realtime.credentials import resolve_openai_key
-    from app.domain.services.credential_resolver import get_credential_resolver
+    from app.domain.services.credential_resolver import get_credential_resolver, resolve_sync_env_only
     realtime_available = bool(await resolve_openai_key(getattr(current_user, "tenant_id", None)))
     assemblyai_available = bool(await get_credential_resolver().resolve(
         "assemblyai", tenant_id=getattr(current_user, "tenant_id", None),
@@ -97,7 +97,8 @@ async def list_providers(current_user=Depends(get_current_user)):
             llm_providers.append("gemini")
             llm_models.extend(model.model_dump() for model in gemini_offered)
     # DeepSeek V4.1 Flash (owner request 2026-10-06), when its key is set.
-    if os.getenv("DEEPSEEK_API_KEY"):
+    # Single key or the DEEPSEEK_API_KEYS pool (2026-10-19) both count.
+    if resolve_sync_env_only("deepseek"):
         llm_providers.append("deepseek")
         llm_models.extend(model.model_dump() for model in DEEPSEEK_MODELS)
 
