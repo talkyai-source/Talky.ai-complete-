@@ -34,6 +34,8 @@ async def meter_db():
         await admin.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER NOBYPASSRLS')
         await admin.execute(f'GRANT USAGE ON SCHEMA public TO "{role}"')
         await admin.execute(f'GRANT SELECT ON plans,tenants,calls,call_legs TO "{role}"')
+        # The meter subtracts expired top-up minutes (billing ledger + order + package).
+        await admin.execute(f'GRANT SELECT ON billing_ledger,topup_orders,topup_packages TO "{role}"')
         for i in range(2):
             await admin.execute("INSERT INTO plans(id,name,price,minutes) VALUES($1,'Synthetic OP01',1,30)", plans[i])
             await admin.execute("INSERT INTO tenants(id,business_name,plan_id,minutes_allocated) VALUES($1,'Synthetic OP01',$2,30)", tenants[i], plans[i])

@@ -131,6 +131,10 @@ async def seed_usage(fixture, *, allocated=350):
     outbound_campaign, inbound_campaign, foreign_campaign = [uuid4() for _ in range(3)]
     async with acquire_with_tenant(fixture.pool, None) as conn:
         await conn.execute(f'GRANT SELECT ON calls,call_legs TO "{fixture.role}"')
+        # The meter subtracts expired top-up minutes (billing ledger + order + package).
+        await conn.execute(
+            f'GRANT SELECT ON billing_ledger,topup_orders,topup_packages TO "{fixture.role}"'
+        )
         await conn.execute(
             "UPDATE tenants SET minutes_allocated=$2 WHERE id=$1", fixture.tenants[0], allocated
         )

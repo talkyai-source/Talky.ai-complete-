@@ -1270,14 +1270,19 @@ class CallService:
         # dialer_jobs has no identity columns, so the retry job used to come
         # back nameless (a named lead greeted as a blind dial). The lead row is
         # the source of truth for who is being called; read it here, inside the
-        # settlement transaction and under the tenant predicate.
+        # settlement transaction and under the tenant predicate. Each optional
+        # read runs in its own savepoint: a failed statement must roll back to
+        # here, not abort the settlement transaction. leads has no company
+        # column; imports keep it in custom_fields (bulk_ingest).
         if lead_id:
             try:
-                lead_ident = await conn.fetchrow(
-                    "SELECT first_name, last_name, company FROM leads "
-                    "WHERE id = $1 AND tenant_id = $2",
-                    lead_id, scope_tenant_id,
-                )
+                async with conn.transaction():
+                    lead_ident = await conn.fetchrow(
+                        "SELECT first_name, last_name, "
+                        "custom_fields->>'company' AS company FROM leads "
+                        "WHERE id = $1 AND tenant_id = $2",
+                        lead_id, scope_tenant_id,
+                    )
             except Exception as exc:  # identity is cosmetic; never block the retry
                 logger.warning("retry identity lookup failed lead=%s: %s", lead_id, exc)
                 lead_ident = None
@@ -1295,14 +1300,15 @@ class CallService:
         # metadata. Tenant predicate via the calls row (role bypasses RLS).
         if call_id:
             try:
-                leg = await conn.fetchrow(
-                    "SELECT cl.metadata FROM call_legs cl "
-                    "JOIN calls c ON c.id = cl.call_id "
-                    "WHERE cl.call_id = $1 AND c.tenant_id = $2 "
-                    "AND cl.leg_type = 'pstn_outbound' "
-                    "ORDER BY cl.created_at ASC LIMIT 1",
-                    call_id, scope_tenant_id,
-                )
+                async with conn.transaction():
+                    leg = await conn.fetchrow(
+                        "SELECT cl.metadata FROM call_legs cl "
+                        "JOIN calls c ON c.id = cl.call_id "
+                        "WHERE cl.call_id = $1 AND c.tenant_id = $2 "
+                        "AND cl.leg_type = 'pstn_outbound' "
+                        "ORDER BY cl.created_at ASC LIMIT 1",
+                        call_id, scope_tenant_id,
+                    )
                 meta = leg["metadata"] if leg is not None else None
                 if isinstance(meta, (str, bytes)):
                     meta = json.loads(meta)

@@ -65,17 +65,29 @@ class _FakeConn:
         self.campaigns_row = {"calls_completed": 0, "calls_failed": 0}
         self.executed: list[tuple[str, tuple[Any, ...]]] = []
         self._tx_lock = asyncio.Lock()
+        self._tx_owner = None
+        self._tx_depth = 0
 
     def transaction(self):
         outer = self
 
         class _Tx:
+            # asyncpg nests transaction() on one connection as a SAVEPOINT;
+            # only the outermost block takes the lock other tasks queue on.
             async def __aenter__(self):
-                await outer._tx_lock.acquire()
+                me = asyncio.current_task()
+                if outer._tx_owner is me:
+                    outer._tx_depth += 1
+                else:
+                    await outer._tx_lock.acquire()
+                    outer._tx_owner, outer._tx_depth = me, 1
                 return outer
 
             async def __aexit__(self, *a):
-                outer._tx_lock.release()
+                outer._tx_depth -= 1
+                if outer._tx_depth == 0:
+                    outer._tx_owner = None
+                    outer._tx_lock.release()
                 return None
 
         return _Tx()

@@ -258,21 +258,60 @@ async def test_retry_job_keeps_lead_identity_and_opening_mode():
 
 
 class _SettleConn:
-    """Enough of a connection for _handle_job_completion_pooled's retry path."""
+    """Enough of a connection for _handle_job_completion_pooled's retry path.
 
-    def __init__(self):
+    Behaves like Postgres where it matters: leads has no company column (the
+    company lives in custom_fields), and a failed statement outside a
+    savepoint aborts the transaction, so every later statement fails.
+    """
+
+    def __init__(self, *, leg_error=False):
         self.lead_queries = []
+        self.leg_error = leg_error
+        self.aborted = False
+        self._savepoints = 0
+
+    def transaction(self):
+        conn = self
+
+        class _Savepoint:
+            async def __aenter__(self):
+                conn._savepoints += 1
+
+            async def __aexit__(self, *exc):
+                conn._savepoints -= 1
+                return False
+
+        return _Savepoint()
+
+    def _fail(self, message):
+        if not self._savepoints:
+            self.aborted = True
+        raise RuntimeError(message)
+
+    def _check(self):
+        if self.aborted:
+            raise RuntimeError("current transaction is aborted")
 
     async def fetchrow(self, sql, *args):
+        self._check()
         if "FROM dialer_jobs" in sql:
             return {"attempt_number": 1, "tenant_id": "t-1", "priority": 5,
                     "phone_number": "+442046132300"}
         if "FROM leads" in sql:
             self.lead_queries.append((sql, args))
+            selected = sql.split("FROM leads")[0].replace("custom_fields->>'company' AS company", "")
+            if re.search(r"\bcompany\b", selected):
+                self._fail('column "company" does not exist')
             return {"first_name": "Pat", "last_name": "Lee", "company": "ACME"}
+        if "FROM call_legs" in sql:
+            if self.leg_error:
+                self._fail("synthetic call_legs read failure")
+            return {"metadata": {"first_speaker": "user", "agent_name": "Sam"}}
         raise AssertionError(sql)
 
     async def fetchval(self, sql, *args):
+        self._check()
         return "job-1"  # the guarded UPDATE ... RETURNING id
 
 
@@ -291,6 +330,30 @@ async def test_settlement_rehydrates_lead_identity_for_the_retry(monkeypatch):
     assert job_data["lead_first_name"] == "Pat" and job_data["lead_company"] == "ACME"
     # tenant-scoped read
     assert conn.lead_queries[0][1] == ("lead-1", "t-1")
+    # the settlement transaction is still usable afterwards
+    assert conn.aborted is False
+
+
+@pytest.mark.asyncio
+async def test_a_failed_optional_identity_read_never_aborts_the_settlement(monkeypatch):
+    """Live 2026-10-20: the retry lookup read a column leads does not have.
+    The except swallowed the error but Postgres had already aborted the
+    transaction, so the rest of the settlement failed. Each optional read now
+    runs in a savepoint; the retry is still scheduled, minus the cosmetics."""
+    svc = CallService(db_client=SimpleNamespace())
+    monkeypatch.setattr(svc, "_effective_attempt_number", AsyncMock(return_value=1))
+    conn = _SettleConn(leg_error=True)
+    terminal, retry_args = await svc._handle_job_completion_pooled(
+        conn, job_id="job-1", outcome=CallOutcome.BUSY, campaign_id="camp-1",
+        lead_id="lead-1", scope_tenant_id="t-1", call_attempt_number=1,
+        caller_opted_out=False, call_id="call-1",
+    )
+    assert terminal is False and retry_args is not None
+    assert conn.aborted is False
+    assert await conn.fetchval("SELECT 1") == "job-1"
+    job_data = retry_args[1]
+    assert job_data["lead_company"] == "ACME"
+    assert "first_speaker" not in job_data
 
 
 # ── auth-1 ──────────────────────────────────────────────────────────

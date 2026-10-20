@@ -587,7 +587,11 @@ async def test_signup_cookie_persistence_failure_rolls_back_entire_account(
         "business_name": "Synthetic CP08 Signup",
         "code_hash": signup_ep._hash_signup_code("123456"),
     }
-    redis = SimpleNamespace(get=AsyncMock(return_value=json.dumps(pending)), delete=AsyncMock())
+    redis = SimpleNamespace(
+        get=AsyncMock(return_value=json.dumps(pending)),
+        delete=AsyncMock(),
+        eval=AsyncMock(return_value=1),  # the atomic code-attempt claim succeeds
+    )
     monkeypatch.setattr(signup_ep, "_get_redis_or_503", lambda: redis)
     monkeypatch.setattr(signup_ep, "validate_password_strength", lambda _: None)
     monkeypatch.setattr(signup_ep, "hash_password", lambda _: "synthetic")
@@ -624,7 +628,12 @@ async def test_signup_cookie_persistence_failure_rolls_back_entire_account(
 
 async def test_signup_send_failure_never_claims_email_sent(identity_db, monkeypatch):
     db = identity_db
-    monkeypatch.setattr(signup_ep, "_get_redis_or_503", lambda: SimpleNamespace(setex=AsyncMock()))
+    monkeypatch.setattr(
+        signup_ep,
+        "_get_redis_or_503",
+        # eval is the atomic per-address send claim, which succeeds here.
+        lambda: SimpleNamespace(setex=AsyncMock(), eval=AsyncMock(return_value=1)),
+    )
     monkeypatch.setattr(
         signup_ep,
         "get_email_service",

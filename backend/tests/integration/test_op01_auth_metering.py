@@ -39,6 +39,10 @@ async def one_slot(db):
 
 
 async def configure_meter(db, unavailable):
+    # The meter subtracts expired top-up minutes (billing ledger + order + package).
+    await db.admin.execute(
+        f'GRANT SELECT ON billing_ledger,topup_orders,topup_packages TO "{db.role}"'
+    )
     # A stale historical counter must not become the displayed balance.
     await db.admin.execute(
         "UPDATE tenants SET minutes_allocated=120,minutes_used=119 WHERE id=$1",
