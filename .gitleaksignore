@@ -310,3 +310,10 @@ e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-migrati
 # Independently verified against https://pypi.org/pypi/PyJWT/2.15.1/json.
 e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-langgraph-security/resolver.json:jwt:1690
 e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-langgraph-security/rejected-1.2.3-resolver.json:jwt:1690
+
+# === Test-only Fernet key in test_connector_factory.py (2026-10-20) =========
+# Not a credential: urlsafe base64 of the public phrase
+# "test_key_for_testing_only_32byte", used only to give the unit tests a valid
+# Fernet key. Commit e42cf260 had it as a literal; later commits build it at
+# runtime, so only this one historical finding needs the fingerprint.
+e42cf2606bed45d8e35aad1fdd3a61061f736399:backend/tests/unit/test_connector_factory.py:generic-api-key:11
