@@ -151,7 +151,9 @@ def campaign_voice_matches_provider(
     hint = voice_id_provider_hint(voice_id)
     if hint is None or not effective_provider:
         return True
-    return hint == str(effective_provider).strip().lower()
+    # TTSProvider is an Enum: str() gives "TTSProvider.DEEPGRAM", not "deepgram".
+    effective = getattr(effective_provider, "value", effective_provider)
+    return hint == str(effective).strip().lower()
 
 
 def _resolve_voice_gender_safe(voice_id: Optional[str]) -> Optional[str]:

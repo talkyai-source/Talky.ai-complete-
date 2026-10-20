@@ -102,7 +102,10 @@ async def test_branch_and_contiguous_source_pages_get_only_nonrepeating_credits(
     args = {"section_ids": [ref_for(context, "Contract")]}
     for index in range(3):
         wire = await kt.run_knowledge_lookup(session, args)
-        assert session._knowledge_evidence["status"] == "source_page" and not session._knowledge_grounding
+        assert session._knowledge_evidence["status"] == "source_page"
+        # A page of an oversized section grounds figures on exactly that page
+        # (live-risk voice-8, 2026-10-20); it used to ground nothing.
+        assert session._knowledge_grounding == [session._knowledge_evidence["source_text"]]
         item = ({"name": kt.KB_TOOL_NAME, "arguments": args}, wire)
         assert credit([item])
         assert not credit([item])
@@ -162,7 +165,8 @@ async def test_actual_live_turn_reads_branch_then_all_oversized_context_pages(mo
     steps.append("The minimum is twelve months, and tax is excluded.")
     response, _, _ = await service._stream_llm_and_tts(session)
     assert response == steps[-1] and len(rounds) == 5
-    assert session._knowledge_evidence["status"] == "source_page" and not session._knowledge_grounding
+    assert session._knowledge_evidence["status"] == "source_page"
+    assert session._knowledge_grounding == [session._knowledge_evidence["source_text"]]
     assert all(messages[-1].content == "Please explain the target contract." for messages, _ in rounds)
 
 

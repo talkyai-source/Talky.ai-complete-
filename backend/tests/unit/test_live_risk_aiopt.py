@@ -122,3 +122,13 @@ def test_campaign_voice_of_other_engine_is_not_paired_with_tenant_provider():
     assert t.campaign_voice_matches_provider(cartesia_uuid, "cartesia", "elevenlabs") is True
     # unknown shape: keep the historical behaviour
     assert t.campaign_voice_matches_provider("lfPTQbwnu1oXQ9g6V0r4", None, "cartesia") is True
+
+
+def test_voice_engine_check_reads_the_provider_enum_value():
+    """The tenant TTS provider arrives as a TTSProvider enum; comparing str(enum)
+    ("TTSProvider.DEEPGRAM") dropped every Deepgram Aura voice as foreign."""
+    from app.domain.models.ai_config import TTSProvider
+    from app.domain.services.telephony_session_config import campaign_voice_matches_provider
+
+    assert campaign_voice_matches_provider("aura-2-apollo-en", None, TTSProvider.DEEPGRAM)
+    assert not campaign_voice_matches_provider("aura-2-apollo-en", None, TTSProvider.CARTESIA)
