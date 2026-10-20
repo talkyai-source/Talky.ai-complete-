@@ -2005,49 +2005,56 @@ async def delete_sip_trunk(
                     "Asterisk configuration cleanup was not confirmed; the trunk was not deleted.",
                 ) from exc
 
-            unpinned = await conn.fetch(_UNPIN_CAMPAIGNS_SQL, tenant_id, str(trunk_id))
-            await conn.execute(_CLEAR_POOL_ASSIGNMENT_SQL, tenant_id, str(trunk_id))
-            await conn.execute(_DELETE_ROUTE_POLICIES_SQL, tenant_id, trunk_id)
-            paused = await conn.fetch(
-                _PAUSE_INBOUND_CONFIGS_SQL, tenant_id, trunk_id, current_user.id
-            )
-            if paused:
-                await conn.execute(
-                    _PAUSE_INBOUND_CAMPAIGNS_SQL, tenant_id, [r["campaign_id"] for r in paused]
+            try:
+                unpinned = await conn.fetch(_UNPIN_CAMPAIGNS_SQL, tenant_id, str(trunk_id))
+                await conn.execute(_CLEAR_POOL_ASSIGNMENT_SQL, tenant_id, str(trunk_id))
+                await conn.execute(_DELETE_ROUTE_POLICIES_SQL, tenant_id, trunk_id)
+                paused = await conn.fetch(
+                    _PAUSE_INBOUND_CONFIGS_SQL, tenant_id, trunk_id, current_user.id
                 )
-                await conn.execute(
-                    _AUDIT_INBOUND_PAUSE_SQL, tenant_id, current_user.id,
-                    getattr(current_user, "role", None), str(trunk_id), [r["id"] for r in paused],
+                if paused:
+                    await conn.execute(
+                        _PAUSE_INBOUND_CAMPAIGNS_SQL, tenant_id, [r["campaign_id"] for r in paused]
+                    )
+                    await conn.execute(
+                        _AUDIT_INBOUND_PAUSE_SQL, tenant_id, current_user.id,
+                        getattr(current_user, "role", None), str(trunk_id), [r["id"] for r in paused],
+                    )
+                archived = await conn.fetch(
+                    _ARCHIVE_INBOUND_ASSIGNMENTS_SQL, tenant_id, trunk_id, current_user.id
                 )
-            archived = await conn.fetch(
-                _ARCHIVE_INBOUND_ASSIGNMENTS_SQL, tenant_id, trunk_id, current_user.id
-            )
-            if await conn.fetchval(_INBOUND_HISTORY_REMAINS_SQL, tenant_id, trunk_id):
-                await conn.execute(_RETIRE_LINE_SQL, tenant_id, trunk_id, current_user.id)
-                mode = "archived"
-            else:
-                await conn.execute(
-                    "DELETE FROM tenant_sip_trunks WHERE tenant_id=$1 AND id=$2",
-                    tenant_id,
-                    trunk_id,
+                if await conn.fetchval(_INBOUND_HISTORY_REMAINS_SQL, tenant_id, trunk_id):
+                    await conn.execute(_RETIRE_LINE_SQL, tenant_id, trunk_id, current_user.id)
+                    mode = "archived"
+                else:
+                    await conn.execute(
+                        "DELETE FROM tenant_sip_trunks WHERE tenant_id=$1 AND id=$2",
+                        tenant_id,
+                        trunk_id,
+                    )
+                    mode = "removed"
+                result = {
+                    "id": str(trunk_id),
+                    "deleted": True,
+                    "mode": mode,
+                    "archived_inbound_numbers": len(archived),
+                    "paused_inbound_campaigns": len(paused),
+                    "unpinned_campaigns": len(unpinned),
+                }
+                await _store_idempotency_result(
+                    conn,
+                    tenant_id=tenant_id,
+                    operation=operation,
+                    idempotency_key=idempotency_key,
+                    response_body=result,
+                    status_code=200,
+                    resource_type="sip_trunk",
+                    resource_id=trunk_id,
                 )
-                mode = "removed"
-            result = {
-                "id": str(trunk_id),
-                "deleted": True,
-                "mode": mode,
-                "archived_inbound_numbers": len(archived),
-                "paused_inbound_campaigns": len(paused),
-                "unpinned_campaigns": len(unpinned),
-            }
-            await _store_idempotency_result(
-                conn,
-                tenant_id=tenant_id,
-                operation=operation,
-                idempotency_key=idempotency_key,
-                response_body=result,
-                status_code=200,
-                resource_type="sip_trunk",
-                resource_id=trunk_id,
-            )
-            return result
+                return result
+            except Exception:
+                # The file is already gone but this transaction will roll back,
+                # leaving the line active with no endpoint: put the file back.
+                if row["is_active"]:
+                    await _restore_trunk_config_file(row)
+                raise

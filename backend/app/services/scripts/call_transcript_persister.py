@@ -121,9 +121,12 @@ async def bind_telephony_call(
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                 row = await conn.fetchrow(
                     """
-                    SELECT id, tenant_id, campaign_id, lead_id, phone_number
+                    SELECT id, tenant_id, campaign_id, lead_id, phone_number,
+                           (SELECT COUNT(DISTINCT c2.tenant_id) FROM calls c2
+                             WHERE c2.external_call_uuid = $1) AS tenant_count
                     FROM   calls
                     WHERE  external_call_uuid = $1
+                    ORDER  BY created_at DESC
                     LIMIT  1
                     """,
                     pbx_channel_id,
@@ -141,6 +144,22 @@ async def bind_telephony_call(
             "bind_telephony_call no dialer row for pbx=%s "
             "(non-campaign test call?)",
             pbx_channel_id[:12] if pbx_channel_id else "?",
+        )
+        return None
+
+    # external_call_uuid is not unique across tenants. This lookup has no
+    # tenant context (it is what establishes it), so an id shared by several
+    # tenants cannot be attributed safely: bind nothing rather than guess and
+    # file an opt-out / transcript / recording under the wrong tenant.
+    try:
+        _tenant_count = int(row.get("tenant_count") or 1)
+    except (AttributeError, TypeError, ValueError):
+        _tenant_count = 1
+    if _tenant_count > 1:
+        logger.error(
+            "bind_telephony_call ambiguous pbx=%s spans %d tenants; refusing to bind",
+            pbx_channel_id[:12] if pbx_channel_id else "?",
+            _tenant_count,
         )
         return None
 

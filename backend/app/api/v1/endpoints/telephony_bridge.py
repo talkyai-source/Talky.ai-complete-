@@ -1707,9 +1707,10 @@ async def _load_agent_lead_context(lead_id, tenant_id) -> Optional[dict]:
                 SELECT first_name, last_name, company_name, job_title,
                        best_time_to_call, calling_notes, email
                   FROM leads
-                 WHERE id = $1::uuid
+                 WHERE id = $1::uuid AND tenant_id = $2::uuid
                 """,
                 str(lead_id),
+                str(tenant_id),
             )
         if not row:
             return None

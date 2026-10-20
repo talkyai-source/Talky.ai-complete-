@@ -1660,13 +1660,7 @@ class AsteriskAdapter(CallControlAdapter):
                             if self._stop_event.is_set():
                                 break
                             if msg.type == aiohttp.WSMsgType.TEXT:
-                                import json
-
-                                try:
-                                    event = json.loads(msg.data)
-                                    await self._handle_ari_event(event)
-                                except Exception as exc:
-                                    logger.debug(f"ARI event parse error: {exc}")
+                                await self._dispatch_ari_text(msg.data)
                             elif msg.type in (
                                 aiohttp.WSMsgType.ERROR,
                                 aiohttp.WSMsgType.CLOSED,
@@ -2953,6 +2947,31 @@ class AsteriskAdapter(CallControlAdapter):
                 for _old in list(self._end_dispatched)[:1000]:
                     self._end_dispatched.pop(_old, None)
 
+    async def _dispatch_ari_text(self, data: str) -> None:
+        """Parse and handle one ARI WebSocket text frame; never raises.
+
+        A handler failure drops the event (a lost StasisStart/Up/Destroyed
+        strands a call), so it is logged at ERROR with the event type and
+        channel, separately from a malformed frame.
+        """
+        import json
+
+        try:
+            event = json.loads(data)
+        except Exception as exc:
+            logger.warning(f"ARI event parse error: {exc}")
+            return
+        try:
+            await self._handle_ari_event(event)
+        except Exception as exc:
+            _etype = event.get("type") if isinstance(event, dict) else None
+            _chan = event.get("channel") if isinstance(event, dict) else None
+            _cid = _chan.get("id") if isinstance(_chan, dict) else None
+            logger.error(
+                f"ARI event handler failed type={_etype} channel={str(_cid)[:12]}: {exc}",
+                exc_info=True,
+            )
+
     async def _on_outbound_stasis_start(self, channel_id: str) -> None:
         """
         Handle an outbound call entering Stasis (callee is still ringing).
@@ -2965,13 +2984,14 @@ class AsteriskAdapter(CallControlAdapter):
         from app.infrastructure.telephony.media_reconciliation import media_bridge_name
 
         logger.info(f"AsteriskAdapter: outbound call ringing channel={channel_id[:12]}")
-        listen_port = await self._alloc_rtp_port()
+        listen_port: Optional[int] = None
         session_id = f"asterisk-{uuid.uuid4().hex}"
         # Choose ownership before the network await: a lost create response
         # must not leave cleanup with an unknowable server-generated ID.
         bridge_id = f"talky-outbound-bridge-{uuid.uuid4().hex[:20]}"
 
         try:
+            listen_port = await self._alloc_rtp_port()
             # 1. Create mixing bridge
             bridge = await self._ari(
                 "POST", "/bridges", params={"type": "mixing", "bridgeId": bridge_id,
@@ -3032,9 +3052,21 @@ class AsteriskAdapter(CallControlAdapter):
                     await self._ari("DELETE", f"/bridges/{bridge_id}", ok=(200, 204, 404))
                 except Exception:
                     pass
-            await self._release_rtp_port(listen_port)
+            if listen_port is not None:
+                await self._release_rtp_port(listen_port)
             if isinstance(exc, asyncio.CancelledError):
                 raise
+            # The PSTN leg is already in Stasis with no bridge or pending
+            # entry: left alone, the callee answers into dead air and nothing
+            # else will ever hang it up. Remove it so the call ends through
+            # the normal ChannelDestroyed path.
+            try:
+                await self.hangup_confirmed(channel_id)
+            except Exception as hangup_exc:
+                logger.critical(
+                    f"AsteriskAdapter: outbound setup failed and hangup "
+                    f"not confirmed channel={channel_id[:12]}: {hangup_exc}"
+                )
 
     async def _persist_outbound_answer_obligation(
         self,

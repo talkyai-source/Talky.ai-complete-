@@ -31,6 +31,8 @@ ENV_PATH = "/opt/talky/backend/.env"
 DEFAULT_REG = "blazedigitel-reg"
 DEFAULT_ENDPOINT = "blazedigitel-endpoint"
 DEFAULT_PLATFORM_TRUNK_NAME = "platform-default"
+# Longer than the API reload debounce plus the activation commit.
+INACTIVE_CLEANUP_GRACE_S = 120
 _STATUSES = ("Registered", "Rejected", "Unregistered", "Registering", "Stopped", "Failed")
 
 
@@ -236,8 +238,20 @@ def reconcile_inactive_config_files(rows, endpoints: set[str]) -> int:
             continue
         if str(row["trunk_name"] or "").strip().lower() == platform_name:
             continue
+        # An activation writes the file and reloads Asterisk inside its DB
+        # transaction, so for a few seconds the row still reads inactive
+        # (READ COMMITTED) while its file is legitimately present. Never
+        # delete a file written within the grace window; the next
+        # pass sees the committed state.
         tid = str(row["id"])
         target = base / f"trunk-{tid}.conf"
+        # Freshness comes from the file's own mtime (written by activation),
+        # not updated_at: this script's UPDATE bumps updated_at on every pass.
+        try:
+            if time.time() - target.stat().st_mtime < INACTIVE_CLEANUP_GRACE_S:
+                continue
+        except OSError:
+            pass
         endpoint_loaded = f"trunk-{tid}" in endpoints
         try:
             file_present = target.exists()

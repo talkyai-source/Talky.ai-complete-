@@ -65,6 +65,9 @@ def test_inactive_cleanup_removes_exact_managed_file_and_reloads_once(tmp_path, 
     tid = _trunk()["id"]
     target = tmp_path / f"trunk-{tid}.conf"
     target.write_text("secret", encoding="utf-8")
+    # Only files older than the activation grace window are orphans.
+    import os, time
+    os.utime(target, (time.time() - 3600, time.time() - 3600))
     calls: list[str] = []
 
     def cli(command: str):
