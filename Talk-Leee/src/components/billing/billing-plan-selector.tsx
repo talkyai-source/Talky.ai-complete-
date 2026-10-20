@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useBillingPlan, useBillingPlans } from "@/lib/billing-api";
 import { formatPurchasedPrice, hasManagedSubscription, openBillingPortal } from "@/lib/billing-purchase";
 import { purchaseErrorText, useBillingPurchase } from "./use-billing-purchase";
+import { PublishedPlanCards } from "./published-plan-cards";
 
 const navigate = (url: string) => window.location.assign(url);
 function PurchaseNotice({ purchase }: { purchase: ReturnType<typeof useBillingPurchase> }) {
@@ -29,7 +30,7 @@ export function BillingCheckoutReturn({ scope, onNavigate = navigate }: { scope:
   const purchase = useBillingPurchase(scope, onNavigate);
   return <PurchaseNotice purchase={purchase} />;
 }
-export function BillingPlanSelector({ scope, onNavigate = navigate }: { scope: string; onNavigate?: (url: string) => void }) {
+export function BillingPlanSelector({ scope, onNavigate = navigate, showPublishedPlans = false }: { scope: string; onNavigate?: (url: string) => void; showPublishedPlans?: boolean }) {
   const plansQuery = useBillingPlans(scope);
   const subscriptionQuery = useBillingPlan(scope);
   const purchase = useBillingPurchase(scope, onNavigate);
@@ -59,10 +60,14 @@ export function BillingPlanSelector({ scope, onNavigate = navigate }: { scope: s
   }
   return <div className="space-y-6">
     <PurchaseNotice purchase={purchase} />
+    {showPublishedPlans && <PublishedPlanCards />}
     {portalError && <p role="alert">{portalError}</p>}
     {plansQuery.isLoading || subscriptionQuery.isLoading ? <p role="status">Loading billing offers…</p> : plansQuery.isError || subscriptionQuery.isError ?
       <div role="alert" className="space-y-3"><p>Billing offers could not be verified. Your current subscription is unchanged.</p><Button variant="outline" onClick={() => { void plansQuery.refetch(); void subscriptionQuery.refetch(); }}>Retry</Button></div> : <>
       {managed && <div className="space-y-3 rounded-xl border p-4"><p>Manage your existing paid subscription in the billing portal.</p>{subscription?.billing_portal_available ? <Button disabled={portalBusy} onClick={() => void manage()}>{portalBusy ? "Opening…" : "Manage subscription"}</Button> : <p>Subscription management is unavailable. Contact support before changing your plan.</p>}</div>}
+      {/* Keep existing purchase recovery above. Published cards must never use
+          an old offer merely because it has the same plan name or ID. */}
+      {!showPublishedPlans && <>
       {annualAvailable && <fieldset className="flex flex-wrap items-center justify-center gap-4"><legend className="mb-2 text-center font-semibold">Billing interval</legend>{(["month", "year"] as const).map(value => <label key={value} className="inline-flex items-center gap-2"><input type="radio" name="billing-interval" value={value} checked={selectedInterval === value} disabled={Boolean(purchase.saved) || purchase.busy} onChange={() => setInterval(value)} />{value === "month" ? "Monthly" : "Yearly"}</label>)}</fieldset>}
       {plans.length === 0 && <p>No approved offers are currently available.</p>}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">{plans.map(plan => {
@@ -76,6 +81,7 @@ export function BillingPlanSelector({ scope, onNavigate = navigate }: { scope: s
           <Button disabled={blocked || !available || currentFree} onClick={() => { if (price) void purchase.run({ plan, price }); }}>{currentFree ? "Current free plan" : price?.kind === "free" ? `Choose ${plan.name}` : `Select ${plan.name}`}</Button>
         </CardContent></Card>;
       })}</div>
+      </>}
     </>}
     <Button asChild variant="outline"><Link href="/billing">Back to billing</Link></Button>
   </div>;

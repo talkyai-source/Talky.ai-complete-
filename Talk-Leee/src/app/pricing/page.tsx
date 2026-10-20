@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
+import { PLAN_DISPLAY_CATALOG, PLAN_DISPLAY_COMPARISON_ROWS } from "@/lib/plan-display-catalog";
 
 export const metadata: Metadata = {
   title: "Pricing | Talk-Lee AI",
@@ -29,41 +30,10 @@ export default function PricingPage() {
   const primaryButtonClassName = `${buttonSizeClassName} bg-blue-600 hover:bg-blue-700 text-white`;
   const outlineButtonClassName = `${buttonSizeClassName} bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900`;
 
-  const plans = [
-    {
-      name: "Basic",
-      price: "$99/month",
-      annual: "Annual billing equivalent: $83/month",
-      highlights: [
-        "Included AI minutes: 300/month",
-        "Concurrent calls: 3",
-        "Campaigns: 2",
-        "Voice recording storage: 2 GB",
-        "Recording retention: 30 days",
-      ],
-    },
-    {
-      name: "Business",
-      price: "$299/month",
-      annual: "Annual billing equivalent: $269/month",
-      highlights: [
-        "Included AI minutes: 1,000/month",
-        "Concurrent calls: 10",
-        "Campaigns: 10",
-        "Voice recording storage: 4 GB",
-        "Recording retention: 90 days",
-      ],
-    },
-  ];
+  const plans = PLAN_DISPLAY_CATALOG;
 
   const comparisonRows: [string, string, string][] = [
-    ["Monthly price", "$99/month", "$299/month"],
-    ["Annual billing equivalent", "$83/month", "$269/month"],
-    ["Included AI minutes", "300/month", "1,000/month"],
-    ["Concurrent calls", "3", "10"],
-    ["Campaigns", "2", "10"],
-    ["Voice recording storage", "2 GB", "4 GB"],
-    ["Recording retention", "30 days", "90 days"],
+    ...PLAN_DISPLAY_COMPARISON_ROWS,
     ["Live analytics", "Included", "Included"],
     ["CDRs / call detail records", "Included", "Included"],
     ["Contact uploads", "Unlimited", "Unlimited"],
@@ -74,6 +44,7 @@ export default function PricingPage() {
     ["Cartesia voices", "Included", "Included"],
     ["Deepgram voices", "Included", "Included"],
     ["Deepgram STT", "Included", "Included"],
+    ["AssemblyAI Universal-3.6 Pro STT", "English-only; selectable when configured", "English-only; selectable when configured"],
     ["ElevenLabs voices", "Paid add-on", "Paid add-on"],
     ["Telephone/PSTN/SIP minutes", "Billed separately", "Billed separately"],
   ];
@@ -95,6 +66,7 @@ export default function PricingPage() {
     "Google voices are included in the subscription.",
     "Cartesia voices are included in the subscription.",
     "Deepgram voices and Deepgram speech-to-text are included in the subscription.",
+    "AssemblyAI Universal-3.6 Pro offers English-only speech-to-text with Fast, Balanced and Accuracy modes. Select it in AI Options when configured; confirm pricing and any included usage in your client agreement.",
     "ElevenLabs is a premium voice option and is charged separately.",
     "Current indicative ElevenLabs add-on: $50/month; the exact included ElevenLabs allowance should be confirmed in the client agreement.",
   ];
@@ -133,9 +105,9 @@ export default function PricingPage() {
               <div key={plan.name} className={`${accentCardClassName} flex flex-col`} style={accentCardStyle}>
                 <h2 className={cardTitleClassName}>{plan.name}</h2>
                 <p className="mt-3 text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground">
-                  {plan.price}
+                  {plan.monthlyPrice}
                 </p>
-                <p className={cardBodyClassName}>{plan.annual}</p>
+                <p className={cardBodyClassName}>Annual billing equivalent: {plan.annualEquivalent}</p>
                 <ul className="mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
                   {plan.highlights.map((item) => (
                     <li key={item}>&bull; {item}</li>
@@ -222,13 +194,19 @@ export default function PricingPage() {
         </section>
 
         <section className="mt-14">
-          <h2 className={headingClassName}>Voice providers</h2>
+          <h2 className={headingClassName}>Voice and speech recognition providers</h2>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <ul className={listClassName}>
               {voiceProviders.map((item) => (
                 <li key={item}>&bull; {item}</li>
               ))}
             </ul>
+            <p className={cardBodyClassName}>
+              <Link href="/ai-options" className="font-semibold text-primary underline underline-offset-4 dark:text-foreground">
+                Configure speech recognition in AI Options
+              </Link>
+              {" "}under Standard Pipeline → Speech-to-Text → Engine.
+            </p>
           </div>
         </section>
 

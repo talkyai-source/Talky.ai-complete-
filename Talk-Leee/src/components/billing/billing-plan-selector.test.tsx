@@ -35,8 +35,8 @@ function accepted(opts: HttpRequestOptions, state = "open") {
   const price = body.price_option_id === YEAR ? annual : monthly;
   return { request_id: body.request_id, state, session_id: state === "open" ? "cs_synthetic" : null, checkout_url: state === "open" ? "https://checkout.stripe.com/c/pay/synthetic" : null, price_option: { ...price, plan_id: plan.id, plan_name: plan.name }, mock_mode: false };
 }
-function mount(activeScope = scope, statusOnly = false) {
-  const ui = statusOnly ? <BillingCheckoutReturn key={activeScope} scope={activeScope} onNavigate={url => navigations.push(url)} /> : <BillingPlanSelector key={activeScope} scope={activeScope} onNavigate={url => navigations.push(url)} />;
+function mount(activeScope = scope, statusOnly = false, showPublishedPlans = false) {
+  const ui = statusOnly ? <BillingCheckoutReturn key={activeScope} scope={activeScope} onNavigate={url => navigations.push(url)} /> : <BillingPlanSelector key={activeScope} scope={activeScope} showPublishedPlans={showPublishedPlans} onNavigate={url => navigations.push(url)} />;
   const view = renderWithQueryClient(ui); clients.push(view.qc); return view;
 }
 beforeEach(() => {
@@ -266,4 +266,67 @@ test("missing backend configuration never submits or creates an uncertain reques
   mount(); fireEvent.click(await screen.findByRole("button", { name: "Select Starter" }));
   await screen.findByText(/service connection is not configured/);
   assert.equal(writes.length, 0); assert.equal(screen.queryByText(/Saved purchase:/), null);
+});
+
+test("published plans replace legacy cards without purchasing a same-name old offer", async () => {
+  catalogue = [{ ...plan, id: "basic", name: "Basic", price_options: [{ ...monthly, amount_minor: 2900 }] },
+    { ...plan, id: "professional", name: "Professional" }];
+  mount(scope, false, true);
+  await waitFor(() => assert.equal(Boolean(screen.queryByText("Loading billing offers…")), false));
+  assert.ok(screen.getByRole("heading", { name: "Basic" }));
+  assert.ok(screen.getByRole("heading", { name: "Business" }));
+  assert.ok(screen.getByText("$99/month"));
+  assert.ok(screen.getByText("$299/month"));
+  assert.ok(screen.getByText("Annual billing equivalent: $83/month"));
+  assert.ok(screen.getByText("Annual billing equivalent: $269/month"));
+  assert.ok(screen.getByText("Included AI minutes: 300/month"));
+  assert.ok(screen.getByText("Included AI minutes: 1,000/month"));
+  assert.equal(screen.queryByRole("heading", { name: "Professional" }), null);
+  assert.equal(screen.queryByText("$29.00 / month"), null);
+  assert.equal(screen.queryByRole("radio", { name: "Yearly" }), null);
+  for (const name of ["Basic", "Business"]) {
+    const button = screen.getByRole("button", { name: `${name} checkout unavailable` });
+    assert.equal((button as HTMLButtonElement).disabled, true);
+    fireEvent.click(button);
+  }
+  assert.equal(writes.length, 0);
+  assert.equal(navigations.length, 0);
+});
+
+test("published plans remain visible when billing offers cannot be loaded", async () => {
+  const request = api.request;
+  api.request = (async (opts: HttpRequestOptions) => {
+    if (opts.path === "/billing/plans") throw new Error("Synthetic catalog outage");
+    return request(opts);
+  }) as typeof api.request;
+  mount(scope, false, true);
+  await screen.findByText("Billing offers could not be verified. Your current subscription is unchanged.");
+  assert.ok(screen.getByText("$99/month"));
+  assert.ok(screen.getByText("$299/month"));
+  assert.ok(screen.getByRole("button", { name: "Retry" }));
+  assert.equal(writes.length, 0);
+});
+
+test("published plans preserve recovery of an existing purchase with its original terms", async () => {
+  const saved: SavedPurchase = { request_id: REQUEST, price_option: snapshot() };
+  storeSavedPurchase(scope, saved);
+  catalogue = [];
+  mount(scope, false, true);
+  await waitFor(() => assert.equal((screen.getByRole("button", { name: "Resume saved purchase" }) as HTMLButtonElement).disabled, false));
+  assert.ok(screen.getByText(/Saved purchase: Starter — \$12.50 \/ month/));
+  assert.ok(screen.getByText("$99/month"));
+  fireEvent.click(screen.getByRole("button", { name: "Resume saved purchase" }));
+  await waitFor(() => assert.equal(navigations.length, 1));
+  assert.deepEqual(writes[0]!.body, { request_id: REQUEST, price_option_id: MONTH });
+});
+
+test("published plans retain management of the existing paid subscription", async () => {
+  subscription = { ...emptySubscription, status: "active", plan_id: plan.id, purchased_price_option: snapshot(), billing_portal_available: true };
+  handleWrite = async () => ({ portal_url: "https://billing.stripe.com/p/session/synthetic", mock_mode: false });
+  mount(scope, false, true);
+  fireEvent.click(await screen.findByRole("button", { name: "Manage subscription" }));
+  await waitFor(() => assert.equal(navigations.length, 1));
+  assert.equal(writes[0]!.path, "/billing/portal");
+  assert.equal(screen.queryByRole("button", { name: "Select Starter" }), null);
+  assert.ok(screen.getByText("$299/month"));
 });
