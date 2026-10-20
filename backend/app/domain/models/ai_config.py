@@ -313,7 +313,7 @@ class LatencyTestResult(BaseModel):
 class LLMTestRequest(BaseModel):
     """Request for LLM testing"""
     model: str = GroqModel.GPT_OSS_20B.value
-    message: str
+    message: str = Field(max_length=4000)
     temperature: float = Field(default=0.6, ge=0.0, le=2.0)
     max_tokens: int = Field(default=150, ge=1, le=5000)
 
@@ -331,7 +331,7 @@ class TTSTestRequest(BaseModel):
     """Request for TTS testing"""
     model: str = CartesiaModel.SONIC_3.value
     voice_id: str
-    text: str
+    text: str = Field(max_length=500)
     sample_rate: int = 24000  # Official Cartesia recommended
 
 

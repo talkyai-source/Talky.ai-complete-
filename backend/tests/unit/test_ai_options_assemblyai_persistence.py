@@ -133,7 +133,8 @@ async def test_saved_endpoint_result_matches_reload_with_assemblyai_credentials(
     assert (reloaded.stt_engine, reloaded.stt_provider, reloaded.stt_model) == (
         "assemblyai", "assemblyai", "universal-3-6-pro",
     )
-    resolve.assert_awaited_once_with("assemblyai", tenant_id="A")
+    # save_config also resolves the LLM provider key (aiopt-4), so assert the AssemblyAI lookup happened exactly once.
+    assert [c.args for c in resolve.await_args_list].count(("assemblyai",)) == 1
 
 
 @pytest.mark.parametrize("has_key", [False, True])

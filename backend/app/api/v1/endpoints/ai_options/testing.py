@@ -19,6 +19,8 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.v1.dependencies import get_current_user, get_db_client
+from app.core.security.api_security import rate_limit_dependency
+from app.core.security.rbac import Permission, require_permission
 
 from app.domain.models.ai_config import (
     CEREBRAS_MODELS,
@@ -55,7 +57,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["AI Options"])
 
 
-@router.post("/test/llm", response_model=LLMTestResponse)
+@router.post(
+    "/test/llm",
+    response_model=LLMTestResponse,
+    dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.TENANTS_UPDATE))],
+)
 async def test_llm(request: LLMTestRequest, current_user=Depends(get_current_user)):
     """
     Test LLM with a message and measure latency.
@@ -169,7 +175,11 @@ async def test_llm(request: LLMTestRequest, current_user=Depends(get_current_use
             await llm.cleanup()
 
 
-@router.post("/test/tts", response_model=TTSTestResponse)
+@router.post(
+    "/test/tts",
+    response_model=TTSTestResponse,
+    dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.TENANTS_UPDATE))],
+)
 async def test_tts(request: TTSTestRequest, current_user=Depends(get_current_user), db_client=Depends(get_db_client)):
     """
     Test TTS with text and measure latency.

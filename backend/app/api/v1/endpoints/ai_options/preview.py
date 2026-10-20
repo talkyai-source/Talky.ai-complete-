@@ -22,7 +22,9 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from app.api.v1.dependencies import get_current_user, get_db_client
-from pydantic import BaseModel
+from app.core.security.api_security import rate_limit_dependency
+from app.core.security.rbac import Permission, require_permission
+from pydantic import BaseModel, Field
 
 from app.domain.models.ai_config import VoiceInfo
 from app.infrastructure.tts.cartesia import CartesiaTTSProvider
@@ -55,6 +57,12 @@ router = APIRouter(tags=["AI Options"])
 _VOICE_PREVIEW_CACHE_DIR = Path("/tmp/talky-voice-preview-cache")
 _PREVIEW_SAMPLE_TEXT = "Hello, I am your AI voice assistant. How can I help you today?"
 
+def _preview_text_is_cacheable(text: str) -> bool:
+    """The disk cache is keyed by voice_id alone and shared by every tenant, so
+    only the canonical sample sentence may be read from or written to it."""
+    return (text or "").strip() == _PREVIEW_SAMPLE_TEXT
+
+
 def _preview_cache_path(voice_id: str) -> Path:
     safe = "".join(ch for ch in voice_id if ch.isalnum() or ch in {"-", "_"})
     return _VOICE_PREVIEW_CACHE_DIR / f"{safe or 'voice'}.f32"
@@ -83,7 +91,7 @@ def _save_preview_cache(voice_id: str, float32_bytes: bytes) -> None:
 class VoicePreviewRequest(BaseModel):
     """Request for voice preview"""
     voice_id: str
-    text: str = "Hello, I am your AI voice assistant. How can I help you today?"
+    text: str = Field(default="Hello, I am your AI voice assistant. How can I help you today?", max_length=500)
     # Set to "realtime" to preview a gpt-realtime-2 voice (generated through
     # the Realtime WebSocket). Omit / leave None for the cascaded TTS voices.
     provider: Optional[str] = None
@@ -98,7 +106,7 @@ class VoicePreviewResponse(BaseModel):
     latency_ms: float
 
 
-@router.post("/voices/preview", response_model=VoicePreviewResponse)
+@router.post("/voices/preview", response_model=VoicePreviewResponse, dependencies=[Depends(rate_limit_dependency)])
 async def preview_voice(request: VoicePreviewRequest, current_user=Depends(get_current_user), db_client=Depends(get_db_client)):
     """
     Generate a voice preview audio sample.
@@ -163,7 +171,7 @@ async def preview_voice(request: VoicePreviewRequest, current_user=Depends(get_c
                 raise HTTPException(exc.status_code, str(exc)) from exc
 
         # Serve from disk cache when available — no external API call needed.
-        cached = _load_preview_cache(request.voice_id)
+        cached = _load_preview_cache(request.voice_id) if _preview_text_is_cacheable(request.text) else None
         if cached:
             audio_base64 = base64.b64encode(cached).decode("utf-8")
             duration_seconds = len(cached) / (24000 * 4)
@@ -264,7 +272,8 @@ async def preview_voice(request: VoicePreviewRequest, current_user=Depends(get_c
             )
 
         # Persist to disk so subsequent preview requests skip the API call entirely.
-        _save_preview_cache(request.voice_id, combined_audio)
+        if _preview_text_is_cacheable(request.text):
+            _save_preview_cache(request.voice_id, combined_audio)
 
         audio_base64 = base64.b64encode(combined_audio).decode("utf-8")
         duration_seconds = len(combined_audio) / (sample_rate * 4)
@@ -323,7 +332,10 @@ async def get_prefetch_status():
     }
 
 
-@router.post("/voices/prefetch")
+@router.post(
+    "/voices/prefetch",
+    dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.TENANTS_UPDATE))],
+)
 async def prefetch_all_voice_samples(current_user=Depends(get_current_user), db_client=Depends(get_db_client)):
     """
     Pre-download and cache preview samples for every available voice.

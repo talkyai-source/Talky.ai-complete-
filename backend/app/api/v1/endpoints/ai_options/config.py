@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from app.api.v1.dependencies import get_current_user, get_db_client
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
+from app.core.security.rbac import Permission, require_permission
 from app.domain.models.ai_config import (
     AIProviderConfig,
     CARTESIA_MODELS,
@@ -85,7 +86,11 @@ async def get_config(
     return config
 
 
-@router.post("/config", response_model=AIProviderConfigWithWarnings)
+@router.post(
+    "/config",
+    response_model=AIProviderConfigWithWarnings,
+    dependencies=[Depends(require_permission(Permission.TENANTS_UPDATE))],
+)
 async def save_config(
     config: AIProviderConfig,
     current_user=Depends(get_current_user),
@@ -173,6 +178,17 @@ async def save_config(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Gemini API key not configured. Set GEMINI_API_KEY in .env.",
         )
+    # Every other offered LLM must resolve a key too (tenant BYOK, the platform
+    # key or a *_KEYS pool). Otherwise the save succeeds and every later call
+    # on this tenant fails at session creation.
+    if config.llm_provider in {"groq", "cerebras", "deepseek"}:
+        from app.domain.services.credential_resolver import get_credential_resolver
+        key = await get_credential_resolver().resolve(config.llm_provider, tenant_id=str(tenant_id))
+        if not key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"{config.llm_provider.capitalize()} API key not configured. Add a tenant credential or set the key on the backend.",
+            )
 
     if config.tts_provider == "cartesia":
         if not os.getenv("CARTESIA_API_KEY"):

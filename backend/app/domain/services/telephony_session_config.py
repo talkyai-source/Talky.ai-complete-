@@ -118,6 +118,42 @@ AGENT_NAMES = [
 # ---------------------------------------------------------------------------
 
 
+_UUID_VOICE_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+def voice_id_provider_hint(voice_id: Optional[str]) -> Optional[str]:
+    """Engine a voice id belongs to when its SHAPE says so, else None.
+
+    Cartesia ids are UUIDs, Deepgram Aura ids start ``aura-``, Google Chirp ids
+    contain ``-Chirp``; ElevenLabs ids have no distinguishing shape (None).
+    """
+    vid = (voice_id or "").strip()
+    if not vid:
+        return None
+    if _UUID_VOICE_ID.match(vid):
+        return "cartesia"
+    if vid.lower().startswith("aura-"):
+        return "deepgram"
+    if "-chirp" in vid.lower():
+        return "google"
+    return None
+
+
+def campaign_voice_matches_provider(
+    voice_id: Optional[str], campaign_provider: Optional[str], effective_provider: Optional[str]
+) -> bool:
+    """False only when a campaign voice with NO pinned engine is recognisably
+    another engine's voice than the one this call will run on (the tenant
+    switched TTS after the campaign was saved). An explicit campaign provider
+    always wins: the voice was validated against it at save time."""
+    if campaign_provider:
+        return True
+    hint = voice_id_provider_hint(voice_id)
+    if hint is None or not effective_provider:
+        return True
+    return hint == str(effective_provider).strip().lower()
+
+
 def _resolve_voice_gender_safe(voice_id: Optional[str]) -> Optional[str]:
     """'male' | 'female' for the voice this call will actually speak with.
 
@@ -1289,6 +1325,17 @@ def build_telephony_session_config(
     tts_model = source_config.tts_model
     _camp_voice = _campaign_attr(campaign, "voice_id")
     _camp_provider = _campaign_attr(campaign, "tts_provider")
+    if _camp_voice and not campaign_voice_matches_provider(
+        _camp_voice, _camp_provider, source_config.tts_provider
+    ):
+        # Voice saved under an engine the tenant has since left; pairing it with
+        # the tenant's NEW engine gives a 4xx / silent call. Use the tenant voice.
+        logger.error(
+            "campaign_voice_engine_mismatch campaign=%s voice=%s tenant_tts=%s - "
+            "ignoring the campaign voice; re-save the campaign voice",
+            _campaign_id(campaign), _camp_voice, source_config.tts_provider,
+        )
+        _camp_voice = None
     if _camp_voice:
         tts_voice_id = _camp_voice
     if _camp_provider:

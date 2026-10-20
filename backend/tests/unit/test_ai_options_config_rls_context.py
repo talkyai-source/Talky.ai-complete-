@@ -144,6 +144,8 @@ async def test_save_config_writes_with_tenant_context(monkeypatch):
 
     from unittest.mock import AsyncMock
     from app.domain.services import voice_clone_service
+    # save_config now refuses an LLM provider with no resolvable key.
+    monkeypatch.setenv("GROQ_API_KEY", "synthetic-groq-key")
     monkeypatch.setattr(voice_clone_service, "owned_voice_ids", AsyncMock(return_value=set()))
     monkeypatch.setattr(voice_clone_service, "all_platform_voice_ids", AsyncMock(return_value=set()))
 
