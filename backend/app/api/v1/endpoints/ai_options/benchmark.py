@@ -68,7 +68,10 @@ def _select_benchmark_llm(config: AIProviderConfig, *, openai_key=None):
             )
         return CerebrasLLMProvider(), key
     if provider == "deepseek" or model in {m.id for m in DEEPSEEK_MODELS}:
-        key = os.getenv("DEEPSEEK_API_KEY")
+        from app.domain.services.credential_resolver import resolve_sync_env_only
+
+        # DEEPSEEK_API_KEY plus the DEEPSEEK_API_KEYS pool (platform key rotation).
+        key = resolve_sync_env_only("deepseek")
         if not key:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

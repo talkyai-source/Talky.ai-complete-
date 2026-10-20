@@ -47,14 +47,12 @@ _sessions_by_ip: dict[str, int] = {}
 
 
 def _client_ip(websocket: WebSocket) -> str:
-    """Real client address: nginx sets X-Real-IP; client.host is the proxy."""
-    real_ip = (websocket.headers.get("x-real-ip") or "").strip()
-    if real_ip:
-        return real_ip
-    forwarded = (websocket.headers.get("x-forwarded-for") or "").split(",")[0].strip()
-    if forwarded:
-        return forwarded
-    return websocket.client.host if websocket.client else "unknown"
+    """Real client address. Forwarded headers count only when the peer is our
+    own proxy (nginx sets X-Real-IP and APPENDS to X-Forwarded-For, so its
+    leftmost entry is caller-supplied); see resolve_client_ip."""
+    from app.core.api_security_middleware import resolve_client_ip
+
+    return resolve_client_ip(websocket)
 
 
 def _get_semaphore() -> asyncio.Semaphore:

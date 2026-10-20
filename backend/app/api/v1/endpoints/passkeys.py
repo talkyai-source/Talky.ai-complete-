@@ -111,11 +111,11 @@ def _set_session_cookie(response: Response, raw_token: str) -> None:
 
 
 def _get_client_ip(request: Request) -> str:
-    """Extract the real client IP from the request."""
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    """Extract the real client IP from the request (never the caller-supplied
+    leftmost X-Forwarded-For entry; live-risk auth-2)."""
+    from app.core.api_security_middleware import resolve_client_ip
+
+    return resolve_client_ip(request)
 
 
 def _get_user_agent(request: Request) -> Optional[str]:

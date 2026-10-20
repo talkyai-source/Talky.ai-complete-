@@ -2196,6 +2196,7 @@ async def remove_contact_from_campaign(
             )
             cancelled = cancel_active_jobs_for_lead(
                 db_client, contact_id, reason=REASON_LEAD_REMOVED,
+                tenant_id=current_user.tenant_id,
             )
         except Exception as exc:
             logger.warning("remove_contact: job cancel failed for %s: %s", contact_id, exc)

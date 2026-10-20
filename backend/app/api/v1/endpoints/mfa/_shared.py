@@ -20,10 +20,11 @@ def _sha256(value: str) -> str:
 
 
 def _get_client_ip(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    # Not the leftmost X-Forwarded-For entry: nginx appends to it, so that
+    # entry is caller-supplied (live-risk auth-2).
+    from app.core.api_security_middleware import resolve_client_ip
+
+    return resolve_client_ip(request)
 
 
 def _get_user_agent(request: Request) -> Optional[str]:
