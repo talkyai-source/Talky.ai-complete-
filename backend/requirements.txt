@@ -33,8 +33,8 @@ hiredis==2.3.2
 httpx==0.28.1
 # HTTPS proxy TLS fixes; pin the patch used in clean-environment acceptance.
 urllib3==2.8.0
-# Security floor (2026-08-28): 3.14.1 has three published PYSEC advisories.
-aiohttp==3.14.3
+# Security floor (2026-10-20): 3.14.3 has three published advisories (GHSA-2g87-pp6c-29x5, CVE-2026-111063, CVE-2026-111064).
+aiohttp==3.14.4
 aiofiles==23.2.1
 
 # --- Email (SMTP) ---
