@@ -4339,6 +4339,16 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
                     "caller_first_no_greeting call=%s — waiting for caller, no auto intro",
                     voice_session.call_id[:12],
                 )
+                # Owner decision 2026-10-21: a callee who picks up and says
+                # nothing (call 2026-10-20: 57.6 s of silence) is greeted after
+                # CALLER_FIRST_SILENT_PICKUP_S. Task lives on _greeting_task so
+                # teardown cancels it.
+                if getattr(voice_session, "realtime_bridge", None) is None:
+                    from app.domain.services.voice_pipeline.silent_pickup import (
+                        schedule_silent_pickup,
+                    )
+
+                    schedule_silent_pickup(voice_session)
 
             # ── Drain early audio buffer ────────────────────────────────
             # Audio from the C++ gateway arrives within ~40ms of callee

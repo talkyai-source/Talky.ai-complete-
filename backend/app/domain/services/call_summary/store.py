@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any, Optional
 
 from app.core.db_utils import acquire_with_tenant
@@ -315,6 +316,96 @@ LEAD_MIN_CALLER_TURNS = int(os.getenv("LEAD_MIN_CALLER_TURNS", "3"))
 LEAD_MIN_DURATION_S = int(os.getenv("LEAD_MIN_DURATION_S", "45"))
 
 
+# Owner decision 2026-10-21 ("only clear interest"): a lead needs a real
+# interest signal (pricing / details / information / meeting) — a callback only
+# counts when it is at a determinable time inside calling hours AND comes with
+# such a signal. A "bad time" reply or a 2 a.m. callback is not interest.
+LEAD_CALL_HOURS_START_MIN = 8 * 60
+LEAD_CALL_HOURS_END_MIN = 21 * 60
+_INTEREST_RE = re.compile(
+    r"\b(pricing|prices?|cost|costs|quote|rates?|details|information|brochure|demo|"
+    r"meeting|appointment|book(?:ed|ing)?|schedul\w*|interested|wants? to know|"
+    r"more info|send (?:me|over)|email (?:me|over)|trial|sign ?up|how much|"
+    r"estimates?|estimating|takeoffs?|site visit|proposal|consultation)\b",
+    re.IGNORECASE,
+)
+# A negation removes the rest of its clause: "wasn't interested in pricing"
+# must not leave "pricing" behind to read as interest.
+_NO_INTEREST_RE = re.compile(
+    r"\b(?:(?:not|never|no longer|isn'?t|wasn'?t|aren'?t|weren'?t)\s+interested|no interest|"
+    r"uninterested|bad time|no (?:meeting|cost)|declined to (?:give|provide|share))[^.;,]*",
+    re.IGNORECASE,
+)
+_TIME_12H_RE = re.compile(r"\b(\d{1,2})(?::([0-5]\d))?\s*(?:o'?\s?clock\s*)?([ap])\.?\s?m\b\.?", re.IGNORECASE)
+_TIME_24H_RE = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
+_DAYPART_RE = re.compile(r"\b(morning|afternoon|evening|lunch\s?time|after lunch)\b", re.IGNORECASE)
+# Where the agreed callback time is stated. timeline / what_happened /
+# key_points also carry durations ("1:30 into the call") and are not read.
+_CALLBACK_TIME_FIELDS = ("outcome", "headline", "next_step")
+
+
+def _summary_texts(summary: dict, *, include_tips: bool) -> list[str]:
+    texts: list[str] = []
+    for key in ("headline", "outcome", "timeline", "what_happened", "next_step", "identified_need", "budget_information"):
+        texts.append(str(summary.get(key) or ""))
+    for key in ("key_points", "commitments") + (("follow_up_tips",) if include_tips else ()):
+        texts.extend(str(x) for x in (summary.get(key) or []))
+    for a in summary.get("action_items") or []:
+        texts.append(str(a.get("item") if isinstance(a, dict) else a))
+    for d in summary.get("business_details") or []:
+        if isinstance(d, dict):
+            texts.append(str(d.get("value") or ""))
+    return [t for t in texts if t.strip()]
+
+
+def _has_interest_signal(summary: dict) -> bool:
+    if str(summary.get("qualification_status") or "").strip().lower() == "qualified":
+        return True
+    for t in _summary_texts(summary, include_tips=False):
+        if _INTEREST_RE.search(_NO_INTEREST_RE.sub(" ", t)):
+            return True
+    return False
+
+
+def _callback_time_texts(summary: dict) -> list[str]:
+    texts = [str(summary.get(k) or "") for k in _CALLBACK_TIME_FIELDS]
+    texts.extend(str(x) for x in (summary.get("commitments") or []))
+    for a in summary.get("action_items") or []:
+        texts.append(str(a.get("item") if isinstance(a, dict) else a))
+    return [t for t in texts if t.strip()]
+
+
+def _callback_hours_verdict(summary: dict) -> str:
+    """'in_hours' | 'out_of_hours' | 'unknown' for the callback time the summary states.
+
+    Any stated time inside calling hours counts ("not at 7 am, call at 2 pm").
+    A bare h:mm from 1 to 7 is read as afternoon; noon, midnight and a part of
+    the day ("tomorrow afternoon") are understood.
+    """
+    minutes: list[int] = []
+    daypart = False
+    for t in _callback_time_texts(summary):
+        if re.search(r"\bnoon\b", t, re.IGNORECASE):
+            minutes.append(12 * 60)
+        if re.search(r"\bmidnight\b", t, re.IGNORECASE):
+            minutes.append(0)
+        for h, m, ap in _TIME_12H_RE.findall(t):
+            hh = int(h)
+            if not 1 <= hh <= 12:
+                continue
+            hh = hh % 12 + (12 if ap.lower() == "p" else 0)
+            minutes.append(hh * 60 + int(m or 0))
+        for h, m in _TIME_24H_RE.findall(_TIME_12H_RE.sub(" ", t)):
+            hh = int(h)
+            minutes.append((hh + 12 if 1 <= hh <= 7 else hh) * 60 + int(m))
+        daypart = daypart or bool(_DAYPART_RE.search(t))
+    if any(LEAD_CALL_HOURS_START_MIN <= x <= LEAD_CALL_HOURS_END_MIN for x in minutes):
+        return "in_hours"
+    if minutes:
+        return "out_of_hours"
+    return "in_hours" if daypart else "unknown"
+
+
 def _summary_supports_lead(summary: dict) -> tuple[bool, str]:
     """Gate 1 — does the summary's own evidence back the lead label?"""
     outcome = str(summary.get("outcome") or "").strip().lower()
@@ -328,6 +419,15 @@ def _summary_supports_lead(summary: dict) -> tuple[bool, str]:
     next_step = str(summary.get("next_step") or "").strip()
     if not (commitments or actions or (next_step and next_step.lower() not in ("none", "unknown", "n/a"))):
         return False, "no_commitment_action_or_next_step"
+    if outcome.startswith("callback"):
+        # An agreed callback inside calling hours is itself the interest
+        # (owner's wording); an odd-hour or unknown-time one is not.
+        verdict = _callback_hours_verdict(summary)
+        if verdict != "in_hours":
+            return False, f"callback_time_{verdict}"
+        return True, "ok"
+    if not _has_interest_signal(summary):
+        return False, "no_clear_interest_signal"
     return True, "ok"
 
 

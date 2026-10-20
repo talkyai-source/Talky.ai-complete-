@@ -521,6 +521,7 @@ class TranscriptHandler:
             if await handle_machine_interim(
                 call_id, session, transcript.text,
                 media_gateway=getattr(self._p, "media_gateway", None),
+                pipeline=self._p, websocket=websocket,
             ):
                 return
 
