@@ -12,7 +12,7 @@ Day 9+ refactoring: Business logic extracted from campaigns.py endpoints
 """
 import uuid
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional, List, Dict, Any
 from dataclasses import dataclass
 
@@ -445,10 +445,18 @@ class CampaignService:
 
             skipped_active = 0
             recovery_only = campaign_was_running and not allow_running
+            lost_job_ids = await self._find_lost_dispatched_jobs(
+                list(active_jobs_by_lead.values()), str(tenant_id)
+            )
             for lead in leads:
                 active_job = active_jobs_by_lead.get(str(lead["id"]))
                 if active_job is not None:
                     skipped_active += 1
+                    if (
+                        str(active_job.get("id")) in lost_job_ids
+                        and await self._reopen_lost_job(active_job)
+                    ):
+                        active_job = {**active_job, "status": "pending"}
                     if str(active_job.get("status") or "") == "pending":
                         jobs_to_dispatch.append(
                             self._restore_pending_job(
@@ -1065,6 +1073,100 @@ class CampaignService:
         }
 
         return job, job_record
+
+    # A queued job's payload can vanish from Redis (restart/flush, racing queue
+    # rewrite) while its row keeps the lead's one-active-job slot. Margins keep
+    # a payload that is merely mid-hop between Redis structures out of scope.
+    _LOST_QUEUED_MIN_AGE = timedelta(minutes=5)
+    _LOST_RETRY_OVERDUE = timedelta(minutes=15)
+    _LIVE_CALL_STATUSES = (
+        "initiated", "dialing", "ringing", "answered", "in_call", "in_progress",
+        "termination_pending",
+    )
+
+    @staticmethod
+    def _as_utc(value: Any) -> Optional[datetime]:
+        if isinstance(value, str):
+            try:
+                value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        if not isinstance(value, datetime):
+            return None
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+    async def _find_lost_dispatched_jobs(
+        self, rows: List[Dict[str, Any]], tenant_id: str
+    ) -> set:
+        """Ids of ``queued``/overdue ``retry_scheduled`` rows provably absent
+        from Redis and without a live call. Any uncertainty returns nothing."""
+        now = datetime.now(timezone.utc)
+        candidates: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            status = str(row.get("status") or "")
+            if status == "queued":
+                stamp = self._as_utc(row.get("updated_at")) or self._as_utc(row.get("created_at"))
+                if stamp is None or now - stamp >= self._LOST_QUEUED_MIN_AGE:
+                    candidates[str(row["id"])] = row
+            elif status == "retry_scheduled":
+                due = self._as_utc(row.get("scheduled_at"))
+                if due is not None and now - due >= self._LOST_RETRY_OVERDUE:
+                    candidates[str(row["id"])] = row
+        if not candidates:
+            return set()
+        try:
+            queue_service = await self._get_queue_service()
+            try:
+                finder = getattr(queue_service, "find_present_job_ids", None)
+                if finder is None:
+                    return set()
+                present = await finder(tenant_id, list(candidates))
+            finally:
+                await self._cleanup_queue_service()
+            if present is None:
+                return set()
+            absent = set(candidates) - {str(p) for p in present}
+            if not absent:
+                return set()
+            res = (
+                self.db_client.table("calls")
+                .select("dialer_job_id")
+                .in_("dialer_job_id", list(absent))
+                .in_("status", list(self._LIVE_CALL_STATUSES))
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            if getattr(res, "error", None):
+                return set()
+            live = {str(r.get("dialer_job_id")) for r in (getattr(res, "data", None) or [])}
+            return absent - live
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("lost-job check failed; not re-dispatching: %s", exc)
+            return set()
+
+    async def _reopen_lost_job(self, row: Dict[str, Any]) -> bool:
+        """Move one lost row back to the recoverable ``pending`` outbox state."""
+        try:
+            res = (
+                self.db_client.table("dialer_jobs")
+                .update({"status": "pending", "updated_at": datetime.utcnow().isoformat()})
+                .eq("id", str(row["id"]))
+                .eq("tenant_id", str(row["tenant_id"]))
+                .eq("campaign_id", str(row["campaign_id"]))
+                .eq("lead_id", str(row["lead_id"]))
+                .eq("status", str(row["status"]))
+                .execute()
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("lost job %s could not be reopened: %s", row.get("id"), exc)
+            return False
+        if getattr(res, "error", None):
+            return False
+        logger.warning(
+            "re-dispatching dialer job %s (was %s, payload absent from Redis)",
+            row.get("id"), row.get("status"),
+        )
+        return len(getattr(res, "data", None) or []) == 1
 
     def _restore_pending_job(
         self,

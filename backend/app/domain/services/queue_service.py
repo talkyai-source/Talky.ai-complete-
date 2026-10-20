@@ -1011,6 +1011,60 @@ class DialerQueueService:
             logger.debug("remove_campaign_inflight failed campaign=%s err=%s", campaign_id, exc)
         return removed
 
+    async def find_present_job_ids(
+        self, tenant_id: str, job_ids: List[str]
+    ) -> Optional[set]:
+        """Read-only: which of ``job_ids`` still have a payload anywhere in Redis.
+
+        Looks in the scheduled set, the priority queue, the tenant's queue and
+        the in-flight list/index/processing set (read in reverse pipeline order
+        so a payload moving forward between reads is still seen). Only payloads
+        whose ``tenant_id`` matches are counted. Returns ``None`` when presence
+        cannot be established (Redis error) so callers fail closed.
+        """
+        wanted = {str(j) for j in job_ids if j}
+        if not wanted:
+            return set()
+        if not self._initialized:
+            await self.initialize()
+        tenant = str(tenant_id)
+        found: set = set()
+
+        def _note(raw) -> None:
+            try:
+                payload = json.loads(raw)
+            except Exception:  # noqa: BLE001
+                return
+            if (
+                isinstance(payload, dict)
+                and str(payload.get("job_id")) in wanted
+                and str(payload.get("tenant_id")) == tenant
+            ):
+                found.add(str(payload.get("job_id")))
+
+        try:
+            for raw in await self._redis.zrange(self.SCHEDULED_ZSET, 0, -1) or []:
+                _note(raw)
+            for key in (
+                self.PRIORITY_QUEUE,
+                self.TENANT_QUEUE_PREFIX.format(tenant_id=tenant),
+            ):
+                for raw in await self._redis.lrange(key, 0, -1) or []:
+                    _note(raw)
+            for raw in await self._redis.lrange(self.INFLIGHT_LIST, 0, -1) or []:
+                _note(raw)
+            index = await self._redis.hgetall(self.INFLIGHT_HASH) or {}
+            for raw in index.values() if isinstance(index, dict) else []:
+                _note(raw)
+            for member in await self._redis.zrange(self.PROCESSING_ZSET, 0, -1) or []:
+                member = member.decode() if isinstance(member, bytes) else str(member)
+                if member in wanted:
+                    found.add(member)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("find_present_job_ids failed tenant=%s err=%s", tenant, exc)
+            return None
+        return found
+
     async def close(self) -> None:
         """Close Redis connection."""
         if self._redis:
