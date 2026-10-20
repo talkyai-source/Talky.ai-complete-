@@ -111,6 +111,10 @@ pydub==0.25.1
 # (resample_audio in app/utils/audio_utils.py). REQUIRED — without it every
 # outbound TTS chunk fails to encode and the agent is silent on calls.
 soxr>=0.3.7
+# WebRTC noise suppression for the caller audio STT hears (caller_denoise.py).
+# Off unless CALLER_NOISE_SUPPRESSION=webrtc. No Windows wheel; elsewhere the
+# denoiser reports "unavailable" and passes audio through.
+webrtc-noise-gain==1.3.0 ; sys_platform == "linux" and platform_machine == "x86_64"
 
 # --- Object Storage — S3 / R2 (NEW) ---
 boto3>=1.34.0

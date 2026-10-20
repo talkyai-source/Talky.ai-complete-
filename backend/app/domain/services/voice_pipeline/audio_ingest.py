@@ -20,6 +20,7 @@ from fastapi import WebSocket
 from app.core.telemetry import pipeline_span, record_latency
 from app.domain.models.conversation import AudioChunk, Message, MessageRole
 from app.domain.models.session import CallSession
+from app.domain.services.voice_pipeline.caller_denoise import CallerDenoiser
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +261,18 @@ class AudioIngest:
             _level_sum_sq = 0.0
             _level_samples = 0
             _margin = BargeInMarginProbe()
+            # Cleans only what STT hears; the level stats below read raw frames.
+            # The feed rate is what the gateway queues (browser: input rate;
+            # telephony: its internal rate), which can differ from the STT rate.
+            _gw = self._p.media_gateway
+            _denoiser = CallerDenoiser(
+                call_id,
+                sample_rate=getattr(self._p, "stt_sample_rate", None),
+                feed_sample_rate=(getattr(_gw, "_input_sample_rate", None)
+                                  or getattr(_gw, "_sample_rate", None)),
+            )
+            _clean_sum_sq = 0.0
+            _clean_samples = 0
             while session.stt_active:
                 try:
                     chunk = await asyncio.wait_for(queue.get(), timeout=0.02)
@@ -346,11 +359,35 @@ class AudioIngest:
                                 session._last_audio_rms_at = time.monotonic()
                             except Exception:
                                 pass
+                            if _clean_samples:
+                                # What the STT watchdog's RMS gate now sees.
+                                logger.info(
+                                    "caller_denoise_level call_id=%s raw_rms=%.0f clean_rms=%.0f",
+                                    call_id, rms, _math.sqrt(_clean_sum_sq / _clean_samples),
+                                )
+                                _clean_sum_sq = 0.0
+                                _clean_samples = 0
                             _level_bucket_t0 = _now
                             _level_max = 0
                             _level_sum_sq = 0.0
                             _level_samples = 0
-                        yield AudioChunk(data=raw_bytes) if isinstance(chunk, bytes) else chunk
+                        if _denoiser.enabled and (
+                            isinstance(chunk, bytes)
+                            or (isinstance(chunk, AudioChunk) and chunk.sample_rate == 16000)
+                        ):
+                            cleaned = _denoiser.process(raw_bytes)
+                            if not cleaned:
+                                continue  # part frame; it goes out with the next chunk
+                            try:
+                                _cs = _struct.unpack(f"<{len(cleaned)//2}h", cleaned)
+                                _clean_sum_sq += sum(s * s for s in _cs)
+                                _clean_samples += len(_cs)
+                            except Exception:
+                                pass
+                            yield (AudioChunk(data=cleaned) if isinstance(chunk, bytes)
+                                   else chunk.model_copy(update={"data": cleaned}))
+                        else:
+                            yield AudioChunk(data=raw_bytes) if isinstance(chunk, bytes) else chunk
                 except asyncio.TimeoutError:
                     continue
                 except Exception as e:
