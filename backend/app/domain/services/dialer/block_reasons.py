@@ -449,6 +449,15 @@ def classify(
     # ``calling_not_allowed_on_Tue`` (day gate) and
     # ``outside_time_window_14:00_17:00`` (hour gate) both come from
     # CallingRules.is_within_time_window.
+    if "invalid_timezone" in low:
+        return BlockReason(
+            BlockCode.SCHEDULE_INVALID,
+            "No calls are going out because this campaign's timezone isn't a "
+            "recognised timezone name (use one like Europe/London or "
+            "America/New_York). Fix it in the calling rules and calls resume "
+            "within the hour.",
+            severity="error", stage="schedule", details=extra,
+        )
     if "invalid_time_window" in low or "schedule_invalid" in low:
         return BlockReason(
             BlockCode.SCHEDULE_INVALID,

@@ -33,6 +33,12 @@ _SCHEDULE_INVALID = IssueAdvice(
     "error", "schedule",
 )
 
+_SCHEDULE_INVALID_TIMEZONE = IssueAdvice(
+    "Campaign timezone not recognised",
+    "No calls are going out because this campaign's timezone isn't a recognised timezone name (use one like Europe/London or America/New_York). Fix it in the campaign's calling rules and calls resume within the hour.",
+    "error", "schedule",
+)
+
 _LINE_CALLER_ID_UNVERIFIED = IssueAdvice(
     "Phone line caller ID not verified",
     "The caller ID on this phone line is not verified yet. Ask support to verify it; calls resume automatically once it is.",
@@ -179,6 +185,7 @@ _RULES: list[tuple[str, IssueAdvice]] = [
     )),
     # The window itself is invalid (unreadable, or ends before it starts): it
     # never opens, so it needs a person, not a wait.
+    ("invalid_timezone", _SCHEDULE_INVALID_TIMEZONE),
     ("invalid_time_window", _SCHEDULE_INVALID),
     ("schedule_invalid", _SCHEDULE_INVALID),
     # Day-of-week gate. The raw dialer code is `calling_not_allowed_on_Tue`
