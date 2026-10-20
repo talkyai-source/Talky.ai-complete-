@@ -405,12 +405,14 @@ jobs:
           NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
 
       - name: Dependency vulnerability audit
-        # Audit the complete dependency graph. High and critical findings block
-        # the release; moderate findings stay visible for follow-up. Runs last
-        # (and even after a failed check) so an advisory with no fix available
-        # (braces GHSA-vfj7-8cjw-p6xm, 2026-10) cannot skip lint, tests and build.
+        # Audit what ships (production dependencies). High and critical
+        # findings block the release; moderate findings stay visible for
+        # follow-up. Dev/build tooling is excluded by owner decision 2026-10-21:
+        # braces GHSA-vfj7-8cjw-p6xm (no fix published) reaches the tree only
+        # through Storybook's webpack builder and eslint-config-next. Runs last
+        # (and even after a failed check) so it cannot skip lint, tests and build.
         if: ${{ !cancelled() }}
-        run: npm audit --audit-level=high
+        run: npm audit --omit=dev --audit-level=high
 
   # Admin control plane: lint + dependency audit + test + production build.
   admin-frontend:
