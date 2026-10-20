@@ -2550,6 +2550,13 @@ class DialerWorker:
         """
         call_id, talklee_call_id, leg_id = self._new_call_identity()
         override_audit = self._schedule_override_audit()
+        # dialer_jobs stores neither; the settlement path reads these back from
+        # this leg so a retry keeps the per-Start opening mode and agent name.
+        retry_identity = {}
+        if getattr(job, "first_speaker", None):
+            retry_identity["first_speaker"] = job.first_speaker
+        if getattr(job, "agent_name", None):
+            retry_identity["agent_name"] = job.agent_name
         try:
             async with self._acquire_db() as conn:
                 inserted = await conn.fetchrow(
@@ -2598,6 +2605,7 @@ class DialerWorker:
                                 "job_id": str(job.job_id),
                                 "campaign_id": str(job.campaign_id),
                                 "dialer_attempt_number": int(job.attempt_number),
+                                **retry_identity,
                                 **override_audit,
                             }
                         ),

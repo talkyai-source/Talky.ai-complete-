@@ -719,6 +719,7 @@ class CallService:
                         scope_tenant_id=call_tenant_id,
                         call_attempt_number=row.get("dialer_attempt_number"),
                         caller_opted_out=caller_opted_out,
+                        call_id=call_uuid,
                     )
 
                 # ---- Step 3: campaign counters ------------------------------
@@ -1106,6 +1107,7 @@ class CallService:
         *, scope_tenant_id,
         call_attempt_number: Optional[int] = None,
         caller_opted_out: bool = False,
+        call_id=None,
     ) -> tuple[bool, Optional[tuple]]:
         """Pooled equivalent of `_handle_job_completion`.
 
@@ -1288,6 +1290,30 @@ class CallService:
                     value = lead_ident[src] if src in lead_ident.keys() else None
                     if value:
                         retry_job_data[dst] = value
+        # first_speaker / agent_name are per-Start choices dialer_jobs cannot
+        # store; the dialer recorded them in THIS call's pstn_outbound leg
+        # metadata. Tenant predicate via the calls row (role bypasses RLS).
+        if call_id:
+            try:
+                leg = await conn.fetchrow(
+                    "SELECT cl.metadata FROM call_legs cl "
+                    "JOIN calls c ON c.id = cl.call_id "
+                    "WHERE cl.call_id = $1 AND c.tenant_id = $2 "
+                    "AND cl.leg_type = 'pstn_outbound' "
+                    "ORDER BY cl.created_at ASC LIMIT 1",
+                    call_id, scope_tenant_id,
+                )
+                meta = leg["metadata"] if leg is not None else None
+                if isinstance(meta, (str, bytes)):
+                    meta = json.loads(meta)
+                if isinstance(meta, dict):
+                    if meta.get("first_speaker") in ("agent", "user"):
+                        retry_job_data["first_speaker"] = meta["first_speaker"]
+                    name = meta.get("agent_name")
+                    if isinstance(name, str) and name.strip():
+                        retry_job_data["agent_name"] = name
+            except Exception as exc:  # identity is cosmetic; never block the retry
+                logger.warning("retry opening-mode lookup failed call=%s: %s", call_id, exc)
         return False, (
             job_id, retry_job_data, outcome, campaign_id, lead_id,
             str(tenant_id), attempt_number, decision.delay_seconds,
