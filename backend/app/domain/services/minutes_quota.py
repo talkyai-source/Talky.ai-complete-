@@ -172,6 +172,61 @@ async def count_inflight_outbound_calls(conn: Any, tenant_id: str) -> int:
     return count
 
 
+# Short-lived per-tenant reservations that close the guard -> calls-row gap.
+# The dialer inserts the calls row AFTER the guard passes, so N simultaneous
+# evaluations all read the same in-flight count. This script serialises them.
+PENDING_RESERVATION_TTL_SECONDS = 30
+
+_RESERVE_LUA = """
+local key = KEYS[1]
+local now = tonumber(ARGV[1])
+local expiry = tonumber(ARGV[2])
+local member = ARGV[3]
+local base = tonumber(ARGV[4])
+local est = tonumber(ARGV[5])
+local allocated = tonumber(ARGV[6])
+redis.call('ZREMRANGEBYSCORE', key, '-inf', now)
+local pending = redis.call('ZCARD', key)
+if redis.call('ZSCORE', key, member) then
+  pending = pending - 1
+end
+if base + (pending + 1) * est <= allocated then
+  redis.call('ZADD', key, expiry, member)
+  redis.call('EXPIRE', key, math.ceil(expiry - now) + 5)
+  return 1
+end
+return 0
+"""
+
+
+async def reserve_outbound_minutes(
+    redis: Any,
+    tenant_id: str,
+    member: str,
+    *,
+    used: int,
+    reserved_inflight: int,
+    est_minutes: int,
+    allocated: int,
+    ttl_seconds: int = PENDING_RESERVATION_TTL_SECONDS,
+) -> bool:
+    """Atomically check-and-reserve one call's minutes for a tenant.
+
+    Returns True when the call fits (and a pending reservation was recorded),
+    False when it would exceed the allowance. Raises on Redis errors so the
+    caller can fall back to the non-atomic check.
+    """
+    import time
+
+    now = time.time()
+    result = await redis.eval(
+        _RESERVE_LUA, 1, f"minutes:pending:{tenant_id}",
+        now, now + ttl_seconds, member,
+        int(used) + int(reserved_inflight), int(est_minutes), int(allocated),
+    )
+    return int(result) == 1
+
+
 async def compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
     """One current calendar-month meter; invalid/missing reads remain unknown."""
     try:

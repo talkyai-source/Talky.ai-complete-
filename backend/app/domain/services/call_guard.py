@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, time
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import asyncpg
 
@@ -1110,7 +1110,25 @@ class CallGuard:
         # `used` cannot see them: reserve one estimate for each.
         reserved = inflight * est_minutes
 
-        if used + reserved + est_minutes > allocated:
+        redis = getattr(self, "_redis", None)
+        over = used + reserved + est_minutes > allocated
+        if redis is not None and not over:
+            # Atomic per-tenant check-and-reserve: concurrent evaluations
+            # before any calls row exists must not all pass the same room.
+            try:
+                from app.domain.services.minutes_quota import reserve_outbound_minutes
+                member = str(kwargs.get("job_id") or kwargs.get("call_id")
+                             or kwargs.get("lead_id") or uuid4())
+                over = not await reserve_outbound_minutes(
+                    redis, str(tenant_id), member, used=used,
+                    reserved_inflight=reserved, est_minutes=est_minutes,
+                    allocated=allocated,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "minutes_reservation_unavailable tenant=%s error_type=%s; using non-atomic check",
+                    tenant_id, type(exc).__name__)
+        if over:
             return CheckResult(
                 check=GuardCheck.MINUTES_QUOTA,
                 passed=False,
