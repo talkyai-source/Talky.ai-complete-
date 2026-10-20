@@ -197,6 +197,26 @@ def _dispatch_stranded_queue(handle):
     return wrapper
 
 
+# How long after the last TTS chunk the agent's own words can still arrive in
+# the caller's transcript (carrier echo + STT finalisation lag).
+_SELF_ECHO_WINDOW_S = 2.0
+
+
+def _agent_audio_may_echo(session) -> bool:
+    """True while the agent's audio could still be echoing into the mic.
+
+    Live TTS always counts. Otherwise only the window after the last chunk
+    counts. A missing stamp keeps the old always-strip behaviour (fail safe
+    toward the pre-existing echo defence).
+    """
+    if getattr(session, "tts_active", False):
+        return True
+    last = getattr(session, "_last_tts_chunk_at", None)
+    if not isinstance(last, (int, float)):
+        return True
+    return (time.monotonic() - last) < _SELF_ECHO_WINDOW_S
+
+
 class TurnEnder:
     """Runs the end-of-turn LLM+TTS cycle with all pre-turn guards."""
 
@@ -650,7 +670,16 @@ class TurnEnder:
                 break
             if _m.role == MessageRole.ASSISTANT and _m.content:
                 _agent_since_user.append(_m.content)
-        _deechoed = strip_self_echo_multi(full_transcript, _agent_since_user)
+        # Only while that audio can still be echoing: live TTS, or inside the
+        # gateway drain window after its last chunk. A caller who reads back
+        # or corrects "sam at gmail dot com" seconds after the agent finished
+        # is speaking for themselves; stripping that run swallowed the
+        # confirmation or the corrected value (listen-1, audit 2026-10-20).
+        _deechoed = (
+            strip_self_echo_multi(full_transcript, _agent_since_user)
+            if _agent_audio_may_echo(session)
+            else full_transcript
+        )
         if _deechoed != full_transcript:
             if not _deechoed.strip():
                 logger.info(

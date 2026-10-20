@@ -123,6 +123,15 @@ async def test_a_short_no_over_the_agent_is_answered():
 async def test_a_plain_backchannel_still_neither_stops_nor_answers():
     p = _Pipeline()
     s, reply = _agent_speaking(p)
+    # Mid-call, over a statement: the caller has already spoken and the agent
+    # asked nothing. (A first utterance, or an answer to a question, is NOT a
+    # backchannel: see test_live_risk_listening.py, listen-2.)
+    from app.domain.models.conversation import Message, MessageRole
+    s.conversation_history = [
+        Message(role=MessageRole.ASSISTANT, content="Hi there."),
+        Message(role=MessageRole.USER, content="Hello."),
+        Message(role=MessageRole.ASSISTANT, content="We offer roofing and gutters."),
+    ]
     try:
         handler = TranscriptHandler(p)
         for chunk in (_Chunk("Okay.", is_final=False), _Chunk("Okay."), _Chunk("")):

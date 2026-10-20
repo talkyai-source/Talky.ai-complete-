@@ -99,6 +99,7 @@ class DeepgramNovaSTTProvider(STTProvider):
         # the full turn = these joined). Reset after each end-of-turn.
         finals: list[str] = []
         last_interim: list[str] = [""]  # newest interim (fallback if stream closes before a final)
+        send_error: list[Optional[BaseException]] = [None]  # why the audio sender stopped, if it failed
         grace: list[int] = [0]          # consecutive idle ticks after the audio stream ends
         pending_barge: list[Optional[float]] = [None]  # SpeechStarted awaiting words
         # Same gate Flux applies to its StartOfTurn transcript (imported here,
@@ -185,7 +186,11 @@ class DeepgramNovaSTTProvider(STTProvider):
                             async for audio_chunk in audio_stream:
                                 await conn.send_media(audio_chunk.data)
                         except Exception as exc:  # noqa: BLE001
-                            logger.debug("nova send_audio ended: %s", exc)
+                            # A send failure means the socket is gone while the
+                            # caller's audio is still flowing. Remember it so the
+                            # loop below raises instead of ending "cleanly".
+                            send_error[0] = exc
+                            logger.warning("nova send_audio ended: %s", exc)
 
                     sender_task = asyncio.create_task(send_audio())
 
@@ -206,6 +211,14 @@ class DeepgramNovaSTTProvider(STTProvider):
                                             yield TranscriptChunk(text=ft, is_final=True, confidence=None)
                                             yield TranscriptChunk(text="", is_final=True, confidence=1.0)
                                             finals.clear()
+                                        if send_error[0] is not None:
+                                            # Not a call teardown: the socket died
+                                            # under live caller audio. A clean return
+                                            # would leave the call up and deaf.
+                                            raise RuntimeError(
+                                                "Deepgram nova socket ended while caller "
+                                                f"audio was still active: {send_error[0]}"
+                                            )
                                         break
                                 continue
 

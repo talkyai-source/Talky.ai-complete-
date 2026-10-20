@@ -231,6 +231,9 @@ class AudioIngest:
         websocket: Optional[WebSocket] = None,
     ) -> None:
         call_id = session.call_id
+        # Set when the caller-audio feed ends because it BROKE, not because the
+        # call ended. The STT wrapper reads that end as a healthy end of input.
+        _feed_failure: list[str] = []
 
         async def audio_stream() -> AsyncIterator[AudioChunk]:
             queue = self._p.media_gateway.get_audio_queue(call_id)
@@ -240,6 +243,7 @@ class AudioIngest:
                     "session registered; ALL caller audio will be lost!",
                     call_id,
                 )
+                _feed_failure.append("media queue missing")
                 return
             logger.info(
                 "audio_stream_started call_id=%s queue_size=%d stt_active=%s",
@@ -351,6 +355,7 @@ class AudioIngest:
                     continue
                 except Exception as e:
                     logger.error(f"Audio stream error: {e}", extra={"call_id": call_id})
+                    _feed_failure.append(f"audio stream error: {e}")
                     break
             logger.info(
                 "audio_stream_ended call_id=%s chunks_yielded=%d stt_active=%s",
@@ -611,6 +616,8 @@ class AudioIngest:
                     except Exception:
                         pass
                     await self._p.handle_transcript(session, transcript, websocket)
+                if _feed_failure and session.stt_active:
+                    raise RuntimeError(f"caller audio feed failed: {_feed_failure[0]}")
             except Exception as e:
                 stt_span.record_exception(e)
                 logger.error(f"STT stream error: {e}", extra={"call_id": call_id})

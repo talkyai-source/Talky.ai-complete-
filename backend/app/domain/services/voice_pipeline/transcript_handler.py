@@ -43,6 +43,26 @@ def _bind_caller_turn(session, transcript_service, order) -> None:
              caller_turn_order=order)
 
 
+def _answers_agent_or_first_turn(session) -> bool:
+    """Same two exemptions turn_ender applies to a backchannel over agent audio:
+    the caller's FIRST utterance, and a reply to an agent question. Without
+    them a "Yes." answering "Is this John?" was dropped here, before
+    turn_ender could exempt it (listen-2, audit 2026-10-20)."""
+    import re
+
+    from app.domain.models.conversation import MessageRole
+
+    history = getattr(session, "conversation_history", None) or []
+    if not any(m.role == MessageRole.USER for m in history):
+        return True
+    last = next((m.content for m in reversed(history) if m.role == MessageRole.ASSISTANT), "") or ""
+    return any(
+        sent.strip().endswith("?")
+        for sent in re.split(r"(?<=[.!?])\s+", last.strip())
+        if sent.strip()
+    )
+
+
 def _join_words(*parts) -> str:
     """Caller words in the order they were said, as one turn."""
     return " ".join(part.strip() for part in parts if part and part.strip())
@@ -204,7 +224,11 @@ class TranscriptHandler:
         # (StartOfTurn already suppressed the audio barge-in for this; this stops
         # the spurious reply.) Only while the agent is talking — a "yeah" when
         # it's the caller's turn is a real answer and falls through normally.
-        if getattr(session, "tts_active", False) and is_backchannel(transcript.text):
+        if (
+            getattr(session, "tts_active", False)
+            and is_backchannel(transcript.text)
+            and not _answers_agent_or_first_turn(session)
+        ):
             logger.info(
                 # `transcript=` names the placeholder so the log redactor can
                 # tell this argument is caller speech (see log_redact).

@@ -779,6 +779,14 @@ async def test_empty_eot_marker_after_suppressed_backchannel_is_swallowed():
     session = _make_session()
     session.tts_active = True
     session.llm_active = False
+    # Mid-call, agent made a statement: a first utterance or an answer to an
+    # agent question is not a backchannel (listen-2, test_live_risk_listening).
+    from app.domain.models.conversation import Message, MessageRole
+    session.conversation_history = [
+        Message(role=MessageRole.ASSISTANT, content="Hi."),
+        Message(role=MessageRole.USER, content="Hello."),
+        Message(role=MessageRole.ASSISTANT, content="We offer roofing and gutters."),
+    ]
 
     # StartOfTurn bumps the utterance seq (mirrors _on_barge_in_direct).
     service._utterance_seq[session.call_id] = 1

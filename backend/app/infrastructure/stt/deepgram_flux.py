@@ -41,6 +41,14 @@ from app.infrastructure.providers.provider_concurrency import get_provider_guard
 from app.utils.audio_utils import validate_pcm_format
 
 
+def _ws_is_dead(ws) -> bool:
+    """True when the websocket is known closed/closing. Unknown means alive."""
+    if getattr(ws, "close_code", None) is not None:
+        return True
+    state = getattr(ws, "state", None)
+    return getattr(state, "name", "") in ("CLOSING", "CLOSED")
+
+
 @dataclass(eq=False)
 class _FluxConnection:
     """One socket owns one provider permit, including its prewarm lifetime."""
@@ -1033,6 +1041,16 @@ class DeepgramFluxSTTProvider(STTProvider):
             if call_id:
                 await self.pre_connect(call_id)
                 connection = self._pre_connections.pop(call_id)
+                if _ws_is_dead(connection.ws):
+                    # A prewarmed socket can sit idle for the whole ring time.
+                    # If the server already closed it, sending the first frame
+                    # would fail the call: replace it while nothing depends on it.
+                    logger.warning(
+                        "stt_prewarm_socket_dead call_id=%s — reopening before first audio",
+                        call_id,
+                    )
+                    await self._close_connection(connection)
+                    connection = await self._open_connection(call_id)
             else:
                 connection = await self._open_connection(call_id)
             connection.adopted = True
