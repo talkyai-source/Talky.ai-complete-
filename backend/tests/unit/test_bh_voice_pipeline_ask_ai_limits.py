@@ -6,6 +6,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from starlette.datastructures import Headers
 
 from app.api.v1.endpoints import ask_ai_ws
 from app.domain.models.session import CallSession
@@ -55,7 +56,9 @@ class _Ws:
     """receive() streams mic frames (or blocks) until the gateway session ends."""
 
     def __init__(self, gateway, *, ip="203.0.113.7", stream_frames=True):
-        self.headers = {"x-real-ip": ip}
+        # Case-insensitive like a real Starlette socket (a plain dict made a
+        # "X-Real-IP" lookup miss and every socket look like the proxy).
+        self.headers = Headers({"x-real-ip": ip})
         self.client = SimpleNamespace(host="127.0.0.1")  # the nginx proxy
         self.sent = []
         self.closed = None
