@@ -155,6 +155,13 @@ class TestSMSTemplateManager:
 
 class TestSMSService:
     """Tests for SMSService."""
+
+    @pytest.fixture(autouse=True)
+    def _not_suppressed(self, monkeypatch):
+        # Delivery behaviour only; the DNC gate is tested in test_live_risk2_sms.py.
+        async def _ok(self, tenant_id, to_number):
+            return "ok"
+        monkeypatch.setattr(SMSService, "_suppression", _ok)
     
     @pytest.fixture
     def mock_supabase(self):

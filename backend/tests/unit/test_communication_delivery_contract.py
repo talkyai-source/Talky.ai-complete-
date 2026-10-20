@@ -43,6 +43,15 @@ class Pool:
 
 
 @pytest.fixture(autouse=True)
+def _sms_not_suppressed(monkeypatch):
+    # These tests cover delivery/receipt handling; the DNC gate has its own
+    # tests in test_live_risk2_sms.py.
+    async def _ok(self, tenant_id, to_number):
+        return "ok"
+    monkeypatch.setattr(SMSService, "_suppression", _ok)
+
+
+@pytest.fixture(autouse=True)
 def encryption(monkeypatch):
     monkeypatch.setenv('CONNECTOR_ENCRYPTION_KEY', Fernet.generate_key().decode())
     # These dispatch/receipt controls stub connector resolution. Supply its

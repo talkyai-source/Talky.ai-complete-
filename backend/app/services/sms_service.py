@@ -76,7 +76,18 @@ class SMSService:
     ) -> Dict[str, Any]:
         """
         Send an SMS message.
+
+        Every caller passes through the suppression gate below: a number on the
+        tenant/global DNC list, or a lead flagged do_not_call / status 'dnc', is
+        never texted, and a failed lookup refuses the send (fail closed).
         """
+        verdict = await self._suppression(tenant_id, to_number)
+        if verdict != "ok":
+            opted_out = verdict == "opted_out"
+            return {"success": False, "status": "failed", "confirmation_allowed": False,
+                "opted_out": opted_out,
+                "error": ("Recipient has opted out of contact; the SMS was not sent." if opted_out else
+                          "The do-not-contact list could not be checked; the SMS was not sent.")}
         if idempotency_key:
             existing = await self._check_idempotency(tenant_id, idempotency_key)
             if existing:
@@ -150,6 +161,25 @@ class SMSService:
                 logger.error("SMS receipt persistence failed action=%s", action_id)
             return {"success": False, "status": "unknown", "confirmation_allowed": False,
                 "error": "SMS outcome is unconfirmed; do not resend automatically", "action_id": action_id, **receipt}
+
+    async def _suppression(self, tenant_id: str, to_number: str) -> str:
+        """'opted_out', 'ok' or 'unknown' (lookup failed: do not send)."""
+        try:
+            from app.domain.services.dnc_service import DNCService, normalize_e164
+
+            if await DNCService(self.db_pool).is_on_dnc(tenant_id=str(tenant_id), e164=to_number):
+                return "opted_out"
+            numbers = list({to_number, normalize_e164(to_number) or to_number})
+            async with acquire_with_tenant(self.db_pool, str(tenant_id)) as conn:
+                flagged = await conn.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM leads WHERE tenant_id=$1::uuid "
+                    "AND phone_number = ANY($2::text[]) AND (do_not_call OR status='dnc'))",
+                    str(tenant_id), numbers,
+                )
+            return "opted_out" if flagged else "ok"
+        except Exception as exc:
+            logger.error("SMS suppression lookup failed: %s", type(exc).__name__)
+            return "unknown"
 
     async def send_meeting_reminder(
         self,
