@@ -141,6 +141,12 @@ class TelephonyBridgeTransferApiTests(unittest.IsolatedAsyncioTestCase):
         # No-op the ownership check so these keep testing what they test.
         self._own_patch = patch.object(telephony_bridge, "_verify_call_ownership", new=AsyncMock())
         self._own_patch.start()
+        # Login-session revocation has its own tests (test_live_risk2_bridgesess.py);
+        # these tests pin the permission and adapter contracts.
+        self._session_patch = patch.object(
+            telephony_bridge, "require_active_session", new=AsyncMock()
+        )
+        self._session_patch.start()
         # Transfer-policy persistence has its own focused service tests. This
         # file deliberately isolates endpoint authorization and adapter
         # delegation from the application container/database.
@@ -156,6 +162,7 @@ class TelephonyBridgeTransferApiTests(unittest.IsolatedAsyncioTestCase):
         self._complete_patch.start()
 
     async def asyncTearDown(self) -> None:
+        self._session_patch.stop()
         self._complete_patch.stop()
         self._policy_patch.stop()
         self._own_patch.stop()

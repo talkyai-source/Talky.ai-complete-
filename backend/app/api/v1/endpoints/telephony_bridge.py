@@ -88,6 +88,7 @@ from app.domain.services.event_emitter import emit_event_via_pool  # noqa: E402
 from app.core.security.internal_auth import (  # noqa: E402
     CallerContext,
     is_internal_service_request,
+    require_active_session,
     require_internal_or_tenant,
     resolve_call_tenant,
 )
@@ -2687,6 +2688,7 @@ async def _require_call_control(request: Request, *, db_pool=None) -> CallerCont
     ctx = require_internal_or_tenant(request)
     if ctx.is_internal:
         return ctx
+    await require_active_session(request, ctx, db_pool=db_pool)
 
     user_id = getattr(request.state, "user_id", None)
     if not isinstance(user_id, str) or not user_id.strip():
@@ -2746,6 +2748,7 @@ async def _require_call_read(request: Request, *, db_pool=None) -> CallerContext
     ctx = require_internal_or_tenant(request)
     if ctx.is_internal:
         return ctx
+    await require_active_session(request, ctx, db_pool=db_pool)
     user_id = getattr(request.state, "user_id", None)
     if not isinstance(user_id, str) or not user_id.strip():
         raise HTTPException(

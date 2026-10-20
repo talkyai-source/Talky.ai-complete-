@@ -551,14 +551,19 @@ def _call_read(req, db_pool=object()):
 
 
 @pytest.fixture()
-def _clean_probe_cache():
+def _clean_probe_cache(monkeypatch):
     # app.core.security.rbac imports app.api.v1.dependencies at module scope and
     # dependencies imports back from rbac, so rbac must never be the FIRST of the
     # pair to be imported in a process. Importing the endpoint module first pulls
     # dependencies in and makes the cycle resolvable.
-    from app.api.v1.endpoints import telephony_bridge  # noqa: F401
+    from app.api.v1.endpoints import telephony_bridge
     from app.core.security.rbac import reset_rbac_seeding_probe_cache
 
+    # These tests pin the PERMISSION contract; the login-session check
+    # (require_active_session) has its own tests in test_live_risk2_bridgesess.py.
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(telephony_bridge, "require_active_session", AsyncMock())
     reset_rbac_seeding_probe_cache()
     yield
     reset_rbac_seeding_probe_cache()
