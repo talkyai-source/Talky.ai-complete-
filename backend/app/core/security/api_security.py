@@ -312,10 +312,9 @@ async def rate_limit_dependency(request: Request) -> None:
     from app.core.container import get_container
 
     # Extract identifiers
-    ip = request.client.host if request.client else "unknown"
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        ip = forwarded.split(",")[0].strip()
+    from app.core.api_security_middleware import resolve_client_ip
+
+    ip = resolve_client_ip(request)
 
     user_id = None
     tenant_id = None

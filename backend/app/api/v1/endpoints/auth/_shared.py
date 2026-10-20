@@ -21,6 +21,7 @@ from slowapi.util import get_remote_address
 
 from datetime import timedelta
 
+from app.core.api_security_middleware import resolve_client_ip
 from app.core.config import get_settings
 from app.core.jwt_security import ACCESS_TOKEN_TTL_MINUTES, encode_access_token
 from app.core.security.cookies import (
@@ -55,18 +56,7 @@ logger = logging.getLogger(__name__)
 # corresponding nginx hardening runbook.
 # ---------------------------------------------------------------------------
 def _real_client_ip(request: "Request") -> str:
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip and real_ip.strip():
-        return real_ip.strip()
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        # First entry = original client (nginx prepends, we trust the leftmost)
-        first = forwarded.split(",")[0].strip()
-        if first:
-            return first
-    if request.client and request.client.host:
-        return request.client.host
-    return "unknown"
+    return resolve_client_ip(request)
 
 
 limiter = Limiter(key_func=_real_client_ip)
@@ -97,11 +87,7 @@ def get_client_ip(request: Request) -> str:
     Respects X-Forwarded-For when behind a trusted reverse proxy.
     Falls back to the direct connection IP.
     """
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        # X-Forwarded-For: client, proxy1, proxy2 — take the leftmost
-        return forwarded_for.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    return resolve_client_ip(request)
 
 
 def get_user_agent(request: Request) -> Optional[str]:

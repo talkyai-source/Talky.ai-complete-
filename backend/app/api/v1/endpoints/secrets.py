@@ -13,6 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from app.core.api_security_middleware import resolve_client_ip
 from app.api.v1.dependencies import get_current_user, require_permissions, get_audit_logger, get_secrets_manager
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.secrets_manager import (
@@ -302,10 +303,7 @@ _VALIDATE_ATTEMPTS: dict[str, deque] = defaultdict(deque)
 
 
 def _validate_client_ip(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    return resolve_client_ip(request)
 
 
 def _validate_rate_limited(ip: str) -> bool:

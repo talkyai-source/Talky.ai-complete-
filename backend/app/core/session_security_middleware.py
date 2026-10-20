@@ -33,6 +33,7 @@ from fastapi import Request, status
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+from app.core.api_security_middleware import resolve_client_ip
 from app.core.config import get_settings
 from app.core.container import get_db_pool_from_container
 from app.core.security.device_fingerprint import generate_device_fingerprint
@@ -204,11 +205,7 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
         Respects X-Forwarded-For when behind a trusted reverse proxy.
         Falls back to the direct connection IP.
         """
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            # X-Forwarded-For: client, proxy1, proxy2 — take the leftmost
-            return forwarded_for.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
+        return resolve_client_ip(request)
 
     async def _handle_suspicious_session(
         self,
