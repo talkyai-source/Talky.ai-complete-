@@ -98,8 +98,18 @@ def test_reconciler_output_carries_the_named_lists():
 
 
 # ------------------------------------------------------------------- inbound-1
+class _ForeignLineConn(adm._AllowedConn):
+    """The tagged line belongs to another tenant on another source host."""
+
+    async def fetchrow(self, query, *args):
+        if "FROM tenant_sip_trunks" in query:
+            return {"tenant_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                    "sip_domain": "attacker.example.org", "metadata": {}}
+        return await super().fetchrow(query, *args)
+
+
 async def _admit(monkeypatch, endpoint):
-    conn = adm._AllowedConn()
+    conn = _ForeignLineConn(route_overrides={"trunk_sip_domain": "sip3.blazedigitel.com"})
     monkeypatch.setattr(admission_module, "acquire_with_tenant", lambda *_a: adm._acquire(conn))
     return await InboundAdmissionService(object(), adm._Limiter()).admit(
         InboundAdmissionRequest(
@@ -115,14 +125,20 @@ async def _admit(monkeypatch, endpoint):
 
 @pytest.mark.asyncio
 async def test_call_arriving_on_another_tenants_trunk_endpoint_is_denied(monkeypatch):
+    async def no_overlap(_a, _b):
+        return False
+
+    monkeypatch.setattr(admission_module, "_hosts_resolve_together", no_overlap)
     decision = await _admit(monkeypatch, "trunk-99999999-9999-9999-9999-999999999999")
     assert decision.allowed is False
     assert decision.reason == "tenant_conflict"
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("endpoint", [f"trunk-{adm.TRUNK}", "blazedigitel-endpoint", None])
-async def test_own_trunk_shared_carrier_or_unknown_endpoint_is_admitted(monkeypatch, endpoint):
+# A missing endpoint (non-PJSIP channel) is refused since round 3; see
+# test_live_risk3_inbound1.test_adapter_reported_no_endpoint_denied.
+@pytest.mark.parametrize("endpoint", [f"trunk-{adm.TRUNK}", "blazedigitel-endpoint"])
+async def test_own_trunk_or_shared_carrier_endpoint_is_admitted(monkeypatch, endpoint):
     decision = await _admit(monkeypatch, endpoint)
     assert decision.allowed is True, decision.reason
 

@@ -224,6 +224,57 @@ def _json_obj(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _identify_host(sip_domain: Any, metadata: Any) -> str:
+    """The host pjsip identify matches for a line (pjsip_config_generator:
+    metadata.source_host, else sip_domain), normalised for comparison."""
+    host = _json_obj(metadata).get("source_host") or sip_domain or ""
+    return str(host).strip().rstrip(".").lower()
+
+
+async def _hosts_resolve_together(a: str, b: str) -> bool:
+    """True when two different host strings share an address (a carrier named
+    by hostname on one line and by IP on another). Unresolvable = not proven."""
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await asyncio.wait_for(
+            asyncio.gather(loop.getaddrinfo(a, None), loop.getaddrinfo(b, None)),
+            timeout=2.0,
+        )
+    except Exception:  # noqa: BLE001 - DNS failure proves nothing either way
+        return False
+    first, second = ({info[4][0] for info in group} for group in infos)
+    return bool(first & second)
+
+
+async def _ingress_line_may_carry(conn: Any, line_id: str, route: Mapping[str, Any]) -> bool:
+    """Whether a call Asterisk tagged with line ``line_id`` may still be for
+    this DID's line. identify matches by source host only, and several lines
+    can share one carrier host, so Asterisk tags such a call with whichever of
+    them it matches first (that is why every endpoint enters one context). The
+    tag proves a foreign source only when it is another tenant's line on a
+    different host; an unknown line proves nothing and is refused."""
+    try:
+        uuid.UUID(line_id)
+    except ValueError:
+        return False
+    row = await conn.fetchrow(
+        "SELECT tenant_id, sip_domain, metadata FROM tenant_sip_trunks "
+        "WHERE id=$1::uuid AND deleted_at IS NULL",
+        line_id,
+    )
+    if row is None:
+        return False
+    if str(row["tenant_id"]) == str(route["tenant_id"]):
+        return True
+    ingress_host = _identify_host(row["sip_domain"], row["metadata"])
+    route_host = _identify_host(route.get("trunk_sip_domain"), route.get("trunk_metadata"))
+    if not ingress_host or not route_host:
+        return False
+    if ingress_host == route_host:
+        return True
+    return await _hosts_resolve_together(ingress_host, route_host)
+
+
 def _provider(value: str) -> Optional[str]:
     normalized = str(value or "").strip().lower()
     return normalized if _PROVIDER_RE.fullmatch(normalized) else None
@@ -604,6 +655,7 @@ class InboundAdmissionService:
                             st.is_active AS trunk_active,
                             st.direction AS trunk_direction,
                             st.metadata AS trunk_metadata,
+                            st.sip_domain AS trunk_sip_domain,
                             st.live_registration_status AS trunk_live_registration_status,
                             st.live_status_detail AS trunk_live_status_detail,
                             st.live_status_checked_at AS trunk_live_status_checked_at,
@@ -681,16 +733,43 @@ class InboundAdmissionService:
                 # this, any peer Asterisk accepted on one tenant's endpoint
                 # could reach a mapped DID of another tenant. The shared
                 # carrier endpoint (not trunk-*) is unaffected.
+                request_meta = request.metadata or {}
                 ingress_endpoint = str(
-                    (request.metadata or {}).get("ingress_endpoint") or ""
+                    request_meta.get("ingress_endpoint") or ""
                 ).strip()
+                # lifecycle.py always sends the key; the adapter leaves it
+                # empty when the channel is not PJSIP/<endpoint>-<id>. Real
+                # carrier traffic is always a named PJSIP endpoint, and
+                # Asterisk's "anonymous" endpoint means no identify/auth
+                # matched, so neither may dial a tenant DID. (Which shared
+                # carrier endpoints may deliver which DID is not provable
+                # from code/config, so that part is not enforced here.)
+                if "ingress_endpoint" in request_meta and (
+                    not ingress_endpoint or ingress_endpoint.lower() == "anonymous"
+                ):
+                    logger.warning(
+                        "inbound_admission_endpoint_unidentified endpoint=%r did_ref=%s",
+                        ingress_endpoint,
+                        redact_did(did),
+                    )
+                    return self._deny(provider, "tenant_conflict")
                 if ingress_endpoint.startswith("trunk-") and ingress_endpoint != (
                     f"trunk-{route['sip_trunk_id']}"
                 ):
-                    logger.warning(
-                        "inbound_admission_endpoint_mismatch did_ref=%s", redact_did(did)
+                    if not await _ingress_line_may_carry(
+                        conn, ingress_endpoint[len("trunk-"):], route
+                    ):
+                        logger.warning(
+                            "inbound_admission_endpoint_mismatch endpoint=%s did_ref=%s",
+                            ingress_endpoint,
+                            redact_did(did),
+                        )
+                        return self._deny(provider, "tenant_conflict")
+                    logger.info(
+                        "inbound_admission_endpoint_shared_host endpoint=%s did_ref=%s",
+                        ingress_endpoint,
+                        redact_did(did),
                     )
-                    return self._deny(provider, "tenant_conflict")
                 trunk_runtime = evaluate_trunk_runtime(route)
                 eligibility = (
                     (bool(route["tenant_inbound_enabled"]), "tenant_inbound_disabled"),
