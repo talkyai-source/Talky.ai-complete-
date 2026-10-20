@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
+import { BillingPeriod } from "./billing-period";
 
 export const metadata: Metadata = {
   title: "Pricing | Talk-Lee AI",
@@ -33,6 +34,7 @@ export default function PricingPage() {
     {
       name: "Basic",
       price: "$99/month",
+      annualPrice: "$83/month",
       annual: "Annual billing equivalent: $83/month",
       highlights: [
         "Included AI minutes: 300/month",
@@ -45,6 +47,7 @@ export default function PricingPage() {
     {
       name: "Business",
       price: "$299/month",
+      annualPrice: "$269/month",
       annual: "Annual billing equivalent: $269/month",
       highlights: [
         "Included AI minutes: 1,000/month",
@@ -127,15 +130,26 @@ export default function PricingPage() {
           </p>
         </header>
 
-        <section className="mt-14" aria-label="Plans">
+        <BillingPeriod>
+        <section className="mt-6" aria-label="Plans">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {plans.map((plan) => (
               <div key={plan.name} className={`${accentCardClassName} flex flex-col`} style={accentCardStyle}>
                 <h2 className={cardTitleClassName}>{plan.name}</h2>
-                <p className="mt-3 text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground">
-                  {plan.price}
-                </p>
-                <p className={cardBodyClassName}>{plan.annual}</p>
+                {/* Both price blocks are always in the server HTML; the switch's
+                    data-billing attribute hides the unselected one with CSS. */}
+                <div className="group-data-[billing=monthly]/billing:hidden">
+                  <p className="mt-3 text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground">
+                    {plan.annualPrice}
+                  </p>
+                  <p className={cardBodyClassName}>Monthly price: {plan.price}</p>
+                </div>
+                <div className="group-data-[billing=annual]/billing:hidden">
+                  <p className="mt-3 text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground">
+                    {plan.price}
+                  </p>
+                  <p className={cardBodyClassName}>{plan.annual}</p>
+                </div>
                 <ul className="mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
                   {plan.highlights.map((item) => (
                     <li key={item}>&bull; {item}</li>
@@ -152,13 +166,16 @@ export default function PricingPage() {
             ))}
           </div>
         </section>
+        </BillingPeriod>
 
         <section className="mt-14" aria-label="Plan comparison">
-          <div className={accentCardClassName} style={accentCardStyle}>
+          <div className={`${accentCardClassName} md:w-fit md:mx-auto`} style={accentCardStyle}>
             <table className="w-full border-collapse text-sm sm:text-base">
               <thead className="hidden md:table-header-group">
                 <tr className="border-b border-border/70">
-                  <th scope="col" className="py-3 pr-4 text-left" />
+                  <th scope="col" className="py-3 pr-4 text-left">
+                    <span className="sr-only">Plan comparison</span>
+                  </th>
                   {plans.map((plan) => (
                     <th key={plan.name} scope="col" className={`py-3 px-4 text-left ${cardTitleClassName}`}>
                       {plan.name}
@@ -260,7 +277,7 @@ export default function PricingPage() {
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
               Create an account to get started, or talk to our team about custom pricing for larger deployments.
             </p>
-            <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
+            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:gap-4">
               <Link href="/auth/register">
                 <Button size="lg" className={primaryButtonClassName}>
                   Get Started
