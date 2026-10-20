@@ -47,8 +47,11 @@ END_QUIET_S = 0.6
 
 
 def note_playback(session, tts_active: bool, *, now: Optional[float] = None) -> None:
-    """Called per caller-audio frame: stamps when the first line starts and ends."""
-    if getattr(session, "_first_line_done", False):
+    """Called per caller-audio frame: stamps when the first line starts and ends.
+
+    The recording notice (caller_first_disclosure) is not the first line: the
+    agent's own opener after it is."""
+    if getattr(session, "_first_line_done", False) or getattr(session, "_disclosure_in_flight", False):
         return
     now = time.monotonic() if now is None else now
     started = getattr(session, "_first_line_started_at", None)
@@ -68,6 +71,10 @@ def note_playback(session, tts_active: bool, *, now: Optional[float] = None) -> 
 def first_line_in_progress(session, *, now: Optional[float] = None) -> bool:
     if _first_speaker_label(session) != "user" or getattr(session, "_first_line_done", False):
         return False
+    if getattr(session, "_disclosure_in_flight", False):
+        # A cut-off notice discards the call's recording; a bare "Hello?" over
+        # it is the caller still checking the line, not an interruption.
+        return True
     now = time.monotonic() if now is None else now
     started = getattr(session, "_first_line_started_at", None)
     if started is None:

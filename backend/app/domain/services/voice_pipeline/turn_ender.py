@@ -464,6 +464,14 @@ class TurnEnder:
 
         # Caller-first speech reaches the model unchanged, including a bare
         # greeting. Do not play a separate scripted opener before this reply.
+        # The recording notice is not an opener: on the first accepted caller
+        # turn it plays before the reply, as agent-first calls play it before
+        # their greeting (caller_first_disclosure).
+        if not _has_prior_user_turn_for_floor and _first_speaker_label(session) == "user":
+            from app.domain.services.voice_pipeline.caller_first_disclosure import (
+                speak_disclosure_before_first_reply,
+            )
+            await speak_disclosure_before_first_reply(session)
 
         # Guard against the confirmed Deepgram Flux hallucination bug (GitHub #1524)
         # where the STT model outputs repetitive nonsense text ("blah blah blah…").
