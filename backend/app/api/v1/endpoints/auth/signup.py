@@ -57,6 +57,29 @@ router = APIRouter(tags=["auth"])
 
 _SIGNUP_CODE_TTL_SECONDS = 15 * 60   # 15 minutes
 _SIGNUP_REDIS_KEY_PREFIX = "signup:pending:"
+_SIGNUP_MAX_CODE_ATTEMPTS = 5
+_SIGNUP_MAX_SENDS_PER_WINDOW = 5
+
+# Atomically claim one guess against the pending code. Past the cap the
+# pending record is deleted (the code is burned). The counter is keyed by the
+# code hash, so a newly issued code starts a fresh count.
+_CLAIM_SIGNUP_ATTEMPT = """
+local n = redis.call('INCR', KEYS[2])
+if n == 1 then redis.call('EXPIRE', KEYS[2], tonumber(ARGV[2])) end
+if n > tonumber(ARGV[1]) then
+  redis.call('DEL', KEYS[1])
+  return -1
+end
+return n
+"""
+
+# Per-email send cap: INCR, TTL set on first send of the window.
+_CLAIM_SIGNUP_SEND = """
+local n = redis.call('INCR', KEYS[1])
+if n == 1 then redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2])) end
+if n > tonumber(ARGV[1]) then return -1 end
+return n
+"""
 
 
 def _already_registered() -> ApiError:
@@ -74,6 +97,51 @@ def _hash_signup_code(code: str) -> str:
 
 def _signup_redis_key(email: str) -> str:
     return f"{_SIGNUP_REDIS_KEY_PREFIX}{email.strip().lower()}"
+
+
+async def _claim_signup_attempt(redis, email: str, pending: dict) -> None:
+    """Burn one guess; 400 once the cap is exceeded. Fails closed (503)."""
+    attempts_key = (
+        f"signup:attempts:{email.strip().lower()}:"
+        f"{str(pending.get('code_hash') or '')[:16]}"
+    )
+    try:
+        claimed = await redis.eval(
+            _CLAIM_SIGNUP_ATTEMPT, 2, _signup_redis_key(email), attempts_key,
+            _SIGNUP_MAX_CODE_ATTEMPTS, _SIGNUP_CODE_TTL_SECONDS,
+        )
+    except Exception as exc:
+        logger.warning("signup_attempt_claim_unavailable err=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Signup service temporarily unavailable.",
+        ) from exc
+    if int(claimed) < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code expired or not found. "
+                   "Please request a new code.",
+        )
+
+
+async def _claim_signup_send(redis, email: str) -> None:
+    """Cap code emails per address per window; 429 beyond it."""
+    try:
+        claimed = await redis.eval(
+            _CLAIM_SIGNUP_SEND, 1, f"signup:sends:{email.strip().lower()}",
+            _SIGNUP_MAX_SENDS_PER_WINDOW, _SIGNUP_CODE_TTL_SECONDS,
+        )
+    except Exception as exc:
+        logger.warning("signup_send_claim_unavailable err=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Signup service temporarily unavailable.",
+        ) from exc
+    if int(claimed) < 0:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many verification emails requested. Please try again later.",
+        )
 
 
 def _get_redis_or_503():
@@ -125,6 +193,7 @@ async def signup_start(
     }
 
     redis = _get_redis_or_503()
+    await _claim_signup_send(redis, email)
     await redis.setex(
         _signup_redis_key(email),
         _SIGNUP_CODE_TTL_SECONDS,
@@ -186,6 +255,7 @@ async def signup_verify_code(
             detail="Signup record corrupted. Please request a new code.",
         ) from None
 
+    await _claim_signup_attempt(redis, email, pending)
     if not secrets.compare_digest(
         _hash_signup_code(body.code.strip()),
         pending["code_hash"],
@@ -255,6 +325,7 @@ async def signup_complete(
         ) from None
 
     # Constant-time-ish comparison via secrets.compare_digest.
+    await _claim_signup_attempt(redis, email, pending)
     if not secrets.compare_digest(
         _hash_signup_code(body.code.strip()),
         pending["code_hash"],

@@ -152,10 +152,9 @@ def get_db_read_client(pool: asyncpg.Pool = Depends(get_db_read_pool)) -> Client
 
 
 def _get_client_ip(request: Request) -> str:
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    from app.core.api_security_middleware import resolve_client_ip
+
+    return resolve_client_ip(request)
 
 
 async def _resolve_cookie_session(

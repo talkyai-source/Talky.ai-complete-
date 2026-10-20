@@ -74,6 +74,9 @@ class _Redis:
     async def delete(self, key: str):
         self.deleted.append(key)
 
+    async def eval(self, script, numkeys, *args):
+        return 1  # attempt claim under the cap
+
 
 class _AuditLogger:
     def __init__(self):

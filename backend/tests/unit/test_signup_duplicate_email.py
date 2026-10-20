@@ -59,7 +59,7 @@ def arrange(monkeypatch, conn):
     async def acquire(*args):
         yield conn
     monkeypatch.setattr(signup, "acquire_with_tenant", acquire)
-    redis = SimpleNamespace(get=AsyncMock(return_value=json.dumps({"code_hash": signup._hash_signup_code("123456"), "name": "Owner", "business_name": "Example"})), delete=AsyncMock())
+    redis = SimpleNamespace(get=AsyncMock(return_value=json.dumps({"code_hash": signup._hash_signup_code("123456"), "name": "Owner", "business_name": "Example"})), delete=AsyncMock(), eval=AsyncMock(return_value=1))
     monkeypatch.setattr(signup, "_get_redis_or_503", lambda: redis)
     monkeypatch.setattr(signup, "validate_password_strength", lambda _: None)
     monkeypatch.setattr(signup, "hash_password", lambda _: "fixture-hash")

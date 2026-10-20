@@ -33,6 +33,11 @@ from typing import Optional
 
 from fastapi import HTTPException, Request
 
+from app.core.db_utils import acquire_with_tenant
+from app.core.jwt_security import JWTValidationError, decode_and_validate_token
+from app.core.security.sessions import get_session_by_id
+from app.core.security.principal import PrincipalUnavailable, load_current_principal
+
 _INTERNAL_TOKEN_HEADER = "x-internal-service-token"
 
 
@@ -130,3 +135,44 @@ def resolve_call_tenant(
             },
         )
     return ctx.tenant_id
+
+
+async def require_active_session(request: Request, ctx: CallerContext, *, db_pool=None) -> None:
+    """User path only: the access JWT's login session must still be live.
+
+    TenantMiddleware trusts the JWT signature alone, so a revoked session
+    (logout-all, password reset, suspension) would otherwise keep working
+    until the token expires. Mirrors ``get_current_user``: the ``sid`` must
+    map to an unrevoked, unexpired session of the same user and the
+    principal must still be active. Internal callers are skipped.
+    """
+    if ctx.is_internal:
+        return
+    auth = request.headers.get("Authorization", "")
+    parts = auth.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Authorization required")
+    try:
+        payload = decode_and_validate_token(parts[1])
+    except JWTValidationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    user_id = payload.get("sub")
+    session_id = payload.get("sid")
+    if not user_id or not isinstance(session_id, str) or not session_id.strip():
+        raise HTTPException(status_code=401, detail="Session-bound token required. Please sign in again.")
+    try:
+        if db_pool is None:
+            from app.core.container import get_db_pool_from_container
+
+            db_pool = get_db_pool_from_container()
+        async with acquire_with_tenant(db_pool, None) as conn:
+            session = await get_session_by_id(conn, session_id, user_id=user_id)
+            if not session:
+                raise HTTPException(status_code=401, detail="Your login session has ended. Please sign in again.")
+            await load_current_principal(conn, user_id, tenant_id=payload.get("tenant_id"))
+    except HTTPException:
+        raise
+    except PrincipalUnavailable as exc:
+        raise HTTPException(status_code=401, detail="Your account or login context is no longer available. Please sign in again.") from exc
+    except Exception as exc:  # noqa: BLE001 - fail closed
+        raise HTTPException(status_code=503, detail={"error": "authorization_unavailable"}) from exc
