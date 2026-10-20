@@ -151,6 +151,19 @@ class TopupService:
         async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
             pkg = await self._package(conn, package_code)
 
+            # minutes_allocated <= 0 is the UNLIMITED sentinel, and the credit
+            # path leaves it untouched. Selling minutes to such a tenant takes
+            # money for nothing, so refuse before any order or Stripe session.
+            allocated = await conn.fetchval(
+                "SELECT minutes_allocated FROM tenants WHERE id = $1::uuid",
+                str(tenant_id),
+            )
+            if allocated is not None and allocated <= 0:
+                raise TopupError(
+                    "This account has no capped minute allowance, so a top-up "
+                    "would add nothing. No payment was started."
+                )
+
             open_orders = await conn.fetchval(
                 "SELECT count(*) FROM topup_orders "
                 " WHERE tenant_id = $1::uuid AND status = 'pending' "

@@ -82,7 +82,19 @@ async def _compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
     # An absent/default tenant allocation cannot prove an unlimited product.
     # The existing bound plan must explicitly carry the zero-minute sentinel.
     row = await conn.fetchrow(
-        """SELECT t.minutes_allocated,p.minutes AS plan_minutes
+        """SELECT t.minutes_allocated,p.minutes AS plan_minutes,
+                  -- Purchased minutes whose package carries an expiry that has
+                  -- passed. They stay in minutes_allocated (and are re-added by
+                  -- every plan re-allocation), so the meter removes them here;
+                  -- otherwise a one-time top-up renews every calendar month.
+                  COALESCE((SELECT SUM(l.minutes_delta)
+                              FROM billing_ledger l
+                              JOIN topup_orders o ON o.id=l.order_id
+                              JOIN topup_packages k ON k.code=o.package_code
+                             WHERE l.tenant_id=t.id AND l.kind='topup'
+                               AND k.expires_days IS NOT NULL
+                               AND l.created_at + make_interval(days => k.expires_days) <= NOW()
+                         ),0) AS expired_topup_minutes
              FROM tenants t LEFT JOIN plans p ON p.id=t.plan_id
             WHERE t.id=$1
               AND (COALESCE(NULLIF(current_setting('app.bypass_rls',true),'')::boolean,false)
@@ -92,6 +104,9 @@ async def _compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
         return unavailable_minutes("allowance_unavailable")
     allocated = row["minutes_allocated"]
     plan_minutes = row["plan_minutes"]
+    expired = row.get("expired_topup_minutes") or 0
+    if allocated > 0 and type(expired) is int and expired > 0:
+        allocated = max(0, allocated - expired)
     if allocated == 0 and (type(plan_minutes) is not int or plan_minutes < 0):
         return unavailable_minutes("unlimited_entitlement_unverified")
     used_seconds = await conn.fetchval(
@@ -130,6 +145,31 @@ async def _compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
         tenant_id,
     )
     return _status_from(allocated, used_seconds, unlimited=allocated == 0 and plan_minutes == 0)
+
+
+async def count_inflight_outbound_calls(conn: Any, tenant_id: str) -> int:
+    """Outbound calls placed but not yet settled (their duration is still NULL).
+
+    The meter above counts settled seconds only, so N concurrent dials all see
+    the same remaining balance. Admission reserves one estimate per in-flight
+    call. The 6 h window keeps a row that never got a terminal status from
+    reserving minutes forever.
+    """
+    from app.domain.services.call_status import TERMINAL_CALL_STATUSES
+
+    count = await conn.fetchval(
+        """SELECT COUNT(*) AS inflight_calls FROM calls c
+            WHERE c.tenant_id=$1 AND NOT c.is_test
+              AND c.direction IS DISTINCT FROM 'inbound'
+              AND c.duration_seconds IS NULL
+              AND c.created_at > NOW() - INTERVAL '6 hours'
+              AND COALESCE(c.status,'') <> ALL($2::text[])""",
+        tenant_id,
+        list(TERMINAL_CALL_STATUSES),
+    )
+    if type(count) is not int or count < 0:
+        raise MeteringUnavailable("inflight_unavailable")
+    return count
 
 
 async def compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:

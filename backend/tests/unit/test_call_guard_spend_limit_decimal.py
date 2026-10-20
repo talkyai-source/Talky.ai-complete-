@@ -39,7 +39,11 @@ from app.domain.services.call_guard import (
 
 
 def _guard() -> CallGuard:
-    return CallGuard(db_pool=object(), redis_client=None)
+    # The spend check now reads the month meter (nothing accrues
+    # monthly_spend_used), so it needs a pool that answers it: zero usage here.
+    from tests.unit.test_op01_metering_unavailable import Meter, Pool
+
+    return CallGuard(db_pool=Pool(Meter(allocated=0, plan_minutes=0, used=0)), redis_client=None)
 
 
 # ── _check_spend_limit: correctness with Decimal-typed inputs ──────────────
@@ -56,7 +60,7 @@ async def test_spend_under_cap_allows_even_with_decimal_inputs():
     )
 
     result = await guard._check_spend_limit(
-        tenant_id="t1", tenant_limits=limits, estimated_duration_seconds=60,
+        tenant_id="11111111-1111-4111-8111-111111111111", tenant_limits=limits, estimated_duration_seconds=60,
     )
 
     assert result.check == GuardCheck.SPEND_LIMIT
@@ -74,7 +78,7 @@ async def test_spend_over_cap_blocks_even_with_decimal_inputs():
     )
 
     result = await guard._check_spend_limit(
-        tenant_id="t1", tenant_limits=limits, estimated_duration_seconds=600,
+        tenant_id="11111111-1111-4111-8111-111111111111", tenant_limits=limits, estimated_duration_seconds=600,
     )
 
     assert result.passed is False
@@ -92,7 +96,7 @@ async def test_spend_check_never_raises_typeerror_with_mixed_decimal_float():
     )
     # Should simply return a CheckResult, not raise TypeError.
     result = await guard._check_spend_limit(
-        tenant_id="t1", tenant_limits=limits, estimated_duration_seconds=30,
+        tenant_id="11111111-1111-4111-8111-111111111111", tenant_limits=limits, estimated_duration_seconds=30,
     )
     assert result.passed is True
 
@@ -105,7 +109,7 @@ async def test_spend_check_plain_float_inputs_still_work():
     limits = TenantCallLimits(monthly_spend_cap=100.0, monthly_spend_used=99.99)
 
     result = await guard._check_spend_limit(
-        tenant_id="t1", tenant_limits=limits, estimated_duration_seconds=120,
+        tenant_id="11111111-1111-4111-8111-111111111111", tenant_limits=limits, estimated_duration_seconds=120,
     )
 
     assert result.passed is False  # 99.99 + 0.10 > 100.0

@@ -429,8 +429,9 @@ class BillingService:
                 "message": "Subscription canceled (mock mode)",
             }
 
-        subscription = stripe.Subscription.modify(
-            subscription_id, cancel_at_period_end=cancel_at_period_end
+        subscription = await self._stripe_call(
+            "Subscription", "update", subscription_id,
+            cancel_at_period_end=cancel_at_period_end,
         )
 
         # Update local state. Stripe spells cancellation "canceled"; the call
@@ -447,9 +448,15 @@ class BillingService:
                     if subscription.cancel_at
                     else None
                 ),
-                "canceled_at": datetime.now(),
+                # Only an immediate cancellation has a cancelled-at; a scheduled
+                # one (cancel_at_period_end) leaves it null.
+                "canceled_at": (
+                    datetime.fromtimestamp(subscription.canceled_at)
+                    if subscription.canceled_at
+                    else None
+                ),
             }
-        ).eq("stripe_subscription_id", subscription_id).execute()
+        ).eq("tenant_id", tenant_id).eq("stripe_subscription_id", subscription_id).execute()
 
         return {
             "status": subscription.status,

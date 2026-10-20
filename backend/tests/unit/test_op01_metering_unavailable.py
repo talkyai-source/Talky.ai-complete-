@@ -13,14 +13,16 @@ from tests.unit.test_dialer_worker_guard_ordering import _base_worker, _job
 
 
 class Meter:
-    def __init__(self, allocated=30, used=120, plan_minutes=30, *, missing=False, fail=False):
-        self.allocated, self.used, self.plan_minutes = allocated, used, plan_minutes
+    def __init__(self, allocated=30, used=120, plan_minutes=30, *, missing=False, fail=False, inflight=0):
+        self.allocated, self.used, self.plan_minutes, self.inflight = allocated, used, plan_minutes, inflight
         self.missing, self.fail = missing, fail
 
     async def fetchrow(self, *_):
         return None if self.missing else {'minutes_allocated': self.allocated, 'plan_minutes': self.plan_minutes}
 
     async def fetchval(self, sql, *_):
+        if 'inflight_calls' in sql:
+            return self.inflight
         if 'SELECT minutes_allocated' in sql:
             return None if self.missing else self.allocated
         if self.fail:

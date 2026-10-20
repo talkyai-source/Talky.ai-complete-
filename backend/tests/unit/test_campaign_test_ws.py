@@ -184,6 +184,7 @@ class _Harness:
             patch("app.core.jwt_security.decode_and_validate_token", return_value={"sub": "user-1", "sid": "session-1"}),
             patch.object(campaign_test_ws, "_session_is_active", AsyncMock(return_value=True), create=True),
             patch.object(campaign_test_ws, "_has_test_membership", AsyncMock(return_value=True), create=True),
+            patch.object(campaign_test_ws, "_tenant_test_refusal", AsyncMock(return_value=None)),
             patch("app.api.v1.dependencies.get_db_client", return_value=db_client),
             patch.object(
                 campaign_test_ws,

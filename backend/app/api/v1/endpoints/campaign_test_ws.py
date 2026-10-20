@@ -63,6 +63,35 @@ _AUTH_RECHECK_SECONDS = 15.0
 _AUTH_TIMEOUT_SECONDS = 5.0
 _CLEANUP_TIMEOUT_SECONDS = 10.0
 _test_semaphore: Optional[asyncio.Semaphore] = None
+# One tenant must not be able to hold every global slot.
+_MAX_CONCURRENT_TEST_PER_TENANT = 2
+_tenant_semaphores: dict[str, asyncio.Semaphore] = {}
+
+
+def _get_tenant_semaphore(tenant_id: str) -> asyncio.Semaphore:
+    sem = _tenant_semaphores.get(tenant_id)
+    if sem is None:
+        sem = _tenant_semaphores[tenant_id] = asyncio.Semaphore(_MAX_CONCURRENT_TEST_PER_TENANT)
+    return sem
+
+
+async def _tenant_test_refusal(pool, tenant_id) -> Optional[str]:
+    """Why this tenant may not spend provider capacity on a test, or None.
+
+    Test sessions are not billed, but they use the same paid STT/LLM/TTS
+    providers, so a suspended or cancelled account must not keep running them.
+    Reuses the call guard's own account checks (fail closed on error).
+    """
+    from app.domain.services.call_guard import CallGuard
+
+    guard = CallGuard(db_pool=pool, redis_client=None)
+    for result in (
+        await guard._check_tenant_active(str(tenant_id)),
+        await guard._check_subscription_uncached(str(tenant_id)),
+    ):
+        if not result.passed:
+            return result.reason or "tenant_not_allowed"
+    return None
 
 
 def _get_semaphore() -> asyncio.Semaphore:
@@ -613,6 +642,20 @@ async def campaign_test_websocket(
     if not await _check_campaign_permission(websocket, container.db_pool, user_id, tenant_id):
         return
 
+    refusal = await _tenant_test_refusal(container.db_pool, tenant_id)
+    if refusal is not None:
+        logger.info("campaign_test_ws refused tenant=%s reason=%s", str(tenant_id)[:8], refusal)
+        await websocket.send_json({"type": "error", "code": "tenant_not_allowed",
+                                   "message": "Test calls are unavailable for this account."})
+        await websocket.close(code=1008, reason="Tenant not allowed")
+        return
+    tenant_sem = _get_tenant_semaphore(str(tenant_id))
+    if tenant_sem.locked():
+        await websocket.send_json({"type": "error", "code": "tenant_test_limit",
+                                   "message": "Too many test sessions are already running for your account."})
+        await websocket.close(code=1013)
+        return
+
     try:
         campaign_row = await asyncio.wait_for(
             _fetch_campaign_row(container.db_pool, tenant_id, campaign_id), timeout=_AUTH_TIMEOUT_SECONDS,
@@ -676,7 +719,7 @@ async def campaign_test_websocket(
     test_call_id = None
     test_started_at = time.time()
 
-    async with sem:
+    async with sem, tenant_sem:
         try:
             # Resolve the tenant's LIVE AI Options exactly like a phone call.
             # These resolvers are cache-bypassed, so an AI-Options edit takes

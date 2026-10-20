@@ -109,6 +109,9 @@ _FAIL_CLOSED_ON_ERROR_CHECKS = frozenset(
 )
 
 
+_ESTIMATED_COST_PER_MINUTE = 0.05
+
+
 @dataclass
 class CheckResult:
     """Result of a single guard check."""
@@ -1033,11 +1036,22 @@ class CallGuard:
         # is in _FAIL_CLOSED_ON_ERROR_CHECKS, that TypeError would fail
         # closed and block every call for that tenant -- not just calls that
         # are actually over cap.
-        current_spend = float(tenant_limits.monthly_spend_used or 0)
+        # Nothing in the app accrues monthly_spend_used, so on its own it is a
+        # constant 0.0 and the cap could never trip. Derive this month's spend
+        # from the settled-minutes meter at the same per-minute rate the
+        # estimate below uses; keep the stored figure as a floor. A meter
+        # failure raises, and SPEND_LIMIT fails closed on error.
+        from app.domain.services.minutes_quota import compute_minutes_status
+
+        async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
+            quota = await compute_minutes_status(conn, str(tenant_id))
+        quota.require_available()
+        metered_spend = (quota.used_minutes or 0) * _ESTIMATED_COST_PER_MINUTE
+        current_spend = max(float(tenant_limits.monthly_spend_used or 0), metered_spend)
         cap = float(tenant_limits.monthly_spend_cap)
 
         # Estimate call cost (simplified - $0.05/minute)
-        estimated_cost = (estimated_duration_seconds or 60) / 60 * 0.05
+        estimated_cost = (estimated_duration_seconds or 60) / 60 * _ESTIMATED_COST_PER_MINUTE
 
         if current_spend + estimated_cost > cap:
             return CheckResult(
@@ -1070,9 +1084,16 @@ class CallGuard:
     ) -> CheckResult:
         """Use the canonical live allowance; uncertainty defers new admission."""
         try:
-            from app.domain.services.minutes_quota import compute_minutes_status
+            from app.domain.services.minutes_quota import (
+                compute_minutes_status,
+                count_inflight_outbound_calls,
+            )
             async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
                 quota = await compute_minutes_status(conn, str(tenant_id))
+                inflight = (
+                    0 if quota.unlimited or quota.state == "unavailable"
+                    else await count_inflight_outbound_calls(conn, str(tenant_id))
+                )
             quota.require_available()
         except Exception:
             return CheckResult(check=GuardCheck.MINUTES_QUOTA, passed=False,
@@ -1085,7 +1106,11 @@ class CallGuard:
         # Round this call's minutes UP (carriers bill per started minute).
         est_minutes = -(-(estimated_duration_seconds or 60) // 60)  # ceil division
 
-        if used + est_minutes > allocated:
+        # Calls already dialled but not yet settled have NULL duration, so
+        # `used` cannot see them: reserve one estimate for each.
+        reserved = inflight * est_minutes
+
+        if used + reserved + est_minutes > allocated:
             return CheckResult(
                 check=GuardCheck.MINUTES_QUOTA,
                 passed=False,
@@ -1094,6 +1119,8 @@ class CallGuard:
                     "minutes_used": used,
                     "minutes_allocated": allocated,
                     "estimated_minutes": est_minutes,
+                    "inflight_calls": inflight,
+                    "reserved_minutes": reserved,
                 },
             )
 

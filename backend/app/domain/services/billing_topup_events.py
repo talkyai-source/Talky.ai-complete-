@@ -198,6 +198,12 @@ async def apply_topup_event(conn, billing, event_type, data, event_id):
         _review("order_provider_binding_missing", tenant_id)
     if session is None:
         session = await _retrieve(billing, "checkout.Session", order["provider_session_id"])
+    # Provider reads happen BEFORE the tenants row lock: a FOR UPDATE held across
+    # a Stripe call stalls every call-row insert for the tenant (FK KEY SHARE).
+    # The charge is only verified later; a read here changes no decision.
+    prefetch_charge = _id(payment.get("latest_charge")) if payment else None
+    if charge is None and prefetch_charge:
+        charge = await _retrieve(billing, "Charge", prefetch_charge)
     tenant = await conn.fetchrow(
         "SELECT stripe_customer_id,minutes_allocated FROM tenants WHERE id=$1 FOR UPDATE", tenant_id
     )
