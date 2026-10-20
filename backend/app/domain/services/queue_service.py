@@ -954,24 +954,19 @@ class DialerQueueService:
         if not entries:
             return 0
 
-        kept_entries: list[str] = []
+        # Remove only the matching entries, one atomic LREM each. The previous
+        # LRANGE + DELETE + RPUSH rewrite dropped any job pushed after the
+        # snapshot and re-delivered any job a worker had already popped.
         removed = 0
         for entry in entries:
             try:
                 payload = json.loads(entry)
             except Exception:
-                kept_entries.append(entry)
                 continue
 
             if payload.get("campaign_id") == campaign_id:
-                removed += 1
-            else:
-                kept_entries.append(entry)
-
-        if removed:
-            await self._redis.delete(key)
-            if kept_entries:
-                await self._redis.rpush(key, *kept_entries)
+                if await self._redis.lrem(key, 1, entry):
+                    removed += 1
 
         return removed
 

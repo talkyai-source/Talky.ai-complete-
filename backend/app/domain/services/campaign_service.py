@@ -502,8 +502,9 @@ class CampaignService:
                 await self._update_campaign_status(
                     campaign_id,
                     status="running",
-                    total_leads=len(leads),
+                    total_leads=self._restart_total_leads(campaign, len(leads)),
                     tenant_id=scoping_tenant_id,
+                    stamp_started_at=not campaign.get("started_at"),
                 )
             else:
                 await self._update_campaign_status(
@@ -683,9 +684,15 @@ class CampaignService:
             REASON_CAMPAIGN_STOPPED,
         )
 
+        # Leads whose next attempt is a scheduled retry sit in status 'called'.
+        # Cancelling that retry job below would strand them: neither Start's
+        # pending/calling selection nor the failed/skipped reset picks 'called'
+        # up. Snapshot them first, hand them back to 'pending' after the cancel.
+        retry_lead_ids = self._leads_awaiting_retry(campaign_id, scoped_tenant)
         cleared_jobs = cancel_active_jobs_for_campaign(
             self.db_client, campaign_id, reason=REASON_CAMPAIGN_STOPPED,
         )
+        self._release_leads_to_pending(retry_lead_ids, campaign_id, scoped_tenant)
         # Drain the Redis queue too so jobs already dequeued into Redis don't
         # get processed after the stop. Best-effort — never block the stop.
         try:
@@ -740,6 +747,63 @@ class CampaignService:
     # =========================================================================
     # Private Helpers
     # =========================================================================
+
+    def _leads_awaiting_retry(
+        self, campaign_id: str, scoped_tenant: Optional[str]
+    ) -> List[str]:
+        """Lead ids whose only pending work is a ``retry_scheduled`` job.
+
+        Best-effort: a failed read must never block a stop.
+        """
+        try:
+            query = (
+                self.db_client.table("dialer_jobs")
+                .select("lead_id")
+                .eq("campaign_id", str(campaign_id))
+                .in_("status", ["retry_scheduled"])
+            )
+            if scoped_tenant:
+                query = query.eq("tenant_id", scoped_tenant)
+            res = query.execute()
+            return [
+                str(r["lead_id"])
+                for r in (getattr(res, "data", None) or [])
+                if r.get("lead_id")
+            ]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("stop_campaign: retry-lead snapshot failed: %s", exc)
+            return []
+
+    def _release_leads_to_pending(
+        self, lead_ids: List[str], campaign_id: str, scoped_tenant: Optional[str]
+    ) -> None:
+        """Return leads whose retry job was cancelled to 'pending' so a later
+        Start re-dispatches them. Only 'called' rows move: a lead that turned
+        dnc / deleted / completed meanwhile is never resurrected."""
+        if not lead_ids:
+            return
+        try:
+            query = (
+                self.db_client.table("leads")
+                .update({"status": "pending"})
+                .eq("campaign_id", str(campaign_id))
+                .eq("status", "called")
+                .in_("id", list(lead_ids))
+            )
+            if scoped_tenant:
+                query = query.eq("tenant_id", scoped_tenant)
+            query.execute()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("stop_campaign: releasing retry leads failed: %s", exc)
+
+    @staticmethod
+    def _restart_total_leads(campaign: Dict[str, Any], remaining: int) -> int:
+        """total_leads on a (re)start = leads still to dial + leads already
+        finished, so a resumed campaign never reads 150% progress."""
+        finished = int(campaign.get("calls_completed") or 0) + int(
+            campaign.get("calls_failed") or 0
+        )
+        return remaining + finished
 
     def _inactive_list_ids(self, campaign_id: str, tenant_id: Optional[str] = None) -> set:
         """Return the set of contact_list ids that are toggled OFF for this
@@ -1148,6 +1212,7 @@ class CampaignService:
         status: str,
         total_leads: Optional[int] = None,
         tenant_id: Optional[str] = None,
+        stamp_started_at: bool = True,
     ) -> None:
         """Update campaign status and metadata.
 
@@ -1158,10 +1223,9 @@ class CampaignService:
         fallback string would not match a real row's tenant_id and would
         silently zero out this update.
         """
-        update_data = {
-            "status": status,
-            "started_at": datetime.utcnow().isoformat()
-        }
+        update_data = {"status": status}
+        if stamp_started_at:
+            update_data["started_at"] = datetime.utcnow().isoformat()
         if total_leads is not None:
             update_data["total_leads"] = total_leads
 

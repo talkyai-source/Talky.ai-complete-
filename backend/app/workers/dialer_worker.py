@@ -550,7 +550,9 @@ class DialerWorker:
             # actually enabled the ceiling (default off → zero overhead).
             lead_attempts_today = None
             if getattr(rules, "max_calls_per_lead_per_day", 0):
-                lead_attempts_today = await self._get_lead_attempts_today(job.lead_id)
+                lead_attempts_today = await self._get_lead_attempts_today(
+                    job.lead_id, rules._resolve_tz(lead_tz).zone
+                )
 
             can_call, reason = await self.rules_engine.can_make_call(
                 tenant_id=job.tenant_id,
@@ -576,6 +578,8 @@ class DialerWorker:
             # below). Reversible by unsetting the switch. See
             # app/domain/services/dialer/testing_override.py.
             self._schedule_override = None
+            if can_call and ignore_schedule:
+                self._stamp_ignore_schedule(job, rules, lead_tz)
             if not can_call:
                 from app.domain.services.dialer.block_reasons import (
                     SCHEDULE_BLOCK_CODES,
@@ -716,12 +720,12 @@ class DialerWorker:
                     # the lead for just after the day rolls over; the
                     # calling-window gate then holds it until the tenant's
                     # allowed hours. Avoids burning retries hammering the cap.
-                    now = datetime.now(timezone.utc)
-                    next_midnight = (now + timedelta(days=1)).replace(
-                        hour=0,
-                        minute=5,
-                        second=0,
-                        microsecond=0,
+                    # Local midnight (the zone the cap counts in), not UTC.
+                    cap_tz = rules._resolve_tz(lead_tz)
+                    now = datetime.now(cap_tz)
+                    next_midnight = cap_tz.localize(
+                        datetime(now.year, now.month, now.day, 0, 5)
+                        + timedelta(days=1)
                     )
                     delay = max(300, int((next_midnight - now).total_seconds()))
                     logger.info(
@@ -1416,6 +1420,7 @@ class DialerWorker:
                     JobStatus.FAILED,
                     error=str(e),
                 )
+                await self._count_pre_answer_failure(job)
 
     # Sentinel returned by _make_call when the bridge says the voice
     # pipeline is not ready (HTTP 503). Distinct from None ("real failure")
@@ -2376,8 +2381,11 @@ class DialerWorker:
             logger.warning(f"Failed to get lead timezone: {e}")
         return None
 
-    async def _get_lead_attempts_today(self, lead_id: str) -> int:
-        """Count dial attempts already made to a lead since UTC midnight.
+    async def _get_lead_attempts_today(self, lead_id: str, tz_name: str = "UTC") -> int:
+        """Count dial attempts already made to a lead since local midnight.
+
+        ``tz_name`` is the zone the calling window is evaluated in (lead, else
+        campaign/tenant); the day rolls over there, not at UTC midnight.
 
         Used only when the tenant has a daily per-lead cap configured
         (``max_calls_per_lead_per_day`` > 0); otherwise this is never
@@ -2389,7 +2397,8 @@ class DialerWorker:
             async with self._acquire_db() as conn:
                 val = await conn.fetchval(
                     "SELECT COUNT(*) FROM calls "
-                    "WHERE lead_id = $1 AND created_at >= date_trunc('day', now()) "
+                    "WHERE lead_id = $1 AND created_at >= "
+                    "(date_trunc('day', now() AT TIME ZONE $2::text) AT TIME ZONE $2::text) "
                     # Testing an agent must not burn a lead's daily attempt quota.
                     "AND NOT is_test "
                     # Nor may intents released while the line was refused:
@@ -2397,6 +2406,7 @@ class DialerWorker:
                     "AND NOT (provider_call_id IS NULL AND COALESCE(failure_reason, '') "
                     "IN ('line_not_ready', 'telephony_unavailable'))",
                     lead_id,
+                    tz_name or "UTC",
                 )
                 return int(val or 0)
         except Exception as e:
@@ -2420,6 +2430,35 @@ class DialerWorker:
             "busy",
             "no_answer",
         }
+
+    def _stamp_ignore_schedule(self, job: DialerJob, rules, lead_tz) -> None:
+        """Audit a call dialled under the tenant "call anytime" switch.
+
+        With ``ignore_schedule`` the window gate is skipped, so nothing records
+        that the call went out of hours. Re-evaluate the window (pure time
+        arithmetic) and, when it would have blocked, log one WARNING and stamp
+        the call exactly like the testing override. In-window calls stay quiet.
+        """
+        try:
+            allowed, reason = rules.is_within_time_window(tz_override=lead_tz)
+            if allowed:
+                return
+            from app.domain.services.dialer.block_reasons import describe_schedule
+
+            schedule = describe_schedule(rules)
+            logger.warning(
+                "SCHEDULE IGNORED: dialling outside the configured calling window "
+                "via campaign ignore_schedule. campaign=%s tenant=%s dest=%s "
+                "would_have_blocked_with=%s schedule=%s",
+                job.campaign_id, job.tenant_id, job.phone_number, reason, schedule,
+            )
+            self._schedule_override = {
+                "source": "campaign:ignore_schedule",
+                "blocked_reason": reason,
+                "schedule": schedule,
+            }
+        except Exception as exc:  # noqa: BLE001 - audit must not block dialling
+            logger.warning("ignore_schedule audit failed: %s", exc)
 
     def _schedule_override_audit(self) -> dict:
         if not self._schedule_override:
@@ -2684,6 +2723,17 @@ class DialerWorker:
             # be its FIRST real origination (a same-attempt hold: pipeline down,
             # throttle, trunk not ready). The gates were applied when the hold
             # began, possibly minutes ago.
+            stale_reason = await self._stale_payload_reason(job)
+            if stale_reason is not None:
+                # The contact was removed / flagged during the hold: terminalise
+                # the unclaimed intent and drop the payload, never dial.
+                if await self._mark_call_intent_not_originated(
+                    job, intent, reason=f"stale_payload:{stale_reason}",
+                ):
+                    await self._drop_stale_payload(job, stale_reason)
+                else:
+                    await self._park_uncertain_origination(job, intent)
+                return
             await self._require_open_window_for_unclaimed_intent(
                 job, rules, campaign_cfg
             )
@@ -2931,6 +2981,8 @@ class DialerWorker:
             enforce_window=not schedule_ignored(campaign_cfg),
         )
         if in_window:
+            if schedule_ignored(campaign_cfg):
+                self._stamp_ignore_schedule(job, rules, lead_tz)
             return
         from app.domain.services.dialer.testing_override import (
             log_override_used,
@@ -3650,6 +3702,37 @@ class DialerWorker:
             reason,
         )
 
+    async def _count_pre_answer_failure(self, job: DialerJob) -> None:
+        """Count a lead that ended FAILED before any call settled as failed.
+
+        Counters are normally bumped by CallService when a call settles; a
+        lead rejected before connecting never reaches it. The NOT EXISTS keeps
+        a job whose call already settled (and was counted) from counting twice.
+        Best-effort: a counter write must not mask the failure being handled.
+        """
+        try:
+            async with self._acquire_db() as conn:
+                await conn.execute(
+                    """
+                    UPDATE campaigns
+                       SET calls_failed = COALESCE(calls_failed, 0) + 1,
+                           updated_at = NOW()
+                     WHERE id = $1::uuid AND tenant_id = $2::uuid
+                       AND NOT EXISTS (
+                           SELECT 1 FROM calls
+                            WHERE dialer_job_id = $3::uuid
+                              AND tenant_id = $2::uuid
+                              AND terminal_settled_at IS NOT NULL)
+                    """,
+                    str(job.campaign_id),
+                    str(job.tenant_id),
+                    str(job.job_id),
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "dialer_failed_counter_not_bumped job=%s err=%s", job.job_id, exc
+            )
+
     async def _update_lead_status(self, job: DialerJob, status: str) -> None:
         """Update exactly the lead owned by this tenant/campaign payload."""
         async with self._acquire_db() as conn:
@@ -3665,6 +3748,7 @@ class DialerWorker:
                  WHERE id = $2::uuid
                    AND tenant_id = $3::uuid
                    AND campaign_id = $4::uuid
+                   AND status NOT IN ('dnc', 'deleted')
                 """,
                 status,
                 str(job.lead_id),
@@ -3672,6 +3756,22 @@ class DialerWorker:
                 str(job.campaign_id),
             )
             if updated != "UPDATE 1":
+                # A concurrent opt-out / contact removal owns the lead now:
+                # leave its status alone rather than resurrect it.
+                current = await conn.fetchval(
+                    "SELECT status FROM leads WHERE id = $1::uuid "
+                    "AND tenant_id = $2::uuid AND campaign_id = $3::uuid",
+                    str(job.lead_id),
+                    str(job.tenant_id),
+                    str(job.campaign_id),
+                )
+                if current in ("dnc", "deleted"):
+                    logger.warning(
+                        "dialer_lead_status_write_skipped job=%s lead=%s "
+                        "current=%s wanted=%s",
+                        job.job_id, job.lead_id, current, status,
+                    )
+                    return
                 raise RuntimeError(
                     f"lead ownership update affected {updated} for job {job.job_id}"
                 )

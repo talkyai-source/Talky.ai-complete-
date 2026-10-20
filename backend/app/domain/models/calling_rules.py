@@ -132,6 +132,19 @@ class CallingRules(BaseModel):
                 continue
         return pytz.UTC
 
+    def _has_resolvable_tz(self, tz_override: Optional[str] = None) -> bool:
+        """False only when a zone was configured but none of them is known."""
+        configured = [c for c in (tz_override, self.timezone) if c]
+        if not configured:
+            return True
+        for candidate in configured:
+            try:
+                pytz.timezone(candidate)
+                return True
+            except pytz.exceptions.UnknownTimeZoneError:
+                continue
+        return False
+
     def is_within_time_window(
         self,
         check_time: Optional[datetime] = None,
@@ -156,6 +169,10 @@ class CallingRules(BaseModel):
         ``"24:00"`` is the end of the day.
         """
         tz = self._resolve_tz(tz_override)
+        if not self._has_resolvable_tz(tz_override):
+            # A typo'd zone must not silently become UTC and open the line at
+            # the wrong local hour. Fail closed, like invalid_time_window.
+            return False, "invalid_timezone"
 
         if check_time is None:
             check_time = datetime.now(tz)

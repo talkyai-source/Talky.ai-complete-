@@ -637,6 +637,10 @@ class _ScopedWriteConn:
         self.calls.append((sql, args))
         return self.result
 
+    async def fetchval(self, sql, *args):
+        # The row exists under no dnc/deleted status the guard would protect.
+        return None
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(

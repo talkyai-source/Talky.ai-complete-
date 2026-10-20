@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import pytz
 from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -120,6 +121,17 @@ class CampaignCallingSchedule(BaseModel):
         default=False,
         description="When true, dial regardless of the window (override). The UI still shows out-of-hours warnings.",
     )
+
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone(cls, v: Optional[str]) -> Optional[str]:
+        # An unknown zone used to be stored as-is and the dialer then evaluated
+        # the window in UTC. Refuse it here so the user hears about it at save.
+        if v is None or v == "":
+            return None
+        if v not in pytz.all_timezones_set:
+            raise ValueError("timezone must be a valid IANA name, e.g. America/New_York")
+        return v
 
     @field_validator("time_window_start", "time_window_end")
     @classmethod
