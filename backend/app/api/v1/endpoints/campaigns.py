@@ -602,6 +602,32 @@ def _merge_calling_config_schedule(existing, schedule_cfg: dict) -> dict:
     return kept
 
 
+def _pinned_tts_provider(requested, ai_config, script_config, voice_id, *, tenant_id, campaign_ref):
+    """TTS provider to store with a campaign's voice_id (aiopt-2).
+
+    An explicit provider is kept as sent. With a voice but no provider, the
+    tenant's CURRENT provider (the one the voice was just validated against) is
+    frozen into the row, so a later tenant switch cannot re-pair the voice with
+    another engine. Realtime campaigns carry a realtime voice, not a TTS voice,
+    and an unresolvable provider keeps today's NULL (runtime heuristic applies).
+    """
+    if requested:
+        return requested
+    if not (voice_id or "").strip():
+        return None
+    if (script_config or {}).get("pipeline_mode") == "realtime":
+        return None
+    raw = getattr(ai_config, "tts_provider", None)
+    resolved = str(getattr(raw, "value", raw) or "").strip().lower()
+    if not resolved:
+        logger.warning(
+            "campaign %s tenant=%s: tenant TTS provider unresolved; storing tts_provider NULL",
+            campaign_ref, tenant_id,
+        )
+        return None
+    return resolved
+
+
 @router.post("/", dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.CAMPAIGNS_CREATE))])
 async def create_campaign(
     campaign_data: CampaignCreateRequest,
@@ -643,7 +669,10 @@ async def create_campaign(
             "description": campaign_data.description.strip() if campaign_data.description else None,
             "system_prompt": campaign_data.system_prompt.strip(),
             "voice_id": selected_voice_id,
-            "tts_provider": (campaign_data.tts_provider or None),
+            "tts_provider": _pinned_tts_provider(
+                campaign_data.tts_provider, ai_config, script_config, selected_voice_id,
+                tenant_id=current_user.tenant_id, campaign_ref="create",
+            ),
             "goal": campaign_data.goal.strip() if campaign_data.goal else None,
             "script_config": script_config,
             "direction": campaign_data.direction,
@@ -806,7 +835,10 @@ async def update_campaign(
             "description": campaign_data.description.strip() if campaign_data.description else None,
             "system_prompt": campaign_data.system_prompt.strip(),
             "voice_id": selected_voice_id,
-            "tts_provider": (campaign_data.tts_provider or None),
+            "tts_provider": _pinned_tts_provider(
+                campaign_data.tts_provider, ai_config, script_config, selected_voice_id,
+                tenant_id=current_user.tenant_id, campaign_ref=campaign_id,
+            ),
             "goal": campaign_data.goal.strip() if campaign_data.goal else None,
             "script_config": script_config,
         }
