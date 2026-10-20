@@ -5,8 +5,10 @@ Day 24: Unified Connector System
 import pytest
 import os
 
-# Set test environment
-os.environ.setdefault("CONNECTOR_ENCRYPTION_KEY", "test_key_for_testing_only_32bytes!")
+# Set test environment. This runs at import and stays for the whole pytest
+# process, so it must be a valid Fernet key (urlsafe base64 of 32 bytes): an
+# invalid one breaks every later connector-encryption test in the same run.
+os.environ.setdefault("CONNECTOR_ENCRYPTION_KEY", "dGVzdF9rZXlfZm9yX3Rlc3Rpbmdfb25seV8zMmJ5dGU=")
 
 
 class TestConnectorFactory:

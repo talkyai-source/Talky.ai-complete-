@@ -1266,8 +1266,32 @@ class CampaignService:
         if getattr(response, "error", None):
             raise RuntimeError("dialer dispatch acknowledgement failed")
         rows = getattr(response, "data", None) or []
-        if len(rows) != 1 or str(rows[0].get("id")) != str(job.job_id):
-            raise RuntimeError("dialer dispatch acknowledgement was not exact")
+        if len(rows) == 1 and str(rows[0].get("id")) == str(job.job_id):
+            return
+        # The dialer can pop the payload before this ack and move the row on
+        # (e.g. re-defer to retry_scheduled when its batch is full). A row that
+        # has left 'pending' needs no outbox replay, so the dispatch stands.
+        try:
+            current = (
+                self.db_client.table("dialer_jobs")
+                .select("id,status")
+                .eq("id", str(job.job_id))
+                .eq("tenant_id", str(job.tenant_id))
+                .eq("campaign_id", str(job.campaign_id))
+                .eq("lead_id", str(job.lead_id))
+                .execute()
+            )
+        except Exception as exc:
+            raise RuntimeError("dialer dispatch acknowledgement was not exact") from exc
+        current_rows = getattr(current, "data", None) or []
+        status_now = str(current_rows[0].get("status") or "") if len(current_rows) == 1 else ""
+        if status_now and status_now != "pending":
+            logger.info(
+                "dialer_dispatch_ack_already_owned job=%s status=%s",
+                job.job_id, status_now,
+            )
+            return
+        raise RuntimeError("dialer dispatch acknowledgement was not exact")
 
     async def _dispatch_durable_jobs(
         self,
