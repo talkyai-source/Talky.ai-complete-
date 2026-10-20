@@ -76,9 +76,21 @@ def cancel_active_jobs_for_campaign(db_client, campaign_id: str, *, reason: str)
     return n
 
 
-def cancel_active_jobs_for_lead(db_client, lead_id: str, *, reason: str = REASON_LEAD_REMOVED) -> int:
-    """Cancel every active job for a single lead. Returns the count cancelled."""
-    result = (
+def cancel_active_jobs_for_lead(
+    db_client,
+    lead_id: str,
+    *,
+    reason: str = REASON_LEAD_REMOVED,
+    tenant_id: str | None = None,
+) -> int:
+    """Cancel every active job for a single lead. Returns the count cancelled.
+
+    ``tenant_id`` adds an explicit tenant predicate: the production DB role
+    bypasses RLS, so a lead id alone must never be enough to reach a row.
+    Callers that know the tenant MUST pass it; omitting it keeps the legacy
+    id-only behaviour and logs a warning.
+    """
+    query = (
         db_client.table("dialer_jobs")
         .update({
             "status": "cancelled",
@@ -86,9 +98,15 @@ def cancel_active_jobs_for_lead(db_client, lead_id: str, *, reason: str = REASON
             "last_error": reason,
         })
         .eq("lead_id", str(lead_id))
-        .in_("status", list(ACTIVE_STATUSES))
-        .execute()
     )
+    if tenant_id is not None:
+        query = query.eq("tenant_id", str(tenant_id))
+    else:
+        logger.warning(
+            "job_lifecycle: cancel_active_jobs_for_lead(%s) called without tenant_id",
+            lead_id,
+        )
+    result = query.in_("status", list(ACTIVE_STATUSES)).execute()
     n = _rowcount(result)
     if n:
         logger.info("job_lifecycle: cancelled %d active job(s) for lead %s (%s)", n, lead_id, reason)
