@@ -96,7 +96,9 @@ def create_contact_list(
 
     Dedup policy: if a list with the SAME (campaign_id, name) already exists,
     we reuse it and append the new leads into it rather than creating a
-    duplicate-named list. This makes "re-upload the same file" idempotent from
+    duplicate-named list. Only an ACTIVE list is reused: appending to a list the
+    user switched off would import contacts that start_campaign silently skips.
+    This makes "re-upload the same file" idempotent from
     the user's perspective (the list's contact_count just grows). A caller that
     wants a distinct list should pass a distinct name.
 
@@ -110,7 +112,7 @@ def create_contact_list(
     try:
         existing = db_client.table("contact_lists").select("id")\
             .eq("campaign_id", campaign_id).eq("tenant_id", tenant_id)\
-            .eq("name", name).execute()
+            .eq("name", name).eq("is_active", True).execute()
         if getattr(existing, "error", None):
             raise RuntimeError("contact-list lookup failed")
         if getattr(existing, "data", None):

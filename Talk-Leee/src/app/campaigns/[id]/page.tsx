@@ -9,7 +9,7 @@ import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { dashboardApi, campaignStartErrorMessage, Campaign, Contact, ContactList, MinutesStatus } from "@/lib/dashboard-api";
 import type { CampaignActivity, CampaignBlockingReason, ContactMutation } from "@/lib/dashboard-api";
-import { OPTIONAL_CONTACT_FIELDS, contactPayload, type OptionalContactFieldKey } from "@/lib/contact-fields";
+import { OPTIONAL_CONTACT_FIELDS, contactPayload, contactEditPayload, fetchAllPages, type OptionalContactFieldKey } from "@/lib/contact-fields";
 import { SmartCsvImport } from "@/components/campaigns/smart-csv-import";
 import { ContactLists, ActiveContactsSummary } from "@/components/campaigns/contact-lists";
 import { ScriptCard } from "@/components/campaigns/script-card";
@@ -233,7 +233,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
             }
 
             const [contactsData, statsData, minutesData] = await Promise.all([
-                dashboardApi.listContacts(campaignId),
+                fetchAllPages((page, size) => dashboardApi.listContacts(campaignId, page, size)),
                 dashboardApi.getCampaignStats(campaignId),
                 // Best-effort — a quota hiccup must not blank the whole page.
                 dashboardApi.getMinutesStatus().catch(() => null),
@@ -389,7 +389,9 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
         e.preventDefault();
         try {
             setAddingContact(true);
-            const payload = contactPayload(contactForm);
+            const payload = editingContact
+                ? contactEditPayload(contactForm)
+                : contactPayload(contactForm);
             if (editingContact) {
                 await dashboardApi.updateContact(campaignId, editingContact.id, payload);
             } else {

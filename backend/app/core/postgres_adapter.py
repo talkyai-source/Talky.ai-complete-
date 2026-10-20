@@ -694,15 +694,22 @@ class QueryBuilder:
         if not items:
             return PostgrestResponse(data=[])
 
-        keys = list(items[0].keys())
-        cols = ", ".join(keys)
         results = []
         column_types = await self._get_table_column_types(conn)
 
         for item in items:
+            # Each row binds its OWN columns: rows in one batch may carry
+            # different key sets (blank CSV cells are dropped upstream), and
+            # using the first row's keys silently discarded later rows' values
+            # (e.g. do_not_call=True) or bound NULL into NOT NULL columns.
+            keys = list(item.keys())
+            cols = ", ".join(keys)
             args = [self._coerce_bind_value(item.get(k), column_types.get(k)) for k in keys]
             placeholders = ", ".join(f"${i + 1}" for i in range(len(args)))
-            sql = f"INSERT INTO {self.table_name} ({cols}) VALUES ({placeholders}) RETURNING *"
+            if keys:
+                sql = f"INSERT INTO {self.table_name} ({cols}) VALUES ({placeholders}) RETURNING *"
+            else:
+                sql = f"INSERT INTO {self.table_name} DEFAULT VALUES RETURNING *"
             row = await conn.fetchrow(sql, *args)
             if row:
                 results.append(self._decode_row(row, column_types))

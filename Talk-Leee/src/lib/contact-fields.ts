@@ -42,3 +42,46 @@ export function contactPayload(form: ContactMutation): ContactMutation {
     }
     return out as unknown as ContactMutation;
 }
+
+/** Payload for EDITING a contact. Unlike {@link contactPayload} a field the
+ *  operator cleared is sent explicitly (null; "" for names / mobile, which the
+ *  API treats as "remove"), because the PATCH only changes keys it receives and
+ *  omitting them leaves the old value stored while the UI says "Saved". */
+export function contactEditPayload(form: ContactMutation): ContactMutation {
+    const out: Record<string, unknown> = { phone_number: form.phone_number.trim() };
+    const keepEmptyString = new Set(["first_name", "last_name", "mobile_number"]);
+    for (const [key, value] of Object.entries(form)) {
+        if (key === "phone_number") continue;
+        if (typeof value === "boolean") {
+            out[key] = value;
+        } else if (typeof value === "string") {
+            const trimmed = value.trim();
+            out[key] = trimmed || (keepEmptyString.has(key) ? "" : null);
+        }
+    }
+    return out as unknown as ContactMutation;
+}
+
+/** Page size the contacts API accepts at most. */
+export const CONTACTS_PAGE_SIZE = 100;
+/** Safety cap so a huge campaign cannot loop the browser forever. */
+export const CONTACTS_MAX_PAGES = 50;
+
+/** Load every page of a paged list (not just page 1) so client-side search and
+ *  the Leads filter cover all rows. Stops at `total`, an empty page, or the cap. */
+export async function fetchAllPages<T>(
+    fetchPage: (page: number, pageSize: number) => Promise<{ items: T[]; total: number }>,
+    pageSize: number = CONTACTS_PAGE_SIZE,
+    maxPages: number = CONTACTS_MAX_PAGES,
+): Promise<{ items: T[]; total: number }> {
+    const first = await fetchPage(1, pageSize);
+    const items = [...first.items];
+    let total = first.total;
+    for (let page = 2; page <= maxPages && items.length < total; page++) {
+        const next = await fetchPage(page, pageSize);
+        if (next.items.length === 0) break;
+        items.push(...next.items);
+        total = next.total;
+    }
+    return { items, total };
+}

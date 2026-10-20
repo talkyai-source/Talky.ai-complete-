@@ -288,9 +288,15 @@ export default function ContactsPage() {
         setContactsError("");
     }, [selectedCampaign]);
 
+    // Latest-request-wins: a slow response for a previous campaign/list/search
+    // must not overwrite the table (or the has-contacts flag) of the current one.
+    const contactsRequestSeq = useRef(0);
+
     const loadContacts = useCallback(async () => {
         if (!selectedCampaign) return;
         const unfiltered = !selectedListId && !debouncedSearch.trim();
+        const seq = ++contactsRequestSeq.current;
+        const superseded = () => seq !== contactsRequestSeq.current;
         try {
             setContactsLoading(true);
             setContactsError("");
@@ -298,15 +304,19 @@ export default function ContactsPage() {
                 listId: selectedListId,
                 search: debouncedSearch,
             });
+            if (superseded()) return;
             setContacts(res.items);
             // Only an UNFILTERED load is authoritative for "does this campaign
             // have any contacts at all".
             if (unfiltered) setCampaignHasContacts(res.total > 0);
         } catch (err) {
+            if (superseded()) return;
             setContactsError(err instanceof Error ? err.message : "Failed to load contacts");
         } finally {
-            setContactsLoading(false);
-            setFirstLoadDone(true);
+            if (!superseded()) {
+                setContactsLoading(false);
+                setFirstLoadDone(true);
+            }
         }
     }, [selectedCampaign, selectedListId, debouncedSearch]);
 

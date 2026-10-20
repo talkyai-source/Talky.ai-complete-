@@ -42,8 +42,14 @@ class _Q:
         self._f.append(("neq", c, v))
         return self
 
+    def in_(self, c, vals):
+        self._f.append(("in", c, list(vals)))
+        return self
+
     def _m(self, r):
         for k, c, v in self._f:
+            if k == "in" and r.get(c) not in v:
+                return False
             if k == "eq" and r.get(c) != v:
                 return False
             if k == "neq" and r.get(c) == v:

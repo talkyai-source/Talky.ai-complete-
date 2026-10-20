@@ -2007,6 +2007,31 @@ async def update_contact_in_campaign(
         if not update_payload:
             raise HTTPException(status_code=400, detail="No fields to update")
 
+        # A queued / retry job carries its own copy of the phone number, so an
+        # edit would leave the OLD number dialled (and retried). Cancel the
+        # lead's not-yet-originated jobs first so start re-queues with the new
+        # number; failing here (rather than swallowing) keeps the edit from
+        # reporting success while the old number is still queued. In-flight
+        # (processing/calling) jobs keep their ownership.
+        phone_changed = (
+            "phone_number" in update_payload
+            and update_payload["phone_number"] != existing.data[0].get("phone_number")
+        )
+        if phone_changed:
+            from app.domain.services.dialer.job_lifecycle import (
+                NOT_ORIGINATED_JOB_STATUSES,
+                REASON_LEAD_REMOVED,
+            )
+            db_client.table("dialer_jobs").update({
+                "status": "cancelled",
+                "failure_reason": REASON_LEAD_REMOVED,
+                "last_error": "contact_phone_changed",
+            }).eq("lead_id", str(contact_id)).eq(
+                "tenant_id", current_user.tenant_id,
+            ).in_(
+                "status", list(NOT_ORIGINATED_JOB_STATUSES),
+            ).execute()
+
         resp = (
             db_client.table("leads")
             .update(update_payload)
