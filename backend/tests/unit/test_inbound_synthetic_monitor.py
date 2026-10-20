@@ -76,8 +76,8 @@ def _run_probe(tmp_path: Path, *, originate_status: int = 0, inbound_arrives: bo
     fake.mkdir()
     scripts = {
         "asterisk": '#!/bin/bash\necho "$*" >> "$STUB_LOG"\ncase "$*" in\n'
-                    '  *"channel originate"*) exit "$STUB_ORIGINATE_STATUS" ;;\n'
-                    '  *"core show channels concise"*) [ -n "$STUB_INBOUND_ARRIVES" ] && '
+                    '  *"channel originate"*) touch "$STUB_LOG.originated"; exit "$STUB_ORIGINATE_STATUS" ;;\n'
+                    '  *"core show channels concise"*) [ -n "$STUB_INBOUND_ARRIVES" ] && [ -e "$STUB_LOG.originated" ] && '
                     'echo "PJSIP/trunk-x-00000001!from-talky-inbound!150001!3!Up!Stasis!talky_ai,inbound"; exit 0 ;;\n'
                     'esac\n',
         "timeout": '#!/bin/bash\nshift\nexec "$@"\n',
@@ -109,17 +109,21 @@ def test_the_probe_succeeds_only_when_the_call_reaches_the_inbound_call_plan(tmp
     result, asterisk_calls = _run_probe(tmp_path, inbound_arrives=True)
     assert result.returncode == 0, result.stderr
     assert "reached the inbound call plan" in result.stdout
-    assert asterisk_calls[0].startswith("-rx channel originate PJSIP/+442046132300@blazedigitel-endpoint")
+    # asterisk_calls[0] is the pre-originate baseline snapshot (ops-8): only a
+    # channel NOT present before the probe may count as the probe's own leg.
+    assert "core show channels concise" in asterisk_calls[0]
+    assert asterisk_calls[1].startswith("-rx channel originate PJSIP/+442046132300@blazedigitel-endpoint")
 
 
 def test_an_accepted_originate_that_never_comes_back_in_fails_the_unit(tmp_path):
     result, asterisk_calls = _run_probe(tmp_path, inbound_arrives=False)
     assert result.returncode == 1
     assert "never came back in on the inbound call plan within 18s" in result.stderr
-    assert sum("core show channels concise" in call for call in asterisk_calls) == 18
+    assert sum("core show channels concise" in call for call in asterisk_calls) == 19  # 1 baseline + 18 polls
 
 
 def test_a_rejected_originate_still_fails_before_waiting(tmp_path):
     result, asterisk_calls = _run_probe(tmp_path, originate_status=1, inbound_arrives=True)
     assert result.returncode == 1 and "rejected or timed out originating" in result.stderr
-    assert not any("core show channels" in call for call in asterisk_calls)
+    originate_at = next(i for i, c in enumerate(asterisk_calls) if "channel originate" in c)
+    assert not any("core show channels" in c for c in asterisk_calls[originate_at + 1 :])

@@ -217,8 +217,12 @@ def test_two_tenants_claiming_one_extension_is_refused(tmp_path):
         _extension_row(TRUNK_A, trunk_tenant_id=TENANT_A, assignment_tenant_id=TENANT_A),
         _extension_row(TRUNK_B, trunk_tenant_id=TENANT_B, assignment_tenant_id=TENANT_B),
     ]
-    with pytest.raises(reconcile.UnsafeInboundMappingError, match="duplicate"):
-        _build(rows, tmp_path)
+    # 2026-10-20: both are NAMED and neither routes; it used to raise and
+    # freeze the reconciler for every tenant.
+    candidate = _build(rows, tmp_path)
+    assert candidate.routes == ()
+    named = " ".join(candidate.unrouted_conflict_trunks)
+    assert TRUNK_A in named and TRUNK_B in named
 
 
 @pytest.mark.parametrize(

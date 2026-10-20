@@ -129,4 +129,4 @@ def test_the_timer_runs_the_script_every_minute_and_install_enables_it():
     assert "ExecStart=/bin/bash /opt/talky/backend/deploy/asterisk-reconcile-on-drift.sh" in unit
     assert "User=root" in unit and "Type=oneshot" in unit
     assert "OnUnitActiveSec=60s" in timer
-    assert "systemctl enable talky-asterisk-reconcile.timer" in install
+    assert "systemctl enable --now talky-asterisk-reconcile.timer" in install

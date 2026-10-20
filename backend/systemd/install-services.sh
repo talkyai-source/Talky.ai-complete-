@@ -64,7 +64,7 @@ systemctl enable talky-healthwatch.timer   # activates talky-healthwatch.service
 systemctl enable talky-trunk-status.service  # refreshes runtime SIP evidence every 10 sec (loop)
 systemctl enable talky-inbound-synthetic.timer  # hourly carrier-hairpin proof
 systemctl enable talky-db-backup.timer  # nightly verified pg_dump (deploy/db-backup.sh)
-systemctl enable talky-asterisk-reconcile.timer  # applies website line/number/inbound changes to Asterisk, every minute, only on drift
+systemctl enable --now talky-asterisk-reconcile.timer # applies website line/number/inbound changes to Asterisk, every minute, only on drift
 systemctl enable talky.target
 
 echo ""

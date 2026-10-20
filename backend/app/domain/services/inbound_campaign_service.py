@@ -25,7 +25,10 @@ from app.domain.services.campaign_direction_guard import (
     acquire_campaign_direction_lock,
 )
 from app.domain.services.telephony.business_hours import evaluate_business_hours
-from app.domain.services.telephony.inbound_overrides import validate_qualification_overrides
+from app.domain.services.telephony.inbound_overrides import (
+    apply_qualification_overrides,
+    validate_qualification_overrides,
+)
 from app.domain.services.telephony.inbound_address import (
     is_extension_address,
     parse_extension,
@@ -595,6 +598,31 @@ class InboundCampaignService:
         qualification_values, qualification_unsupported, qualification_invalid = (
             validate_qualification_overrides(_json_obj(bundle.get("qualification_config")))
         )
+        # The live call appends these overrides to the campaign guidance and
+        # REFUSES the call above the shared budget, so an override that fits
+        # its own 20,000-char field but busts the budget must not read ready.
+        guidance_over_budget = ""
+        if not qualification_unsupported and not qualification_invalid and qualification_values:
+            from app.domain.services.campaign_prompt_service import (
+                guidance_budget_error_message,
+                guidance_budget_violation,
+            )
+
+            merged_script = (
+                apply_qualification_overrides(
+                    {"script_config": _json_obj(bundle.get("script_config"))},
+                    qualification_values,
+                ).get("script_config")
+                or {}
+            )
+            violation = guidance_budget_violation(
+                merged_script.get("additional_instructions"),
+                merged_script.get("campaign_brief")
+                if isinstance(merged_script.get("campaign_brief"), Mapping)
+                else None,
+            )
+            if violation:
+                guidance_over_budget = guidance_budget_error_message(*violation)
         has_prompt = (
             bool(qualification_values.get("system_prompt"))
             or bool(str(bundle.get("system_prompt") or "").strip())
@@ -939,7 +967,11 @@ class InboundCampaignService:
                 else "Enable the platform recording control or disable campaign recording."
             ),
         )
-        qualification_supported = not qualification_unsupported and not qualification_invalid
+        qualification_supported = (
+            not qualification_unsupported
+            and not qualification_invalid
+            and not guidance_over_budget
+        )
         qualification_detail = (
             "Pinned purpose, persona, system-prompt, voice, and opening-silence "
             "overrides are supported."
@@ -952,6 +984,8 @@ class InboundCampaignService:
             qualification_detail = "Invalid inbound override values: " + ", ".join(
                 qualification_invalid
             )
+        elif guidance_over_budget:
+            qualification_detail = guidance_over_budget
         add(
             "qualification_runtime_supported",
             "Inbound-specific AI overrides supported",

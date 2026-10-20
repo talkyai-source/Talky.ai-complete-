@@ -676,6 +676,21 @@ class InboundAdmissionService:
                 tenant_id = str(route["tenant_id"])
                 if context_tenant and context_tenant != tenant_id:
                     return self._deny(provider, "tenant_conflict")
+                # A call that arrived on a TENANT trunk endpoint (trunk-<id>)
+                # may only dial a DID assigned to that same trunk. Without
+                # this, any peer Asterisk accepted on one tenant's endpoint
+                # could reach a mapped DID of another tenant. The shared
+                # carrier endpoint (not trunk-*) is unaffected.
+                ingress_endpoint = str(
+                    (request.metadata or {}).get("ingress_endpoint") or ""
+                ).strip()
+                if ingress_endpoint.startswith("trunk-") and ingress_endpoint != (
+                    f"trunk-{route['sip_trunk_id']}"
+                ):
+                    logger.warning(
+                        "inbound_admission_endpoint_mismatch did_ref=%s", redact_did(did)
+                    )
+                    return self._deny(provider, "tenant_conflict")
                 trunk_runtime = evaluate_trunk_runtime(route)
                 eligibility = (
                     (bool(route["tenant_inbound_enabled"]), "tenant_inbound_disabled"),

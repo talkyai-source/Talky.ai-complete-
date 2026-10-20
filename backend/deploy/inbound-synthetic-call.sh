@@ -73,6 +73,15 @@ endpoint="${INBOUND_SYNTHETIC_TRUNK_ENDPOINT}"
 wait_seconds="${INBOUND_SYNTHETIC_WAIT_SECONDS:-20}"
 command_text="channel originate PJSIP/${did}@${endpoint} application Wait ${wait_seconds}"
 
+# Channels already on the inbound call plan BEFORE the probe is sent. A real
+# customer call in the window must not be mistaken for the probe's own leg
+# (ops-8, 2026-10-20): only a channel that was not here before can count.
+inbound_channels() {
+    timeout 5 asterisk -rx "core show channels concise" 2>/dev/null |
+        awk -F'!' '$2 == "from-talky-inbound" { print $1 }' || true
+}
+baseline_channels="$(inbound_channels)"
+
 echo "inbound synthetic: originating carrier hairpin did=${did} endpoint=${endpoint}"
 if ! timeout "$((wait_seconds + 20))" asterisk -rx "$command_text"; then
     echo "INBOUND_SYNTHETIC CRITICAL: Asterisk rejected or timed out originating the probe" >&2
@@ -87,8 +96,14 @@ fi
 arrive_window=$((wait_seconds + 10))
 arrived=""
 for _ in $(seq 1 "$arrive_window"); do
-    if timeout 5 asterisk -rx "core show channels concise" 2>/dev/null | grep -q '!from-talky-inbound!'; then
-        arrived=1
+    while IFS= read -r channel; do
+        [ -n "$channel" ] || continue
+        if ! grep -qxF -- "$channel" <<<"$baseline_channels"; then
+            arrived=1
+            break
+        fi
+    done < <(inbound_channels)
+    if [ -n "$arrived" ]; then
         break
     fi
     sleep 1

@@ -159,7 +159,7 @@ def test_account_route_is_derived_from_same_tenant_active_assignment_not_metadat
     assert "exten => _.,1," in dialplan
 
 
-def test_same_account_conflict_across_tenants_is_rejected(tmp_path):
+def test_same_account_conflict_across_tenants_keeps_live_route_and_names_newcomer(tmp_path):
     other = _assignment_row(
         TRUNK_B,
         trunk_tenant_id=TENANT_B,
@@ -167,26 +167,37 @@ def test_same_account_conflict_across_tenants_is_rejected(tmp_path):
     )
     other["assignment_id"] = "55555555-5555-4555-8555-555555555555"
 
-    with pytest.raises(reconcile.UnsafeInboundMappingError, match="duplicate account"):
-        reconcile.build_candidate_set(
-            [_assignment_row(), other],
-            candidate_dir=tmp_path / "candidate",
-            decrypt_password=lambda _: "secret",
-            observed_at=NOW,
-        )
+    # 2026-10-20: this used to raise and freeze the reconciler for everyone.
+    candidate = reconcile.build_candidate_set(
+        [_assignment_row(), other],
+        candidate_dir=tmp_path / "candidate",
+        decrypt_password=lambda _: "secret",
+        observed_at=NOW,
+    )
+    assert [r.trunk_id for r in candidate.routes] == [TRUNK_A]
+    assert f"trunk-{TRUNK_B}:duplicate_account_or_did" in candidate.unrouted_conflict_trunks
+    assert not any(
+        n.startswith(f"trunk-{TRUNK_A}:") for n in candidate.unrouted_conflict_trunks
+    )
 
 
-def test_same_account_conflict_across_two_trunks_of_one_tenant_is_rejected(tmp_path):
+def test_same_account_conflict_across_two_trunks_of_one_tenant_keeps_live_route_and_names_newcomer(
+    tmp_path,
+):
     other = _assignment_row(TRUNK_B)
     other["assignment_id"] = "55555555-5555-4555-8555-555555555555"
 
-    with pytest.raises(reconcile.UnsafeInboundMappingError, match="duplicate account"):
-        reconcile.build_candidate_set(
-            [_assignment_row(), other],
-            candidate_dir=tmp_path / "candidate",
-            decrypt_password=lambda _: "secret",
-            observed_at=NOW,
-        )
+    candidate = reconcile.build_candidate_set(
+        [_assignment_row(), other],
+        candidate_dir=tmp_path / "candidate",
+        decrypt_password=lambda _: "secret",
+        observed_at=NOW,
+    )
+    assert [r.trunk_id for r in candidate.routes] == [TRUNK_A]
+    assert f"trunk-{TRUNK_B}:duplicate_account_or_did" in candidate.unrouted_conflict_trunks
+    assert not any(
+        n.startswith(f"trunk-{TRUNK_A}:") for n in candidate.unrouted_conflict_trunks
+    )
 
 
 def test_duplicate_verified_account_trunk_cannot_borrow_another_trunks_assignment(
@@ -198,13 +209,17 @@ def test_duplicate_verified_account_trunk_cannot_borrow_another_trunks_assignmen
         inbound_did=None,
     )
 
-    with pytest.raises(reconcile.UnsafeInboundMappingError, match="duplicate verified"):
-        reconcile.build_candidate_set(
-            [_assignment_row(), second_without_assignment],
-            candidate_dir=tmp_path / "candidate",
-            decrypt_password=lambda _: "secret",
-            observed_at=NOW,
-        )
+    candidate = reconcile.build_candidate_set(
+        [_assignment_row(), second_without_assignment],
+        candidate_dir=tmp_path / "candidate",
+        decrypt_password=lambda _: "secret",
+        observed_at=NOW,
+    )
+    # The borrower is named and gets no route; the assignment owner keeps its own.
+    assert [r.trunk_id for r in candidate.routes] == [TRUNK_A]
+    assert (
+        f"trunk-{TRUNK_B}:duplicate_verified_account" in candidate.unrouted_conflict_trunks
+    )
 
 
 @pytest.mark.parametrize(
@@ -280,20 +295,18 @@ def test_verified_inventory_rejects_duplicate_accounts(tmp_path, body):
         reconcile.load_verified_account_dids(inventory)
 
 
-def test_verified_carrier_map_conflicting_with_assignment_blocks_candidate(tmp_path):
+def test_verified_carrier_map_conflicting_with_assignment_is_named_not_routed(tmp_path):
     row = _assignment_row(did="+17789249977")
-    candidate_dir = tmp_path / "candidate"
-
-    with pytest.raises(reconcile.UnsafeInboundMappingError, match="conflicts"):
-        reconcile.build_candidate_set(
-            [row],
-            candidate_dir=candidate_dir,
-            decrypt_password=lambda _: "secret",
-            observed_at=NOW,
-        )
-    assert not candidate_dir.exists(), (
-        "a conflicted carrier map must block before a candidate can replace "
-        "the working live context"
+    candidate = reconcile.build_candidate_set(
+        [row],
+        candidate_dir=tmp_path / "candidate",
+        decrypt_password=lambda _: "secret",
+        observed_at=NOW,
+    )
+    assert candidate.routes == ()
+    assert (
+        f"trunk-{TRUNK_A}:conflicts_with_verified_routing"
+        in candidate.unrouted_conflict_trunks
     )
 
 
@@ -338,17 +351,18 @@ def test_routed_verified_account_is_not_reported_as_unrouted(tmp_path):
     assert candidate.unrouted_verified_trunks == ()
 
 
-def test_active_assignment_on_outbound_only_trunk_is_rejected(tmp_path):
+def test_active_assignment_on_outbound_only_trunk_is_named_not_routed(tmp_path):
     row = _assignment_row()
     row["direction"] = "outbound"
 
-    with pytest.raises(reconcile.UnsafeInboundMappingError, match="non-inbound"):
-        reconcile.build_candidate_set(
-            [row],
-            candidate_dir=tmp_path / "candidate",
-            decrypt_password=lambda _: "secret",
-            observed_at=NOW,
-        )
+    candidate = reconcile.build_candidate_set(
+        [row],
+        candidate_dir=tmp_path / "candidate",
+        decrypt_password=lambda _: "secret",
+        observed_at=NOW,
+    )
+    assert candidate.routes == ()
+    assert f"trunk-{TRUNK_A}:non_inbound_trunk" in candidate.unrouted_conflict_trunks
 
 
 def test_shared_carrier_host_routes_by_request_uri_not_endpoint_set_var(tmp_path):

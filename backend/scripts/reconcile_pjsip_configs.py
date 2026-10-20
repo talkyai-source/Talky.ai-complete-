@@ -197,6 +197,15 @@ class CandidateSet:
     # Named rather than raised: these are reachable through the ordinary trunk
     # API, and raising would let one tenant freeze every deploy.
     unrouted_extension_trunks: tuple[str, ...] = ()
+    # Tenant-reachable conflicts (duplicate login/DID, non-numeric login, a
+    # login that collides with a reviewed carrier account, an assignment on a
+    # non-inbound trunk). NAMED as ``trunk-<id>:<reason>`` and left on the
+    # fail-closed catch-all: one tenant's line must never stop the reconciler
+    # for every other tenant.
+    unrouted_conflict_trunks: tuple[str, ...] = ()
+    # Active assignment whose login is not in the reviewed carrier inventory:
+    # it stays on the catch-all (admission rejects it) but is no longer silent.
+    unrouted_unknown_account_trunks: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -296,6 +305,14 @@ def _assignment_is_current(row: Mapping[str, Any], observed_at: datetime) -> boo
     return valid_to is None or _as_utc(valid_to, label="assignment") > observed_at
 
 
+class _RouteSkip(Exception):
+    """A tenant-reachable route problem: named in the output, never raised out."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 def _route_from_row(
     row: Mapping[str, Any],
     *,
@@ -319,9 +336,7 @@ def _route_from_row(
             f"{_safe_trunk_label(row)} has an inbound assignment tenant conflict"
         )
     if str(row.get("direction") or "").strip().lower() not in {"inbound", "both"}:
-        raise UnsafeInboundMappingError(
-            f"{_safe_trunk_label(row)} has an assignment on a non-inbound trunk"
-        )
+        raise _RouteSkip("non_inbound_trunk")
     if str(row.get("phone_status") or "").strip().lower() != "verified":
         return None
 
@@ -339,9 +354,7 @@ def _route_from_row(
 
     account = str(row.get("auth_username") or "").strip()
     if not _ACCOUNT_RE.fullmatch(account):
-        raise UnsafeInboundMappingError(
-            f"{_safe_trunk_label(row)} has an unroutable carrier account"
-        )
+        raise _RouteSkip("unroutable_account")
     return InboundRoute(
         account=account,
         did=did,
@@ -802,6 +815,48 @@ def build_candidate_set(
     routes_by_account: dict[str, InboundRoute] = {}
     routes_by_did: dict[str, InboundRoute] = {}
     unrouted_extension_trunks: list[str] = []
+    unrouted_conflict_trunks: list[str] = []
+    unrouted_unknown_account_trunks: list[str] = []
+
+    evicted_accounts: set[str] = set()
+    evicted_dids: set[str] = set()
+
+    def _register_route(route: InboundRoute, *, evict_on_conflict: bool = False) -> None:
+        """Add a route; a later claimant of a taken account/DID is dropped.
+
+        The route already registered keeps serving (rows arrive in a stable
+        order), so a second trunk reusing a login or DID cannot knock another
+        tenant's live inbound route offline. The newcomer is named instead.
+        Extension routes pass ``evict_on_conflict``: nothing verifies which
+        tenant owns the digits, so row order must not pick one; both drop.
+        """
+        priors = [
+            p
+            for p in (
+                routes_by_account.get(route.account),
+                routes_by_did.get(route.did),
+            )
+            if p is not None and p != route
+        ]
+        if route.account in evicted_accounts or route.did in evicted_dids:
+            priors = priors or [route]
+        if not priors:
+            routes_by_account[route.account] = route
+            routes_by_did[route.did] = route
+            return
+        doomed_routes = [route] + (priors if evict_on_conflict else [])
+        if evict_on_conflict:
+            for doomed in doomed_routes:
+                evicted_accounts.add(doomed.account)
+                evicted_dids.add(doomed.did)
+        for doomed in doomed_routes:
+            if doomed is not route:
+                routes_by_account.pop(doomed.account, None)
+                routes_by_did.pop(doomed.did, None)
+            unrouted_conflict_trunks.append(
+                f"trunk-{doomed.trunk_id}:duplicate_account_or_did"
+            )
+
     # Extension digits are unique only inside one carrier's account namespace.
     # Count the distinct hosts up front so the loop can refuse to render any
     # extension route once a second carrier appears.
@@ -880,50 +935,36 @@ def build_candidate_set(
             # reviewed DID inventory. It still has to pass the same two
             # ambiguity guards a DID does, on the same dicts, so a duplicate
             # can never be silently resolved by row order.
-            prior_ext_account = routes_by_account.get(extension_route.account)
-            if prior_ext_account is not None and prior_ext_account != extension_route:
-                raise UnsafeInboundMappingError(
-                    "active inbound assignments contain a duplicate account conflict"
-                )
-            prior_ext_did = routes_by_did.get(extension_route.did)
-            if prior_ext_did is not None and prior_ext_did != extension_route:
-                raise UnsafeInboundMappingError(
-                    "active inbound assignments contain a duplicate extension conflict"
-                )
-            routes_by_account[extension_route.account] = extension_route
-            routes_by_did[extension_route.did] = extension_route
+            _register_route(extension_route, evict_on_conflict=True)
             continue
 
-        route = _route_from_row(
-            row,
-            trunk_id=trunk_id,
-            tenant_id=tenant_id,
-            observed_at=observed_at,
-        )
+        try:
+            route = _route_from_row(
+                row,
+                trunk_id=trunk_id,
+                tenant_id=tenant_id,
+                observed_at=observed_at,
+            )
+        except _RouteSkip as skip:
+            unrouted_conflict_trunks.append(f"trunk-{trunk_id}:{skip.reason}")
+            continue
         if route is None:
             continue
         verified_did = verified_account_dids.get(route.account)
         if verified_did is None:
+            # Named every tick (2026-10-20): the line looks "ready" on the
+            # website but has no Asterisk route, and nothing said why.
+            unrouted_unknown_account_trunks.append(f"trunk-{trunk_id}")
             # An active assignment alone cannot prove what a carrier places in
             # the Request-URI. Unknown accounts stay on the catch-all and are
             # rejected by admission rather than being guessed into a route.
             continue
         if route.did != verified_did:
-            raise UnsafeInboundMappingError(
-                f"trunk-{trunk_id} assignment conflicts with verified carrier routing"
+            unrouted_conflict_trunks.append(
+                f"trunk-{trunk_id}:conflicts_with_verified_routing"
             )
-        prior_account = routes_by_account.get(route.account)
-        if prior_account is not None and prior_account != route:
-            raise UnsafeInboundMappingError(
-                "active inbound assignments contain a duplicate account conflict"
-            )
-        prior_did = routes_by_did.get(route.did)
-        if prior_did is not None and prior_did != route:
-            raise UnsafeInboundMappingError(
-                "active inbound assignments contain a duplicate DID conflict"
-            )
-        routes_by_account[route.account] = route
-        routes_by_did[route.did] = route
+            continue
+        _register_route(route)
 
     verified_trunks_by_account: dict[str, str] = {}
     unrouted_verified_trunks: list[str] = []
@@ -938,9 +979,17 @@ def build_candidate_set(
             continue
         prior_trunk = verified_trunks_by_account.get(account)
         if prior_trunk is not None and prior_trunk != trunk_id:
-            raise UnsafeInboundMappingError(
-                "active inbound trunks contain a duplicate verified carrier account"
-            )
+            # A second line claiming a reviewed carrier login. Name the one
+            # that does NOT own the live route (or both when none does); the
+            # owner's route and every other tenant keep reconciling.
+            owner = routes_by_account.get(account)
+            owner_trunk = owner.trunk_id if owner is not None else None
+            for dup in (prior_trunk, trunk_id):
+                if dup != owner_trunk:
+                    unrouted_conflict_trunks.append(
+                        f"trunk-{dup}:duplicate_verified_account"
+                    )
+            continue
         verified_trunks_by_account[account] = trunk_id
         if account not in routes_by_account:
             # 2026-09-10: this used to raise. A tenant paused its inbound
@@ -995,6 +1044,8 @@ def build_candidate_set(
         digest=digest,
         unrouted_verified_trunks=tuple(sorted(unrouted_verified_trunks)),
         unrouted_extension_trunks=tuple(sorted(set(unrouted_extension_trunks))),
+        unrouted_conflict_trunks=tuple(sorted(set(unrouted_conflict_trunks))),
+        unrouted_unknown_account_trunks=tuple(sorted(set(unrouted_unknown_account_trunks))),
     )
 
 
@@ -1635,6 +1686,8 @@ async def _execute(args: argparse.Namespace) -> int:
         "route_count": len(candidate.routes),
         "unrouted_verified_trunks": list(candidate.unrouted_verified_trunks),
         "unrouted_extension_trunks": list(candidate.unrouted_extension_trunks),
+        "unrouted_conflict_trunks": list(candidate.unrouted_conflict_trunks),
+        "unrouted_unknown_account_trunks": list(candidate.unrouted_unknown_account_trunks),
         **summary.to_safe_dict(),
     }
     print(json.dumps(output, sort_keys=True))
