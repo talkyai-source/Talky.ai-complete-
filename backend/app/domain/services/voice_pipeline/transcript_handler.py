@@ -103,11 +103,23 @@ class TranscriptHandler:
 
             phase = getattr(transcript, "phase", "confirm")
             text = sanitize_explicit_secrets(getattr(transcript, "text", "") or "")
+            from app.domain.services.voice_pipeline.first_line_guard import (
+                is_first_line_greeting_repeat,
+            )
+            # A repeated bare "Hello?" during the agent's first line neither
+            # holds nor stops it (see first_line_guard).
+            repeat_greeting = bool(text) and is_first_line_greeting_repeat(session, text)
+            if repeat_greeting:
+                session._first_line_barge_skipped = True
             if phase == "pause":
-                await pause_for_caller(session, websocket, text=text)
+                if not repeat_greeting:
+                    await pause_for_caller(session, websocket, text=text)
                 return
             if phase == "resume":
                 await resume_after_caller(session, websocket, reason="backchannel")
+                return
+            if repeat_greeting:
+                await resume_after_caller(session, websocket, reason="first_line_greeting")
                 return
             end_pause_for_interruption(session)
             await self._p.handle_barge_in(session, websocket, transcript_text=text)
@@ -216,6 +228,37 @@ class TranscriptHandler:
                 })
             except Exception as e:
                 logger.warning(f"Failed to send transcript to websocket: {e}")
+
+        # A repeated bare "Hello?" during the agent's first line (caller-first):
+        # that line is already the answer to it, so like a backchannel it gets
+        # no interrupt and no reply. Marking the seq swallows its empty EOT.
+        from app.domain.services.voice_pipeline.first_line_guard import (
+            first_line_in_progress,
+            is_first_line_greeting_repeat,
+        )
+        if transcript.text and is_first_line_greeting_repeat(session, transcript.text):
+            logger.info(
+                "first_line_greeting transcript=%r during the agent's first line — ignored (no interrupt, no reply)",
+                (transcript.text or "")[:24],
+            )
+            session._first_line_barge_skipped = True
+            session._suppressed_backchannel_seq = self._p._utterance_seq.get(call_id, 0)
+            return
+        # An utterance whose opening "Hello" skipped the interrupt has grown into
+        # real words ("Hello? Who is this?"): interrupt now, with the StartOfTurn
+        # bookkeeping the skip left out, instead of talking over it to EndOfTurn.
+        if transcript.text and getattr(session, "_first_line_barge_skipped", False):
+            session._first_line_barge_skipped = False
+            if getattr(session, "tts_active", False) and first_line_in_progress(session):
+                from app.domain.services.voice_pipeline.playback_gate import mark_caller_speaking
+
+                mark_caller_speaking(session)
+                self._p._utterance_seq[call_id] = self._p._utterance_seq.get(call_id, 0) + 1
+                logger.info(
+                    "first_line_greeting_grew transcript=%r — interrupting now",
+                    (transcript.text or "")[:24],
+                )
+                await self._p.handle_barge_in(session, websocket, transcript_text=transcript.text)
 
         # Backchannel guard (Deepgram leaves this to the app). If the agent is
         # currently speaking and the user only made a short acknowledgement

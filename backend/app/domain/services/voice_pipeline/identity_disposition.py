@@ -24,6 +24,9 @@ _DNC_PHRASES = (
     "do not ring me", "do not ring us",
     "never ring me", "never ring us", "never ring again", "never ring this number again",
     "dont phone me", "do not phone me", "do not call list",
+    # Hostile dismissals count as a do-not-call request (owner decision 2026-10-21);
+    # STT may mask profanity, so "f*** off" / "f off" are included.
+    "fuck off", "f*** off", "f off", "fuck you", "piss off", "sod off",
 )
 
 _EXPLICIT_GOODBYE_PHRASES = (

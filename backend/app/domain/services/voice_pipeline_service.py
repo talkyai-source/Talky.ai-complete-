@@ -605,6 +605,16 @@ class VoicePipelineService:
                 call_id[:12], (transcript_text or "")[:24],
             )
             return
+        from app.domain.services.voice_pipeline.first_line_guard import (
+            is_first_line_greeting_repeat,
+        )
+        if is_first_line_greeting_repeat(session, transcript_text):
+            logger.info(
+                "first_line_greeting_kept_playing call=%s text=%r",
+                call_id[:12], (transcript_text or "")[:24],
+            )
+            session._first_line_barge_skipped = True
+            return
 
         # Protect an in-flight FINAL answer that has not started playing yet.
         # A StartOfTurn here means the caller began a NEW utterance before we

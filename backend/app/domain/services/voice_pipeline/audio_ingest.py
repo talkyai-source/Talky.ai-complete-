@@ -21,6 +21,10 @@ from app.core.telemetry import pipeline_span, record_latency
 from app.domain.models.conversation import AudioChunk, Message, MessageRole
 from app.domain.models.session import CallSession
 from app.domain.services.voice_pipeline.caller_denoise import CallerDenoiser
+from app.domain.services.voice_pipeline.first_line_guard import (
+    is_first_line_greeting_repeat,
+    note_playback,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +283,10 @@ class AudioIngest:
                     if chunk:
                         _chunks_yielded += 1
                         raw_bytes = chunk if isinstance(chunk, bytes) else getattr(chunk, "data", b"")
+                        try:
+                            note_playback(session, bool(getattr(session, "tts_active", False)))
+                        except Exception:
+                            pass
                         if not _first_chunk_logged:
                             _first_chunk_logged = True
                             # The silence monitor measures the CALLER's silence,
@@ -440,6 +448,17 @@ class AudioIngest:
                         "instant_opener_echo_ignored call=%s text=%r",
                         call_id[:12], (transcript_text or "")[:24],
                     )
+                    return
+                # A repeated bare "Hello?" while the agent's first line plays is
+                # the same utterance it is answering: keep talking, no seq bump.
+                if is_first_line_greeting_repeat(session, transcript_text):
+                    logger.info(
+                        "first_line_greeting_kept_playing call=%s text=%r",
+                        call_id[:12], (transcript_text or "")[:24],
+                    )
+                    # If the utterance grows into real words, transcript_handler
+                    # interrupts then (first_line_guard).
+                    session._first_line_barge_skipped = True
                     return
                 # The caller now holds the floor. Recorded so a FINAL answer that
                 # is still generating does not begin speaking on top of them —
