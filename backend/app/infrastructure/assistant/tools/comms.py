@@ -313,6 +313,34 @@ async def send_email(
                 "confirmation_allowed": False, "error": str(e)}
 
 
+async def _sms_suppression(db_client: Any, tenant_id: str, number: str) -> str:
+    """'opted_out', 'ok' or 'unknown' (lookup failed: do not send).
+
+    Same rule as the reminder worker: a lead flagged do_not_call / status 'dnc'
+    or a number on the tenant/global DNC list (the call guard's normaliser) is
+    never texted. Fails closed.
+    """
+    try:
+        from app.core.db_utils import acquire_with_tenant
+        from app.domain.services.dnc_service import DNCService
+
+        pool = getattr(db_client, "pool", None)
+        if pool is None:
+            return "unknown"
+        if await DNCService(pool).is_on_dnc(tenant_id=tenant_id, e164=number):
+            return "opted_out"
+        async with acquire_with_tenant(pool, tenant_id) as conn:
+            flagged = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM leads WHERE tenant_id=$1::uuid "
+                "AND phone_number=$2 AND (do_not_call OR status='dnc'))",
+                tenant_id, number,
+            )
+        return "opted_out" if flagged else "ok"
+    except Exception as exc:
+        logger.error("send_sms: suppression lookup failed: %s", type(exc).__name__)
+        return "unknown"
+
+
 async def send_sms(
     tenant_id: str, db_client: Client, to: List[str], message: str,
     lead_ids: Optional[List[str]] = None, connector_id: Optional[str] = None,
@@ -329,6 +357,16 @@ async def send_sms(
             "_apply_args": {"to": recipients, "message": message, "lead_ids": lead_ids}}
     from app.services.sms_service import get_sms_service
     receipts = []
+    for number in recipients:
+        verdict = await _sms_suppression(db_client, tenant_id, number)
+        if verdict != "ok":
+            # Nothing is sent to ANY recipient: the proposal was reviewed as a
+            # whole and a partial send would be a different action.
+            return {"success": False, "status": "failed", "confirmation_allowed": False,
+                "error": ("A recipient has opted out of contact; the SMS was not sent."
+                          if verdict == "opted_out" else
+                          "The do-not-contact list could not be checked; the SMS was not sent."),
+                "opted_out": verdict == "opted_out"}
     try:
         service = get_sms_service(db_client)
         for number in recipients:

@@ -66,6 +66,15 @@ def lookup_timezone_sync(e164: str) -> Optional[str]:
 
     # Some numbers resolve to multiple tz (e.g. Kiribati, Russia).
     # libphonenumber returns "Etc/Unknown" when it cannot be specific.
+    # Several zones with DIFFERENT clocks (Australian/Russian mobiles) cannot
+    # be placed: taking the first judged a Perth callee on Adelaide time and
+    # could pass an out-of-hours call. Same rule as the dialer's
+    # lead_timezone resolver -> None, so the caller uses the tenant timezone.
+    if len(tzs) != 1:
+        from app.domain.services.dialer.lead_timezone import _zones_share_one_clock
+
+        if not _zones_share_one_clock(tzs):
+            return None
     for candidate in tzs:
         if candidate and candidate != "Etc/Unknown":
             return candidate

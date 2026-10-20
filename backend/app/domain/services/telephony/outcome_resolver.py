@@ -185,6 +185,23 @@ def _wall_clock_seconds(voice_session: Any) -> float:
         return 0.0
 
 
+def _connected_seconds(voice_session: Any) -> float:
+    """Seconds since the callee ANSWERED, falling back to session wall clock.
+
+    ``CallSession.started_at`` is stamped at prewarm, BEFORE the ring, so it
+    includes ring time and made the "silent and short" test unreachable. The
+    lifecycle stamps ``_answered_at_monotonic`` (event-loop clock, the same
+    one ``time.monotonic`` reads) at confirmed Answer; use it when present.
+    """
+    import time
+
+    for holder in (voice_session, getattr(voice_session, "call_session", None)):
+        answered = getattr(holder, "_answered_at_monotonic", None) if holder is not None else None
+        if isinstance(answered, (int, float)) and not isinstance(answered, bool):
+            return max(0.0, time.monotonic() - float(answered))
+    return _wall_clock_seconds(voice_session)
+
+
 def _normalise_cause(cause: Optional[str]) -> str:
     """Lowercase and collapse every run of non-alphanumerics to one ``_`` so
     cause comparisons are stable across adapter wording (FreeSWITCH vs
@@ -311,7 +328,7 @@ def resolve_call_outcome(
     # No explicit cause code. Use session state to pick between
     # ANSWERED (real conversation happened) and NO_ANSWER (line opened
     # but caller never spoke).
-    duration = _wall_clock_seconds(voice_session)
+    duration = _connected_seconds(voice_session)
     user_turns = _conversation_user_turns(voice_session)
     if user_turns == 0 and duration < _MIN_ANSWERED_S:
         return CallOutcome.NO_ANSWER

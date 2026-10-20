@@ -79,6 +79,17 @@ class WebhookTargetMismatch(Exception):
 # deciding calls_failed vs calls_completed.
 NON_RETRYABLE_OUTCOMES = frozenset(DNC_OUTCOMES) | {CallOutcome.GOAL_ACHIEVED}
 
+# Job fields a retry must carry over so the second attempt greets the same lead
+# the same way. ``dialer_jobs`` (Postgres) stores none of them, so only the
+# values the settlement path can supply travel (see _handle_job_completion_pooled).
+_RETRY_IDENTITY_KEYS = (
+    "first_speaker", "agent_name",
+    "lead_first_name", "lead_last_name", "lead_company",
+)
+
+# ``mark_as_spam`` reasons that mean "stop calling this number" (suppression).
+_MARK_AS_SUPPRESSION_REASONS = frozenset({"spam", "unavailable"})
+
 
 @dataclass(frozen=True)
 class CallStatusResult:
@@ -734,6 +745,11 @@ class CallService:
                         "job_data": {
                             "priority": retry_job_data.get("priority", 5),
                             "phone_number": retry_job_data.get("phone_number", ""),
+                            **{
+                                key: retry_job_data[key]
+                                for key in _RETRY_IDENTITY_KEYS
+                                if retry_job_data.get(key)
+                            },
                         },
                         "outcome": retry_outcome.value,
                         "campaign_id": retry_campaign_id,
@@ -1026,15 +1042,20 @@ class CallService:
         )
         current_attempts = current_attempts or 0
 
-        # An explicit 'dnc' already on the lead (operator spam-marking, the
-        # opt-out purge) is never downgraded to 'failed' by a late settlement.
-        # (A retryable outcome may still clear a 'dnc' whose suppression row
-        # was removed -- dnc_entries is the source of truth, see
-        # _active_caller_opt_out_pooled.)
+        # An explicit 'dnc' already on the lead is never downgraded to
+        # 'failed' by a late settlement, and an operator spam-mark (which sets
+        # leads.do_not_call) survives ANY outcome: a retryable/ANSWERED result
+        # used to put the lead back to 'called'/'contacted' and the retry
+        # re-dialled a suppressed number. A 'dnc' with no flag whose
+        # suppression row was removed (dnc_entries is the source of truth, see
+        # _active_caller_opt_out_pooled) may still be cleared by a retryable
+        # outcome. A contact the operator removed ('deleted') stays removed
+        # when the call that was ringing at removal time settles.
         await conn.execute(
             """
             UPDATE leads
-            SET status = CASE WHEN $6::boolean AND status = 'dnc'
+            SET status = CASE WHEN status = 'deleted'
+                                   OR (status = 'dnc' AND (do_not_call OR $6::boolean))
                               THEN status ELSE $2 END,
                 last_call_result = $3, last_called_at = NOW(),
                 call_attempts = $4, updated_at = NOW()
@@ -1243,8 +1264,32 @@ class CallService:
         # `_schedule_retry` reads job_data as a dict (job_data.get(...)); the
         # asyncpg Record supports mapping-style access, but pass a plain
         # dict for exact parity with the legacy path's `job_response.data[0]`.
+        retry_job_data = dict(job_data)
+        # dialer_jobs has no identity columns, so the retry job used to come
+        # back nameless (a named lead greeted as a blind dial). The lead row is
+        # the source of truth for who is being called; read it here, inside the
+        # settlement transaction and under the tenant predicate.
+        if lead_id:
+            try:
+                lead_ident = await conn.fetchrow(
+                    "SELECT first_name, last_name, company FROM leads "
+                    "WHERE id = $1 AND tenant_id = $2",
+                    lead_id, scope_tenant_id,
+                )
+            except Exception as exc:  # identity is cosmetic; never block the retry
+                logger.warning("retry identity lookup failed lead=%s: %s", lead_id, exc)
+                lead_ident = None
+            if lead_ident is not None:
+                for src, dst in (
+                    ("first_name", "lead_first_name"),
+                    ("last_name", "lead_last_name"),
+                    ("company", "lead_company"),
+                ):
+                    value = lead_ident[src] if src in lead_ident.keys() else None
+                    if value:
+                        retry_job_data[dst] = value
         return False, (
-            job_id, dict(job_data), outcome, campaign_id, lead_id,
+            job_id, retry_job_data, outcome, campaign_id, lead_id,
             str(tenant_id), attempt_number, decision.delay_seconds,
         )
 
@@ -1537,7 +1582,14 @@ class CallService:
             status=JobStatus.RETRY_SCHEDULED,
             # NOT +1 — `schedule_retry` increments this exactly once.
             attempt_number=attempt_number,
-            last_outcome=outcome
+            last_outcome=outcome,
+            # Who is being called / how the call opens, when the caller of this
+            # method knows it (absent keys keep the model defaults).
+            **{
+                key: job_data[key]
+                for key in _RETRY_IDENTITY_KEYS
+                if job_data.get(key)
+            },
         )
 
         if self._queue_service:
@@ -1631,6 +1683,34 @@ class CallService:
         logger.info("Goal achieved for call %s (tenant %s)", call_id, tenant_id)
         return {"message": "Goal marked as achieved", "call_id": call_id}
 
+    async def _add_spam_mark_to_dnc_list(
+        self, tenant_id: str, phone_number: Optional[str], reason: str,
+    ) -> None:
+        """Write the operator's suppression to ``dnc_entries`` too.
+
+        ``leads.status`` alone is rewritten by a re-import into another
+        campaign (fresh 'pending' lead for the same number), and CallGuard only
+        reads ``dnc_entries`` / ``leads.do_not_call``. Never raises: the lead
+        flag above is already written; a failure here is logged loudly.
+        """
+        try:
+            normalized = normalize_e164_for_storage(str(phone_number or ""))
+            pool = getattr(self._db_client, "pool", None)
+            if pool is None:
+                raise RuntimeError("no database pool on the call service client")
+            from app.domain.services.dnc_service import DNCService, SOURCE_MANUAL_ADMIN
+
+            await DNCService(pool).add(
+                tenant_id=str(tenant_id), e164=normalized,
+                source=SOURCE_MANUAL_ADMIN, reason=f"mark_as_{reason}",
+            )
+        except Exception as exc:
+            logger.error(
+                "mark_as_spam: lead flagged do_not_call but the DNC list write "
+                "failed tenant=%s number_tail=%s: %s",
+                tenant_id, str(phone_number or "")[-4:], exc,
+            )
+
     async def mark_as_spam(
         self,
         tenant_id: str,
@@ -1706,10 +1786,21 @@ class CallService:
             resolved_lead_id = str(lead_id) if lead_id is not None else None
 
         if resolved_lead_id:
-            lead_res = self._db_client.table("leads").update({
-                "status": "dnc",
+            # Only a human "stop calling this number" (spam / unavailable) is a
+            # do-not-call. invalid / disconnected mean the line is dead: the
+            # lead is finished ('failed', which a restart can reset) but NOT
+            # suppressed, matching the outcome rules above.
+            suppress = reason in _MARK_AS_SUPPRESSION_REASONS
+            lead_update = {
+                "status": "dnc" if suppress else "failed",
                 "updated_at": datetime.utcnow().isoformat(),
-            }).eq("id", resolved_lead_id).eq("tenant_id", tenant_id).execute()
+            }
+            if suppress:
+                # The flag survives a re-import / settlement that rewrites status.
+                lead_update["do_not_call"] = True
+            lead_res = self._db_client.table("leads").update(
+                lead_update
+            ).eq("id", resolved_lead_id).eq("tenant_id", tenant_id).execute()
             if not (lead_res.data or []):
                 if not call_id:
                     # Lead-only request, foreign/nonexistent lead → nothing
@@ -1730,6 +1821,12 @@ class CallService:
         if not call_id and not resolved_lead_id:
             # Neither identifier supplied — nothing to do; do not fake success.
             return None
+
+        if resolved_lead_id and reason in _MARK_AS_SUPPRESSION_REASONS:
+            await self._add_spam_mark_to_dnc_list(
+                tenant_id, lead_res.data[0].get("phone_number") if (lead_res.data or []) else None,
+                reason,
+            )
 
         logger.info(
             "Marked as %s: call=%s lead=%s tenant=%s",

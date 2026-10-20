@@ -192,6 +192,9 @@ async def test_tenant_email_does_not_fall_back_to_global_smtp(monkeypatch):
 async def test_sms_preview_has_no_mutation_and_apply_uses_provider_receipt(monkeypatch):
     backend = NS(send_sms=AsyncMock(return_value={'success': True, 'status': 'accepted', 'message_id': 'real-id'}))
     monkeypatch.setattr('app.services.sms_service.get_sms_service', lambda _: backend)
+    # The send now checks DNC / opt-out first (fails closed without a pool); this
+    # test is about receipts, so the recipient is reported as not suppressed.
+    monkeypatch.setattr(comms, '_sms_suppression', AsyncMock(return_value='ok'))
     preview = await comms.send_sms(TENANT, object(), ['+15555550101'], 'Approved message')
     assert preview['preview'] and preview['_apply_args']['message'] == 'Approved message'
     backend.send_sms.assert_not_awaited()

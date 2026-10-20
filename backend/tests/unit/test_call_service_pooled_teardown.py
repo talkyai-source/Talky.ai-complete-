@@ -100,12 +100,17 @@ class _FakeConn:
 
         if "UPDATE leads" in q:
             # Settlement shape: (lead_id, status, last_call_result, attempts,
-            # tenant_id, keep_dnc). ``keep_dnc`` mirrors the SQL CASE that never
-            # downgrades an existing 'dnc' on a non-retryable call outcome.
+            # tenant_id, keep_dnc). Mirrors the SQL CASE: 'deleted' is always
+            # kept; 'dnc' is kept when ``keep_dnc`` (non-retryable outcome) or
+            # the lead carries the do_not_call flag.
             lead_id, lead_status, last_call_result, call_attempts, *scope = args
             if self.leads_row and self.leads_row["id"] == lead_id:
-                if scope and scope[1] and self.leads_row.get("status") == "dnc":
-                    lead_status = "dnc"
+                current = self.leads_row.get("status")
+                if current == "deleted" or (
+                    current == "dnc"
+                    and ((scope and scope[1]) or self.leads_row.get("do_not_call"))
+                ):
+                    lead_status = current
                 self.leads_row["status"] = lead_status
                 self.leads_row["last_call_result"] = last_call_result
                 self.leads_row["call_attempts"] = call_attempts

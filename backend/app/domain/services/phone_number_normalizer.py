@@ -278,7 +278,8 @@ def normalize_e164_digits(phone_number: str) -> str:
     this deliberately has no error path:
 
       * falsy input (including ``None``) -> ``""``;
-      * everything non-digit removed, a leading ``+`` preserved;
+      * everything non-digit removed, a leading ``+`` preserved; a bracketed
+        trunk ``(0)`` after a leading ``+`` is dropped (``+44 (0)20...``);
       * a bare 10-digit number is assumed US/Canada and gets ``+1``;
       * anything else just gets a ``+`` prefix, valid or not.
 
@@ -296,6 +297,12 @@ def normalize_e164_digits(phone_number: str) -> str:
 
     # Remove all non-digit characters except leading +
     has_plus = phone_number.startswith("+")
+    if has_plus:
+        # "+44 (0)20 4613 2300": the bracketed 0 is the national trunk digit,
+        # not part of the E.164 number. Keeping it stored "+4402046132300"
+        # while the lead (libphonenumber) is dialled as "+442046132300", so the
+        # DNC row never matched. Dropped only inside brackets after a "+".
+        phone_number = re.sub(r"\(\s*0\s*\)", "", phone_number)
     digits = re.sub(r"\D", "", phone_number)
 
     if has_plus:

@@ -663,6 +663,29 @@ async def _enqueue_callback(
     except ValueError as exc:
         raise _CallbackConflict(422, {"error": "invalid_phone", "message": str(exc)})
 
+    # The tenant's DNC list is the suppression source the call guard enforces;
+    # refuse before saving or queuing anything. Same normaliser as the guard
+    # (DNCService.is_on_dnc). A failed lookup refuses rather than risk a call.
+    pool = getattr(db_client, "pool", None)
+    if pool is None:
+        logger.warning("salesforce callback: no DB pool, DNC list check skipped")
+    else:
+        from app.domain.services.dnc_service import DNCService
+
+        try:
+            on_dnc = await DNCService(pool).is_on_dnc(tenant_id=tenant_id, e164=phone)
+        except Exception as exc:
+            logger.error("salesforce callback: DNC lookup failed: %s", exc)
+            raise _CallbackConflict(503, {
+                "error": "dnc_check_unavailable",
+                "message": "The do-not-call list could not be checked; the callback was not queued.",
+            })
+        if on_dnc:
+            raise _CallbackConflict(409, {
+                "error": "do_not_call",
+                "message": "This number is on the do-not-call list; the callback was not queued.",
+            })
+
     list_id = create_contact_list(
         db_client, campaign_id=str(campaign["id"]), tenant_id=tenant_id,
         name=CALLBACK_LIST_NAME, source="manual",
@@ -681,7 +704,7 @@ async def _enqueue_callback(
 
     existing = (
         db_client.table("leads")
-        .select("id, status, do_not_call, custom_fields")
+        .select("id, status, do_not_call, last_call_result, custom_fields")
         .eq("campaign_id", str(campaign["id"]))
         .eq("tenant_id", tenant_id)
         .eq("phone_number", phone)
@@ -697,7 +720,14 @@ async def _enqueue_callback(
     now_iso = datetime.now(timezone.utc).isoformat()
     if existing.data:
         lead = existing.data[0]
-        if lead.get("do_not_call"):
+        # The opt-out writers set status='dnc' / last_call_result='caller_opt_out'
+        # and do not always set do_not_call; a 'dnc' lead must never be promoted
+        # back to 'pending' below.
+        if (
+            lead.get("do_not_call")
+            or str(lead.get("status") or "") == "dnc"
+            or str(lead.get("last_call_result") or "") == "caller_opt_out"
+        ):
             raise _CallbackConflict(409, {
                 "error": "do_not_call",
                 "message": "This contact is flagged do-not-call in Talky.ai; the callback was not queued.",
