@@ -55,4 +55,27 @@ The code commit contains only the bounded source, tests and CI changes. The orig
 
 ## Provider references
 
+### Dashboard plan visibility — 21 October 2026
+
+The owner requested that the public Basic $99/month and Business $299/month plans
+also appear in the dashboard Plans section. Public pricing cards/comparison and
+dashboard cards now share `plan-display-catalog.ts`, including the $83/$269 annual
+monthly equivalents, 300/1,000 included AI minutes and the other advertised limits.
+The dashboard suppresses the older catalog cards in this display mode. These are
+published comparison terms, not current-account entitlements or payment offers.
+
+Online checkout for the new cards remains explicitly unavailable. In particular,
+the backend's older Basic offer must not become a $99 purchase merely because its
+ID/name matches. Existing saved-purchase recovery and subscription portal controls
+are preserved. Payment-provider mappings, currency/annual charge verification,
+production release and purchase acceptance remain separate unfinished work; no
+plan records, entitlements, Stripe settings or payment flows were activated.
+
+Validation: all 33 billing-selector DOM tests passed, including four new cases for
+same-name legacy offer isolation, catalog-outage visibility, saved-purchase recovery
+and existing subscription management. Scoped ESLint, full frontend TypeScript and
+`git diff --check` passed. An initial test assertion tried to print a loading DOM
+node and exhausted memory; comparing the loading state as a boolean fixed the test
+diagnostic, and the complete rerun passed. This does not close CP02 or release gates.
+
 The implementation checks fixed recurring [Stripe Price fields](https://docs.stripe.com/api/prices/object), [Checkout Session parameters](https://docs.stripe.com/api/checkout/sessions/create), [currency minor-unit rules](https://docs.stripe.com/currencies), and [idempotency retention](https://docs.stripe.com/api/idempotent_requests). It supports the [subscription item period change](https://docs.stripe.com/changelog/basil/2025-03-31/deprecate-subscription-current-period-start-and-end). These references explain provider contracts; they are not evidence of the deployed account's configuration or successful payment processing.
