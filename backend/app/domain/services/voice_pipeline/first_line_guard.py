@@ -69,12 +69,14 @@ def note_playback(session, tts_active: bool, *, now: Optional[float] = None) -> 
 
 
 def first_line_in_progress(session, *, now: Optional[float] = None) -> bool:
-    if _first_speaker_label(session) != "user" or getattr(session, "_first_line_done", False):
-        return False
     if getattr(session, "_disclosure_in_flight", False):
         # A cut-off notice discards the call's recording; a bare "Hello?" over
-        # it is the caller still checking the line, not an interruption.
+        # it is the caller still checking the line, not an interruption. Either
+        # first speaker: an agent-first notice starts at answer, on the pickup
+        # "Hello?" (2026-10-21).
         return True
+    if _first_speaker_label(session) != "user" or getattr(session, "_first_line_done", False):
+        return False
     now = time.monotonic() if now is None else now
     started = getattr(session, "_first_line_started_at", None)
     if started is None:

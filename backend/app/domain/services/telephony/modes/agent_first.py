@@ -326,26 +326,47 @@ async def _speak_recording_disclosure(voice_session) -> None:
         session._tts_playback_receipt = None
         session._tts_playback_utterance_id = None
         session._tts_delivery_status = "pending"
-        interrupted = await voice_session.pipeline.synthesize_and_send_audio(
-            session, text, websocket=None, track_latency=False,
-        )
+        # While the notice plays, a bare pickup "Hello?" must not cut it off
+        # (first_line_guard); on agent-first calls the notice starts at answer,
+        # exactly when callees say it (2026-10-21: 20 of 33 notices lost so).
+        # Restored, not cleared: caller_first_disclosure holds the flag around
+        # this whole helper.
+        disclosure_was_in_flight = getattr(session, "_disclosure_in_flight", False)
+        session._disclosure_in_flight = True
+        try:
+            interrupted = await voice_session.pipeline.synthesize_and_send_audio(
+                session, text, websocket=None, track_latency=False,
+            )
+        finally:
+            session._disclosure_in_flight = disclosure_was_in_flight
         receipt = getattr(session, "_tts_playback_receipt", None)
+        # The phone gateway's finish receipt is status="transmitted" with
+        # evidence="transmitted" (voice_gateway /v1/sessions/tts/finish); the
+        # browser's is status="completed". Requiring "completed" alone failed
+        # every telephony notice from 2026-10-05 to 2026-10-21.
         delivered = bool(
             not interrupted
             and getattr(session, "_tts_delivery_status", None) == "submitted"
             and isinstance(receipt, dict)
             and receipt.get("utterance_id")
             and receipt.get("utterance_id") == getattr(session, "_tts_playback_utterance_id", None)
-            and receipt.get("status") == "completed"
-            and receipt.get("evidence") in {"transport_played", "transmitted"}
+            and (
+                (receipt.get("status") == "completed"
+                 and receipt.get("evidence") in {"transport_played", "transmitted"})
+                or (receipt.get("status") == "transmitted"
+                    and receipt.get("evidence") == "transmitted")
+            )
         )
         if not delivered:
             record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
             logger.warning(
-                "recording_disclosure_unconfirmed call_id=%s — notice incomplete or unproven "
+                "recording_disclosure_unconfirmed call_id=%s interrupted=%s delivery=%s "
+                "receipt_status=%s evidence=%s — notice incomplete or unproven "
                 "short; not retried (a restart would talk over the caller "
                 "a second time); recording will be suppressed",
-                call_id[:12],
+                call_id[:12], interrupted, getattr(session, "_tts_delivery_status", None),
+                receipt.get("status") if isinstance(receipt, dict) else None,
+                receipt.get("evidence") if isinstance(receipt, dict) else None,
             )
             return
 

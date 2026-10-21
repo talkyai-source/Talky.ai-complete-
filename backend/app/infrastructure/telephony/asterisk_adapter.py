@@ -5453,6 +5453,19 @@ class AsteriskAdapter(CallControlAdapter):
                     await asyncio.sleep(0.05)
         except TimeoutError:
             return {**pending, "reason": "transmission_receipt_timeout"}
+        finally:
+            # The gateway refuses any further chunk for an id it was asked to
+            # finish (utterance_already_finalized). The next unannounced send —
+            # the pre-synthesised greeting after the recording notice — must
+            # carry a fresh id, or the caller hears the notice, then silence
+            # (2026-10-21, 9 calls). Rotated in place so the per-call audit
+            # counters survive.
+            utterance = self._tts_utterances.get(call_id)
+            if utterance is not None and utterance.get("utterance_id") == utterance_id and utterance.get("seq"):
+                import uuid as _uuid
+
+                utterance["utterance_id"] = _uuid.uuid4().hex[:16]
+                utterance["seq"] = 0
 
     async def interrupt_tts(self, call_id: str) -> Dict[str, Any]:
         """
