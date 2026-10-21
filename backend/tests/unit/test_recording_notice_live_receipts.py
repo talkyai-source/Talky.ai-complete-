@@ -198,8 +198,10 @@ def test_real_words_or_unknown_speech_still_interrupt_the_notice(text):
     assert not is_first_line_greeting_repeat(s, text)
 
 
-def test_agent_first_lines_after_the_notice_are_unchanged():
-    s = _agent_first_session(_first_line_started_at=time.monotonic() - 0.2)
+def test_after_the_notice_a_hello_to_a_silent_agent_is_a_real_turn():
+    # While the agent speaks, a bare "Hello?" never stops it (first_line_guard,
+    # 2026-10-22); once it is silent, the "Hello?" is the caller's turn.
+    s = _agent_first_session(_first_line_started_at=time.monotonic() - 0.2, tts_active=False)
     assert not first_line_in_progress(s)
     assert not is_first_line_greeting_repeat(s, "Hello?")
 

@@ -116,6 +116,8 @@ class TranscriptHandler:
                     await pause_for_caller(session, websocket, text=text)
                 return
             if phase == "resume":
+                # The utterance was withdrawn: nothing is left to grow.
+                session._first_line_barge_skipped = False
                 await resume_after_caller(session, websocket, reason="backchannel")
                 return
             if repeat_greeting:
@@ -182,6 +184,9 @@ class TranscriptHandler:
                 mark_caller_stopped,
             )
             mark_caller_stopped(session)
+            # The utterance whose "Hello" skipped its interrupt is over; the
+            # next one starts with its own StartOfTurn.
+            session._first_line_barge_skipped = False
 
         metadata = transcript.metadata or {}
         if _is_turn_end and metadata.get("provider") == "assemblyai" and metadata.get("empty_turn") is True:
@@ -229,19 +234,21 @@ class TranscriptHandler:
             except Exception as e:
                 logger.warning(f"Failed to send transcript to websocket: {e}")
 
-        # A repeated bare "Hello?" during the agent's first line (caller-first):
-        # that line is already the answer to it, so like a backchannel it gets
-        # no interrupt and no reply. Marking the seq swallows its empty EOT.
+        # A bare "Hello?" / "Are you there?" while the agent speaks (any turn), or
+        # in its first line's sentence gaps: the speech playing is the answer, so
+        # like a backchannel it gets no interrupt and no reply. Marking the seq
+        # swallows its empty EOT.
         from app.domain.services.voice_pipeline.first_line_guard import (
-            first_line_in_progress,
             is_first_line_greeting_repeat,
         )
         if transcript.text and is_first_line_greeting_repeat(session, transcript.text):
             logger.info(
-                "first_line_greeting transcript=%r during the agent's first line — ignored (no interrupt, no reply)",
+                "first_line_greeting transcript=%r during the agent's speech — ignored (no interrupt, no reply)",
                 (transcript.text or "")[:24],
             )
-            session._first_line_barge_skipped = True
+            # A finished greeting cannot grow; a later utterance (a "yeah") must
+            # not inherit its skipped interrupt.
+            session._first_line_barge_skipped = not bool(getattr(transcript, "is_final", False))
             session._suppressed_backchannel_seq = self._p._utterance_seq.get(call_id, 0)
             return
         # An utterance whose opening "Hello" skipped the interrupt has grown into
@@ -249,7 +256,7 @@ class TranscriptHandler:
         # bookkeeping the skip left out, instead of talking over it to EndOfTurn.
         if transcript.text and getattr(session, "_first_line_barge_skipped", False):
             session._first_line_barge_skipped = False
-            if getattr(session, "tts_active", False) and first_line_in_progress(session):
+            if getattr(session, "tts_active", False):
                 from app.domain.services.voice_pipeline.playback_gate import mark_caller_speaking
 
                 mark_caller_speaking(session)

@@ -10,6 +10,12 @@ agent's first line, a bare greeting neither interrupts nor gets its own reply:
 the line already playing is the answer to it (owner decision 2026-10-21).
 Real speech ("who is this?", "stop") still interrupts, and so does a
 StartOfTurn whose text is unknown. No scripted opener is involved.
+
+Live 2026-10-21 (call a3e8f75e): a person who came on after call screening said
+"Hello?" each time the agent began to answer, and each one cancelled the reply,
+three times, until they hung up. So, anywhere in the call, a bare greeting or
+line check ("Are you there?") while the agent is speaking is treated the same
+way (owner decision 2026-10-22).
 """
 from __future__ import annotations
 
@@ -24,14 +30,24 @@ DEFAULT_GUARD_S = 2.5
 # during "Hi, is this Mike?" those are the caller's ANSWER and must get through.
 _GREETINGS = frozenset({"hello", "hullo", "hi", "hiya", "hey", "allo"})
 _FILLER = frozenset({"there"})
+# Checking the line is still open, with or without a greeting before it.
+_LINE_CHECKS = frozenset({
+    "are you there", "you there", "are you still there", "you still there",
+    "can you hear me", "can you hear me now",
+})
 
 
 def is_repeat_greeting(text: str) -> bool:
     words = [w.strip(".,!?'’\"-") for w in (text or "").lower().split()]
     words = [w for w in words if w]
-    if not words or len(words) > 4:
+    if not words or len(words) > 7:
         return False
-    return any(w in _GREETINGS for w in words) and all(w in _GREETINGS or w in _FILLER for w in words)
+    core = [w for w in words if w not in _GREETINGS]
+    if " ".join(core) in _LINE_CHECKS:
+        return True
+    if len(words) > 4:
+        return False
+    return any(w in _GREETINGS for w in words) and all(w in _FILLER for w in core)
 
 
 def guard_seconds() -> float:
@@ -88,4 +104,17 @@ def first_line_in_progress(session, *, now: Optional[float] = None) -> bool:
 
 
 def is_first_line_greeting_repeat(session, text: Optional[str], *, now: Optional[float] = None) -> bool:
-    return is_repeat_greeting(text or "") and first_line_in_progress(session, now=now)
+    """A bare greeting or line check the agent's own speech already answers:
+    while it is speaking, anywhere in the call, or in the first line's
+    sentence gaps."""
+    if not is_repeat_greeting(text or ""):
+        return False
+    # first_line_in_progress first: it also stamps a first line the per-frame
+    # stamp has not caught yet.
+    if first_line_in_progress(session, now=now) or getattr(session, "tts_active", False):
+        return True
+    # tts_active drops when Python stops streaming; the gateway still plays
+    # its queued tail (240-300 ms measured) for the caller.
+    from app.domain.services.voice_pipeline.interrupt import _playback_may_still_be_audible
+
+    return _playback_may_still_be_audible(session) is not None

@@ -53,16 +53,43 @@ def test_answers_and_real_speech_do_not(text):
     assert not is_repeat_greeting(text)
 
 
+@pytest.mark.parametrize("text", [
+    "Are you there?", "Hello? Are you there?", "You still there?", "Can you hear me?",
+    "Hello, can you hear me?", "Hello hello are you there",
+])
+def test_line_checks_count(text):
+    assert is_repeat_greeting(text)
+
+
+@pytest.mark.parametrize("text", ["Are you a robot?", "Can you call me back?", "Is anyone there with you?"])
+def test_questions_that_are_not_line_checks_do_not(text):
+    assert not is_repeat_greeting(text)
+
+
 def test_guard_applies_in_the_first_line_window_on_caller_first_calls():
     assert is_first_line_greeting_repeat(_session(), "Hello?")
 
 
 @pytest.mark.parametrize("kwargs", [
-    {"first_speaker": "agent"},                       # agent-first calls have their own pickup handling
-    {"tts_active": False, "started_ago": None},       # agent has not spoken yet: a real turn
-    {"started_ago": 3.0},                             # past the 2.5 s window
+    {"first_speaker": "agent"},                       # agent-first calls too (owner 2026-10-22)
+    {"started_ago": 3.0},                             # past the first line's window
+    {"started_ago": 30.0, "_first_line_done": True},  # any later reply
 ])
-def test_guard_does_not_apply_outside_its_case(kwargs):
+@pytest.mark.parametrize("text", ["Hello?", "Are you there?"])
+def test_guard_applies_whenever_the_agent_is_speaking(kwargs, text):
+    """Call a3e8f75e (2026-10-21): each "Hello?" cancelled a reply as it began."""
+    done = kwargs.pop("_first_line_done", False)
+    s = _session(**kwargs)
+    s._first_line_done = done
+    assert is_first_line_greeting_repeat(s, text)
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"tts_active": False, "started_ago": None},                         # agent has not spoken yet
+    {"tts_active": False, "started_ago": 3.0},                          # agent silent, past the window
+    {"tts_active": False, "started_ago": 0.5, "first_speaker": "agent"},  # agent-first, agent silent
+])
+def test_guard_does_not_apply_while_the_agent_is_silent(kwargs):
     assert not is_first_line_greeting_repeat(_session(**kwargs), "Hello?")
 
 
@@ -71,8 +98,8 @@ def test_guard_covers_the_gap_between_the_first_lines_sentences():
     assert is_first_line_greeting_repeat(s, "Hello?")
 
 
-def test_guard_ends_with_the_first_line():
-    s = _session()
+def test_after_the_first_line_a_hello_to_a_silent_agent_is_a_real_turn():
+    s = _session(tts_active=False)
     s._first_line_done = True
     assert not is_first_line_greeting_repeat(s, "Hello?")
 
@@ -113,8 +140,10 @@ def test_a_sentence_gap_does_not_end_the_first_line():
 
 
 def test_window_is_configurable(monkeypatch):
+    # The window covers the first line's sentence gaps (agent momentarily silent).
     monkeypatch.setenv("VOICE_FIRST_LINE_GUARD_S", "1.0")
-    assert not is_first_line_greeting_repeat(_session(started_ago=1.5), "Hello?")
+    assert not is_first_line_greeting_repeat(_session(tts_active=False, started_ago=1.5), "Hello?")
+    assert is_first_line_greeting_repeat(_session(tts_active=False, started_ago=0.8), "Hello?")
     monkeypatch.setenv("VOICE_FIRST_LINE_GUARD_S", "not-a-number")
     assert guard.guard_seconds() == guard.DEFAULT_GUARD_S
 
@@ -265,3 +294,135 @@ async def test_barge_in_callback_skips_a_repeated_hello():
 async def test_barge_in_callback_still_stops_for_real_speech():
     event, seq = await _drive_barge_in_callback(["Stop"])
     assert event.is_set() and seq == 1
+
+
+# ── later in the call (owner decision 2026-10-22, call a3e8f75e) ─────────────
+
+def _mid_call(first_speaker="agent", tts_active=True) -> CallSession:
+    s = _session(first_speaker=first_speaker, tts_active=tts_active, started_ago=40.0)
+    s._first_line_done = True
+    return s
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["Hello?", "Are you there?"])
+async def test_handle_barge_in_keeps_a_later_reply_playing(text):
+    from app.domain.services.voice_pipeline_service import VoicePipelineService
+
+    s = _mid_call()
+    event = asyncio.Event()
+    fake = SimpleNamespace(_barge_in_events={s.call_id: event}, _barge_in_epoch={})
+    await VoicePipelineService.handle_barge_in(fake, s, None, transcript_text=text)
+    assert not event.is_set() and s.tts_active is True
+
+
+@pytest.mark.asyncio
+async def test_a_later_reply_ignores_a_hello_and_a_following_yeah():
+    """A finished "Hello?" must not leave a skipped interrupt behind for the
+    next utterance: the "yeah" after it is a backchannel, not a stop."""
+    from tests.unit.test_caller_speaking_cleared_on_end_of_turn import _Chunk, _Pipeline
+    from app.domain.services.voice_pipeline.transcript_handler import TranscriptHandler
+
+    p, s = _Pipeline(), _mid_call()
+    stops = []
+
+    async def barge(session, websocket=None, **k):
+        stops.append(k.get("transcript_text"))
+
+    p.handle_barge_in = barge
+    p._utterance_seq[s.call_id] = 5
+    await TranscriptHandler(p).handle(s, _Chunk(text="Hello?", is_final=True))
+    assert s._first_line_barge_skipped is False
+    await TranscriptHandler(p).handle(s, _Chunk(text="Yeah.", is_final=True))
+    assert stops == []
+    assert not p._pending_llm_tasks
+
+
+@pytest.mark.asyncio
+async def test_a_later_hello_that_grows_into_real_words_interrupts_at_once():
+    from tests.unit.test_caller_speaking_cleared_on_end_of_turn import _Chunk, _Pipeline
+    from app.domain.services.voice_pipeline.transcript_handler import TranscriptHandler
+
+    p, s = _Pipeline(), _mid_call()
+    stops = []
+
+    async def barge(session, websocket=None, **k):
+        stops.append(k.get("transcript_text"))
+
+    p.handle_barge_in = barge
+    p._utterance_seq[s.call_id] = 5
+    await TranscriptHandler(p).handle(s, _Chunk(text="Hello?", is_final=False))
+    assert stops == []
+    await TranscriptHandler(p).handle(s, _Chunk(text="Hello? Who is this?", is_final=False))
+    assert stops == ["Hello? Who is this?"]
+
+
+@pytest.mark.asyncio
+async def test_assemblyai_confirm_of_a_later_hello_resumes_instead_of_stopping():
+    s = _mid_call()
+    s._tts_paused_at = time.monotonic()
+    stops = await _signal(s, "confirm", "Hello? Are you there?")
+    assert stops == [] and s._tts_paused_at is None
+
+
+@pytest.mark.asyncio
+async def test_assemblyai_real_words_still_stop_a_later_reply():
+    stops = await _signal(_mid_call(), "confirm", "No, stop")
+    assert stops == ["No, stop"]
+
+
+@pytest.mark.parametrize("age_s,protected", [(0.2, True), (1.0, False)])
+def test_the_gateways_queued_tail_still_counts_as_the_agent_speaking(age_s, protected):
+    """tts_active drops when Python stops streaming; the gateway still plays its
+    queued tail (interrupt._GATEWAY_DRAIN_S) to the caller."""
+    s = _mid_call(tts_active=False)
+    s._last_tts_chunk_at = time.monotonic() - age_s
+    assert is_first_line_greeting_repeat(s, "Hello?") is protected
+
+
+@pytest.mark.asyncio
+async def test_a_skip_left_by_a_withdrawn_or_empty_turn_does_not_make_a_yeah_interrupt():
+    """A StartOfTurn/BargeInSignal "Hello" skip with no text chunk after it must
+    end with its turn: the next utterance's "yeah" stays a backchannel."""
+    from tests.unit.test_caller_speaking_cleared_on_end_of_turn import _Chunk, _Pipeline, eot_marker
+    from app.domain.services.voice_pipeline.transcript_handler import TranscriptHandler
+
+    p, s = _Pipeline(), _mid_call()
+    stops = []
+
+    async def barge(session, websocket=None, **k):
+        stops.append(k.get("transcript_text"))
+
+    from app.domain.models.conversation import Message, MessageRole
+
+    s.conversation_history = [
+        Message(role=MessageRole.USER, content="Hello?"),
+        Message(role=MessageRole.ASSISTANT, content="We help contractors with estimating and takeoffs."),
+    ]
+    p.handle_barge_in = barge
+    p._utterance_seq[s.call_id] = 5
+    s._first_line_barge_skipped = True               # set by the audio-level skip only
+    await TranscriptHandler(p).handle(s, eot_marker())
+    assert s._first_line_barge_skipped is False
+    stops.clear()                                    # the marker's own handling is not under test
+    await TranscriptHandler(p).handle(s, _Chunk(text="Yeah.", is_final=True))
+    assert stops == []
+
+
+@pytest.mark.asyncio
+async def test_a_withdrawn_assemblyai_barge_in_clears_the_skip():
+    s = _mid_call()
+    s._first_line_barge_skipped = True
+    await _signal(s, "resume", "")
+    assert s._first_line_barge_skipped is False
+
+
+@pytest.mark.asyncio
+async def test_a_hello_to_a_silent_agent_mid_call_is_answered():
+    from tests.unit.test_caller_speaking_cleared_on_end_of_turn import _Chunk, _Pipeline
+    from app.domain.services.voice_pipeline.transcript_handler import TranscriptHandler
+
+    p, s = _Pipeline(), _mid_call(tts_active=False)
+    await TranscriptHandler(p).handle(s, _Chunk(text="Hello?", is_final=False))
+    assert "Hello?" in (s.current_user_input or "")
+    assert getattr(s, "_suppressed_backchannel_seq", None) is None
