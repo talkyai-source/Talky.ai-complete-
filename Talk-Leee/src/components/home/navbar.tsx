@@ -41,9 +41,10 @@ export function Navbar() {
     pathname.startsWith("/terms/") ||
     pathname === "/privacy" ||
     pathname.startsWith("/privacy/");
+  const isDocsPage = pathname === "/docs" || pathname.startsWith("/docs/");
   // Every standalone marketing page shares one navbar treatment.
   const isStandalonePage =
-    isAiVoices || isUseCasesPage || isIndustriesPage || isProductsPage || isPricingPage || isContactPage || isLegalPage;
+    isAiVoices || isUseCasesPage || isIndustriesPage || isProductsPage || isPricingPage || isContactPage || isLegalPage || isDocsPage;
   const mobileMenuRef = useRef<HTMLDetailsElement | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();

@@ -31,11 +31,10 @@ for (const width of WIDTHS) {
     });
 
     expect(rows.nav).toHaveLength(6);
-    expect(rows.secondary).toHaveLength(4);
+    expect(rows.secondary).toHaveLength(5);
     for (let i = 0; i < rows.secondary.length; i++) {
       expect(Math.abs(rows.nav[i] - rows.secondary[i]), `row ${i + 1} centre difference`).toBeLessThan(0.01);
     }
-    expect(rows.nav[4]).toBeGreaterThan(rows.secondary[3]);
-    expect(rows.nav[5]).toBeGreaterThan(rows.nav[4]);
+    expect(rows.nav[5]).toBeGreaterThan(rows.secondary[4]);
   });
 }
