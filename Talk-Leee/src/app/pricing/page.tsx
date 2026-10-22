@@ -277,7 +277,7 @@ export default function PricingPage() {
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
               Create an account to get started, or talk to our team about custom pricing for larger deployments.
             </p>
-            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:gap-4">
+            <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
               <Link href="/auth/register">
                 <Button size="lg" className={primaryButtonClassName}>
                   Get Started
