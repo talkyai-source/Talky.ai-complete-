@@ -6,16 +6,22 @@ The Contacts area is used to manage people who may be called by campaigns.
 2. Choose the relevant campaign or contact list when required.
 3. Use search to locate a contact.
 
+![The contacts list, showing three contacts with their companies and numbers](/docs/contacts-01-list.webp)
+
 ## Upload Contacts by CSV
 
 1. Open **Contacts**.
 2. Select the campaign/contact list.
 3. Choose **Upload CSV** or **Add more contacts**.
+
+   ![The CSV upload panel, with a link to download a template](/docs/contacts-02-csv-upload.webp)
 4. If needed, select **Download template** to obtain the expected format.
 5. Choose the CSV file.
 6. Review the import preview and any validation errors.
 7. Select **Upload Contacts**.
 8. Review the import results.
+
+   ![An import summary, listing the rows imported and the rows that could not be](/docs/contacts-03-import-result.webp)
 
 Talk-Lee reports successfully imported rows and rows that could not be imported.
 

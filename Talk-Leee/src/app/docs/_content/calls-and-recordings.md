@@ -9,6 +9,8 @@ Call History provides a detailed record of campaign calls.
 3. Use available filters such as all calls, lead-related calls, or calls with issues.
 4. Expand a call to view additional information.
 
+![Call history, showing the search and filter controls above a list of calls](/docs/calls-01-history.webp)
+
 Depending on the call, Talk-Lee can provide:
 
 - Campaign information
@@ -21,6 +23,8 @@ Depending on the call, Talk-Lee can provide:
 ### Transcript and Summary
 
 Use the transcript to understand what was actually said. Use the AI summary for a faster overview, but verify important sales or compliance details against the transcript when necessary.
+
+![A call expanded to show its summary and transcript](/docs/calls-02-expanded.webp)
 
 ### Call detail page
 
@@ -37,6 +41,8 @@ Where a call had a technical problem, Talk-Lee can show an issues panel explaini
 ## Recordings
 
 The Recordings page provides access to stored voice recordings according to your plan and retention policy.
+
+![The recordings page, listing stored call audio](/docs/calls-03-recordings.webp)
 
 Recording storage and retention depend on your plan. The pricing page lists the storage allowance and retention period for each plan. Recordings older than the retention period are removed, so download anything you need to keep for longer.
 
@@ -56,6 +62,8 @@ Do not share recordings outside authorized users or purposes.
 ## Analytics
 
 Analytics helps you understand campaign and calling performance.
+
+![The analytics page, showing call trends and campaign performance](/docs/calls-04-analytics.webp)
 
 ### Typical metrics
 

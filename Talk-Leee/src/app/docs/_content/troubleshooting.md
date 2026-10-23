@@ -19,6 +19,8 @@ Verify that the campaign captures the field and that the latest call-state/captu
 
 Talk-Lee shows the reason beside the campaign controls. The most common cause is that the selected telephone trunk is not ready. Select **Check again**, then open **Settings → Telephony** and review the line's live status.
 
+![The bulk-action panel showing a readiness warning, with Resume unavailable and a Check again link](/docs/outbound-campaigns-04-readiness-warning.webp)
+
 ### A campaign is active but no calls are going out
 
 Check the calling hours and their time zone, that contacts remain in the list, that your concurrency limit is not already used by another campaign, and that minutes remain on the account.

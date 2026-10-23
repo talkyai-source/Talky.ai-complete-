@@ -9,6 +9,8 @@ Campaigns control how Talk-Lee makes outbound calls, what the AI agent is trying
 3. Use the available sorting/filtering controls to find a campaign.
 4. Depending on campaign status, you can open, pause, resume, edit, or delete a campaign.
 
+![The campaigns list, showing the filters above a table of three campaigns](/docs/outbound-campaigns-01-list.webp)
+
 ### Reading the campaign table
 
 | Column | What it means |
@@ -20,6 +22,8 @@ Campaigns control how Talk-Lee makes outbound calls, what the AI agent is trying
 | **Leads** | How many leads the campaign has produced. |
 | **Completed** | How many calls finished normally. |
 | **Failed** | How many calls did not connect or ended in error. |
+
+![The campaign table, with columns for status, completion, success rate, leads, completed and failed](/docs/outbound-campaigns-02-columns.webp)
 
 Select a column heading to sort by it.
 
@@ -50,11 +54,15 @@ Use the controls above the table to choose how many rows to show at once and to 
 
 1. Tick the checkbox beside each campaign you want to act on, or the header checkbox to select them all.
 2. A panel appears above the table showing how many are selected.
+
+   ![The bulk-action panel with Pause, Resume, Export and Delete, shown after selecting a campaign](/docs/outbound-campaigns-03-bulk-actions.webp)
 3. Choose an action:
    - **Pause Selected** — stop calling on those campaigns
    - **Resume Selected** — restart calling, where the campaigns are ready
    - **Export Selected** — open the export and reporting options
    - **Delete Selected** — remove the campaigns after confirming
+
+![The bulk-action panel showing a readiness warning, with Resume unavailable and a Check again link](/docs/outbound-campaigns-04-readiness-warning.webp)
 
 **Resume Selected** is unavailable when the selected campaigns cannot currently place calls. When that happens, Talk-Lee explains why beside the buttons — for example that the selected telephone trunk is not ready. Select **Check again** to re-test, or open **Settings → Telephony** to review the trunk.
 
@@ -63,6 +71,8 @@ Use the controls above the table to choose how many rows to show at once and to 
 1. Open **Campaigns**.
 2. Select **New Campaign** or the create-campaign action.
 3. Complete the campaign setup sections shown in the wizard.
+
+![The top of the campaign form, showing the name, brand, persona options and representative name](/docs/outbound-campaigns-05-identity.webp)
 
 Your plan limits how many campaigns you can run. The pricing page lists the limit for each plan.
 
@@ -79,29 +89,43 @@ Examples:
 
 Avoid generic names such as "Campaign 1".
 
-### Agent Name and Role
+### Brand / company name
 
-Choose the name used by the AI agent during the call and define the agent's role.
+Enter the business the agent represents. The field sits beside the campaign name, and the campaign brief takes its brand from here.
 
-Examples:
+### Persona and Representative names
 
-- **Alex — Business Development Representative**
-- **Sarah — Website Growth Consultant**
-- **Sophie — Virtual Receptionist**
+Choose the **Persona** that matches the campaign. There are three:
 
-The role should describe what the agent is expected to do, not a long script.
+- **Lead Generation** — outbound calls: qualify leads and book consultations
+- **Customer Support** — inbound: resolve issues, handle escalations, book callbacks
+- **AI Receptionist** — inbound: answer, route, book appointments, take messages
 
-### Define the First Useful Outcome
+Then enter the **Representative names**: one to three names, comma-separated. The agent uses one of them on each call. Each name has a **Male / Female** selector so that the name matches the gender of the voice you choose.
 
-Describe what the agent should achieve early in the conversation.
+### Voice engine
 
-A good first outcome is short and measurable.
+Choose the engine from the **Voice engine** dropdown. The current option reads **Traditional · separate speech and language providers**, which uses the speech-to-text, language model and voice settings described in this guide.
+
+### Opening objective
+
+The **Campaign brief** is the live prompt layer: structured instructions used by the live agent. Brand and representative come from the identity fields above; everything here is saved and appears in prompt preview.
+
+**Opening objective** is required and limited to 500 characters. Describe the first useful outcome, not a full script.
+
+![The campaign brief, with fields for the opening objective and the decision-maker role](/docs/outbound-campaigns-06-campaign-brief.webp)
+
+A good opening objective is short and measurable.
 
 Example:
 
 > Confirm whether the person handles website or marketing decisions and understand whether the current website generates enquiries.
 
 Do not place the entire sales script in this field.
+
+### Decision-maker role
+
+Enter the role the agent should try to reach, such as Head of Operations. Leave blank when any informed contact can progress the call.
 
 ### Approved Next Actions
 
@@ -114,6 +138,8 @@ Available actions can include:
 - **Submit configured form** — use an available form integration
 - **Transfer to a human** — transfer only when the transfer runtime and destination are available
 - **End call politely** — close when the objective is complete or the caller declines
+
+![The approved next actions, with transfer destination and objection-attempt settings beneath](/docs/outbound-campaigns-07-approved-actions.webp)
 
 #### Important
 
@@ -140,15 +166,24 @@ The agent should distinguish between a soft objection such as "maybe later" and 
 
 ### Required Lead Fields
 
-Use the required-fields section to define which contact details or lead information should be captured.
+The **Required lead fields** line in the campaign brief is a summary. The fields themselves are chosen in **Contact details the agent may capture**, further down the form.
 
-Typical fields include:
+Choose only information this campaign needs. "Required" means a missing answer remains visibly incomplete; the agent must never invent it.
 
-- Contact name
-- Business name
+The ten fields are:
+
 - Phone number
-- Email address
-- Preferred callback time
+- Mobile
+- Business number
+- First name
+- Last name
+- Email
+- Company
+- Job title
+- Best time to call
+- Calling notes
+
+![The contact-details picker, listing the fields the agent may capture](/docs/outbound-campaigns-11-contact-details.webp)
 
 Only mark fields as required when they are genuinely necessary for the campaign.
 
@@ -167,15 +202,19 @@ Good guidance includes:
 
 Avoid duplicating large amounts of company information here. Business facts belong in the Knowledge Base.
 
+Guidance shares a 12,000 character limit with the structured brief. The counter includes the structured brief and this freeform layer. Nothing is trimmed automatically.
+
+![The additional guidance field, with its character counter](/docs/outbound-campaigns-08-guidance.webp)
+
 ### Calling Hours
 
-Where the setting is available, define the hours and days during which the campaign may call, and the time zone those hours apply in. Calls are not placed outside that window.
+Set the **Timezone**, the **Start** and **End** times, and the days the campaign may call using the **Mon** to **Sun** toggles. Calls are not placed outside that window.
+
+Tick **Call anytime (ignore these hours)** to let the dialer call regardless of the window above. You will still see warnings.
+
+![The calling hours settings, with timezone, start and end times, day selection and a call-anytime option](/docs/outbound-campaigns-10-calling-hours.webp)
 
 Check the rules that apply in the markets you call into. Many have legally defined calling hours.
-
-### Who Speaks First
-
-Where the setting is available, choose whether the AI agent speaks first when the call connects, or waits for the person to speak. Agent-first suits outbound sales calls. Caller-first can suit confirmation or service calls.
 
 ### Select a Voice Provider and Voice
 
@@ -186,6 +225,8 @@ The campaign voice is selected per campaign.
 3. Review the available voices for that provider.
 4. Use the play/preview button to hear a sample.
 5. Select the voice that best fits the campaign persona.
+
+![The voice selection, showing the provider list and the available voices](/docs/outbound-campaigns-09-voice.webp)
 
 Talk-Lee can expose multiple voice providers depending on your account configuration, including providers such as Google, Cartesia, Deepgram, or ElevenLabs. Google, Cartesia and Deepgram voices are included in the standard subscription. ElevenLabs is a premium option charged separately.
 
@@ -258,6 +299,8 @@ Never launch a new campaign without testing it first.
 
 1. Save the campaign.
 2. Open the campaign and use the available **Test Agent** or preview function.
+
+   ![The test dialog, offering a choice of who opens the conversation and a headphones option](/docs/outbound-campaigns-12-test-dialog.webp)
 3. Test the opening.
 4. Interrupt the agent while it is speaking.
 5. Give a soft objection.
@@ -267,6 +310,16 @@ Never launch a new campaign without testing it first.
 9. Test callback scheduling if enabled.
 10. Test human transfer if enabled.
 11. Check the resulting call summary/transcript.
+
+### Choose who speaks first
+
+When you start a test, the **Test this campaign's agent** dialog asks who opens the conversation. This choice applies to the test only; real outbound calls are always agent-first.
+
+- **AI agent speaks first** — The agent greets you the moment the session connects. Same as an agent-first outbound call.
+- **You say hello first** — The agent waits for your "hello", then introduces itself and why it is calling. Still an outbound call — it will not answer like a receptionist.
+- **I'm wearing headphones — allow interruption** — Lets you talk over the agent, like on a real phone line. On speakers the microphone hears the agent's own voice and it will interrupt itself — leave this off, and don't judge interruption quality from a speaker test.
+
+Your microphone is used only for the test. Nothing is dialled and no plan minutes are used.
 
 ### Launch criteria
 

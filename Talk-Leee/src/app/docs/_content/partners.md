@@ -12,7 +12,7 @@ Where your account includes white-label access, you manage your own customers fr
 2. Review the list of tenant accounts.
 3. Select **Edit** on a tenant to change its details.
 4. Open a tenant's **Agent settings** to review or change how its AI agent behaves.
-5. Use the create action to add a new sub-tenant, where it is available to your account.
+5. Creating a new sub-tenant is handled by the Talk-Lee team. Contact them when you need one added.
 
 ## Partner analytics and billing
 

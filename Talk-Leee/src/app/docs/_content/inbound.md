@@ -1,5 +1,7 @@
 Inbound allows Talk-Lee to answer incoming calls with an AI agent when inbound calling is enabled for your account.
 
+![The inbound campaigns list](/docs/inbound-01-list.webp)
+
 ## Typical setup flow
 
 1. Open **Inbound**.
@@ -11,6 +13,8 @@ Inbound allows Talk-Lee to answer incoming calls with an AI agent when inbound c
 7. Configure approved actions such as appointment booking, message taking, callback, or transfer.
 8. Connect the required telephone number/SIP route.
 9. Run test calls before routing production traffic.
+
+![An inbound campaign's overview, showing its number, name, AI campaign, SIP trunk, opening mode and timezone, with the server readiness checks and the after-hours and recording policy](/docs/inbound-02-setup.webp)
 
 ## Managing inbound campaigns
 

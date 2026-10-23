@@ -13,8 +13,14 @@
  *   dark:text-foreground for headings, text-gray-700 / dark:text-muted-foreground
  *   for body, border-border, bg-card and bg-muted/50 for surfaces, and
  *   text-blue-600 / dark:text-blue-400 for links.
+ * - Images (screenshots under public/docs) render as a framed <img> with the
+ *   WebP's intrinsic width/height, so the browser reserves the box before the
+ *   file loads, and loading="lazy" so images below the first screen are
+ *   fetched only when scrolled near.
  */
 
+import fs from "node:fs";
+import path from "node:path";
 import type { ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -34,6 +40,46 @@ export function headingId(text: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Intrinsic size of a WebP under public/, read from its RIFF container at
+ * render time (static generation), so every <img> carries width/height.
+ * Handles the three chunk layouts: "VP8 " (lossy: 14-bit dimensions after the
+ * 3-byte start code at byte 26), "VP8L" (lossless: 14-bit dimensions minus one
+ * packed after the 0x2f signature at byte 21) and "VP8X" (extended: 24-bit
+ * canvas dimensions minus one at byte 24). Returns null for anything else, in
+ * which case the image renders without reserved dimensions.
+ */
+function webpSize(src: string | undefined): { width: number; height: number } | null {
+  if (!src || !src.startsWith("/") || !src.endsWith(".webp")) return null;
+  try {
+    const file = path.join(process.cwd(), "public", ...src.slice(1).split("/"));
+    const fd = fs.openSync(file, "r");
+    try {
+      const header = Buffer.alloc(30);
+      if (fs.readSync(fd, header, 0, 30, 0) < 30) return null;
+      if (header.toString("latin1", 0, 4) !== "RIFF" || header.toString("latin1", 8, 12) !== "WEBP") return null;
+      const chunk = header.toString("latin1", 12, 16);
+      if (chunk === "VP8 ") {
+        if (header[23] !== 0x9d || header[24] !== 0x01 || header[25] !== 0x2a) return null;
+        return { width: header.readUInt16LE(26) & 0x3fff, height: header.readUInt16LE(28) & 0x3fff };
+      }
+      if (chunk === "VP8L") {
+        if (header[20] !== 0x2f) return null;
+        const bits = header.readUInt32LE(21);
+        return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
+      }
+      if (chunk === "VP8X") {
+        return { width: header.readUIntLE(24, 3) + 1, height: header.readUIntLE(27, 3) + 1 };
+      }
+      return null;
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
 }
 
 const anchorClassName = "scroll-mt-[calc(var(--home-navbar-height)+16px)]";
@@ -93,6 +139,21 @@ const components: Components = {
   ),
   td: ({ children }) => <td className={`${bodyColorClassName} border border-border px-3 py-2 align-top`}>{children}</td>,
   hr: () => <hr className="my-8 border-border" />,
+  img: ({ src, alt }) => {
+    const size = webpSize(typeof src === "string" ? src : undefined);
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- static screenshot with reserved intrinsic size; no runtime optimisation wanted
+      <img
+        src={typeof src === "string" ? src : undefined}
+        alt={alt ?? ""}
+        width={size?.width}
+        height={size?.height}
+        loading="lazy"
+        decoding="async"
+        className="my-6 block h-auto max-w-full rounded-lg border border-border"
+      />
+    );
+  },
 };
 
 export function DocsMarkdown({ content }: { content: string }) {

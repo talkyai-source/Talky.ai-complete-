@@ -1,26 +1,38 @@
 ## Security
 
-The Security area covers your own account's protection, separate from the administrative Security Center.
+The Security area covers your account protection, active sessions, and — for admins — tenant-wide keys and audit activity.
 
-Where enabled, it can include:
+![Account security, with password change and passkey options](/docs/security-01-password-passkeys.webp)
 
-- Recovery codes for your account
-- Current and recent sign-in sessions
-- Trusted devices
+### Password and account
 
-### Recovery codes
+Change your password here, or sign in without one using a passkey. Changing the password signs out all other sessions, each within 15 minutes.
 
-1. Select **Security** from the sidebar.
-2. Generate recovery codes if you have not already.
-3. Store them somewhere safe and private — a password manager, not a note on your desk.
-4. Each code can be used once, to sign in if you lose access to your MFA device.
-5. Generate a new set if you use them up or believe they have been seen by someone else.
+### Passkeys
 
-Generating a new set invalidates the old one.
+Add a passkey from this section. A passkey lets you sign in with your device's own unlock instead of a password.
+
+### Two-factor authentication
+
+A second step at sign-in, from an authenticator app. Enable it from this page.
 
 ### Sessions and devices
 
-Review where your account is signed in. End any session you do not recognise, then change your password and review your MFA settings.
+**Active sessions** lists every device the account is signed in on, with its last-active time, under **Active Devices**. Revoking an entry does not sign that device out; changing your password does.
+
+![Active sessions, listing each signed-in device](/docs/security-03-sessions.webp)
+
+### Tenant-wide security
+
+Administrators also see **Tenant-wide security**: **Audit activity** (who changed what, and when), **Audit and access** (security events and access review), **API keys and tokens** and **Voice security**. The last two currently state that they are not available here.
+
+### Data retention and recordings
+
+Confirm your account's recording and transcript retention policy with your administrator. Open **Recordings** to review stored audio.
+
+### IP allow-list
+
+Not available. No IP allow-list is enforced anywhere in the platform today; it is listed so that its absence is explicit rather than assumed.
 
 ## Settings
 
@@ -34,35 +46,38 @@ Use the Profile tab to review or update information such as:
 - Business/organization name
 - Account/tenant information
 
+![The profile settings, showing name and business details](/docs/settings-01-profile.webp)
+
 Save changes after editing.
 
 ### Account Security
 
-Where enabled, Security settings can include:
+Account security controls live on the **Security** page, opened from the sidebar. The **Security** tab under **Settings → Account & Security** only shows a **Go to Security** link. The Security page offers:
 
-- MFA setup
-- MFA removal
-- Recovery information
+- Two-factor authentication setup and removal
+- Recovery codes, shown once two-factor authentication is on
 - Passkeys
-- Trusted devices/session controls
+- Active sessions, with sign-out of other devices
 
 Use MFA for administrator accounts wherever possible.
 
 #### Set up MFA
 
-1. Open **Settings → Account Security**.
-2. Start the MFA setup.
-3. Scan the code with your authenticator app, or enter the key manually.
-4. Enter the six-digit code from the app to confirm.
-5. Store the recovery codes somewhere safe. Each one can be used once if you lose access to the app.
+1. Select **Security** from the sidebar.
+2. Under **Two-factor authentication**, select **Enable two-factor authentication**.
+3. On the **QR Code** step, scan the code with your authenticator app, or enter the key shown beneath it manually.
+4. On the **Verify** step, enter the six-digit code from the app to confirm.
+5. On the **Recovery** step, select **Download** to save your recovery codes, then **Complete Setup**. Once two-factor authentication is on, the panel shows **Recovery codes remaining** and a **Regenerate recovery codes** button.
+
+![The two-factor authentication panel, showing its current state](/docs/security-02-two-factor.webp)
 
 #### Add a passkey
 
-Where passkeys are available, follow the on-screen prompts to register your device. A passkey lets you sign in using your device's own unlock method instead of a password.
+On the **Security** page, under **Password and account**, select **Add a passkey** and follow the on-screen prompts to register your device. A passkey lets you sign in using your device's own unlock method instead of a password.
 
 #### Remove MFA
 
-Removing MFA weakens your account. Only do it when you are replacing the method, and re-enable it immediately afterwards.
+Removing MFA weakens your account. Only do it when you are replacing the method, and re-enable it immediately afterwards. On the **Security** page, under **Two-factor authentication**, select **Turn off**, confirm your password, then select **Turn off two-factor authentication**.
 
 ### Telephony
 
@@ -70,7 +85,11 @@ The Telephony tab is used to configure supported calling providers and related s
 
 1. Open **Settings → Telephony**.
 2. Review the existing SIP lines and their live status.
-3. Select **Connect your PBX** to add a connection, or **Edit** to change one.
+
+   ![The telephony settings, listing configured SIP lines and their status](/docs/settings-02-telephony.webp)
+3. Select **Connect PBX** to add a connection, or **Edit** to change one.
+
+   ![The dialog for connecting a PBX, with fields for the provider details](/docs/settings-03-pbx-dialog.webp)
 4. Enter the details supplied by your provider.
 5. Save, then use the test action to confirm the line works.
 
@@ -86,15 +105,17 @@ Your plan sets how many calls can run at once. Campaigns queue beyond that limit
 
 These areas are available only to authorized administrative roles.
 
+![Tenant-wide security, listing audit activity, access review, API keys and voice security](/docs/security-04-tenant-wide.webp)
+
 ### Security Center may include
 
 - **Audit logs** — a record of who did what and when
-- **Voice security** — controls related to voice handling
+- **Voice security** — listed, but not available in the application today
 - **Abuse detection** — monitoring for misuse
 
 ### Developer Hub may include
 
-- **API keys** — create, review and revoke keys
+- **API keys** — listed, but not available in the application today
 - **Webhooks** — register endpoints to receive events
 - **Rate limiting** — review and adjust request limits
 - **Secrets** — manage stored credentials
@@ -109,15 +130,13 @@ Administrators may see a separate reviews area covering conversations across the
 
 These areas should normally be managed by administrators or technical teams rather than everyday campaign operators.
 
-#### Working with API keys
+#### API keys and voice security
 
-1. Open **Developer Hub → API keys**.
-2. Create a key and record it immediately — it is shown only once.
-3. Revoke any key that is no longer needed or may have been exposed.
-
-Never place an API key in a public document, a support message, or client-side code.
+API keys and voice security are listed in the navigation but are not available in the application today. No key management API is served.
 
 #### Working with webhooks
+
+Webhooks are available where your account provides them.
 
 1. Open **Developer Hub → Webhooks**.
 2. Register the endpoint that should receive events.

@@ -2,6 +2,8 @@
 
 Where the Assistant area is enabled for your account, it brings together follow-up work created by your calls.
 
+![The Assistant area, listing follow-up work created by calls](/docs/follow-ups-01-assistant.webp)
+
 ### Assistant areas
 
 - **Actions** — tasks the AI agent agreed to during calls, and their status
@@ -64,3 +66,5 @@ Talk-Lee can notify you about events that need attention, such as a campaign pro
 2. Review unread items.
 3. Open an item to go to the relevant area.
 4. Mark items as read once handled.
+
+![The notifications panel open, showing recent items](/docs/follow-ups-02-notifications.webp)

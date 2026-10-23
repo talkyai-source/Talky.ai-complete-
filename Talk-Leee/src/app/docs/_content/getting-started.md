@@ -6,11 +6,15 @@ Parts of Talk-Lee are available to anyone visiting the website, without an accou
 
 The Talk-Lee home page carries an **Ask AI** button. Selecting it starts a live voice conversation with a Talk-Lee AI agent in your browser, so you can hear how the product sounds before signing up.
 
+![The Talk-Lee home page with the Ask AI button in the lower left of the hero](/docs/getting-started-01-home-ask-ai.webp)
+
 1. Open the Talk-Lee home page.
 2. Select **Ask AI**.
 3. Allow microphone access when your browser asks for it.
 4. Speak normally. The agent answers in real time.
 5. While a call is active, a call bar appears at the top of the page showing the elapsed time and an **End Call** button.
+
+   ![The active-call bar at the top of the page, showing the elapsed time and an End Call button](/docs/getting-started-02-ask-ai-call-bar.webp)
 6. Select **End Call** to finish. A short notice confirms the call has ended.
 
 Notes:
@@ -22,6 +26,8 @@ Notes:
 ### Pricing
 
 The public **Pricing** page lists the available subscription plans.
+
+![The pricing page with the Annual option selected and the two plan cards below it](/docs/getting-started-03-pricing-annual.webp)
 
 1. Select **Pricing** from the navigation menu, or open the pricing page directly.
 2. Use the **Annual / Monthly** switch above the plan cards to change which price is shown. Annual is shown by default.
@@ -52,8 +58,14 @@ Corporate networks that block real-time audio may prevent in-browser calling. If
 
 1. Open the Talk-Lee website and select **Start Free Trial**, **Get Started**, or **Register**.
 2. Enter your name, business name, and email address, then continue.
+
+   ![The first registration step, asking for name, business name and email](/docs/getting-started-04-register-details.webp)
 3. Talk-Lee emails a verification code. Enter that code to continue.
+
+   ![The verification step, with a field for the code sent by email](/docs/getting-started-05-register-code.webp)
 4. Choose a password that meets the strength requirements shown on screen.
+
+   ![The password step, showing the strength requirements](/docs/getting-started-06-register-password.webp)
 5. Complete the registration.
 
 After registration, Talk-Lee signs you in and opens your dashboard. If you arrived from the Ask AI button, you are returned to the home page instead.
@@ -65,6 +77,8 @@ After registration, Talk-Lee signs you in and opens your dashboard. If you arriv
 3. Complete MFA if it is enabled for your account.
 4. After a successful sign-in, Talk-Lee opens the **Dashboard**.
 
+![The sign-in page, with fields for email and password](/docs/getting-started-07-login.webp)
+
 If your organization uses a configured sign-in provider, follow the provider prompts shown on screen.
 
 ### Reset a forgotten password
@@ -75,9 +89,13 @@ If your organization uses a configured sign-in provider, follow the provider pro
 4. Enter the code and set a new password.
 5. Sign in with the new password.
 
+![The forgotten-password page, asking for a registered email address](/docs/getting-started-08-forgot-password.webp)
+
 ### Main Navigation
 
 The left sidebar provides access to the main Talk-Lee areas, in this order:
+
+![The expanded sidebar, listing every area from Dashboard to Logout](/docs/getting-started-10-sidebar-expanded.webp)
 
 - **Dashboard** — account and calling overview
 - **Campaigns** — create and manage outbound campaigns
@@ -88,9 +106,9 @@ The left sidebar provides access to the main Talk-Lee areas, in this order:
 - **Recordings** — access stored call recordings
 - **Connectors** — connect supported external services
 - **AI Options** — configure AI, voice, and model settings
-- **Security** — your own account security, including recovery codes
+- **Security** — your account security; recovery codes appear once two-factor authentication is on
 - **Billing & Logs** — view plan, usage, and billing information
-- **Settings** — profile, account security, and telephony settings
+- **Settings** — profile, device, telephony, and recording settings
 - **Logout** — sign out of Talk-Lee
 
 Depending on your plan and role you may also see **Assistant**, **Meetings**, **Reminders**, **Email**, **Reviews**, **Notifications**, **Security Center**, **Developer Hub**, or white-label partner areas.
@@ -100,6 +118,8 @@ Selecting the **Talk-Lee** name at the top of the sidebar returns you to the pub
 ### Collapse the sidebar
 
 A control beside the Talk-Lee name collapses the sidebar to icons only, giving more room to the page content. Select it again to expand. Your choice is remembered on that browser.
+
+![The sidebar collapsed to icons only](/docs/getting-started-11-sidebar-collapsed.webp)
 
 ### Your account panel
 
@@ -112,6 +132,8 @@ The navigation bar includes a theme control. Use it to switch between light and 
 ### Smaller screens
 
 On phones and tablets the navigation collapses into a menu button. Select it to open the navigation drawer, then select an area. The drawer closes when you choose a destination, when you select the close control, when you select outside it, or when you press Escape.
+
+![The navigation drawer open on a phone-width screen](/docs/getting-started-12-mobile-drawer.webp)
 
 ### Sign out
 
@@ -133,6 +155,8 @@ If a link leads to a page that does not exist, Talk-Lee shows a not-found page. 
 ## Dashboard
 
 The Dashboard gives you a high-level view of your Talk-Lee account and recent calling activity.
+
+![The Talk-Lee dashboard, showing the summary cards and recent activity](/docs/getting-started-09-dashboard.webp)
 
 ### What you can review
 
