@@ -1,5 +1,10 @@
 # Admin remaining limitations — 27 October 2026
 
+**Follow-up:** [billing-compatible Admin release](2026-10-27-admin-billing-release-compatibility.md)
+records the subsequently changed production source/schema, preserved billing
+merge and fresh restore. Its live observations supersede the baseline below;
+the earlier results remain historical evidence.
+
 This continues the [live monitoring repair](2026-10-27-admin-monitoring-live.md)
 under the existing feature freeze. It records completed work and the remaining
 coordinated-release dependency; it does not certify the whole Admin product.
