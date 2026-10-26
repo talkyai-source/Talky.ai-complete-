@@ -143,8 +143,8 @@ _OUTCOME_ASSIGN = re.compile(
 )
 
 
-def _queue_stat_outcome_lines(src: str) -> set[int]:
-    """Lines whose ``outcome=`` kwarg is a QUEUE job-stat label, not a call outcome.
+def _non_call_outcome_lines(src: str) -> set[int]:
+    """Lines whose outcome kwarg belongs to a queue statistic or media receipt.
 
     ``QueueService.mark_completed(job_id, outcome=...)`` only does a Redis
     ``hincrby`` on ``outcome_<label>`` — a per-delivery job statistic. It never
@@ -153,6 +153,10 @@ def _queue_stat_outcome_lines(src: str) -> set[int]:
     the same reason latency_tracker and resilient_llm are excluded at module
     level: ``outcome`` is an overloaded word. Narrowing, not loosening — a
     literal that really is written to the calls table is still flagged.
+
+    ``AdminMediaDeleteReceipt`` similarly owns a deletion-result vocabulary.
+    Exclude only its outcome keyword, not its module or literal value: media.py
+    also updates calls, and those writes must remain covered.
 
     Takes RAW source: ``app_sources`` yields comment/docstring-stripped text
     that no longer parses (a stripped docstring leaves an empty function body).
@@ -168,7 +172,7 @@ def _queue_stat_outcome_lines(src: str) -> set[int]:
             continue
         func = node.func
         name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-        if name not in {"mark_completed", "mark_skipped"}:
+        if name not in {"mark_completed", "mark_skipped", "AdminMediaDeleteReceipt"}:
             continue
         for keyword in node.keywords:
             if keyword.arg == "outcome":
@@ -204,11 +208,11 @@ def test_every_literal_outcome_written_anywhere_is_classified():
         if not _writes_the_calls_table(src):
             continue
         scanned += 1
-        queue_stat_lines = _queue_stat_outcome_lines(
+        non_call_lines = _non_call_outcome_lines(
             (BACKEND / rel).read_text(encoding="utf-8")
         )
         for i, line in enumerate(src.splitlines(), 1):
-            if i in queue_stat_lines:
+            if i in non_call_lines:
                 continue
             for match in _OUTCOME_ASSIGN.finditer(line):
                 value = next(g for g in match.groups() if g)
@@ -238,10 +242,10 @@ def test_admin_terminate_maps_both_cases(was_answered, expected):
 
 
 def test_the_scanner_still_catches_a_calls_table_offender():
-    """The queue-stat exclusion narrows the scan; it must not blunt it.
+    """Non-call vocabularies must not hide the same literal in a calls write.
 
     Planted source: one genuine `calls` write with an unclassified literal
-    (must be flagged) and one queue job-stat label (must be ignored).
+    (must be flagged), a queue statistic and a typed media receipt (ignored).
     """
     planted = (
         'def a(conn):\n'
@@ -251,14 +255,18 @@ def test_the_scanner_still_catches_a_calls_table_offender():
         '        job.job_id,\n'
         '        outcome="duplicate_terminal_attempt",\n'
         '    )\n'
+        'def c():\n'
+        '    return AdminMediaDeleteReceipt(outcome="completed")\n'
+        'def d(conn):\n'
+        '    conn.execute("UPDATE calls SET outcome = $1", outcome="completed")\n'
     )
     assert _writes_the_calls_table(planted)
 
-    skip = _queue_stat_outcome_lines(planted)
+    skip = _non_call_outcome_lines(planted)
     found = [
         next(g for g in m.groups() if g)
         for i, line in enumerate(planted.splitlines(), 1)
         if i not in skip
         for m in _OUTCOME_ASSIGN.finditer(line)
     ]
-    assert found == ["terminated_by_admin"], found
+    assert found == ["terminated_by_admin", "completed"], found
