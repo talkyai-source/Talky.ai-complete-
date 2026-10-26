@@ -103,6 +103,18 @@ deployment. The call checkout and the dashboard unit remained unchanged.
 Observation SHA-256:
 `0bfabba6cfeac55366e0843c9637abdbddbc4d4bdefcb0c6966a4d590c5d4eff`.
 
+The complete source candidate `a7fdd7278e704e472f6b196e2fab69d64588f8b1`
+subsequently passed all **14 CI checks**, including the backend, both frontends,
+full voice/security suite, native gateway/sanitizer checks, schema/secret guards
+and container build/security scan. These are source checks, not production
+activation or end-user/provider acceptance. The recorded checks are in
+[main CI](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40404987542),
+[voice CI](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40404987583)
+and [native gateway CI](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40404987667).
+The final check receipt hashes to
+`d482bdbcb9bbabbb500dfef3fb6afe111c5c7a4c94cab47b63a55373f7432eec`.
+Later evidence-only commits do not change that tested runtime source.
+
 The next activation remains subject to the existing executable
 [drain contract](../DEPLOYMENT.md#production-drain-manifest-contract): verified
 ingress/outbound freeze, four fresh zero counts, topology/change references and
