@@ -447,7 +447,7 @@ async def test_actual_callback_and_resolver_refresh_use_the_durable_lifecycle(co
 async def test_migration_downgrade_refuses_unresolved_refresh(connector_db, monkeypatch):
     import importlib.util
     from pathlib import Path
-    path = Path(__file__).parents[2] / "alembic/versions/0071_connector_lifecycle.py"
+    path = Path(__file__).parents[2] / "Alembic/versions/0071_connector_lifecycle.py"
     spec = importlib.util.spec_from_file_location("connector_lifecycle_migration", path)
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)

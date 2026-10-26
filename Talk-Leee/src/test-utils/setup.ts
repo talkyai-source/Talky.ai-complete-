@@ -1,7 +1,7 @@
 import { ensureDom } from "@/test-utils/dom";
 // JSDOM has no native Web Locks. Declare a supported-browser scheduler for
 // unit controls; unavailable capability and real cookies have separate tests.
-import { installSessionLocks } from "../../../Admin/frontend/tests/session-lock-fixture.mjs";
+import { installSessionLocks } from "./session-lock-fixture.mjs";
 
 ensureDom();
 installSessionLocks(window.navigator);
