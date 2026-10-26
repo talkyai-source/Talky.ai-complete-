@@ -258,6 +258,7 @@ jobs:
             tests/integration/test_billing_read_truth.py \
             tests/integration/test_knowledge_retrieval_boundaries.py \
             tests/integration/test_billing_refund_projection.py \
+            tests/integration/test_topup_usage.py \
             tests/integration/test_action_execution_receipts.py \
             tests/integration/test_ag05_lead_evidence.py \
             tests/integration/test_ag06_action_cancellation.py \

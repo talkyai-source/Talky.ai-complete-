@@ -26,6 +26,7 @@ function balance(over: Partial<TopupBalance> = {}): TopupBalance {
         unlimited: false,
         exhausted: false,
         purchased_minutes: 0,
+        topup_minutes_left: 0,
         ...over,
     };
 }

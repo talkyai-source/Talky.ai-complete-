@@ -93,7 +93,9 @@ def test_signing_secret_required_for_new_paid_checkout(monkeypatch):
         catalog.validate_option(option(), "test")
 
 
-def test_explicit_free_does_not_need_stripe(monkeypatch):
+def test_free_option_is_refused_since_paid_only_billing(monkeypatch):
+    """Owner decision 2026-10-27: no free minutes for anyone, even where an
+    old free option row is still active and complete."""
     monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
     terms = option()
     terms.update(
@@ -103,10 +105,9 @@ def test_explicit_free_does_not_need_stripe(monkeypatch):
         stripe_product_id=None,
         provider_mode="free",
     )
-    catalog.validate_option(terms, "disabled")
-    terms["amount_minor"] = None
-    with pytest.raises(catalog.BillingCatalogUnavailable):
-        catalog.validate_option(terms, "disabled")
+    for mode in ("disabled", "test", "live"):
+        with pytest.raises(catalog.BillingCatalogUnavailable, match="no longer offered"):
+            catalog.validate_option(terms, mode)
 
 
 @pytest.mark.parametrize(

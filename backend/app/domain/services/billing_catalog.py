@@ -97,15 +97,9 @@ def validate_option(option: dict, mode: str) -> None:
     ):
         raise BillingCatalogUnavailable("This billing interval is not supported.")
     if option.get("kind") == "free":
-        if (
-            amount != 0
-            or option.get("stripe_price_id")
-            or option.get("stripe_product_id")
-            or option.get("provider_mode") != "free"
-            or option.get("interval") != "month"
-        ):
-            raise BillingCatalogUnavailable("This free price option is invalid.")
-        return
+        # Owner decision 2026-10-27: no free minutes for anyone from now on.
+        # Code refuses it even where an old database row is still active.
+        raise BillingCatalogUnavailable("Free plans are no longer offered. Choose a paid plan.")
     if (
         option.get("kind") != "stripe"
         or amount <= 0
@@ -217,14 +211,13 @@ async def list_plan_catalog(pool) -> list[dict]:
         return option["plan_id"], public
 
     presented = await asyncio.gather(
-        *(
-            present(row)
-            for row in rows
-            if row["provider_mode"] == "free" or row["provider_mode"] == mode
-        )
+        *(present(row) for row in rows if row["kind"] == "stripe" and row["provider_mode"] == mode)
     )
+    offered = {plan_id for plan_id, _ in presented}
     result = []
     for row in plans:
+        if row["id"] not in offered:
+            continue  # free, retired or not yet priced in this billing mode
         plan = dict(row)
         for field in ("features", "not_included"):
             value = plan.get(field)

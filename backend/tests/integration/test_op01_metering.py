@@ -99,13 +99,18 @@ async def test_zero_allocation_requires_explicit_zero_plan(meter_db, plan_minute
     assert result.unlimited is (state == "unlimited")
 
 
-@pytest.mark.parametrize("missing", ["tenant", "plan"])
-async def test_missing_entitlement_is_unavailable(meter_db, missing):
-    if missing == "plan":
-        await meter_db.admin.execute("UPDATE tenants SET minutes_allocated=0,plan_id=NULL WHERE id=$1", meter_db.tenants[0])
-    result = await status(meter_db, uuid4() if missing == "tenant" else None)
+async def test_missing_entitlement_is_unavailable(meter_db):
+    result = await status(meter_db, uuid4())
     assert result.state == "unavailable" and not result.unlimited
     assert result.remaining_minutes is None
+
+
+async def test_no_plan_is_zero_known_minutes_never_unlimited(meter_db):
+    """Paid-only billing (owner decision 2026-10-27): new accounts have no plan
+    and no minutes until they buy one."""
+    await meter_db.admin.execute("UPDATE tenants SET minutes_allocated=0,plan_id=NULL WHERE id=$1", meter_db.tenants[0])
+    result = await status(meter_db)
+    assert (result.state, result.remaining_minutes, result.exhausted, result.unlimited) == ("known", 0, True, False)
 
 
 async def test_schema_rejects_missing_allocation_without_altering_entitlement(meter_db):

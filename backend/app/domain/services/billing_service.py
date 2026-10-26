@@ -329,7 +329,11 @@ class BillingService:
 
         if not await self._portal_customer_verified(tenant_id, customer_id):
             raise ValueError("Billing portal customer ownership could not be verified")
-        session = await self._stripe_call("billing_portal.Session", "create", customer=customer_id, return_url=return_url)
+        # The portal offers card updates, invoices and cancel-at-period-end
+        # only; a price change there would not match the frozen purchase terms.
+        # scripts/stripe_catalog_setup.py creates that configuration.
+        portal = {"configuration": configuration} if (configuration := os.getenv("STRIPE_PORTAL_CONFIGURATION_ID", "").strip()) else {}
+        session = await self._stripe_call("billing_portal.Session", "create", customer=customer_id, return_url=return_url, **portal)
 
         return {"portal_url": session.url, "mock_mode": False}
 

@@ -16,7 +16,9 @@ durations plus only ``finalized`` transfer-leg actual durations, divided by
 by inbound admission but are not presented as already-used customer minutes.
 
 A zero allocation is unlimited only when the bound plan explicitly has zero
-included minutes. Missing/invalid allowance or failed usage reads are unavailable.
+included minutes; an account with no plan has zero minutes. Missing/invalid
+allowance or failed usage reads are unavailable. Top-up minutes are used once
+(see ``topup_usage``).
 The stale tenants.minutes_used column is never an admission authority.
 """
 from __future__ import annotations
@@ -83,6 +85,8 @@ async def _compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
     # The existing bound plan must explicitly carry the zero-minute sentinel.
     row = await conn.fetchrow(
         """SELECT t.minutes_allocated,p.minutes AS plan_minutes,
+                  t.plan_id IS NULL AS no_plan,
+                  EXISTS(SELECT 1 FROM billing_ledger b WHERE b.tenant_id=t.id) AS has_ledger,
                   -- Purchased minutes whose package carries an expiry that has
                   -- passed. They stay in minutes_allocated (and are re-added by
                   -- every plan re-allocation), so the meter removes them here;
@@ -102,12 +106,19 @@ async def _compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
     )
     if row is None or type(row["minutes_allocated"]) is not int or row["minutes_allocated"] < 0:
         return unavailable_minutes("allowance_unavailable")
-    allocated = row["minutes_allocated"]
+    allocated = raw_allocated = row["minutes_allocated"]
     plan_minutes = row["plan_minutes"]
+    if allocated > 0 and row.get("has_ledger"):
+        # Top-up minutes that closed months used up, not yet recorded by the
+        # reminder worker, would otherwise be granted again this month.
+        from app.domain.services.topup_usage import pending_topup_usage
+        allocated = max(0, allocated - await pending_topup_usage(conn, tenant_id, allocated))
     expired = row.get("expired_topup_minutes") or 0
     if allocated > 0 and type(expired) is int and expired > 0:
         allocated = max(0, allocated - expired)
-    if allocated == 0 and (type(plan_minutes) is not int or plan_minutes < 0):
+    # No plan bound (new accounts since paid-only billing): zero minutes, a
+    # known and exhausted allowance rather than an unknown one.
+    if allocated == 0 and not row.get("no_plan") and (type(plan_minutes) is not int or plan_minutes < 0):
         return unavailable_minutes("unlimited_entitlement_unverified")
     used_seconds = await conn.fetchval(
         """
@@ -144,7 +155,8 @@ async def _compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
         """,
         tenant_id,
     )
-    return _status_from(allocated, used_seconds, unlimited=allocated == 0 and plan_minutes == 0)
+    # Unlimited is the stored sentinel, never a balance reduced to zero.
+    return _status_from(allocated, used_seconds, unlimited=raw_allocated == 0 and plan_minutes == 0)
 
 
 async def count_inflight_outbound_calls(conn: Any, tenant_id: str) -> int:

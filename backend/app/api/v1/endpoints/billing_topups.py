@@ -49,7 +49,9 @@ from app.domain.services.billing_checkout import CheckoutError, billing_return_u
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.billing_service import BillingService
 from app.domain.services.minutes_quota import compute_minutes_status
+from app.domain.services.subscription_status import ACTIVE, TRIALING, canonical
 from app.domain.services.topup_service import TopupError, TopupService, public_ledger_entry
+from app.domain.services.topup_usage import topup_minutes_left
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,17 @@ def _tenant(user) -> str:
     return str(tid)
 
 
+async def _has_paid_plan(tenant_id: str) -> bool:
+    """An active Stripe subscription, the only way to a paid plan."""
+    async with acquire_with_tenant(get_container().db_pool, tenant_id) as conn:
+        row = await conn.fetchrow(
+            "SELECT stripe_subscription_id, subscription_status FROM tenants WHERE id=$1::uuid",
+            tenant_id,
+        )
+    return bool(row and row["stripe_subscription_id"]
+                and canonical(row["subscription_status"]) in {ACTIVE, TRIALING})
+
+
 def _service() -> TopupService:
     c = get_container()
     if not c.is_initialized:
@@ -76,11 +89,11 @@ def _service() -> TopupService:
 def _live_topups_enabled() -> bool:
     """BILLING_TOPUPS_LIVE_ENABLED, default off (same truthy set as the other flags).
 
-    Purchased top-up minutes are added to ``tenants.minutes_allocated``
-    permanently and recur every month, so they cannot be sold against a real
-    Stripe key until the owner decides how they expire. Read from the process
-    environment on each request (no cached setting), so the switch is the
-    service environment plus a restart.
+    Top-up minutes used to recur every month inside ``minutes_allocated``.
+    Since 2026-10-27 they are used once and carry over until used
+    (``topup_usage``, owner decision), and this stays the operator's switch.
+    Read from the process environment on each request (no cached setting), so
+    the switch is the service environment plus a restart.
     """
     return os.getenv("BILLING_TOPUPS_LIVE_ENABLED", "false").strip().lower() in {
         "1", "true", "yes", "on",
@@ -128,6 +141,8 @@ class BalanceOut(BaseModel):
     unlimited: bool
     exhausted: bool
     purchased_minutes: int
+    # Bought minutes still unused; they carry over until used (topup_usage).
+    topup_minutes_left: int = 0
 
 
 # ── catalogue ───────────────────────────────────────────────────────────────
@@ -169,9 +184,11 @@ async def get_balance(current_user: CurrentUser = Depends(get_current_user)):
     try:
         async with acquire_with_tenant(c.db_pool, tenant_id) as conn:
             st = (await compute_minutes_status(conn, tenant_id)).require_available()
+            left = 0 if st.unlimited else await topup_minutes_left(conn, tenant_id, st.used_minutes)
     except Exception as exc:
         raise HTTPException(status_code=503, detail={"code": "usage_unavailable", "message": "Minute allowance is temporarily unavailable."}) from exc
-    return BalanceOut(**st.as_dict(), purchased_minutes=await svc.purchased_total(tenant_id))
+    return BalanceOut(**st.as_dict(), purchased_minutes=await svc.purchased_total(tenant_id),
+                      topup_minutes_left=left)
 
 
 # ── purchase ────────────────────────────────────────────────────────────────
@@ -218,6 +235,14 @@ async def create_topup_checkout(
         )
 
     svc = _service()
+
+    # Paid-only billing (owner decision 2026-10-27): top-ups add to a paid
+    # plan, as the pricing page says. Refused before any order or session.
+    if not await _has_paid_plan(tenant_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Buy a monthly or yearly plan before adding top-up minutes.",
+        )
 
     # Resolved before the order exists so a missing/invalid destination cannot
     # leave an orphan pending order. Neither the body nor the Origin header can

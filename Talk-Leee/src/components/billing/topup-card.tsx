@@ -117,7 +117,8 @@ export function TopupCard() {
               <Zap className="h-4 w-4" aria-hidden /> Top up minutes
             </CardTitle>
             <CardDescription className="text-xs">
-              Buy call minutes without changing your plan. Credit follows verified payment.
+              Add minutes to your paid plan. They are used after your monthly minutes and carry over
+              until used. Credit follows verified payment.
             </CardDescription>
           </div>
           {balance && !unlimited ? (
@@ -141,6 +142,8 @@ export function TopupCard() {
                   <>
                     {" · "}
                     {balance.purchased_minutes.toLocaleString()} topped up
+                    {" · "}
+                    {balance.topup_minutes_left.toLocaleString()} top-up left
                   </>
                 ) : null}
               </div>

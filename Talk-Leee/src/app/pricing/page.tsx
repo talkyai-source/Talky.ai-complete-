@@ -34,8 +34,8 @@ export default function PricingPage() {
     {
       name: "Basic",
       price: "$99/month",
-      annualPrice: "$83/month",
-      annual: "Annual billing equivalent: $83/month",
+      annualPrice: "$82/month",
+      annual: "Billed annually: $986/year (save 17%)",
       highlights: [
         "Included AI minutes: 300/month",
         "Concurrent calls: 3",
@@ -47,8 +47,8 @@ export default function PricingPage() {
     {
       name: "Business",
       price: "$299/month",
-      annualPrice: "$269/month",
-      annual: "Annual billing equivalent: $269/month",
+      annualPrice: "$248/month",
+      annual: "Billed annually: $2,978/year (save 17%)",
       highlights: [
         "Included AI minutes: 1,000/month",
         "Concurrent calls: 10",
@@ -61,7 +61,7 @@ export default function PricingPage() {
 
   const comparisonRows: [string, string, string][] = [
     ["Monthly price", "$99/month", "$299/month"],
-    ["Annual billing equivalent", "$83/month", "$269/month"],
+    ["Annual billing (17% off)", "$986/year ($82/month)", "$2,978/year ($248/month)"],
     ["Included AI minutes", "300/month", "1,000/month"],
     ["Concurrent calls", "3", "10"],
     ["Campaigns", "2", "10"],
@@ -89,6 +89,7 @@ export default function PricingPage() {
 
   const bundleNotes = [
     "Top-up bundles apply only to Talklee AI platform minutes.",
+    "Top-up minutes are used after the plan's monthly minutes and carry over until used.",
     "Telephone/PSTN/SIP carrier usage remains billed separately.",
     "ElevenLabs premium voice usage remains separate from the standard AI-minute bundles.",
     "Larger custom minute bundles can be quoted for higher-volume customers.",
@@ -110,7 +111,8 @@ export default function PricingPage() {
 
   const billingNotes = [
     "Plan limits apply per customer account.",
-    "AI top-ups can be purchased when the included monthly AI-minute allowance is exhausted.",
+    "AI calling requires a paid Basic or Business plan; there is no free minute allowance.",
+    "AI top-ups can be purchased with a paid plan when the included monthly AI-minute allowance is exhausted.",
     "Premium voice usage and telephony usage are billed separately from standard AI minutes.",
     "Custom pricing can be agreed for larger deployments or higher-volume usage.",
     "Final commercial terms, premium voice allowances and custom carrier rates should be confirmed in the client agreement.",

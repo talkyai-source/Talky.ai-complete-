@@ -86,6 +86,17 @@ class _Conn:
     def transaction(self):
         return self._Txn()
 
+    async def fetchrow(self, sql, *args):
+        # record_topup_usage reads the tenant before any re-allocation.
+        self.sql.append(sql)
+        return {"minutes_allocated": self.store["allocated"], "plan_minutes": self.store["plan"]["minutes"]}
+
+    async def fetch(self, sql, *args):
+        # No closed month is waiting to be recorded in these scenarios
+        # (tests/integration/test_topup_usage.py covers that against Postgres).
+        self.sql.append(sql)
+        return []
+
     async def execute(self, sql, *args):
         self.sql.append(sql)
         if "UPDATE tenants" in sql and "minutes_allocated" in sql:

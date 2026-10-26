@@ -61,6 +61,10 @@ def billing_return_urls(request_id=None):
 
 async def apply_plan_allocation(conn, tenant_id, minutes):
     """Preserve the existing signed top-up ledger and unlimited sentinel."""
+    from app.domain.services.topup_usage import record_topup_usage
+    # Closed months are measured against the old plan's minutes; record them
+    # before the allowance changes so the ledger sum is the unused balance.
+    await record_topup_usage(conn, str(tenant_id))
     result = await conn.execute(
         """UPDATE tenants SET minutes_allocated=CASE WHEN $2::int<=0 THEN 0
              ELSE $2::int + GREATEST(0,COALESCE((SELECT SUM(minutes_delta)
@@ -249,21 +253,6 @@ class CheckoutAttempts:
                 datetime.fromtimestamp(expires, UTC), state,
             )
 
-    async def _activate_free(self, row):
-        tenant_id, request_id = str(row["tenant_id"]), str(row["id"])
-        option = row["snapshot"]["option"]
-        async with acquire_with_tenant(self.pool, tenant_id) as conn:
-            tenant = await conn.fetchrow("SELECT stripe_subscription_id,plan_id,subscription_status FROM tenants WHERE id=$1::uuid FOR UPDATE", tenant_id)
-            attempt = await conn.fetchrow("SELECT status FROM billing_checkout_attempts WHERE id=$1::uuid AND tenant_id=$2::uuid FOR UPDATE", request_id, tenant_id)
-            if attempt["status"] == "completed":
-                return
-            if not tenant or tenant["stripe_subscription_id"]:
-                raise CheckoutError("subscription_exists", "Manage your existing subscription before changing plan.")
-            if tenant["plan_id"] != option["plan_id"] or tenant["subscription_status"] != "active":
-                await apply_plan_allocation(conn, tenant_id, option["minutes"])
-                await conn.execute("UPDATE tenants SET plan_id=$2,subscription_status='active' WHERE id=$1::uuid", tenant_id, option["plan_id"])
-            await conn.execute("UPDATE billing_checkout_attempts SET status='completed',updated_at=NOW() WHERE id=$1::uuid AND tenant_id=$2::uuid", request_id, tenant_id)
-
     async def create(self, *, tenant_id, request_id, price_option_id, email, business_name=None):
         from app.domain.services.billing_catalog import (
             BillingCatalogUnavailable,
@@ -287,8 +276,8 @@ class CheckoutAttempts:
             return await self.get(tenant_id=tenant_id, request_id=request_id)
         option, snapshot = row["snapshot"]["option"], row["snapshot"]
         if option["kind"] == "free":
-            await self._activate_free(row)
-            return self.response(await self._get(tenant_id, request_id))
+            # A free request saved before paid-only billing never grants minutes.
+            raise CheckoutError("free_plan_retired", "Free plans are no longer offered. Choose a paid plan.", 400)
         if self.billing.billing_mode not in {"test", "live"} or option["provider_mode"] != self.billing.billing_mode:
             raise CheckoutError("billing_unavailable", "Paid checkout is unavailable in the current billing mode.", 503)
         # An old uncertain attempt is fenced forever until reconciled. Stripe's

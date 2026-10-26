@@ -234,6 +234,16 @@ def _check_pbx_default_credentials() -> list[GateViolation]:
     return violations
 
 
+def _acknowledged_test_mode(stripe_key: str) -> bool:
+    """A real Stripe test key plus an explicit production opt-in, never a default."""
+    flag = os.getenv("STRIPE_TEST_MODE_IN_PRODUCTION", "").strip().lower()
+    return (
+        flag in {"1", "true", "yes", "on"}
+        and stripe_key.startswith("sk_test_")
+        and len(stripe_key) > len("sk_test_")
+    )
+
+
 def _check_required_secrets() -> list[GateViolation]:
     """T0.3 — secrets that MUST be set in production. JWT controls auth;
     TELEPHONY_METRICS_TOKEN gates the /metrics endpoint;
@@ -424,6 +434,13 @@ def _check_required_secrets() -> list[GateViolation]:
                     "STRIPE_BILLING_DISABLED=1 to acknowledge running without billing."
                 ),
             )
+        )
+    elif _acknowledged_test_mode(stripe_key):
+        # The owner chose to run production on Stripe test mode until live keys
+        # exist (2026-10-27). Checkout shows "Test billing" and takes no money.
+        logger.warning(
+            "prod_gate_stripe_test_mode — production billing uses Stripe TEST "
+            "mode (STRIPE_TEST_MODE_IN_PRODUCTION); no real payment is taken"
         )
     elif not stripe_key.startswith("sk_live_") or len(stripe_key) <= len("sk_live_"):
         # A set-but-non-live key (test/restricted-test 'sk_test_...' or a
