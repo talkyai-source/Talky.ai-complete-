@@ -14,9 +14,11 @@ class SystemHealthItem(BaseModel):
     """Single provider health status"""
     name: str
     status: str  # 'operational', 'degraded', 'down'
-    latency_ms: int
+    latency_ms: Optional[int] = None
     latency_display: str
     last_check: Optional[str] = None
+    scope: str = "unmeasured"
+    detail: str = ""
 
 
 class DetailedHealthResponse(BaseModel):
@@ -28,12 +30,15 @@ class DetailedHealthResponse(BaseModel):
     memory_percent: float
     cpu_usage_percent: float
     disk_usage_percent: float
+    disk_free_gb: float
     python_version: str
     os_info: str
     environment: str
     version: str
     providers: List[SystemHealthItem]
     last_updated: str
+    checked_at: str
+    metrics_scope: str
 
 
 class WorkerStatus(BaseModel):
@@ -42,11 +47,13 @@ class WorkerStatus(BaseModel):
     name: str
     status: str  # idle, busy, offline
     current_task: Optional[str] = None
-    processed_count: int
-    failed_count: int
-    success_rate: float
-    last_heartbeat: str
-    uptime_seconds: int
+    processed_count: Optional[int] = None
+    failed_count: Optional[int] = None
+    success_rate: Optional[float] = None
+    last_heartbeat: Optional[str] = None
+    uptime_seconds: Optional[int] = None
+    age_seconds: Optional[float] = None
+    detail: str = ""
 
 
 class WorkersResponse(BaseModel):
@@ -54,37 +61,45 @@ class WorkersResponse(BaseModel):
     workers: List[WorkerStatus]
     total_workers: int
     active_workers: int
-    busy_workers: int
+    busy_workers: Optional[int] = None
+    checked_at: str
+    scope: str = "Role heartbeats; not an inventory of worker instances or tasks."
 
 
 class QueueStatus(BaseModel):
     """Queue status"""
     name: str
-    pending: int
-    processing: int
-    failed: int
-    completed_24h: int
-    success_rate_24h: float
-    avg_processing_time_ms: int
+    pending: Optional[int] = None
+    processing: Optional[int] = None
+    failed: Optional[int] = None
+    completed_24h: Optional[int] = None
+    success_rate_24h: Optional[float] = None
+    avg_processing_time_ms: Optional[int] = None
+    status: str = "unavailable"
+    scope: str
+    detail: str = ""
 
 
 class QueuesResponse(BaseModel):
     """Queues list response"""
     queues: List[QueueStatus]
-    total_pending: int
-    total_processing: int
+    total_pending: Optional[int] = None
+    total_processing: Optional[int] = None
+    checked_at: str
 
 
 class DatabaseStatus(BaseModel):
     """Database connection status"""
     connected: bool
-    latency_ms: int
-    pool_size: int
-    active_connections: int
-    available_connections: int
-    database_size_mb: float
-    table_count: int
+    latency_ms: Optional[int] = None
+    pool_size: Optional[int] = None
+    active_connections: Optional[int] = None
+    available_connections: Optional[int] = None
+    database_size_mb: Optional[float] = None
+    table_count: Optional[int] = None
     last_check: str
+    error: Optional[str] = None
+    scope: str = "Current API process connection pool and connected PostgreSQL database."
 
 
 # =============================================================================

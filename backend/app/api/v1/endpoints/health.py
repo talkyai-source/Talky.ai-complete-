@@ -124,6 +124,40 @@ _WORKER_HEARTBEAT_KEYS: Dict[str, str] = {
 _WORKER_STALE_AFTER_S = 180
 
 
+async def read_worker_heartbeats(redis_client: Any, *, now: float | None = None) -> list[Dict[str, Any]]:
+    """Bounded reads of role heartbeats, not instance/task-progress claims."""
+    import math
+    import time
+    observed = time.time() if now is None else now
+    async def read(name: str, key: str) -> Dict[str, Any]:
+        beat = None
+        reason = "heartbeat_missing"
+        try:
+            if redis_client is None:
+                raise RuntimeError("Redis unavailable")
+            raw = await asyncio.wait_for(redis_client.get(key), timeout=_DEEP_PING_TIMEOUT_S)
+            if raw is not None:
+                if isinstance(raw, (bytes, bytearray)):
+                    raw = raw.decode("utf-8")
+                beat = float(raw)
+                if not math.isfinite(beat) or beat <= 0:
+                    beat = None
+                    reason = "heartbeat_invalid"
+                elif beat > observed:
+                    reason = "heartbeat_in_future"
+                    beat = None
+                else:
+                    reason = "recent_heartbeat" if observed - beat < _WORKER_STALE_AFTER_S else "heartbeat_stale"
+        except (TypeError, ValueError, UnicodeError):
+            reason = "heartbeat_invalid"
+        except Exception:
+            reason = "heartbeat_read_unavailable"
+        age = observed - beat if beat is not None else None
+        return {"name": name, "last_beat_epoch": beat, "age_seconds": age,
+                "healthy": reason == "recent_heartbeat", "reason": reason}
+    return list(await asyncio.gather(*(read(name, key) for name, key in _WORKER_HEARTBEAT_KEYS.items())))
+
+
 @router.get("/healthz/workers")
 async def workers_health_probe(response: Response) -> Dict[str, Any]:
     """
