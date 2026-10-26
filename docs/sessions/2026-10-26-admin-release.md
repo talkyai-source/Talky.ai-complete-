@@ -4,6 +4,23 @@ The user has authorized deployment and another QA pass. This record describes re
 
 ## Current release status
 
+### Confirmed monitoring incompatibility — 27 October, Asia/Karachi
+
+After the login repair, an authenticated read of all six dashboard/monitoring endpoints returned HTTP 200 with the correct default Admin CORS header, but each response lacked fields required by the hosted Admin validators. The production backend still implements the older contract; this is a confirmed incomplete frontend/backend release, not a failed sign-in or a remaining CORS error for these requests.
+
+| Endpoint | Required fields absent from the actual response |
+|---|---|
+| `/admin/dashboard/stats` | `failed_calls_24h`, `total_calls_24h`, `failed_call_rate_24h`, `observed_at` |
+| `/admin/system-health` | Provider `scope`, `detail`, `last_check` |
+| `/admin/health/detailed` | `checked_at`, `metrics_scope` |
+| `/admin/health/workers` | `checked_at`, `scope`; worker `age_seconds`, `detail` |
+| `/admin/health/queues` | `checked_at`; queue `status`, `scope`, `detail` |
+| `/admin/health/database` | `scope`, `error` |
+
+The source comparison confirms that several old measurements are also semantically unsuitable: provider status/latencies are hardcoded, call failures are labelled API errors and include no-answer, the zero-active-tenant fallback counts all tenants, and worker/queue/database responses contain synthetic defaults or constants. Merely renaming fields, filling absent values or relaxing the UI validators would misrepresent these observations. The corresponding corrected collectors are already in the tested release candidate, but that backend release has not been activated. A matching deployment and real monitoring-page acceptance are still necessary; the CORS repair only established authentication/session behavior.
+
+The read-only investigation made no monitoring source/configuration change. Its temporary authentication session was logged out and the retired token returned 401. Only response shapes were retained, without tokens, passwords or customer rows. Private receipts: `output/admin-health-contract-local/live-response-shapes.json`, SHA-256 `2d379b74ad98ffc6a0bde4d326ed75d466649bad2df76249733e37e8c8f6c76f`; required-field comparison `output/admin-health-contract-local/contract-gaps.json`, SHA-256 `88faaaab92826e42a1ebfe7b4e3de5d81138f728298aa5912caef523e1940555`. Missing-field checks establish incompatibility; no separate direct validator execution or passing dashboard-browser journey is claimed.
+
 ### Admin login configuration repair — 27 October, Asia/Karachi
 
 The default Admin address reached its login page but session verification failed with `Failed to fetch`: the live API rejected its preflight with HTTP 400 `Disallowed CORS origin`. The exact origin `https://talkleeai-admin.vercel.app` was appended to the existing `CORS_ORIGINS` list. All other environment values and file permissions were preserved; the already-configured `SameSite=None` cookie policy and `talkleeai.com` cookie domain were unchanged. A root-private rollback copy remains on the server; it is excluded from exported evidence.
