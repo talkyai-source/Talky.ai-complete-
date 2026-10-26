@@ -2,7 +2,8 @@
 
 Owner decision 2026-10-27: a bought minute is used only after the month's plan
 minutes run out and stays until used. Before this, a top-up inside
-``minutes_allocated`` was granted again every calendar month.
+``minutes_allocated`` was granted again every calendar month. Bought minutes now
+live only in billing_ledger; minutes_allocated is the plan's monthly minutes.
 
 The meter and the recorder run as a NOSUPERUSER/NOBYPASSRLS role under tenant
 context, the way the application reads. Rows are UUID-scoped and removed.
@@ -80,14 +81,11 @@ def _month(months_ago: int, day: int = 2) -> str:
 
 
 async def buy(db, minutes: int, months_ago: int) -> None:
-    """A credited top-up, as credit_paid_order leaves it: ledger row plus allocation."""
+    """A credited top-up, as credit_paid_order leaves it: a ledger row only."""
     await db.admin.execute(
         f"""INSERT INTO billing_ledger(tenant_id,kind,minutes_delta,provider_event_id,created_at)
             VALUES($1,'topup',$2,$3,{_month(months_ago)})""",
         db.tenant, minutes, "evt_topup_" + uuid4().hex,
-    )
-    await db.admin.execute(
-        "UPDATE tenants SET minutes_allocated=minutes_allocated+$2 WHERE id=$1", db.tenant, minutes,
     )
 
 
@@ -125,8 +123,8 @@ async def test_a_closed_month_uses_bought_minutes_once(usage_db):
     )
 
     assert await record(db) == 100
-    assert await allocated(db) == 450
-    month = await db.admin.fetchval(f"SELECT to_char({_month(1)}, 'YYYY-MM')")
+    assert await allocated(db) == 300, "the allocation stays the plan's minutes"
+    month = await db.admin.fetchval(f"SELECT to_char(date_trunc('month', {_month(1)}), 'YYYY-MM-DD')")
     row = await db.admin.fetchrow(
         "SELECT kind,minutes_delta FROM billing_ledger WHERE provider_event_id=$1",
         usage_event_id(db.tenant, month),
@@ -144,7 +142,8 @@ async def test_unused_bought_minutes_carry_into_later_months(usage_db):
 
     assert (await meter(db)).allocated == 500
     assert await record(db) == 50
-    assert await allocated(db) == 500
+    assert await allocated(db) == 300
+    assert (await meter(db)).allocated == 500
     assert await db.admin.fetchval(
         "SELECT COUNT(*) FROM billing_ledger WHERE tenant_id=$1 AND provider_event_id LIKE 'topup-usage:%'", db.tenant,
     ) == 2, "both closed months are marked, the quiet one with a zero row"
@@ -180,8 +179,8 @@ async def test_a_plan_change_measures_closed_months_against_the_old_plan(usage_d
     async with acquire_with_tenant(db.pool, str(db.tenant)) as conn:
         await apply_plan_allocation(conn, str(db.tenant), 1000)
 
-    assert await allocated(db) == 1150, "the new plan plus the 150 bought minutes still unused"
-    assert (await meter(db)).allocated == 1150
+    assert await allocated(db) == 1000, "the allocation is the new plan's minutes"
+    assert (await meter(db)).allocated == 1150, "the new plan plus the 150 bought minutes still unused"
 
 
 async def test_an_unlimited_account_is_left_alone(usage_db):
@@ -206,3 +205,90 @@ async def test_an_account_with_no_plan_has_zero_minutes_not_an_unknown_allowance
     status = await meter(db)
     assert (status.state, status.allocated, status.remaining_minutes) == ("known", 0, 0)
     assert status.exhausted is True and status.unlimited is False
+
+
+async def test_a_refund_of_partly_used_minutes_is_never_blocked_and_takes_the_used_part_back(usage_db):
+    """Plan 300, a 250 top-up of which 100 were used, then a full refund: the
+    refund cannot be refused (it used to need review when the allocation was
+    at or below the pack size) and the 100 used minutes come off next."""
+    db = usage_db
+    await buy(db, 250, months_ago=1)
+    await talk(db, 400, months_ago=1)
+    await db.admin.execute(
+        "INSERT INTO billing_ledger(tenant_id,kind,minutes_delta,provider_event_id) VALUES($1,'refund',-250,$2)",
+        db.tenant, "evt_refund_" + uuid4().hex,
+    )
+    assert (await meter(db)).allocated == 200
+    assert await record(db) == 100
+    assert (await meter(db)).allocated == 200 and await allocated(db) == 300
+
+
+async def test_a_paid_plan_renews_monthly_from_the_purchase_not_the_first(usage_db):
+    """Subscribing late in a month must not give a second allowance on the 1st."""
+    db = usage_db
+    await db.admin.execute(
+        "UPDATE tenants SET allowance_anchor_at = NOW() - interval '10 days' WHERE id=$1", db.tenant,
+    )
+    await db.admin.execute(
+        """INSERT INTO calls(id,tenant_id,campaign_id,phone_number,status,duration_seconds,
+           direction,billing_status,is_test,created_at)
+           VALUES($1,$2,$3,'+15550001111','ended',18000,'outbound','none',FALSE,
+                  NOW() - interval '10 days' + interval '1 hour')""",
+        uuid4(), db.tenant, db.campaign,
+    )
+    status = await meter(db)
+    assert (status.used_minutes, status.remaining_minutes, status.exhausted) == (300, 0, True)
+
+
+async def test_usage_before_the_purchase_month_window_is_not_counted(usage_db):
+    db = usage_db
+    await db.admin.execute(
+        "UPDATE tenants SET allowance_anchor_at = NOW() - interval '40 days' WHERE id=$1", db.tenant,
+    )
+    for days_ago, minutes in ((35, 200), (5, 20)):
+        await db.admin.execute(
+            f"""INSERT INTO calls(id,tenant_id,campaign_id,phone_number,status,duration_seconds,
+                direction,billing_status,is_test,created_at)
+                VALUES($1,$2,$3,'+15550001111','ended',$4,'outbound','none',FALSE,
+                       NOW() - interval '{days_ago} days')""",
+            uuid4(), db.tenant, db.campaign, minutes * 60,
+        )
+    status = await meter(db)
+    assert status.used_minutes == 20, "only the current allowance month counts"
+
+
+@pytest.mark.parametrize("anchor,at,start", [
+    ("2026-01-31", "2026-02-27 23:59", "2026-01-31"),
+    ("2026-01-31", "2026-02-28 12:00", "2026-02-28"),
+    ("2026-01-31", "2026-03-30 23:00", "2026-02-28"),
+    ("2026-01-31", "2026-03-31 00:00", "2026-03-31"),
+    ("2026-10-25", "2026-11-24 23:00", "2026-10-25"),
+    ("2026-10-25", "2026-11-25 00:00", "2026-11-25"),
+    ("2026-10-25", "2026-10-10 00:00", "2026-10-01"),
+])
+async def test_allowance_month_boundaries_hold_at_month_ends(usage_db, anchor, at, start):
+    from app.domain.services.minutes_quota import allowance_window_start_sql
+
+    got = await usage_db.admin.fetchval(
+        "SELECT to_char(" + allowance_window_start_sql("$1::timestamp", "$2::timestamp") + ", 'YYYY-MM-DD')",
+        __import__("datetime").datetime.fromisoformat(anchor), __import__("datetime").datetime.fromisoformat(at),
+    )
+    assert got == start
+
+
+async def test_a_live_call_reserves_the_minutes_it_has_already_run(usage_db):
+    """Admission used to reserve one minute per live call, so long calls could
+    overrun the allowance; the call being admitted never reserves against itself."""
+    from app.domain.services.minutes_quota import inflight_outbound_minutes
+
+    db = usage_db
+    long_call, ringing = uuid4(), uuid4()
+    await db.admin.execute(
+        """INSERT INTO calls(id,tenant_id,campaign_id,phone_number,status,direction,is_test,created_at,answered_at)
+           VALUES($1,$3,$4,'+15550001111','in_progress','outbound',FALSE,NOW()-interval '6 minutes',NOW()-interval '5 minutes 30 seconds'),
+                 ($2,$3,$4,'+15550001112','initiated','outbound',FALSE,NOW(),NULL)""",
+        long_call, ringing, db.tenant, db.campaign,
+    )
+    async with acquire_with_tenant(db.pool, str(db.tenant)) as conn:
+        assert await inflight_outbound_minutes(conn, str(db.tenant)) == (2, 6 + 1)
+        assert await inflight_outbound_minutes(conn, str(db.tenant), exclude_call_id=str(ringing)) == (1, 6)

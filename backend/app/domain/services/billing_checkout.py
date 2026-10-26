@@ -60,16 +60,19 @@ def billing_return_urls(request_id=None):
 
 
 async def apply_plan_allocation(conn, tenant_id, minutes):
-    """Preserve the existing signed top-up ledger and unlimited sentinel."""
+    """Set the plan's monthly minutes; bought minutes stay in billing_ledger.
+
+    The meter adds the ledger balance to this, so a plan change neither loses
+    nor duplicates top-up minutes. ``<= 0`` keeps the unlimited sentinel.
+    """
     from app.domain.services.topup_usage import record_topup_usage
-    # Closed months are measured against the old plan's minutes; record them
-    # before the allowance changes so the ledger sum is the unused balance.
-    await record_topup_usage(conn, str(tenant_id))
+    # Windows so far, including the running one, are measured against the old
+    # plan's minutes and anchor; record them before both change.
+    await record_topup_usage(conn, str(tenant_id), close_current=True)
+    # The allowance renews monthly from this purchase (minutes_quota).
     result = await conn.execute(
-        """UPDATE tenants SET minutes_allocated=CASE WHEN $2::int<=0 THEN 0
-             ELSE $2::int + GREATEST(0,COALESCE((SELECT SUM(minutes_delta)
-               FROM billing_ledger WHERE tenant_id=$1::uuid),0)) END,
-             minutes_used=0 WHERE id=$1::uuid""", str(tenant_id), int(minutes),
+        """UPDATE tenants SET minutes_allocated=CASE WHEN $2::int<=0 THEN 0 ELSE $2::int END,
+             allowance_anchor_at=NOW(), minutes_used=0 WHERE id=$1::uuid""", str(tenant_id), int(minutes),
     )
     if result != "UPDATE 1":
         raise CheckoutError("tenant_not_found", "Billing account is unavailable.", 404)
@@ -190,19 +193,65 @@ class CheckoutAttempts:
                 str(request_id), str(tenant_id), state,
             )
 
-    async def _save_customer(self, row, customer):
+    async def _save_customer(self, row, customer, replacing=None):
+        """Bind the customer; ``replacing`` is a stored id Stripe does not have."""
         tenant_id, request_id = str(row["tenant_id"]), str(row["id"])
         async with acquire_with_tenant(self.pool, tenant_id) as conn:
             tenant = await conn.fetchrow(
                 "SELECT stripe_customer_id FROM tenants WHERE id=$1::uuid FOR UPDATE", tenant_id,
             )
-            if not tenant or tenant["stripe_customer_id"] not in {None, customer["id"]}:
+            if not tenant or tenant["stripe_customer_id"] not in {None, customer["id"], replacing}:
                 raise CheckoutError("customer_binding_changed", "Billing customer changed; review this checkout.")
             await conn.execute("UPDATE tenants SET stripe_customer_id=$2 WHERE id=$1::uuid", tenant_id, customer["id"])
             await conn.execute(
                 "UPDATE billing_checkout_attempts SET stripe_customer_id=$3,updated_at=NOW() WHERE id=$1::uuid AND tenant_id=$2::uuid",
                 request_id, tenant_id, customer["id"],
             )
+
+    async def _live_customer(self, customer_id):
+        """The stored customer, or None when Stripe does not have it here.
+
+        A leftover mock id, a customer deleted in Stripe, or one from the other
+        mode (test ids after the switch to live keys) would otherwise fence
+        every checkout of this tenant forever.
+        """
+        import stripe
+
+        if not customer_id or str(customer_id).startswith("cus_mock"):
+            return None
+        try:
+            customer = await self.billing._stripe_call("Customer", "retrieve", customer_id)
+        except stripe.InvalidRequestError as exc:
+            if getattr(exc, "code", None) == "resource_missing":
+                return None
+            raise
+        return None if customer.get("deleted") else customer
+
+    @staticmethod
+    def _expires(row):
+        return datetime.fromtimestamp(row["snapshot"]["expires_at"], UTC)
+
+    async def _reconcile_unsessioned(self, row):
+        """Settle an attempt whose session can no longer be (re)created.
+
+        Stripe needs expires_at at least 30 minutes ahead and the idempotency key
+        pins the original one, so a retry cannot create a session any more.
+        Look for the session the first request may have created; once the
+        frozen expiry has passed with none, no payment is possible and the
+        attempt fails, so the tenant can start a new checkout.
+        """
+        tenant_id, request_id = str(row["tenant_id"]), str(row["id"])
+        if row.get("stripe_customer_id"):
+            sessions = await self.billing._stripe_call(
+                "checkout.Session", "list", customer=row["stripe_customer_id"], limit=100,
+            )
+            for session in sessions.get("data") or []:
+                if session.get("client_reference_id") == request_id:
+                    await self._save_session(row, session)
+                    return await self._get(tenant_id, request_id)
+        if datetime.now(UTC) >= self._expires(row) + timedelta(minutes=5):
+            await self._state(tenant_id, request_id, "failed")
+        return await self._get(tenant_id, request_id)
 
     @staticmethod
     def _check_customer(customer, row):
@@ -267,7 +316,19 @@ class CheckoutAttempts:
             except BillingCatalogUnavailable as exc:
                 row = await self._existing_or_reject_offer(tenant_id, request_id, str(exc))
             else:
-                row = await self._claim(tenant_id, request_id, option, email, business_name)
+                try:
+                    row = await self._claim(tenant_id, request_id, option, email, business_name)
+                except CheckoutError as exc:
+                    stale = exc.existing_attempt and await self._get(tenant_id, exc.existing_attempt["request_id"])
+                    if exc.code != "checkout_outstanding" or not stale:
+                        raise
+                    # A stale outstanding attempt must not block buying forever.
+                    if stale.get("stripe_session_id"):
+                        await self.get(tenant_id=tenant_id, request_id=str(stale["id"]))
+                    elif (datetime.now(UTC) >= self._expires(stale) - timedelta(minutes=31)
+                            or datetime.now(UTC) - stale["created_at"] >= timedelta(hours=23)):
+                        await self._reconcile_unsessioned(stale)
+                    row = await self._claim(tenant_id, request_id, option, email, business_name)
         if str(row["price_option_id"]) != price_option_id:
             raise CheckoutError("checkout_payload_conflict", "This checkout reference belongs to a different offer.")
         if row["status"] in {"completed", "failed", "expired"}:
@@ -280,23 +341,24 @@ class CheckoutAttempts:
             raise CheckoutError("free_plan_retired", "Free plans are no longer offered. Choose a paid plan.", 400)
         if self.billing.billing_mode not in {"test", "live"} or option["provider_mode"] != self.billing.billing_mode:
             raise CheckoutError("billing_unavailable", "Paid checkout is unavailable in the current billing mode.", 503)
-        # An old uncertain attempt is fenced forever until reconciled. Stripe's
-        # idempotency cache is not a permanent financial receipt.
-        if datetime.now(UTC) - row["created_at"] >= timedelta(hours=23):
-            await self._state(tenant_id, request_id, "unknown")
-            return self.response(await self._get(tenant_id, request_id))
+        # The frozen expires_at must stay at least 30 minutes ahead for Stripe,
+        # and Stripe's idempotency cache is not a permanent financial receipt:
+        # past that point never create, only find what the first request made.
+        if (datetime.now(UTC) >= self._expires(row) - timedelta(minutes=31)
+                or datetime.now(UTC) - row["created_at"] >= timedelta(hours=23)):
+            return self.response(await self._reconcile_unsessioned(row))
         try:
             price = await self.billing._stripe_call("Price", "retrieve", option["stripe_price_id"])
             validate_provider_price(option, price)
-            if row.get("stripe_customer_id"):
-                customer = await self.billing._stripe_call("Customer", "retrieve", row["stripe_customer_id"])
-            else:
+            customer = await self._live_customer(row.get("stripe_customer_id"))
+            replacing = None if customer else row.get("stripe_customer_id")
+            if customer is None:
                 customer = await self.billing._stripe_call(
                     "Customer", "create", email=snapshot["email"], name=snapshot["business_name"],
                     metadata={"tenant_id": tenant_id}, idempotency_key=f"subscription-customer:{request_id}",
                 )
             self._check_customer(customer, row)
-            await self._save_customer(row, customer)
+            await self._save_customer(row, customer, replacing=replacing)
             row["stripe_customer_id"] = customer["id"]
             meta = {"tenant_id": tenant_id, "plan_id": option["plan_id"], "price_option_id": price_option_id, "request_id": request_id}
             session = await self.billing._stripe_call(

@@ -140,6 +140,8 @@ class BillingService:
             if tenant is None:
                 raise ValueError("Billing tenant not found")
             if tenant["stripe_customer_id"]:
+                # Top-ups need an active paid plan, whose checkout already
+                # replaced any customer Stripe does not have (billing_checkout).
                 return {"customer_id": tenant["stripe_customer_id"], "created": False}
 
             # Create new customer
@@ -332,8 +334,12 @@ class BillingService:
         # The portal offers card updates, invoices and cancel-at-period-end
         # only; a price change there would not match the frozen purchase terms.
         # scripts/stripe_catalog_setup.py creates that configuration.
-        portal = {"configuration": configuration} if (configuration := os.getenv("STRIPE_PORTAL_CONFIGURATION_ID", "").strip()) else {}
-        session = await self._stripe_call("billing_portal.Session", "create", customer=customer_id, return_url=return_url, **portal)
+        configuration = os.getenv("STRIPE_PORTAL_CONFIGURATION_ID", "").strip()
+        if not configuration:
+            # The account's default portal may allow plan changes; refuse it.
+            raise ValueError("The billing portal is not configured yet. Contact support.")
+        session = await self._stripe_call("billing_portal.Session", "create", customer=customer_id,
+                                          return_url=return_url, configuration=configuration)
 
         return {"portal_url": session.url, "mock_mode": False}
 
@@ -515,7 +521,7 @@ class BillingService:
                     return result
             if await self._is_topup_event(event_type, data):
                 result = await apply_topup_event(conn, self, event_type, data, event["id"])
-                if result["status"] != "ignored" or event_type != "charge.refunded":
+                if result["status"] != "ignored" or event_type not in {"charge.refunded", "charge.dispute.created"}:
                     return result
             return await apply_billing_event(conn, self, event_type, data, source_reference=event["id"])
         except (BillingStateReviewRequired, BillingTopupReviewRequired) as exc:

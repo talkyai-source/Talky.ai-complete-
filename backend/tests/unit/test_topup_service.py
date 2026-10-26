@@ -76,8 +76,8 @@ class FakeConn:
             # (> 0), so a top-up never invents a cap for a tenant who has none.
             if (self.store.get("enforced") or 0) <= 0:
                 return "UPDATE 0"
-            if "GREATEST(0" in sql:
-                self.store["enforced"] = max(0, self.store["enforced"] - args[1])
+            if "GREATEST(" in sql:
+                self.store["enforced"] = max(1, self.store["enforced"] - args[1])
             else:
                 self.store["enforced"] += args[1]
             return "UPDATE 1"
@@ -176,6 +176,15 @@ def make_store(*, allocated=1000, order=None, package=None, enforced=0):
     }
 
 
+def granted(store):
+    """What the meter grants: the plan's minutes plus the bought balance.
+
+    Since 2026-10-27 bought minutes live only in the ledger; a credit or a
+    reversal never writes tenants.minutes_allocated.
+    """
+    return store["allocated"] + sum(e["minutes_delta"] for e in store["ledger"])
+
+
 def paid_order(status="pending", minutes=250):
     return {
         "id": "order-1",
@@ -205,13 +214,13 @@ async def test_the_same_event_credits_once_no_matter_how_often_it_arrives():
 
     first = await svc.credit_paid_order(session_id="cs_1", event_id="evt_1")
     assert first is True
-    assert store["allocated"] == 1250
+    assert granted(store) == 1250
 
     # Redelivery 2 and 3. The order is 'paid' now, so it short-circuits before
     # the ledger — but the ledger would refuse it anyway (next test).
     for _ in range(2):
         assert await svc.credit_paid_order(session_id="cs_1", event_id="evt_1") is False
-    assert store["allocated"] == 1250, "a redelivered webhook added minutes again"
+    assert granted(store) == 1250, "a redelivered webhook added minutes again"
 
 
 @pytest.mark.asyncio
@@ -229,7 +238,7 @@ async def test_the_ledger_refuses_a_repeat_event_even_if_the_order_looks_unpaid(
     credited = await svc.credit_paid_order(session_id="cs_1", event_id="evt_dup")
 
     assert credited is False
-    assert store["allocated"] == 1000, (
+    assert granted(store) == 1000, (
         "minutes were added despite the ledger refusing the entry — the credit "
         "is not actually gated on the uniqueness constraint"
     )
@@ -258,7 +267,7 @@ async def test_a_payment_for_an_order_we_never_created_credits_nothing():
     svc = TopupService(FakePool(store))
 
     assert await svc.credit_paid_order(session_id="cs_ghost", event_id="e") is False
-    assert store["allocated"] == 1000
+    assert granted(store) == 1000
 
 
 @pytest.mark.asyncio
@@ -296,6 +305,7 @@ async def test_topping_up_an_unlimited_tenant_does_not_give_them_a_limit():
 
     assert store["allocated"] == 0, "an unlimited tenant was given a 250-minute cap"
     assert len(store["ledger"]) == 1, "the money must still be recorded"
+    # The meter ignores the ledger for the unlimited sentinel (plan of 0).
 
 
 # ── reversals ───────────────────────────────────────────────────────────────
@@ -310,20 +320,23 @@ async def test_a_refund_is_a_new_negative_row_not_an_edit():
 
     assert len(store["ledger"]) == 1
     assert store["ledger"][0]["minutes_delta"] == -250
-    assert store["allocated"] == 1000
+    assert granted(store) == 1000
 
 
 @pytest.mark.asyncio
-async def test_a_chargeback_cannot_push_an_allocation_below_zero():
-    """A tenant who already SPENT the minutes then charges back. Subtracting
-    freely would land on a negative number, and negative reads as UNLIMITED —
-    a chargeback would buy them free calls forever."""
+async def test_a_chargeback_is_applied_even_when_the_minutes_were_spent():
+    """A tenant who already SPENT the minutes then charges back. The reversal
+    used to be refused here (to keep the allocation off the unlimited
+    sentinel), leaving the customer refunded AND credited. It is now a ledger
+    row only: the plan's minutes are untouched, so no sentinel can be reached,
+    and the spent minutes come off the next allowance."""
     store = make_store(allocated=100, order=paid_order(status="paid"))
     svc = TopupService(FakePool(store))
 
-    with pytest.raises(TopupError):
-        await svc.reverse(event_id="evt_d", kind="dispute", payment_id="pi_1")
-    assert store["allocated"] == 100 and store["ledger"] == []
+    assert await svc.reverse(event_id="evt_d", kind="dispute", payment_id="pi_1") is True
+    assert store["allocated"] == 100
+    assert store["ledger"] == [{"kind": "dispute", "minutes_delta": -250}]
+    assert store["order"]["status"] == "disputed"
 
 
 @pytest.mark.asyncio
@@ -332,7 +345,7 @@ async def test_reversing_an_unpaid_order_does_nothing():
     svc = TopupService(FakePool(store))
 
     assert await svc.reverse(event_id="e", kind="refund", payment_id="pi_1") is False
-    assert store["allocated"] == 1000
+    assert granted(store) == 1000
     assert store["ledger"] == []
 
 
@@ -350,10 +363,11 @@ async def test_reverse_refuses_a_kind_that_is_not_a_reversal():
         await svc.reverse(event_id="e", kind="topup", payment_id="pi_1")
 
 
-def test_the_reversal_floor_is_in_the_statement():
-    """Structural: doing the floor in Python would leave a window where a
-    concurrent credit and reversal interleave into a negative allocation."""
-    assert "GREATEST(0" in inspect.getsource(TopupService.reverse)
+def test_credits_and_reversals_never_write_the_plan_allocation():
+    """Structural: bought minutes live only in the ledger, so neither path can
+    floor, cap or zero tenants.minutes_allocated (the unlimited sentinel)."""
+    for method in (TopupService.credit_paid_order, TopupService.reverse):
+        assert "UPDATE tenants" not in inspect.getsource(method)
 
 
 # ── what the client is allowed to name ──────────────────────────────────────
@@ -486,7 +500,7 @@ async def test_a_credit_raises_the_ceiling_the_call_guard_enforces():
 
     assert await svc.credit_paid_order(session_id="cs_1", event_id="evt_1") is True
 
-    assert store["allocated"] == 1250
+    assert granted(store) == 1250
     assert store["enforced"] == 1250, (
         "the customer paid for 250 minutes and the guard that actually blocks "
         "origination still enforces the old ceiling"
@@ -504,7 +518,7 @@ async def test_a_credit_does_not_invent_a_ceiling_where_none_is_configured():
     await svc.credit_paid_order(session_id="cs_1", event_id="evt_1")
 
     assert store["enforced"] == 0
-    assert store["allocated"] == 1250
+    assert granted(store) == 1250
 
 
 @pytest.mark.asyncio
@@ -516,7 +530,7 @@ async def test_a_reversal_lowers_the_enforced_ceiling_too():
 
     await svc.reverse(event_id="evt_r", kind="refund", payment_id="pi_1")
 
-    assert store["allocated"] == 1000
+    assert granted(store) == 1000
     assert store["enforced"] == 1000
 
 
@@ -539,7 +553,7 @@ async def test_a_duplicate_event_does_not_raise_the_ceiling_either():
     await svc.credit_paid_order(session_id="cs_1", event_id="evt_dup")
 
     assert store["enforced"] == 1000
-    assert store["allocated"] == 1000
+    assert granted(store) == 1000
 
 
 # ── two Stripe events, one delayed payment ──────────────────────────────────
@@ -557,7 +571,7 @@ async def test_completed_and_async_succeeded_credit_one_session_once():
     assert await svc.credit_paid_order(session_id="cs_1", event_id="evt_completed") is True
     assert await svc.credit_paid_order(session_id="cs_1", event_id="evt_async") is False
 
-    assert store["allocated"] == 1250, "one payment credited twice"
+    assert granted(store) == 1250, "one payment credited twice"
     assert len(store["ledger"]) == 1
 
 
@@ -568,7 +582,7 @@ async def test_late_distinct_success_cannot_recredit_a_refunded_order():
     await service.credit_paid_order(session_id="cs_fixture", event_id="evt_credit")
     await service.reverse(event_id="evt_refund", payment_id="pi_fixture")
     assert await service.credit_paid_order(session_id="cs_fixture", event_id="evt_late") is False
-    assert store["allocated"] == 1000
+    assert granted(store) == 1000
     assert [row["minutes_delta"] for row in store["ledger"]] == [250, -250]
 
 
@@ -582,13 +596,14 @@ async def test_existing_positive_ledger_prevents_recredit_when_order_status_is_s
         )
         is False
     )
-    assert store["allocated"] == 1000 and len(store["ledger"]) == 1
+    assert granted(store) == 1250 and len(store["ledger"]) == 1, "no second credit"
 
 
 @pytest.mark.asyncio
 async def test_reversal_cannot_turn_finite_allowance_into_unlimited():
     store = make_store(allocated=50, enforced=50, order=paid_order(status="paid"))
-    with pytest.raises(TopupError):
-        await TopupService(FakePool(store)).reverse(event_id="evt_refund", payment_id="pi_fixture")
-    assert store["allocated"] == store["enforced"] == 50
-    assert store["ledger"] == [] and store["order"]["status"] == "paid"
+    assert await TopupService(FakePool(store)).reverse(event_id="evt_refund", payment_id="pi_fixture") is True
+    assert store["allocated"] == 50, "the plan's minutes are untouched"
+    assert store["enforced"] == 1, "the legacy ceiling stays finite"
+    assert store["ledger"] == [{"kind": "refund", "minutes_delta": -250}]
+    assert store["order"]["status"] == "refunded"

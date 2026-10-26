@@ -287,6 +287,7 @@ class CallGuard:
         estimated_duration_seconds: Optional[int] = None,
         feature_required: Optional[str] = None,
         lead_id: Optional[str] = None,
+        call_id: Optional[str] = None,
     ) -> GuardResult:
         """
         Evaluate if a call should be allowed.
@@ -378,6 +379,7 @@ class CallGuard:
                     partner_id=partner_id,
                     campaign_id=campaign_id,
                     lead_id=lead_id,
+                    call_id=call_id,
                     call_type=call_type,
                     feature_required=feature_required,
                     estimated_duration_seconds=estimated_duration_seconds,
@@ -1086,13 +1088,15 @@ class CallGuard:
         try:
             from app.domain.services.minutes_quota import (
                 compute_minutes_status,
-                count_inflight_outbound_calls,
+                inflight_outbound_minutes,
             )
             async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
                 quota = await compute_minutes_status(conn, str(tenant_id))
-                inflight = (
-                    0 if quota.unlimited or quota.state == "unavailable"
-                    else await count_inflight_outbound_calls(conn, str(tenant_id))
+                inflight, inflight_minutes = (
+                    (0, 0) if quota.unlimited or quota.state == "unavailable"
+                    else await inflight_outbound_minutes(
+                        conn, str(tenant_id), exclude_call_id=kwargs.get("call_id"),
+                    )
                 )
             quota.require_available()
         except Exception:
@@ -1107,8 +1111,9 @@ class CallGuard:
         est_minutes = -(-(estimated_duration_seconds or 60) // 60)  # ceil division
 
         # Calls already dialled but not yet settled have NULL duration, so
-        # `used` cannot see them: reserve one estimate for each.
-        reserved = inflight * est_minutes
+        # `used` cannot see them: reserve at least one estimate for each, and
+        # the minutes a long live call has already run.
+        reserved = max(inflight * est_minutes, inflight_minutes)
 
         redis = getattr(self, "_redis", None)
         over = used + reserved + est_minutes > allocated
@@ -1117,8 +1122,10 @@ class CallGuard:
             # before any calls row exists must not all pass the same room.
             try:
                 from app.domain.services.minutes_quota import reserve_outbound_minutes
-                member = str(kwargs.get("job_id") or kwargs.get("call_id")
-                             or kwargs.get("lead_id") or uuid4())
+                # The dialer and the bridge re-check both pass the lead, so one
+                # call keeps one reservation across the two evaluations.
+                member = str(kwargs.get("lead_id") or kwargs.get("call_id")
+                             or kwargs.get("job_id") or uuid4())
                 over = not await reserve_outbound_minutes(
                     redis, str(tenant_id), member, used=used,
                     reserved_inflight=reserved, est_minutes=est_minutes,

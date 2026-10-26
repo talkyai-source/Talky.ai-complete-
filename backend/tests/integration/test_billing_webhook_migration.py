@@ -43,6 +43,9 @@ async def webhook_db():
             await conn.execute(f'GRANT USAGE ON SCHEMA public TO "{fixture.role}"')
             await conn.execute(f'GRANT SELECT,INSERT,UPDATE,DELETE ON {",".join(TABLES)} TO "{fixture.role}"')
             await conn.execute(f'GRANT SELECT ON billing_ledger,topup_orders,subscriptions,tenants,invoices,billing_checkout_attempts TO "{fixture.role}"')
+            # A plan activation closes the running allowance window, which
+            # reads call usage when the tenant has top-up ledger rows.
+            await conn.execute(f'GRANT SELECT ON calls,call_legs TO "{fixture.role}"')
             await conn.execute(f'GRANT SELECT,INSERT ON invoice_snapshots,billing_refund_snapshots TO "{fixture.role}"')
             await conn.execute(f'GRANT USAGE,SELECT ON SEQUENCE invoice_snapshots_id_seq,billing_refund_snapshots_id_seq TO "{fixture.role}"')
 

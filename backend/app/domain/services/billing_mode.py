@@ -37,3 +37,26 @@ def get_billing_mode(*, sdk_available: bool | None = None) -> BillingMode:
         except (ImportError, OSError, ValueError):
             sdk_available = False
     return mode if sdk_available else "unconfigured"
+
+
+def checkout_permitted_in_test_mode(*, is_platform_admin: bool, email: str | None) -> bool:
+    """Production on Stripe TEST mode sells only to the team.
+
+    A test card pays nothing, so in production test mode a public checkout
+    would hand real phone minutes to anyone. Until live keys exist, checkout
+    and top-ups are open only to platform admins and to the addresses in
+    STRIPE_TEST_CHECKOUT_EMAILS (comma-separated; ``name+tag@domain`` matches
+    ``name@domain``). Every other mode and environment is unaffected.
+    """
+    if get_billing_mode() != "test":
+        return True
+    if os.getenv("ENVIRONMENT", "").strip().lower() != "production":
+        return True
+    if is_platform_admin:
+        return True
+    allowed = {item.strip().lower() for item in os.getenv("STRIPE_TEST_CHECKOUT_EMAILS", "").split(",") if item.strip()}
+    address = (email or "").strip().lower()
+    local, at, domain = address.partition("@")
+    if not at or not local or not domain:
+        return False
+    return address in allowed or f"{local.split('+', 1)[0]}@{domain}" in allowed

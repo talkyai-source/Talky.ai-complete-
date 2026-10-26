@@ -17,7 +17,9 @@ class Meter:
         self.allocated, self.used, self.plan_minutes, self.inflight = allocated, used, plan_minutes, inflight
         self.missing, self.fail = missing, fail
 
-    async def fetchrow(self, *_):
+    async def fetchrow(self, sql='', *_):
+        if 'AS calls' in sql:  # minutes_quota.inflight_outbound_minutes; each still ringing
+            return {'calls': self.inflight, 'minutes': self.inflight}
         return None if self.missing else {'minutes_allocated': self.allocated, 'plan_minutes': self.plan_minutes}
 
     async def fetchval(self, sql, *_):

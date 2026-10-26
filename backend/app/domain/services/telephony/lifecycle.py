@@ -1207,6 +1207,7 @@ async def _hydrate_orphan_recovery_context(
                    c.terminal_settled_at, c.terminal_retry_payload,
                    c.terminal_retry_enqueued_at,
                     COUNT(*) OVER() AS recovery_match_count,
+                    NOW() AS recovery_db_now,
                     CASE
                       WHEN c.answered_at IS NOT NULL
                         AND c.provider_terminated_at IS NOT NULL
@@ -1256,6 +1257,7 @@ async def _hydrate_orphan_recovery_context(
 
         row = dict(raw_row)
         match_count = int(row.pop("recovery_match_count", 0) or 0)
+        db_now = row.pop("recovery_db_now", None)
         if match_count != 1:
             raise RuntimeError(
                 "orphan recovery identity is ambiguous for provider session "
@@ -1278,6 +1280,15 @@ async def _hydrate_orphan_recovery_context(
         or status in {"answered", "in_call"}
         or ledger_state in {"active", "answer_pending"}
     )
+    is_outbound_row = str(row.get("direction") or "outbound").strip().lower() != "inbound"
+    if is_outbound_row:
+        # The SQL CASE above only knows inbound reservation fields and is
+        # always 0 for outbound. Outbound billing comes from durable
+        # answered_at, never from a lost in-memory monotonic value.
+        row["recovery_duration_seconds"] = _durable_outbound_duration_seconds(
+            row.get("answered_at"),
+            row.get("provider_terminated_at") or row.get("ended_at") or db_now,
+        )
     terminal_proof_missing = bool(
         was_answered and row.get("provider_terminated_at") is None
     )
@@ -1291,7 +1302,7 @@ async def _hydrate_orphan_recovery_context(
         or terminal_proof_missing
         or terminal_duration_ambiguous
     )
-    if terminal_proof_missing or terminal_duration_ambiguous:
+    if (terminal_proof_missing or terminal_duration_ambiguous) and not is_outbound_row:
         row["recovery_duration_seconds"] = 0
     provider_call_id = str(
         row.get("provider_call_id") or row.get("external_call_uuid") or provider_session_id
@@ -3298,6 +3309,26 @@ def _confirmed_inbound_duration_seconds(
         math.ceil(max(0.0, float(terminal_at_monotonic) - float(answered_at))),
     )
     return min(elapsed, _pinned_inbound_max_duration(admission))
+
+
+def _durable_outbound_duration_seconds(answered_at: Any, end_at: Any) -> int:
+    """Whole seconds answered_at -> end_at from durable timestamps.
+
+    Fallback when the in-memory monotonic Answer time is unavailable (restart,
+    or consumed by a teardown that raised). Never answered -> 0; capped at the
+    configured maximum call duration; floored at 0.
+    """
+
+    if not isinstance(answered_at, datetime):
+        return 0
+    if not isinstance(end_at, datetime):
+        end_at = datetime.now(timezone.utc)
+    if answered_at.tzinfo is None:
+        answered_at = answered_at.replace(tzinfo=timezone.utc)
+    if end_at.tzinfo is None:
+        end_at = end_at.replace(tzinfo=timezone.utc)
+    elapsed = int((end_at - answered_at).total_seconds())
+    return max(0, min(elapsed, _SESSION_MAX_DURATION_S))
 
 
 def _confirmed_outbound_duration_seconds(
@@ -5526,7 +5557,7 @@ async def _on_call_ended(
                 async with acquire_with_tenant(_c4.db_pool, None) as _conn:
                     _row = await _conn.fetchrow(
                         """
-                        SELECT id, tenant_id FROM calls
+                        SELECT id, tenant_id, answered_at, NOW() AS db_now FROM calls
                         WHERE (provider_call_id = $1 OR external_call_uuid = $1)
                           AND COALESCE(direction, 'outbound') <> 'inbound'
                           AND (
@@ -5567,6 +5598,12 @@ async def _on_call_ended(
                         # see CallService._handle_call_status_pooled.
                         db_pool=_c4.db_pool,
                     )
+                    if outbound_duration_s <= 0 and not answer_was_confirmed:
+                        # In-memory Answer time lost (restart / consumed by an
+                        # earlier failed teardown): bill from durable answered_at.
+                        outbound_duration_s = _durable_outbound_duration_seconds(
+                            _row["answered_at"], _row["db_now"]
+                        )
                     settlement_result = await call_service.handle_call_status(
                         call_uuid=str(_row["id"]),
                         outcome=outcome,

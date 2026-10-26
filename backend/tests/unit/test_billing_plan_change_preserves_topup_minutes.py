@@ -100,13 +100,11 @@ class _Conn:
     async def execute(self, sql, *args):
         self.sql.append(sql)
         if "UPDATE tenants" in sql and "minutes_allocated" in sql:
-            # Execute the statement the way Postgres would: the plan figure
-            # plus whatever the ledger says was bought, in ONE evaluation.
+            # Execute the statement the way Postgres would. Since 2026-10-27 it
+            # writes the plan's minutes only; bought minutes stay in the ledger.
+            assert "billing_ledger" not in sql
             plan_minutes = int(args[1] or 0)
-            purchased = max(0, sum(self.store["ledger"]))
-            self.store["allocated"] = (
-                0 if plan_minutes <= 0 else plan_minutes + purchased
-            )
+            self.store["allocated"] = 0 if plan_minutes <= 0 else plan_minutes
             return "UPDATE 1"
         return "UPDATE 0"
 
@@ -135,6 +133,11 @@ class _Client:
 
     def table(self, name):
         return _Table(self.store, name)
+
+
+def granted(store):
+    """What the meter grants: the plan's minutes plus the bought balance."""
+    return store["allocated"] + sum(store["ledger"])
 
 
 def make_store(*, allocated=1000, purchased=(), plan_minutes=2000):
@@ -172,10 +175,9 @@ async def test_a_plan_change_keeps_minutes_the_customer_bought():
 
     await apply_plan_allocation(_svc(store).db_client.pool.conn, _session()["metadata"]["tenant_id"], store["plan"]["minutes"])
 
-    assert store["allocated"] == 2500, (
-        "the plan change overwrote the allocation with the plan figure alone — "
-        "500 minutes the customer paid for were destroyed, while the ledger "
-        "still records the sale"
+    assert store["allocated"] == 2000, "the allocation is the new plan's minutes"
+    assert granted(store) == 2500, (
+        "500 minutes the customer paid for must survive the plan change"
     )
 
 
@@ -187,7 +189,7 @@ async def test_a_refunded_topup_is_not_re_added_on_the_next_plan_change():
 
     await apply_plan_allocation(_svc(store).db_client.pool.conn, _session()["metadata"]["tenant_id"], store["plan"]["minutes"])
 
-    assert store["allocated"] == 2000
+    assert granted(store) == 2000
 
 
 @pytest.mark.asyncio
@@ -232,20 +234,15 @@ async def test_a_checkout_with_no_plan_leaves_the_allocation_alone():
 
 # ── how, not just what ──────────────────────────────────────────────────────
 
-def test_the_purchased_balance_is_read_in_the_same_statement_that_writes():
-    """Structural. A SELECT of the ledger followed by a hard SET leaves a
-    window: a top-up committing between the two is overwritten, and a lost
-    update on money is the bug this file exists for.
-    """
+def test_the_plan_allocation_never_folds_in_the_ledger():
+    """Structural. Folding the purchased balance into the allocation is what
+    let a refund floor or a plan change lose or duplicate bought minutes; the
+    meter adds the ledger instead, so no top-up committing concurrently can be
+    overwritten here."""
     src = inspect.getsource(apply_plan_allocation)
-    assert "billing_ledger" in src, (
-        "the plan allocation is written without consulting the ledger"
-    )
+    update = src.split("UPDATE tenants", 1)[1]
     assert src.count("UPDATE tenants") == 1
-    assert "SELECT" in src.split("UPDATE tenants", 1)[1], (
-        "the purchased balance must be a subselect inside the UPDATE, not a "
-        "separate read"
-    )
+    assert "billing_ledger" not in update
 
 
 @pytest.mark.asyncio

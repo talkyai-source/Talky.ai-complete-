@@ -8,7 +8,7 @@ import pytest
 import stripe
 
 from app.domain.services import billing_topup_events as events
-from tests.unit.test_topup_service import FakeConn, make_store, paid_order
+from tests.unit.test_topup_service import granted, FakeConn, make_store, paid_order
 
 
 class EventConn(FakeConn):
@@ -163,7 +163,7 @@ async def test_distinct_success_events_credit_once_and_recover_same_receipt_inte
     fixture = fixture_data()
     first = await apply(fixture)
     second = await apply(fixture, "checkout.session.async_payment_succeeded", "evt_late")
-    assert fixture.store["allocated"] == fixture.store["enforced"] == 1250
+    assert granted(fixture.store) == fixture.store["enforced"] == 1250
     assert len(fixture.store["ledger"]) == 1
     assert first["notifications"][0]["delivery_key"] == second["notifications"][0]["delivery_key"]
     assert first["notifications"][0]["prior_delivery_unknown"] is False
@@ -184,7 +184,7 @@ async def test_credit_refund_then_late_credit_has_one_positive_and_one_negative_
     fixture.charge.update(amount_refunded=2500, refunded=True)
     await apply(fixture, "charge.refunded", "evt_refund")
     late = await apply(fixture, event_id="evt_late")
-    assert late["notifications"] == [] and fixture.store["allocated"] == 1000
+    assert late["notifications"] == [] and granted(fixture.store) == 1000
     assert [row["minutes_delta"] for row in fixture.store["ledger"]] == [250, -250]
 
 
@@ -214,7 +214,7 @@ async def test_mismatched_current_evidence_cannot_change_money(resource, field, 
     fixture.objects[resource][field] = value
     with pytest.raises(events.BillingTopupReviewRequired):
         await apply(fixture)
-    assert fixture.store["ledger"] == [] and fixture.store["allocated"] == 1000
+    assert fixture.store["ledger"] == [] and granted(fixture.store) == 1000
 
 
 @pytest.mark.asyncio
@@ -225,7 +225,7 @@ async def test_partial_refund_is_explicit_review_without_invented_rounding(refun
     fixture.charge["amount_refunded"] = refunded
     with pytest.raises(events.BillingTopupReviewRequired, match="partial_refund"):
         await apply(fixture, "charge.refunded", "evt_partial")
-    assert fixture.store["allocated"] == 1250 and len(fixture.store["ledger"]) == 1
+    assert granted(fixture.store) == 1250 and len(fixture.store["ledger"]) == 1
 
 
 @pytest.mark.asyncio
@@ -236,7 +236,7 @@ async def test_precredit_refund_is_review_and_later_credit_cannot_ignore_current
         await apply(fixture, "charge.refunded")
     with pytest.raises(events.BillingTopupReviewRequired, match="reversed_before_credit"):
         await apply(fixture, event_id="evt_late")
-    assert fixture.store["ledger"] == [] and fixture.store["allocated"] == 1000
+    assert fixture.store["ledger"] == [] and granted(fixture.store) == 1000
 
 
 @pytest.mark.asyncio
@@ -247,7 +247,7 @@ async def test_current_dispute_reverses_once_without_inventing_a_refund():
     await apply(fixture, "charge.dispute.created", "evt_dispute")
     await apply(fixture, "charge.dispute.created", "evt_duplicate_dispute")
     assert [row["kind"] for row in fixture.store["ledger"]] == ["topup", "dispute"]
-    assert fixture.store["allocated"] == 1000
+    assert granted(fixture.store) == 1000
 
 
 @pytest.mark.asyncio
@@ -325,7 +325,7 @@ async def test_unpaid_event_can_discover_settled_payment_after_aggregate_lock():
     result = await events.apply_topup_event(
         fixture.conn, fixture.provider, "checkout.session.completed", earlier, "evt_earlier"
     )
-    assert result["status"] == "handled" and fixture.store["allocated"] == 1250
+    assert result["status"] == "handled" and granted(fixture.store) == 1250
     assert [call[0] for call in fixture.calls] == [
         "checkout.Session",
         "checkout.Session",
@@ -361,7 +361,7 @@ async def test_paid_unlimited_tenant_retains_sentinel_and_duplicate_ledger():
     fixture.store.update(allocated=0, enforced=0)
     await apply(fixture)
     await apply(fixture, event_id="evt_repeat")
-    assert fixture.store["allocated"] == fixture.store["enforced"] == 0
+    assert fixture.store["allocated"] == fixture.store["enforced"] == 0  # unlimited: the plan allocation is untouched
     assert len(fixture.store["ledger"]) == 1
 
 
@@ -407,7 +407,7 @@ async def test_nullable_dispute_binding_drift_cannot_reverse():
     fixture.provider._stripe_call = drift
     with pytest.raises(events.BillingTopupReviewRequired, match="charge_payment_mismatch"):
         await apply(fixture, "charge.dispute.created", "evt_dispute")
-    assert len(fixture.store["ledger"]) == 1 and fixture.store["allocated"] == 1250
+    assert len(fixture.store["ledger"]) == 1 and granted(fixture.store) == 1250
 
 
 @pytest.mark.asyncio
@@ -417,4 +417,4 @@ async def test_valid_credit_with_stale_nonpaid_order_is_review_not_completed():
     fixture.store["order"]["status"] = "pending"
     with pytest.raises(events.BillingTopupReviewRequired, match="order_ledger_state_conflict"):
         await apply(fixture, event_id="evt_stale")
-    assert len(fixture.store["ledger"]) == 1 and fixture.store["allocated"] == 1250
+    assert len(fixture.store["ledger"]) == 1 and granted(fixture.store) == 1250

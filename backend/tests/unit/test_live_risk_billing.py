@@ -29,15 +29,19 @@ class _ExpiryConn(Meter):
 
 
 @pytest.mark.asyncio
-async def test_expired_topup_minutes_leave_the_allowance():
+async def test_bought_minutes_never_expire():
+    """Owner decision 2026-10-27: top-up minutes carry over until used (and
+    expiring packages are refused at sale), so the meter has no expiry term.
+    The recurring-top-up bug expiry once worked around is fixed by
+    topup_usage recording each month's use once."""
     s = await minutes_quota.compute_minutes_status(_ExpiryConn(500, allocated=530, used=0), TENANT)
-    assert (s.allocated, s.remaining_minutes) == (30, 30)
+    assert (s.allocated, s.remaining_minutes) == (530, 530)
 
 
 @pytest.mark.asyncio
-async def test_expired_topup_cannot_turn_a_finite_plan_into_unlimited():
-    s = await minutes_quota.compute_minutes_status(_ExpiryConn(900, allocated=530, used=0), TENANT)
-    assert s.allocated == 0 and s.unlimited is False and s.exhausted is True
+async def test_a_finite_plan_with_nothing_left_is_exhausted_not_unlimited():
+    s = await minutes_quota.compute_minutes_status(_ExpiryConn(0, allocated=30, used=30 * 60), TENANT)
+    assert s.allocated == 30 and s.unlimited is False and s.exhausted is True
 
 
 @pytest.mark.asyncio

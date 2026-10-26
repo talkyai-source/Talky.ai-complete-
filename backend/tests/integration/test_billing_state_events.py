@@ -31,6 +31,8 @@ async def state_db(checkout_db):  # noqa: F811
         await conn.execute(f'GRANT SELECT,INSERT ON invoice_snapshots TO "{fixture.role}"')
         await conn.execute(f'GRANT USAGE ON SEQUENCE invoice_snapshots_id_seq TO "{fixture.role}"')
         await conn.execute(f'GRANT SELECT ON user_profiles TO "{fixture.role}"')
+        # A won dispute first looks for a disputed top-up order.
+        await conn.execute(f'GRANT SELECT,UPDATE ON topup_orders TO "{fixture.role}"')
         await conn.execute(f'GRANT SELECT,INSERT,UPDATE,DELETE ON billing_webhook_notifications,processed_webhook_events TO "{fixture.role}"')
     fixture.objects, fixture.reads = {}, []
 
@@ -103,7 +105,7 @@ async def test_paid_invoice_first_recovers_missing_session_then_checkout_never_r
     duplicate = await _apply(fixture, "invoice.paid", invoice)
     assert duplicate["notifications"][0]["delivery_key"] == first["notifications"][0]["delivery_key"]
     tenant = await _tenant(fixture)
-    assert tenant["minutes_allocated"] == 163 and tenant["minutes_used"] == 37
+    assert tenant["minutes_allocated"] == 120 and tenant["minutes_used"] == 37
     saved = await fixture.service._get(fixture.tenants[0], receipt["request_id"])
     assert saved["status"] == "completed" and saved["stripe_session_id"] == session["id"]
     async with acquire_with_tenant(fixture.pool, None) as conn:
@@ -312,3 +314,54 @@ async def test_existing_invoice_projection_cannot_prove_old_email_was_unsent(sta
     repeated = await _apply(fixture, event_type, invoice)
     assert repeated["notifications"][0]["prior_delivery_unknown"] is True
     assert repeated["notifications"][0]["delivery_key"] == first["notifications"][0]["delivery_key"]
+
+
+@pytest.mark.parametrize("status,expected", [("past_due", "past_due"), ("unpaid", "unpaid"), ("canceled", "cancelled")])
+async def test_after_purchase_a_changed_price_never_blocks_a_status_change(state_db, status, expected):
+    """A provider-side price/item change after the purchase used to reject
+    every later event as a purchase mismatch, so a cancelled or unpaid
+    tenant stayed active. Status changes must always land; minutes never do."""
+    fixture = state_db
+    receipt, subscription, session, _invoice = await _paid(fixture)
+    await _apply(fixture, "checkout.session.completed", session)
+    before = await _tenant(fixture)
+    assert before["subscription_status"] == "active"
+    changed = deepcopy(subscription)
+    changed["items"]["data"][0]["price"] = dict(changed["items"]["data"][0]["price"], id="price_changedelsewhere", unit_amount=1)
+    changed["status"] = status
+    fixture.objects[("Subscription", subscription["id"])] = changed
+    result = await _apply(fixture, "customer.subscription.updated", changed)
+    after = await _tenant(fixture)
+    assert result["status"] == "handled"
+    assert after["subscription_status"] == expected
+    assert after["minutes_allocated"] == before["minutes_allocated"], "no minutes from a lifecycle event"
+
+
+async def test_a_chargeback_on_a_plan_suspends_calls_until_the_dispute_is_won(state_db):
+    fixture = state_db
+    receipt, subscription, session, invoice = await _paid(fixture)
+    await _apply(fixture, "invoice.paid", invoice)
+    assert (await _tenant(fixture))["subscription_status"] == "active"
+    charge_id, payment_id, dispute_id = "ch_" + uuid4().hex, "pi_" + uuid4().hex, "dp_" + uuid4().hex
+    fixture.objects[("Charge", charge_id)] = stripe.Charge.construct_from({
+        "id": charge_id, "object": "charge", "livemode": False, "invoice": invoice["id"],
+        "customer": session["customer"], "payment_intent": payment_id, "currency": "usd",
+    }, "sk_test_synthetic")
+    dispute = {"id": dispute_id, "object": "dispute", "livemode": False, "charge": charge_id,
+               "payment_intent": payment_id, "status": "needs_response"}
+    fixture.objects[("Dispute", dispute_id)] = stripe.Dispute.construct_from(dispute, "sk_test_synthetic")
+
+    result = await _apply(fixture, "charge.dispute.created", dispute)
+    assert result["reason"] == "subscription_dispute_suspended"
+    assert (await _tenant(fixture))["subscription_status"] == "suspended"
+    # An ordinary 'active' update while the dispute is open keeps calls off.
+    await _apply(fixture, "customer.subscription.updated", subscription)
+    assert (await _tenant(fixture))["subscription_status"] == "suspended"
+
+    fixture.objects[("Dispute", dispute_id)] = stripe.Dispute.construct_from(dict(dispute, status="lost"), "sk_test_synthetic")
+    assert (await _apply(fixture, "charge.dispute.closed", dispute))["reason"] == "dispute_not_won"
+    assert (await _tenant(fixture))["subscription_status"] == "suspended"
+    fixture.objects[("Dispute", dispute_id)] = stripe.Dispute.construct_from(dict(dispute, status="won"), "sk_test_synthetic")
+    result = await _apply(fixture, "charge.dispute.closed", dispute)
+    assert result["reason"] == "subscription_dispute_won"
+    assert (await _tenant(fixture))["subscription_status"] == "active"

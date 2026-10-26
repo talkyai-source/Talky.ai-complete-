@@ -174,9 +174,12 @@ async def test_daily_and_monthly_reads_include_only_settled_owned_seconds(
     fixture = invoice_db
     await seed_usage(fixture, allocated=allocated)
     usage = await api.get_usage_summary("minutes", user(fixture), billing(fixture))
-    assert usage.total_used == 3 and usage.allocated == allocated
+    # The fixture tenant also holds 43 bought minutes (ledger 50 - 7), which the
+    # meter adds to the plan's minutes; an unlimited plan ignores them.
+    granted = allocated + 43 if allocated else 0
+    assert usage.total_used == 3 and usage.allocated == granted
     assert usage.unlimited is (allocated == 0) and usage.overage == 0
-    assert usage.remaining == (347 if allocated else 0)
+    assert usage.remaining == (granted - 3 if allocated else 0)
     daily = await api.get_daily_usage(1, user(fixture), fixture.service_pool)
     assert daily[0]["secondsUsed"] == 239 and daily[0]["minutesUsed"] == 3
     assert daily[0]["totalCalls"] == 2

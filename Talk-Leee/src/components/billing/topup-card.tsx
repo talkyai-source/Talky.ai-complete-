@@ -15,6 +15,7 @@ import {
   Zap,
 } from "lucide-react";
 import { isApiClientError } from "@/lib/http-client";
+import { approvedCheckoutUrl } from "@/lib/billing-purchase";
 import {
   canTopUp,
   formatMoney,
@@ -36,6 +37,11 @@ function formatTopupError(err: unknown): string {
     return err.message;
   }
   return err instanceof Error ? err.message : "The request did not complete.";
+}
+
+/** A refusal made before any order or payment existed, in the server's words. */
+function refusedBeforeOrder(err: unknown): string | null {
+  return isApiClientError(err) && err.status !== undefined && [400, 403, 409].includes(err.status) ? err.message : null;
 }
 
 export function TopupCard() {
@@ -88,8 +94,9 @@ export function TopupCard() {
 
       if (result?.checkout_url) {
         // Leaves the app entirely. The button stays disabled behind us because
-        // `pending` never clears before navigation.
-        window.location.assign(result.checkout_url);
+        // `pending` never clears before navigation. Only Stripe's own checkout
+        // host is followed, as for plan checkout.
+        window.location.assign(approvedCheckoutUrl(result.checkout_url));
       }
     } catch {
       setChosen(null);
@@ -177,8 +184,12 @@ export function TopupCard() {
           >
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden />
             <span>
-              The purchase result was not confirmed. Review saved orders before trying again.
-              Contact the billing team if the saved status remains unclear.
+              {refusedBeforeOrder(start.error) ?? (
+                <>
+                  The purchase result was not confirmed. Review saved orders before trying again.
+                  Contact the billing team if the saved status remains unclear.
+                </>
+              )}
             </span>
           </div>
         ) : null}

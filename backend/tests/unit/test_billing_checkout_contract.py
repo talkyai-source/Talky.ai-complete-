@@ -96,13 +96,14 @@ async def test_lost_provider_response_reuses_exact_session_parameters_and_identi
 async def test_old_unknown_attempt_never_recreates_a_provider_session(monkeypatch):
     row = attempt()
     row.update(status="unknown", created_at=datetime.now(UTC) - timedelta(hours=24))
-    sdk = AsyncMock()
+    sdk = AsyncMock(return_value={"data": []})
     svc = checkout.CheckoutAttempts(None, SimpleNamespace(billing_mode="test", _stripe_call=sdk))
     monkeypatch.setattr(svc, "_get", AsyncMock(return_value=row))
     monkeypatch.setattr(svc, "_state", AsyncMock())
     result = await svc.create(tenant_id=row["tenant_id"], request_id=row["id"], price_option_id=row["price_option_id"], email="synthetic@example.com")
     assert result["state"] == "pending" and result["checkout_url"] is None
-    sdk.assert_not_awaited()
+    # It may look for the session the first request made (a read), never create one.
+    assert {call.args[:2] for call in sdk.await_args_list} <= {("checkout.Session", "list")}
 
 
 @pytest.mark.asyncio
@@ -291,9 +292,9 @@ async def test_unavailable_offer_cannot_unlock_a_concurrently_saved_request(monk
 
     monkeypatch.setattr(checkout, "acquire_with_tenant", acquire)
     monkeypatch.setattr(billing_catalog, "resolve_checkout_option", AsyncMock(side_effect=billing_catalog.BillingCatalogUnavailable("Offer unavailable.")))
-    sdk = AsyncMock()
+    sdk = AsyncMock(return_value={"data": []})
     svc = checkout.CheckoutAttempts(None, SimpleNamespace(billing_mode="test", _stripe_call=sdk))
-    monkeypatch.setattr(svc, "_get", AsyncMock(side_effect=[None, row]))
+    monkeypatch.setattr(svc, "_get", AsyncMock(side_effect=[None, row, row]))
     monkeypatch.setattr(svc, "_state", AsyncMock())
     if concurrent_receipt:
         result = await svc.create(tenant_id=row["tenant_id"], request_id=row["id"], price_option_id=row["price_option_id"], email="synthetic@example.com")
@@ -303,7 +304,8 @@ async def test_unavailable_offer_cannot_unlock_a_concurrently_saved_request(monk
             await svc.create(tenant_id=row["tenant_id"], request_id=row["id"], price_option_id=row["price_option_id"], email="synthetic@example.com")
         assert rejected.value.code == "billing_offer_unavailable"
         assert rejected.value.request_not_started is True
-    sdk.assert_not_awaited()
+    # Never a provider write; a saved old attempt may only be looked up.
+    assert {call.args[:2] for call in sdk.await_args_list} <= {("checkout.Session", "list")}
 
 
 @pytest.mark.asyncio
