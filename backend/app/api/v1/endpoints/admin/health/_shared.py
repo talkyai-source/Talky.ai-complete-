@@ -105,18 +105,26 @@ async def _internal_dependency_health(pool) -> list[SystemHealthItem]:
         from app.api.v1.endpoints import telephony_bridge
         adapter = telephony_bridge._adapter
         scope = "Configured PBX and media gateway of this API process; not tenant carrier registration or end-to-end audio."
-        if adapter is None or getattr(adapter, "name", None) != "asterisk":
+        if adapter is not None and getattr(adapter, "name", None) != "asterisk":
             return SystemHealthItem(name="Telephony", status="unknown", latency_display="Not measured",
                 scope=scope, detail="This API process has no supported active PBX read probe.")
         start = perf_counter()
         try:
-            ok = await asyncio.wait_for(adapter.health_check(), timeout=4.0)
+            if adapter is None:
+                from ._pbx_probe import configured_pbx_health
+                scope = "Configured PBX and media gateway control connectivity; not active call ownership, tenant carrier registration or end-to-end audio."
+                ok = await asyncio.wait_for(configured_pbx_health(), timeout=4.0)
+                if ok is None:
+                    return SystemHealthItem(name="Telephony", status="unknown", latency_display="Not measured",
+                        scope=scope, detail="No explicitly selected, fully configured Asterisk read probe is available.")
+            else:
+                ok = await asyncio.wait_for(adapter.health_check(), timeout=4.0)
             if ok is not True:
                 raise RuntimeError("PBX/gateway probe rejected")
             latency = max(0, round((perf_counter() - start) * 1000))
             return SystemHealthItem(name="Telephony", status="operational" if latency < 1000 else "degraded", latency_ms=latency,
                 latency_display=f"{latency}ms control probe", last_check=_utc_now(), scope=scope,
-                detail="Existing ARI read and gateway protocol compatibility probe passed; not call audio latency.")
+                detail="ARI read and gateway protocol compatibility probe passed; not call audio latency.")
         except Exception:
             return SystemHealthItem(name="Telephony", status="down", latency_display="Unavailable",
                 last_check=_utc_now(), scope=scope, detail="PBX/gateway control probe failed or timed out.")

@@ -22,6 +22,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 BASE = "2739eeabf7d091ffa63b7dc0695019da77f972f9"
+PREVIOUS_MONITORING = "80f011d40c187afecdaaf84ee7aba6c188e835fc"
 BRANCH = "refs/heads/codex/admin-monitoring-live-20261027"
 LIVE = Path("/opt/talky")
 UNIT = Path("/etc/systemd/system/talky-api-web.service")
@@ -34,6 +35,7 @@ RUNTIME = {
     "backend/app/api/v1/endpoints/admin/base.py",
     *{"backend/app/api/v1/endpoints/admin/health/" + name + ".py"
       for name in ("_shared", "schemas", "system", "workers", "queues", "database")},
+    "backend/app/api/v1/endpoints/admin/health/_pbx_probe.py",
     "backend/app/api/v1/endpoints/health.py",
     "backend/app/infrastructure/metrics/provider_observations.py",
 }
@@ -42,7 +44,9 @@ OTHER = {
     "backend/tests/unit/test_admin_monitoring_truth.py",
     "backend/tests/unit/test_provider_observations.py",
     "backend/tests/unit/test_admin_monitoring_backport_contract.py",
+    "backend/tests/unit/test_admin_pbx_probe.py",
     "docs/sessions/2026-10-27-admin-monitoring-live.md",
+    "docs/sessions/2026-10-27-admin-remaining-limitations.md",
 }
 SERVICES = ("talky-api", "talky-voice-gateway", "talky-dialer-worker",
             "talky-voice-worker", "talky-reminder-worker", "talky-trunk-status", "asterisk")
@@ -106,6 +110,9 @@ def validate(path, value):
         need(bool(value["providers"]), "Missing dependencies")
         need(all({"name", "status", "latency_ms", "latency_display", "scope", "detail", "last_check"} <= row.keys()
                  for row in value["providers"]), "Incomplete dependency observation")
+        pbx = next((row for row in value["providers"] if row["name"] == "Telephony"), {})
+        need(pbx.get("status") in ("operational", "degraded") and pbx.get("last_check")
+             and type(pbx.get("latency_ms")) is int, "Configured PBX/gateway observation did not pass")
     elif path == PATHS[3]:
         need(value["total_workers"] == 3 and value["active_workers"] == 3, "Worker heartbeat unavailable or stale")
         need(all({"age_seconds", "detail", "last_heartbeat"} <= row.keys() for row in value["workers"]), "Incomplete heartbeat")
@@ -142,6 +149,8 @@ async def check():
             rows = await conn.fetch("SELECT table_name,column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=ANY($1::text[])", list(required))
             assert all(cols <= {r['column_name'] for r in rows if r['table_name']==table} for table,cols in required.items())
             assert await conn.fetchval('SELECT pg_database_size(current_database())') > 0
+        from app.api.v1.endpoints.admin.health._pbx_probe import configured_pbx_health
+        assert await configured_pbx_health() is True
         print('MONITORING_PREFLIGHT_OK')
     finally:
         await conn.close()
@@ -191,10 +200,14 @@ def main():
     need(not git("ls-files", "--others", "--exclude-standard", "backend/app", cwd=candidate), "Untracked candidate application source")
     changed = set(git("diff", "--name-only", BASE, args.commit, cwd=candidate).splitlines())
     need(RUNTIME <= changed <= RUNTIME | OTHER, "Candidate exceeds the reviewed monitoring-only file set")
-    need(UNIT.is_symlink() and UNIT.readlink() == LIVE / "backend/systemd/talky-api-web.service", "Unexpected unit link; inspect before maintenance")
+    previous_unit = LIVE / "runtime/admin-monitoring" / PREVIOUS_MONITORING / "talky-api-web.service"
+    need(UNIT.is_symlink() and UNIT.readlink() == previous_unit, "Unexpected unit link; inspect before maintenance")
     original = UNIT.readlink()
     expected = git("show", BASE + ":backend/systemd/talky-api-web.service")
-    need(UNIT.read_text().strip() == expected, "Dashboard unit drift")
+    needle = "ExecStart=/opt/talky/backend/venv/bin/uvicorn app.main:app "
+    previous_expected = "# Monitoring maintenance commit " + PREVIOUS_MONITORING + "\n" + expected.replace(
+        needle, needle + "--app-dir " + str(LIVE / "releases" / PREVIOUS_MONITORING / "backend") + " ")
+    need(UNIT.read_text().strip() == previous_expected, "Dashboard unit drift")
     need(run("systemctl", "show", "talky-api-web", "--property=DropInPaths", "--value") == str(DROPIN)
          and digest(DROPIN) == DROPIN_SHA, "Unreviewed dashboard unit overrides")
     before = {service: identity(service) for service in SERVICES}
@@ -206,7 +219,7 @@ def main():
                             cwd=LIVE / "backend", env={"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "TELEPHONY_ENABLED": "false"},
                             capture_output=True, text=True, timeout=60)
     need(result.returncode == 0 and "MONITORING_PREFLIGHT_OK" in result.stdout, "Import/schema preflight failed; no service changed")
-    print("PASS: production base, source boundary, unit, imports and existing database columns", flush=True)
+    print("PASS: production base, source boundary, unit, imports, database columns and configured PBX/gateway read probes", flush=True)
     if args.check_only:
         return
     need(sys.stdin.isatty(), "Credentials require a private terminal")
@@ -216,10 +229,9 @@ def main():
     receipt = {"commit": args.commit, "base": BASE, "before": before, "before_web": before_web,
                "original_unit": str(original), "state": "prepared", "reads": []}
     target = runtime / "talky-api-web.service"
-    needle = "ExecStart=/opt/talky/backend/venv/bin/uvicorn app.main:app "
     need(expected.count(needle) == 1, "Unexpected executable")
     target.write_text("# Monitoring maintenance commit " + args.commit + "\n" + expected.replace(
-        needle, needle + "--app-dir " + str(candidate / "backend") + " ") + "\n")
+        needle, "Environment=APP_VERSION=" + args.commit[:8] + "\n" + needle + "--app-dir " + str(candidate / "backend") + " ") + "\n")
     target.chmod(0o644)
     run("systemd-analyze", "verify", str(target))
     activated, token = False, None
@@ -242,6 +254,8 @@ def main():
                 status, cors, body = request(base, path, token)
                 need(status == 200 and cors == ORIGIN, "Monitoring request failed: " + path)
                 validate(path, body)
+                if path == PATHS[2]:
+                    need(body.get("version") == args.commit[:8], "Dashboard version does not identify the running release")
                 receipt["reads"].append({"base": base, "path": path, "status": status, "response": body})
                 anonymous, _, _ = request(base, path)
                 need(anonymous in (401, 403), "Anonymous monitoring access allowed")
