@@ -4,6 +4,17 @@ The user has authorized deployment and another QA pass. This record describes re
 
 ## Current release status
 
+### Remaining-limitations follow-up — 27 October, Asia/Karachi
+
+[The follow-up record](2026-10-27-admin-remaining-limitations.md) closes dashboard
+PBX visibility and 360 px keyboard/touch table access. API-web now runs `5470521a`
+and displays that version; the call owner remains on `2739eea`. The wider read
+audit confirms five live Admin contract/CORS failures and a latent enquiry revision
+mismatch requiring the paired backend/schema release. The new read-only release
+observer measured all four call counters at zero without claiming a traffic freeze
+or owner approval. Provider publication, old-process fallback and full Admin
+acceptance remain open under the existing coordinated-release contract.
+
 ### Live monitoring maintenance — 27 October, Asia/Karachi
 
 [The monitoring activation record](2026-10-27-admin-monitoring-live.md) supersedes

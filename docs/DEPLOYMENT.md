@@ -169,10 +169,13 @@ sha256sum "$TALKY_DEPLOY_DRAIN_MANIFEST"
 
 The local replay ledger is an additional fail-closed guard; the change system
 must also enforce global manifest-ID uniqueness. SHA-256 binds the bytes but is
-not an approver signature. Most importantly, repository code does not yet read
-the carrier, Asterisk legs, Redis leases, or database live-call state. Those
-values, the topology reference, and the ingress/origination freeze remain
-externally attested. The later gateway `/stats` checks narrow only the local
+not an approver signature. The optional `backend/scripts/observe_release_quiescence.py`
+now reads bounded gateway/Asterisk/Redis/database counters using an explicit
+`--env-file`. Its output is a non-atomic snapshot, never a drain manifest or
+approval; exit zero means the reads were complete and internally consistent,
+not that every counter was zero. The carrier topology and ingress/origination
+freeze still require owner attestation, and counts must be rechecked after that
+freeze. The later gateway `/stats` checks narrow only the local
 gateway restart window; neither the manifest nor a phrase eliminates TOCTOU
 across the external topology.
 
