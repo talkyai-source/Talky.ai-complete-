@@ -374,10 +374,19 @@ def test_drain_manifest_id_cannot_escape_replay_ledger(tmp_path):
 
 def test_deployment_docs_keep_external_attestation_and_toctou_limit_explicit():
     deployment_doc = (ROOT / "docs" / "DEPLOYMENT.md").read_text(encoding="utf-8")
+    deployment_prose = " ".join(deployment_doc.split())
 
-    assert "repository code does not yet read" in deployment_doc
-    assert "carrier, Asterisk legs, Redis leases, or database live-call state" in deployment_doc
-    assert "externally attested" in deployment_doc
+    assert "backend/scripts/observe_release_quiescence.py" in deployment_doc
+    assert "bounded gateway/Asterisk/Redis/database counters" in deployment_prose
+    assert "non-atomic snapshot, never a drain manifest or approval" in deployment_prose
+    assert (
+        "exit zero means the reads were complete and internally consistent, "
+        "not that every counter was zero"
+    ) in deployment_prose
+    assert (
+        "carrier topology and ingress/origination freeze still require owner attestation"
+    ) in deployment_prose
+    assert "counts must be rechecked after that freeze" in deployment_prose
     assert "neither the manifest nor a phrase eliminates TOCTOU" in deployment_doc
     assert "closes the check/restart race" not in deployment_doc
 
