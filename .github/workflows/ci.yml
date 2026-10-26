@@ -313,6 +313,7 @@ jobs:
             tests/integration/test_admin_incident_authority.py \
             tests/integration/test_admin_tenant_atomicity.py \
             tests/integration/test_admin_incidents.py \
+            tests/integration/test_legacy_incidents_adoption.py \
             tests/integration/test_alertmanager_incidents.py \
             tests/integration/test_connector_lifecycle.py \
             tests/integration/test_connector_audit_atomicity.py \
