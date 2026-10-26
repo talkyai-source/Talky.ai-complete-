@@ -77,6 +77,18 @@ const nextConfig: NextConfig = {
                 source: "/:path*.svg",
                 headers: [{ key: "Cache-Control", value: "public, max-age=604800, stale-while-revalidate=2592000" }],
             },
+            // Documentation screenshots (public/docs/*.webp, rendered by
+            // docs-markdown.tsx). Next's static default is max-age=0, which
+            // re-validates every image on every visit. The filenames carry no
+            // content hash, so this is deliberately NOT immutable: fresh for a
+            // day, then served stale for a week while revalidating in the
+            // background (the same values as /images above), so a replaced
+            // screenshot reaches a returning reader within a day. Matches only
+            // .webp under /docs/, never the /docs/* HTML pages.
+            {
+                source: "/docs/:path*.webp",
+                headers: [{ key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" }],
+            },
             {
                 source: "/openapi.json",
                 headers: [{ key: "Cache-Control", value: "public, max-age=3600, stale-while-revalidate=86400" }],
