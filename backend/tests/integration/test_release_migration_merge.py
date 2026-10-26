@@ -24,11 +24,11 @@ BASELINE = "0008_tenant_voice_tuning"
 HEARTBEAT = "0048_audit_skip_heartbeat"
 RECEIPTS = "0062_saved_acknowledgement"
 MERGE = "0063_release_history_merge"
-HEAD = "0076_admin_user_operations"
+HEAD = "0077_legacy_tenant_rls_repair"
 CURRENT_ADMIN_REVISIONS = {
     "0070_trunk_soft_delete", "0071_connector_lifecycle",
     "0072_admin_incidents", "0073_alertmanager_incidents", "0074_contact_enquiry_revision",
-    "0075_admin_user_review", HEAD,
+    "0075_admin_user_review", "0076_admin_user_operations", HEAD,
 }
 RUN_EVIDENCE = []
 pytestmark = pytest.mark.integration

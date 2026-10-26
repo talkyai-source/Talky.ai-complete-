@@ -1209,10 +1209,14 @@
         {
           "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-populated-restore-runtime-independent-review-v1.json",
           "kind": "final_local_acceptance_with_external_limits"
+        },
+        {
+          "path": "docs/sessions/2026-10-26-admin-release.md",
+          "kind": "release_candidate_qa_and_activation_limits"
         }
       ],
-      "blocker": "Finite local L1-L4 are accepted at their explicit sources/data/platform limits: media, layout,634-case exact48-module PostgreSQL selection,932-case Admin gate, unchanged accepted Next binding and compatible baseline/populated-state restore. No whole-Admin/provider/release claim. E1-E6 remain: designated hosted artifact/roles; owned provider/PBX/media resources; installed monitoring/receiver/fault/load window; supplier capability/finance scope; historical/partner policy; exact Linux/runtime/fresh backup/drain/release acceptance. CP05/CP06 deferred; freeze active.",
-      "next_action": "Use the single current 16-area queue and exact accepted artifacts. Obtain the E1-E6 designated inputs/decisions; complete the bounded supplier-source capability and finance reconciliation under E4 and applicable E5 policy work, then execute the required operating/release acceptance. Preserve existing local evidence; reopen an affected local item only for changed relevant inputs or a concrete new defect. Add no unrelated features, broad re-audit, duplicate per-page auth journey or automatic Next rebuild.",
+      "blocker": "Original finite local L1-L4 acceptance remains bound to its recorded sources/data/platform limits. The October 26 merged release has separate current-candidate QA: Admin frontend and protected hosted static checks pass; customer package-boundary and legacy database-upgrade defects require corrected release validation, and the first local database run retained a concurrent-lock timeout. Vercel access is available, but public Admin DNS, backend CORS, operator sudo, actual runtime grants and backup/drain/release evidence remain unresolved. E1-E6 still include designated roles, real provider/PBX/media resources, monitoring/recovery/load, unfinished supplier capability/finance and historical/partner policy. CP05/CP06 deferred; freeze active. See the release record for current outcomes instead of treating historical green gates as a current release pass.",
+      "next_action": "Finish the concrete October 26 release defects and exact-candidate Linux/hosted QA, then activate matching backend/schema/frontends only after the documented operating inputs are available. Preserve the original accepted evidence and source-bound limits. Obtain remaining E1-E6 inputs and complete the bounded supplier-source capability, finance reconciliation and applicable policy work. Add no unrelated features or broad rewrite; protected hosting and passing local checks do not close paid-use acceptance.",
       "target_date": null
     },
     {

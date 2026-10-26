@@ -9,7 +9,7 @@ SCRIPTS = ScriptDirectory(str(Path(__file__).resolve().parents[2] / "Alembic"))
 HEARTBEAT = "0048_audit_skip_heartbeat"
 RECEIPTS = "0062_saved_acknowledgement"
 MERGE = "0063_release_history_merge"
-HEAD = "0076_admin_user_operations"
+HEAD = "0077_legacy_tenant_rls_repair"
 
 
 def test_release_exposes_one_head_containing_both_existing_histories():
@@ -19,10 +19,12 @@ def test_release_exposes_one_head_containing_both_existing_histories():
     # line soft delete), 0071 (connector lifecycle), 0072 (durable incidents) and
     # 0073 (Alertmanager source episodes), 0074 (enquiry decision revision)
     # 0075 (reviewed user/profile membership versions), and 0076 (terminal
-    # user-operation uniqueness and actor discovery)
+    # user-operation uniqueness and actor discovery), and 0077 (legacy tenant
+    # policy repair)
     # are linear above the same merge.
     assert SCRIPTS.get_heads() == [HEAD]
-    assert SCRIPTS.get_revision(HEAD).down_revision == "0075_admin_user_review"
+    assert SCRIPTS.get_revision(HEAD).down_revision == "0076_admin_user_operations"
+    assert SCRIPTS.get_revision("0076_admin_user_operations").down_revision == "0075_admin_user_review"
     assert SCRIPTS.get_revision("0075_admin_user_review").down_revision == "0074_contact_enquiry_revision"
     assert SCRIPTS.get_revision("0074_contact_enquiry_revision").down_revision == "0073_alertmanager_incidents"
     assert SCRIPTS.get_revision("0073_alertmanager_incidents").down_revision == "0072_admin_incidents"
@@ -56,7 +58,7 @@ def test_upgrade_plan_runs_only_the_missing_branch(start, required, already_pres
     assert required | {
         "0070_trunk_soft_delete", "0071_connector_lifecycle",
         "0072_admin_incidents", "0073_alertmanager_incidents", "0074_contact_enquiry_revision",
-        "0075_admin_user_review", HEAD,
+        "0075_admin_user_review", "0076_admin_user_operations", HEAD,
     } <= head_revisions
     assert already_present not in head_revisions
 

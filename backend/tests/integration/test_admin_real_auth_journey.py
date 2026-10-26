@@ -78,6 +78,7 @@ async def _protected_snapshot(conn):
     # PostgreSQL may materialize NULL/default ACLs on the first GRANT, even
     # after DROP OWNED removes every fixture grant. Compare effective grants,
     # preserving owner, grantor, grantee, privilege and grant option instead.
+    # pg_class uses relkind 'S'; acldefault uses 's' for sequences ('S' is a foreign server).
     rows = await conn.fetch("""
         SELECT c.relname,c.relkind::text,c.relrowsecurity,c.relforcerowsecurity,
                pg_get_userbyid(c.relowner) AS owner,
@@ -87,7 +88,7 @@ async def _protected_snapshot(conn):
                  FROM aclexplode(CASE
                    WHEN c.relkind IN ('r','p','v','m','f','S') THEN
                      coalesce(c.relacl,acldefault(
-                       CASE WHEN c.relkind='S' THEN 'S' ELSE 'r' END::"char",c.relowner))
+                       CASE WHEN c.relkind='S' THEN 's' ELSE 'r' END::"char",c.relowner))
                    ELSE c.relacl END) a
                  ORDER BY a.grantor,a.grantee,a.privilege_type,a.is_grantable
                ) AS effective_acl
@@ -126,7 +127,7 @@ async def journey_db(monkeypatch):
     assert not app.dependency_overrides, "Authentication must use normal dependencies"
     owner = await asyncpg.connect(configured, command_timeout=30)
     before = await protected_snapshot(owner)
-    assert before["head"] == "0076_admin_user_operations"
+    assert before["head"] == "0077_legacy_tenant_rls_repair"
     role = "admin_http_" + uuid4().hex
     tenants = [uuid4() for _ in range(3)]
     users = [uuid4() for _ in range(3)]

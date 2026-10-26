@@ -21,11 +21,12 @@ pytestmark = pytest.mark.integration
 async def acl_snapshot(conn):
     # Treat NULL/default ACL and its explicit equivalent identically, as the
     # existing normal-auth fixture does; retain every grant and grant option.
+    # acldefault's sequence code is 's', distinct from pg_class.relkind 'S'.
     return [tuple(row) for row in await conn.fetch("""
         SELECT 'table:'||c.relname AS object,
           ARRAY(SELECT format('%s:%s:%s:%s',a.grantor,a.grantee,a.privilege_type,a.is_grantable)
                 FROM aclexplode(COALESCE(c.relacl,acldefault(
-                    CASE WHEN c.relkind='S' THEN 'S'::"char" ELSE 'r'::"char" END,c.relowner))) a
+                    CASE WHEN c.relkind='S' THEN 's'::"char" ELSE 'r'::"char" END,c.relowner))) a
                 ORDER BY a.grantor,a.grantee,a.privilege_type,a.is_grantable) AS acl
         FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relkind IN ('r','p','S')

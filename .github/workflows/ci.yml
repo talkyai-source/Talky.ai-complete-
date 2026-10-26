@@ -332,6 +332,7 @@ jobs:
             tests/integration/test_admin_real_auth_journey.py \
             tests/integration/test_admin_canonical_context.py \
             tests/integration/test_admin_runtime_privileges.py \
+            tests/integration/test_legacy_tenant_rls_repair.py \
             tests/integration/test_auth_logout_refresh_lock_order.py \
             tests/integration/test_admin_user_name_audit.py \
             tests/integration/test_admin_users_tenants_crud.py \
