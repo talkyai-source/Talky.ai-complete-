@@ -4,6 +4,24 @@ The user has authorized deployment and another QA pass. This record describes re
 
 ## Current release status
 
+### Live monitoring maintenance — 27 October, Asia/Karachi
+
+[The monitoring activation record](2026-10-27-admin-monitoring-live.md) supersedes
+the six-endpoint incompatibility below. Production-based backend `80f011d4` is
+running in the independent API-web service; call/worker/gateway processes remain
+on their previous source and schema 0070. All six direct/public reads, anonymous
+access rejection, three fresh role heartbeats, measured queues/database, normal
+login and session retirement passed. The deployed Admin frontend `6a8d5afc` also
+fixes clipped worker columns; actual default-alias browser reads, reload and
+programmatic final-column access at 1280/768 pixels pass. This closes the reported
+dashboard/monitoring contract error and worker-table clipping for the tested
+protected address. Provider/PBX observations, legacy port-8000 fallback and broader
+Admin/provider/MFA/customer acceptance remain explicitly open. Vercel protection,
+customer production, full-release drain requirements and the feature freeze remain.
+
+The sections below preserve the earlier reproduction and release history; their
+six-read failure and old Admin deployment references are superseded by this entry.
+
 ### Confirmed monitoring incompatibility — 27 October, Asia/Karachi
 
 After the login repair, an authenticated read of all six dashboard/monitoring endpoints returned HTTP 200 with the correct default Admin CORS header, but each response lacked fields required by the hosted Admin validators. The production backend still implements the older contract; this is a confirmed incomplete frontend/backend release, not a failed sign-in or a remaining CORS error for these requests.
