@@ -4,6 +4,67 @@ The user has authorized deployment and another QA pass. This record describes re
 
 ## Current release status
 
+The latest validated executable source is **`d5d6cf1dc66b3308807cb6978634b75a0cece256`**, pushed to [draft PR 22](https://github.com/talkyai-source/Talky.ai-complete-/pull/22). RSA SSH and interactive sudo now work. The new backend and public Admin **have not been activated**. At 16:37 UTC, the existing customer site and API health returned HTTP 200; all eight application/telephony services were active. Backend production remained clean at `2739eeabf7d091ffa63b7dc0695019da77f972f9`, schema `0070_trunk_soft_delete`.
+
+Main independently advanced to `c364e337b1a28fcfe610338acd6d53c6c992c13f` and published the customer deployment `dpl_FVACeir72YWzMgtb9Wma9oNS1iBi`. Merge `388b3ba7f62e52ec0053df2866c372513fd57ce4` preserves all five of those main changes, including the docs navigation and image cache repairs. This session did not move the production aliases or merge the release into main.
+
+### Fresh release validation
+
+- [Main CI](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40357494780), [voice CI](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40357494986), and [C++ CI](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40357494777) all finish successfully for d5d6cf1; all 13 recorded checks pass.
+- The actual combined Admin PostgreSQL gate passes **666 tests, zero skips**, across 50 explicit modules. This includes the new 23-case legacy-incidents module; no separate standalone run or downloaded XML is claimed. The existing CI XML/no-skip guard passes.
+- Admin frontend passes **932 tests, zero skips**. Customer frontend passes **1,292 tests, two existing optional database skips**. Their lint, type/build and dependency-audit gates pass. Main backend passes **15,317 tests, 174 existing skips**; the separate voice selection passes **15,271 tests, 220 existing skips**, plus 18 subtests. These selections overlap and must not be summed.
+- C++ production/sanitizer checks, image build, configured Trivy gate and Compose build pass. The ingress selection still has 25 static passes and 14 opt-in Docker skips. The existing Trivy policy and scan-artifact limits described below still apply; this is not live provider acceptance.
+- The exact d5d6cf1 [customer preview](https://talkleeai-m46fzypjh-allestateestimation-9391s-projects.vercel.app), `dpl_EB7CteRcB6NCZEwiNTqEqXFobRoP`, is READY. Fresh 388b3ba7 preview QA covered five pages, 37 directly referenced assets, desktop docs-sidebar scrolling and mobile navigation without page exceptions or overflow. All 761 tracked Next source paths and the complete Next/Admin/application/gateway trees are unchanged from 388b3ba7 to d5d6cf1, allowing scoped reuse of that QA. This does not assert identical emitted bundles or a new browser pass against d5d6cf1. The one auth probe was blocked before dispatch; no production login is claimed.
+- An isolated server checkout passed application import, an actual gateway build and **4/4 CTest checks**, Asterisk reconciliation check-only and inbound synthetic configuration validation. Gateway source is unchanged in d5d6cf1. All 64 installed Python requirements satisfy the candidate, including 43 exact pins; pip check passes. No dependencies were installed, service binary published, or synthetic call placed.
+
+### Real backup rehearsal and migration repair
+
+A fresh 24,702,915-byte production dump containing 121 table-data archive entries was checksum-verified and retained at `/var/backups/talky/releases/admin-20261026/talky-20261026T150109Z.dump`. A full, unfiltered ownership-preserving restoration into an isolated PostgreSQL 15.17 instance passed. The instance had no network and no published ports; only its own new volume and a read-only backup mount were used. Captured metadata, extension ownership/ACLs, role flags, locale, schema head and five table counts matched. Counts were captured after the dump rather than in its transaction and are not complete content hashes.
+
+The restored database exposed a genuine release blocker: migration 0072 tried to create `incidents`, which the July 2026 manual migration had already created. The original 388b3ba7 upgrade failed with `DuplicateTableError` and rolled back to 0070. d5d6cf1 now strictly recognizes and adopts that known legacy layout in place, preserves its history/owner/indexes, adds canonical constraints and platform RLS, and rejects unknown layouts or unrepresentable data without partial changes. Downgrade refuses to drop the adopted history table. The new module covers 23 acceptance/rejection/rollback cases within the 666-case CI gate.
+
+The actual restored backup subsequently upgraded **0070 to 0077** on d5d6cf1. Runtime privilege checks, application compatibility checks and the configured SIP-hook privilege contract all passed using the application role without SUPERUSER or BYPASSRLS. The real legacy incidents table was empty; its `created_at`, owner and three legacy indexes remained, and RLS/FORCE RLS became enabled. No pre-migration table-OID snapshot was captured for this clone; direct in-place OID continuity is covered by the CI cases instead.
+
+A separate recovery limitation remains: restoring into a disposable database within the existing production cluster failed while creating `pg_trgm` with `permission denied for language c`. Its bootstrap role is no longer a superuser, and no database superuser role exists. The successful fresh-cluster rehearsal does not repair that maintenance path or establish off-host/object-store/key recovery. Production roles were not changed. Earlier diagnostic-helper failures and the original migration failure remain preserved as failed evidence.
+
+All owned temporary recovery containers, volumes, generated init-password files, disposable databases, server worktrees and candidate binaries were removed after identity checks. The verified backup and private evidence remain. No live schema upgrade, service restart, application-account grant or password reset occurred. The privileged SSH session was closed after exporting and checking the selected evidence.
+
+### Remaining activation and acceptance
+
+1. **DNS:** `admin.talkleeai.com` still does not resolve; the GoDaddy browser session is signed out. The recorded Vercel CNAME and verification TXT must be added through the authoritative DNS account. Protected Admin staging remains `dpl_HN2UKGDzsvnmtxcnetk9vb9dwSCg`, with Vercel Authentication for all deployments and no public production/custom-domain activation.
+2. **CORS and coordinated release:** the production Admin-origin preflight returns HTTP 400 without an allow-origin header. The prepared additive configuration preserves the five existing origins and adds only `https://admin.talkleeai.com`; it has not been applied. Deploy the matching backend/schema/gateway and production-environment frontend builds before protected authenticated acceptance. Do not assume a preview promotion has production contact-origin configuration.
+3. **Real traffic drain:** [the existing deployment contract](../DEPLOYMENT.md#production-drain-manifest-contract) requires verified ingress and outbound-origination freezes, four measured zero counters, topology/change references and distinct telephony/release approvers. There is no repository-owned freeze command for this Asterisk-only topology. Only gateway sessions and Asterisk calls were observed at zero; Redis/database counters, an actual freeze and the approval record were not established. The earlier backup rehearsal is not a drain manifest. A compatible rollback/code-forward/verified-restore disposition and the post-migration check under the actual service identity also remain required.
+4. **Accounts and production journeys:** two existing active, verified `platform_admin` accounts have passwords configured. No identities, hashes or credentials are published here. MFA is off on both, and new Admin creation does not force enrolment. The intended account owner must complete authenticator enrolment and a fresh hosted login; role, session cutoff, business mutations and real provider effects remain to be accepted after activation. Full application authority still preserves audit and distinct-person billing safeguards.
+5. **Scope still open:** authoritative supplier spending and finance reconciliation remain unimplemented/unaccepted. Designated provider/PBX/media resources, monitoring/recovery/load and historical/partner policy acceptance remain in CP09. The feature freeze stays active.
+
+Feature percentages below are **evidence-checklist completion, not reliability or the fraction of working code**. Each applicable stage has one point: implementation, bounded local acceptance, hosted UI, authenticated production, and real provider/operating acceptance. Not-applicable stages are excluded. A hosted login screen proves only that screen. No row should be averaged into an overall functional percentage.
+
+| Existing area | Accepted stages | Evidence index | Main remaining proof |
+|---|---:|---:|---|
+| Login and sessions | 3/4 | 75% | Real hosted login, MFA and session/cookie behavior |
+| Command Center | 2/5 | 40% | Deployed fleet/worker and PBX effects |
+| Tenants | 2/4 | 50% | Production writes, grants and history |
+| Users and roles | 2/4 | 50% | Real operator authority and credential cutoff |
+| Formal holds, appeals and expiry | 2/5 | 40% | Actual scheduler and assistant/PBX enforcement |
+| Website enquiries | 2/4 | 50% | Public intake through authenticated handling |
+| Calls | 2/5 | 40% | Real routing, all-leg termination and CRM evidence |
+| Call media and feedback | 2/5 | 40% | Storage, retention and transcription acceptance |
+| Inbound Control | 2/5 | 40% | Real DID admission and settlement effects |
+| Actions | 2/5 | 40% | Original-account provider effects and inspection |
+| Connectors | 2/5 | 40% | Real OAuth, rotation and revoke/reauthorization |
+| Usage and legacy cost estimates | 2/4 | 50% | Hosted reconciliation; estimates are not supplier spending |
+| Authoritative supplier spending | 0/5 | 0% | Capability, retained source and finance reconciliation |
+| Incidents | 2/5 | 40% | Real delivery, recovery and outage/restart behavior |
+| System Health | 2/5 | 40% | Nonzero provider/worker traffic and fallback/restart |
+| Shared UI and companion audit/security | 2/4 | 50% | Hosted protected, mobile and partner-policy journeys |
+| Release and recovery | 2/4 | 50% | Coordinated activation/drain and operating acceptance |
+
+The 17 rows represent the existing 16-area inventory with usage/cost split to expose the missing supplier capability. Private source-bound evidence includes `output/release-0072-ci-local/candidate-ci-checkpoint-v1.json` (SHA-256 `621412c5b33eaa3abcb66d1936554f003f3706279ac881f144a22b15332eadb6`), the reused browser manifest (SHA-256 `4f3e4ea05fb210b6a2c8d4d5046c955c64d12bad3853fd0c27bf7c928dd61066`), and `output/admin-recovery-local/server-evidence/manifest.json` (SHA-256 `eff515fc8ff9083716bb06635ea3ede0d234c109e3cb6468c2eac1938cf10649`). All 12 exported metadata files were rehashed after copying; the dump, passwords and raw customer rows were excluded. The successful candidate upgrade report hashes to `4b8421a9b54180a059df9d901a60c006f5c1debd83e7caf84d696c427941480b`.
+
+This final record update changes documentation only. Executable-source CI and recovery evidence remain bound to d5d6cf1; a later documentation commit is not described as a new completed CI run. The following sections are chronological historical evidence; current observations above supersede earlier status statements without changing the outcomes of earlier failed runs.
+
+## Earlier release checkpoint — before sudo access and the real-backup rehearsal
+
 The validated source candidate is `94308a6a336508a0dc30188dfdb6588761e5a3a4` on [draft PR 22](https://github.com/talkyai-source/Talky.ai-complete-/pull/22). Vercel access works. The customer preview and protected Admin staging are ready, but the production backend and public customer deployment have not been changed.
 
 - The [full backend unit/security workflow](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40301582584) passes: **15,271 passed, zero failed, 220 existing skips**, plus 18 passing subtests. All four failures from the previous full run and both new inventory regressions pass. The skip list is unchanged, including 133 previously quarantined cases; this is not complete live-feature acceptance. The exact source-bound checkpoint is `output/voice-ci-live-review-local/94308-full-ci-checkpoint-v1.json`, SHA-256 `b565dedb3416b43874e678479da86be7e873314866f48d85f497c729ea406b32`.
