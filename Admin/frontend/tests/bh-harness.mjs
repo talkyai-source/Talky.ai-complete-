@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import net from 'node:net';
 import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
+import { installSessionLocks as installBrowserLocks } from './session-lock-fixture.mjs';
 
 export const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://admin.example.invalid/' });
 const originalGlobals = new Map();
@@ -26,19 +27,43 @@ const bundle = await build({
         contents: `
             export { TenantsTable } from './src/components/TenantsTable';
             export { TenantsPage } from './src/pages/TenantsPage';
+            export { UsersPage } from './src/pages/UsersPage';
+            export { FormalHoldPanel } from './src/components/FormalHoldPanel';
+            export { IncidentsPage } from './src/pages/IncidentsPage';
+            export { ContactEnquiriesPage } from './src/pages/ContactEnquiriesPage';
+            export { ActionDetailDrawer } from './src/components/ActionDetailDrawer';
+            export { CallsPage } from './src/pages/CallsPage';
+            export { ActionsPage } from './src/pages/ActionsPage';
             export { ConnectorDetailDrawer } from './src/components/ConnectorDetailDrawer';
             export { ConnectorsTable } from './src/components/ConnectorsTable';
+            export { ConnectorsPage } from './src/pages/ConnectorsPage';
             export { ActionsTable } from './src/components/ActionsTable';
+            export { CallHistoryTable } from './src/components/CallHistoryTable';
             export { LiveCalls } from './src/components/LiveCalls';
+            export { LiveCallsTable } from './src/components/LiveCallsTable';
             export { StatsGrid } from './src/components/StatsGrid';
+            export { TopTenantsList } from './src/components/TopTenantsList';
+            export { TopTenantsPanel } from './src/components/TopTenantsPanel';
+            export { UsageCostPage } from './src/pages/UsageCostPage';
+            export { UsageBreakdownCard } from './src/components/UsageBreakdownCard';
             export { Incidents } from './src/components/Incidents';
             export { SystemHealth } from './src/components/SystemHealth';
+            export { WorkerStatusTable } from './src/components/WorkerStatusTable';
+            export { QueueDepthChart } from './src/components/QueueDepthChart';
+            export { HealthOverviewCards } from './src/components/HealthOverviewCards';
+            export { DatabaseHealthCard } from './src/components/DatabaseHealthCard';
             export { RecordingsTable } from './src/components/RecordingsTable';
             export { FeedbackTable } from './src/components/FeedbackTable';
             export { AuthProvider, useAuth } from './src/lib/auth';
             export { api } from './src/lib/api';
             export { MemoryRouter } from 'react-router-dom';
             export { CallDetailDrawer } from './src/components/CallDetailDrawer';
+            export { AdminMediaPlayer } from './src/components/AdminMediaPlayer';
+            export { LoginPage } from './src/pages/LoginPage';
+            export { AdminRouteGuard } from './src/components/AdminRouteGuard';
+            export { Sidebar } from './src/components/Sidebar';
+            export { Header } from './src/components/Header';
+            export { ADMIN_ROUTES, canAccessAdminRoute, adminLanding, safeAdminReturn } from './src/lib/admin-routes';
         `,
         resolveDir: fileURLToPath(new URL('..', import.meta.url)),
         loader: 'ts',
@@ -59,19 +84,24 @@ export const deferred = () => { let resolve; const promise = new Promise((done) 
 export const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 export const state = { root: null, host: null, requests: [], route: null };
+// Capability-failure tests replace or remove this declared browser fixture.
+export const installSessionLocks = () => installBrowserLocks(dom.window.navigator);
 // Default: any request not explicitly routed is an error response, so a test
 // only has to describe the calls it cares about.
 export const unrouted = () => response({ detail: 'unrouted synthetic request' }, 500);
 
 beforeEach(() => {
+    installSessionLocks();
     state.host = document.createElement('div'); document.body.append(state.host);
     state.root = createRoot(state.host);
+    localStorage.removeItem('talky.admin.logout.pending');
     api.setToken(`synthetic-${crypto.randomUUID()}`);
     state.requests = [];
     state.route = unrouted;
     globalThis.fetch = async (url, options = {}) => {
         const request = { path: new URL(url).pathname + new URL(url).search, method: options.method ?? 'GET',
-            authorization: options.headers?.Authorization, body: options.body ? JSON.parse(options.body) : undefined };
+            authorization: options.headers?.Authorization, headers: { ...options.headers }, credentials: options.credentials,
+            body: options.body ? JSON.parse(options.body) : undefined };
         state.requests.push(request);
         return state.route(request);
     };

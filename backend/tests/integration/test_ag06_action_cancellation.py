@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from fastapi import HTTPException
+from starlette.requests import Request
 
 from app.api.v1.endpoints.admin import actions
 from app.core import postgres_adapter
@@ -33,6 +34,18 @@ async def cancel_db(lead_db, monkeypatch):  # noqa: F811 - imported pytest fixtu
     monkeypatch.setattr(postgres_adapter, "_DATABASE_URL", os.environ["TEST_DATABASE_URL"])
     db.client = postgres_adapter.Client(db.pool)
     db.actor = SimpleNamespace(id=str(uuid4()), role="platform_admin", tenant_id=None)
+    # These legacy direct-call tests prove real PG dispatch/reservation and
+    # tenant predicates. Their actors never represented authenticated sessions.
+    # Keep the principal port explicitly synthetic here; the separate normal-
+    # auth HTTP suite tests the real loader and current-session authority.
+    db.synthetic_cancel_principals = {}
+
+    async def load_synthetic_principal(_conn, claims):
+        principal = db.synthetic_cancel_principals[(claims["sub"], claims["sid"])]
+        assert claims.get("tenant_id") == principal["tenant_id"]
+        return dict(principal)
+
+    monkeypatch.setattr(actions, "load_session_principal", load_synthetic_principal)
     try:
         yield db
     finally:
@@ -56,8 +69,19 @@ async def seed_action(db, *, callback=False):
     return identity, parameters
 
 
+def cancel_request(db, actor):
+    session_id = str(uuid4())
+    request = Request({"type": "http", "method": "POST", "path": "/cancel", "headers": []})
+    request.state.authenticated_user_id = actor.id
+    request.state.authenticated_session_id = session_id
+    db.synthetic_cancel_principals[(actor.id, session_id)] = {
+        "id": actor.id, "role": actor.role, "tenant_id": actor.tenant_id,
+    }
+    return request
+
+
 async def cancel(db, identity):
-    return await actions.cancel_action(str(identity), db.actor, db.client)
+    return await actions.cancel_action(str(identity), db.actor, db.client, request=cancel_request(db, db.actor))
 
 
 async def stored(db, identity):
@@ -189,7 +213,8 @@ async def test_admin_receipt_reads_and_cancel_pin_the_authenticated_tenant(cance
     foreign = SimpleNamespace(id=str(uuid4()), role=role, tenant_id=str(db.tenants[1]))
     for endpoint in (actions.get_admin_action_detail, actions.retry_action, actions.cancel_action):
         with pytest.raises(HTTPException) as caught:
-            await endpoint(str(identity), foreign, db.client)
+            kwargs = {"request": cancel_request(db, foreign)} if endpoint is actions.cancel_action else {}
+            await endpoint(str(identity), foreign, db.client, **kwargs)
         assert caught.value.status_code == 404
     listing = await actions.get_admin_actions(
         page=1, page_size=20, status=None, type=None, tenant_id=None,
@@ -208,4 +233,5 @@ async def test_admin_receipt_reads_and_cancel_pin_the_authenticated_tenant(cance
     with pytest.raises(HTTPException) as caught:
         await actions.retry_action(str(identity), owner, db.client)
     assert caught.value.status_code == 501 and caught.value.detail["retryable"] is False
-    assert (await actions.cancel_action(str(identity), owner, db.client))["new_status"] == "cancelled"
+    result = await actions.cancel_action(str(identity), owner, db.client, request=cancel_request(db, owner))
+    assert result["new_status"] == "cancelled"

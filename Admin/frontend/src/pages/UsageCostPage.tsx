@@ -6,6 +6,8 @@ import { DollarSign, RefreshCw, Info, Building2 } from 'lucide-react';
 import { api } from '../lib/api';
 import type { LegacyOutboundEstimate } from '../lib/api';
 import { formatLegacyEstimate, formatRecordedCount, sumRecordedValues } from '../lib/usage-evidence';
+import { useAuthGeneration } from '../lib/use-auth-generation';
+import { useOperationOwner } from '../lib/use-operation-owner';
 
 // Shape returned by GET /admin/usage/breakdown?group_by=tenant
 interface TenantUsageRow {
@@ -28,6 +30,11 @@ function today(): string {
 }
 
 export function UsageCostPage() {
+    const generation = useAuthGeneration();
+    return <UsageCostContent key={generation} generation={generation} />;
+}
+
+function UsageCostContent({ generation }: { generation: number }) {
     const [fromDate, setFromDate] = useState(monthStart());
     const [toDate, setToDate] = useState(today());
     const [tenantRows, setTenantRows] = useState<TenantUsageRow[]>([]);
@@ -41,8 +48,10 @@ export function UsageCostPage() {
     const [resolvedQuery, setResolvedQuery] = useState<string | null>(null);
     const requestGeneration = useRef(0);
     const queryKey = `${fromDate}|${toDate}|${reloadKey}`;
+    const captureOwner = useOperationOwner(generation, queryKey);
 
     const fetchTenantBreakdown = useCallback(async () => {
+        const owns = captureOwner();
         const generation = ++requestGeneration.current;
         setLoading(true);
         setError(null);
@@ -52,12 +61,17 @@ export function UsageCostPage() {
                 from_date: fromDate,
                 to_date: toDate,
             });
-            if (generation !== requestGeneration.current) return;
-            if (res.error || !res.data) {
+            if (!owns() || generation !== requestGeneration.current) return;
+            const validRows = res.data && Array.isArray(res.data.breakdown)
+                && typeof res.data.monetary_note === 'string' && res.data.breakdown.every(row =>
+                    row && typeof row.tenant_id === 'string' && (row.tenant_name === null || typeof row.tenant_name === 'string')
+                    && [row.call_count, row.total_minutes, row.total_seconds].every(value =>
+                        value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0)));
+            if (res.error || !res.data || !validRows) {
                 setError('Usage data is unavailable. Please retry.');
                 setTenantRows([]);
             } else {
-                const rows = (res.data?.breakdown ?? []) as unknown as TenantUsageRow[];
+                const rows = [...res.data.breakdown] as unknown as TenantUsageRow[];
                 if (res.data) {
                     setMonetaryNote(res.data.monetary_note);
                 }
@@ -66,16 +80,16 @@ export function UsageCostPage() {
                 setTenantRows(rows);
             }
         } catch {
-            if (generation !== requestGeneration.current) return;
+            if (!owns() || generation !== requestGeneration.current) return;
             setError('Usage data is unavailable. Please retry.');
             setTenantRows([]);
         } finally {
-            if (generation === requestGeneration.current) {
+            if (owns() && generation === requestGeneration.current) {
                 setLoading(false);
                 setResolvedQuery(queryKey);
             }
         }
-    }, [fromDate, toDate, queryKey]);
+    }, [fromDate, toDate, queryKey, captureOwner]);
 
     useEffect(() => {
         fetchTenantBreakdown();

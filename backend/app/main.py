@@ -900,7 +900,19 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Telephony state recovery failed (non-fatal): {e}")
 
-    yield
+    # Formal hold expiry is application work, independent of which process
+    # owns telephony. Existing exact-event transactions make duplicate scans
+    # safe; startup immediately rechecks holds left by a previous process.
+    from app.domain.services.suspension_expiry import start_suspension_expiry_watchdog
+
+    app.state.suspension_expiry_watchdog = start_suspension_expiry_watchdog(
+        getattr(container, "db_pool", None), redis_client=getattr(container, "redis", None),
+    )
+    try:
+        yield
+    finally:
+        if app.state.suspension_expiry_watchdog is not None:
+            await app.state.suspension_expiry_watchdog.stop()
 
     # A boot-time ARI connect retry must not reconnect during teardown.
     _boot_retry = getattr(app.state, "boot_ari_retry_task", None)

@@ -50,6 +50,9 @@
           },
           "config": {
             "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
             "additionalProperties": {}
           },
           "createdAt": {
@@ -62,8 +65,7 @@
           "type",
           "config",
           "createdAt"
-        ],
-        "additionalProperties": false
+        ]
       },
       "ConnectorAccount": {
         "type": "object",
@@ -76,10 +78,16 @@
           },
           "credentials": {
             "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
             "additionalProperties": {}
           },
           "metadata": {
             "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
             "additionalProperties": {}
           }
         },
@@ -88,8 +96,7 @@
           "connector_id",
           "credentials",
           "metadata"
-        ],
-        "additionalProperties": false
+        ]
       },
       "Meeting": {
         "type": "object",
@@ -123,8 +130,7 @@
           "startTime",
           "endTime",
           "status"
-        ],
-        "additionalProperties": false
+        ]
       },
       "Reminder": {
         "anyOf": [
@@ -185,11 +191,13 @@
               },
               "retryCount": {
                 "type": "integer",
-                "minimum": 0
+                "minimum": 0,
+                "maximum": 9007199254740991
               },
               "maxRetries": {
                 "type": "integer",
-                "exclusiveMinimum": 0
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
               },
               "nextRetryAt": {
                 "type": "string"
@@ -210,8 +218,7 @@
               "status",
               "channel",
               "scheduledAt"
-            ],
-            "additionalProperties": false
+            ]
           },
           {
             "type": "object",
@@ -299,7 +306,8 @@
                 "anyOf": [
                   {
                     "type": "integer",
-                    "minimum": 0
+                    "minimum": 0,
+                    "maximum": 9007199254740991
                   },
                   {
                     "type": "null"
@@ -310,7 +318,8 @@
                 "anyOf": [
                   {
                     "type": "integer",
-                    "exclusiveMinimum": 0
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
                   {
                     "type": "null"
@@ -345,8 +354,7 @@
             "required": [
               "id",
               "content"
-            ],
-            "additionalProperties": false
+            ]
           },
           {
             "type": "object",
@@ -369,8 +377,7 @@
               "content",
               "due_date",
               "is_completed"
-            ],
-            "additionalProperties": false
+            ]
           }
         ]
       },
@@ -476,8 +483,7 @@
                     "type": "string",
                     "maxLength": 64
                   }
-                },
-                "additionalProperties": false
+                }
               },
               {
                 "type": "null"
@@ -496,8 +502,7 @@
           "type",
           "status",
           "created_at"
-        ],
-        "additionalProperties": false
+        ]
       },
       "ConnectorListResponse": {
         "type": "object",
@@ -518,6 +523,9 @@
                 },
                 "config": {
                   "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
                   "additionalProperties": {}
                 },
                 "createdAt": {
@@ -530,15 +538,13 @@
                 "type",
                 "config",
                 "createdAt"
-              ],
-              "additionalProperties": false
+              ]
             }
           }
         },
         "required": [
           "items"
-        ],
-        "additionalProperties": false
+        ]
       },
       "ConnectorAccountListResponse": {
         "type": "object",
@@ -556,10 +562,16 @@
                 },
                 "credentials": {
                   "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
                   "additionalProperties": {}
                 },
                 "metadata": {
                   "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
                   "additionalProperties": {}
                 }
               },
@@ -568,15 +580,13 @@
                 "connector_id",
                 "credentials",
                 "metadata"
-              ],
-              "additionalProperties": false
+              ]
             }
           }
         },
         "required": [
           "items"
-        ],
-        "additionalProperties": false
+        ]
       },
       "MeetingListResponse": {
         "type": "object",
@@ -615,15 +625,13 @@
                 "startTime",
                 "endTime",
                 "status"
-              ],
-              "additionalProperties": false
+              ]
             }
           }
         },
         "required": [
           "items"
-        ],
-        "additionalProperties": false
+        ]
       },
       "ReminderListResponse": {
         "type": "object",
@@ -689,11 +697,13 @@
                     },
                     "retryCount": {
                       "type": "integer",
-                      "minimum": 0
+                      "minimum": 0,
+                      "maximum": 9007199254740991
                     },
                     "maxRetries": {
                       "type": "integer",
-                      "exclusiveMinimum": 0
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
                     },
                     "nextRetryAt": {
                       "type": "string"
@@ -714,8 +724,7 @@
                     "status",
                     "channel",
                     "scheduledAt"
-                  ],
-                  "additionalProperties": false
+                  ]
                 },
                 {
                   "type": "object",
@@ -803,7 +812,8 @@
                       "anyOf": [
                         {
                           "type": "integer",
-                          "minimum": 0
+                          "minimum": 0,
+                          "maximum": 9007199254740991
                         },
                         {
                           "type": "null"
@@ -814,7 +824,8 @@
                       "anyOf": [
                         {
                           "type": "integer",
-                          "exclusiveMinimum": 0
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
                         },
                         {
                           "type": "null"
@@ -849,8 +860,7 @@
                   "required": [
                     "id",
                     "content"
-                  ],
-                  "additionalProperties": false
+                  ]
                 },
                 {
                   "type": "object",
@@ -873,8 +883,7 @@
                     "content",
                     "due_date",
                     "is_completed"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               ]
             }
@@ -882,8 +891,7 @@
         },
         "required": [
           "items"
-        ],
-        "additionalProperties": false
+        ]
       },
       "AssistantActionListResponse": {
         "type": "object",
@@ -992,8 +1000,7 @@
                           "type": "string",
                           "maxLength": 64
                         }
-                      },
-                      "additionalProperties": false
+                      }
                     },
                     {
                       "type": "null"
@@ -1012,21 +1019,23 @@
                 "type",
                 "status",
                 "created_at"
-              ],
-              "additionalProperties": false
+              ]
             }
           },
           "total": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 9007199254740991
           },
           "page": {
             "type": "integer",
-            "exclusiveMinimum": 0
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
           },
           "page_size": {
             "type": "integer",
-            "exclusiveMinimum": 0
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -1034,8 +1043,7 @@
           "total",
           "page",
           "page_size"
-        ],
-        "additionalProperties": false
+        ]
       },
       "HealthResponse": {
         "type": "object",

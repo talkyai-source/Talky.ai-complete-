@@ -12,6 +12,24 @@ from app.infrastructure.telephony.asterisk_adapter import (
 )
 
 
+@pytest.fixture(autouse=True)
+def bound_pbx_identity(monkeypatch):
+    # These cases isolate admission/media ordering; the real ARI identity guard
+    # is exercised separately by test_control_backend_termination.
+    from tests.unit.pbx_identity_helpers import INFO
+    from app.domain.services.telephony import lifecycle
+    # This suite isolates existing media/admission ownership. Dedicated account
+    # policy tests exercise the real new provider-boundary checks.
+    monkeypatch.setattr(lifecycle, "_require_call_authority", AsyncMock())
+    original = AsteriskAdapter.__init__
+    def initialize(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        self._control_backend_system = INFO["system"]["entity_id"]
+        self._control_backend_startup = INFO["status"]["startup_time"]
+        self._verify_control_backend = AsyncMock()
+    monkeypatch.setattr(AsteriskAdapter, "__init__", initialize)
+
+
 def _enable_answer_persistence(
     adapter: AsteriskAdapter,
     callback=None,
@@ -36,6 +54,7 @@ def _event(channel_id: str = "inbound-1") -> dict:
 
 
 def _allowed(channel_id: str = "inbound-1") -> dict:
+    from tests.unit.pbx_identity_helpers import BINDING
     return {
         "allowed": True,
         "reason": "admitted",
@@ -44,6 +63,7 @@ def _allowed(channel_id: str = "inbound-1") -> dict:
         "campaign_id": "33333333-3333-3333-3333-333333333333",
         "provider": "asterisk",
         "provider_call_id": channel_id,
+        "_control_backend": BINDING,
         "config_snapshot": {
             "campaign": {"id": "campaign"},
             "inbound_config": {

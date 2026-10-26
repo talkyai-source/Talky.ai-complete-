@@ -13,6 +13,8 @@ from app.api.v1.endpoints import assistant_ws
 
 @pytest.fixture(autouse=True)
 def _stub_auth_and_model(monkeypatch):
+    from tests.helpers.assistant_runtime import stub_runtime_receipts
+    stub_runtime_receipts(monkeypatch)
     """Post-hardening the WS verifies auth through decode_and_validate_token
     (same path as REST), not the old db_client.auth.get_user, and resolves the
     tenant's model via get_tenant_assistant_model. Stub both so these tests

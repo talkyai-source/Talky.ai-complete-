@@ -1,41 +1,20 @@
-import { useState, useEffect, useCallback } from 'react';
 import { Database, Loader2, RefreshCw, AlertCircle } from 'lucide-react';
 import { api } from '../lib/api';
-import type { DatabaseHealthResponse } from '../lib/api';
+import { useAdminRead } from '../lib/use-admin-read';
+import { validDatabaseHealth } from '../lib/health-contracts';
+import { metric, observedAt } from '../lib/health-display';
+
+const loadDatabaseHealthCard = () => api.getDatabaseHealth();
 
 export function DatabaseHealthCard() {
-    const [db, setDb] = useState<DatabaseHealthResponse | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-
-    const fetchDbHealth = useCallback(async () => {
-        try {
-            const response = await api.getDatabaseHealth();
-            if (response.data) {
-                setDb(response.data);
-                setError(null);
-            } else if (response.error) {
-                setError(response.error.message);
-            }
-        } catch {
-            setError('Failed to fetch database health');
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        fetchDbHealth();
-        const interval = setInterval(fetchDbHealth, 30000);
-        return () => clearInterval(interval);
-    }, [fetchDbHealth]);
+    const { data: db, loading, error, refresh: fetchDbHealth } = useAdminRead(loadDatabaseHealthCard, 30000, validDatabaseHealth);
 
     return (
         <div className="card">
             <div className="card-header">
                 <h3 className="card-title"><Database size={18} /> Database Health</h3>
                 <div className="card-header-actions">
-                    {db && (
+                    {db && !error && (
                         <span className={`badge ${db.connected ? 'badge-success' : 'badge-danger'}`}>
                             {db.connected ? 'Connected' : 'Disconnected'}
                         </span>
@@ -51,40 +30,44 @@ export function DatabaseHealthCard() {
                 ) : error || !db ? (
                     <div className="error-state">
                         <AlertCircle size={24} />
-                        <span>Failed to load database status</span>
+                        <span role="alert">Database observations unavailable: {error ?? 'No data returned'}</span>
                         <button className="btn btn-sm btn-secondary" onClick={fetchDbHealth}>
                             <RefreshCw size={14} /> Retry
                         </button>
                     </div>
                 ) : (
+                    <>
+                    <p className="text-muted">{db.scope}</p>
+                    {db.error && <p role="alert">{db.error}</p>}
                     <table className="data-table compact">
                         <tbody>
                             <tr>
                                 <td className="detail-label">Latency</td>
-                                <td>{db.latency_ms}ms</td>
+                                <td>{metric(db.latency_ms, 'ms')}</td>
                             </tr>
                             <tr>
                                 <td className="detail-label">Connection Pool</td>
-                                <td>{db.active_connections}/{db.pool_size} active</td>
+                                <td>{metric(db.active_connections)} active / {metric(db.pool_size)} allocated</td>
                             </tr>
                             <tr>
                                 <td className="detail-label">Available Connections</td>
-                                <td>{db.available_connections}</td>
+                                <td>{metric(db.available_connections)}</td>
                             </tr>
                             <tr>
                                 <td className="detail-label">Tables</td>
-                                <td>{db.table_count}</td>
+                                <td>{metric(db.table_count)}</td>
                             </tr>
                             <tr>
                                 <td className="detail-label">Size</td>
-                                <td>{db.database_size_mb > 0 ? `${db.database_size_mb.toFixed(1)} MB` : 'N/A'}</td>
+                                <td>{metric(db.database_size_mb, ' MB', 1)}</td>
                             </tr>
                             <tr>
                                 <td className="detail-label">Last Check</td>
-                                <td>{new Date(db.last_check).toLocaleTimeString()}</td>
+                                <td>{observedAt(db.last_check)}</td>
                             </tr>
                         </tbody>
                     </table>
+                    </>
                 )}
             </div>
         </div>

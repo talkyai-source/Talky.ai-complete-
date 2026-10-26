@@ -124,11 +124,12 @@ def test_fail_closed_set_contains_dnc_and_spend_only_the_intended_checks():
     assert GuardCheck.PLATFORM_CALLS_ENABLED in _FAIL_CLOSED_ON_ERROR_CHECKS
     assert GuardCheck.DNC_CHECK in _FAIL_CLOSED_ON_ERROR_CHECKS
     assert GuardCheck.SPEND_LIMIT in _FAIL_CLOSED_ON_ERROR_CHECKS
+    # Formal parent/hold authority is now a required security check.
+    assert GuardCheck.TENANT_ACTIVE in _FAIL_CLOSED_ON_ERROR_CHECKS
     # Availability checks must be preserved as fail-OPEN — an infra blip in
     # rate limiting or concurrency lookups must not block legitimate calls.
     assert GuardCheck.RATE_LIMIT not in _FAIL_CLOSED_ON_ERROR_CHECKS
     assert GuardCheck.CONCURRENCY_LIMIT not in _FAIL_CLOSED_ON_ERROR_CHECKS
-    assert GuardCheck.TENANT_ACTIVE not in _FAIL_CLOSED_ON_ERROR_CHECKS
 
 
 def test_evaluate_source_fails_closed_on_the_fail_closed_set():

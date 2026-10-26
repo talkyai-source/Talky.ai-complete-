@@ -16,7 +16,7 @@ export const topupBalanceSchema = z.object({ allocated: z.number().finite(), use
   remaining_minutes: z.number().finite(), unlimited: z.boolean(), exhausted: z.boolean(), purchased_minutes: z.number().finite(),
 });
 export type TopupBalance = z.infer<typeof topupBalanceSchema>;
-export const topupOrderSchema = z.object({ id: z.string().uuid(), package_code: z.string(), minutes: z.number().int().safe(),
+export const topupOrderSchema = z.object({ id: z.guid(), package_code: z.string(), minutes: z.number().int().safe(),
   price_cents: z.number().int().safe(), currency: currencyCode, currency_exponent: currencyExponent,
   status: z.enum(["pending", "paid", "failed", "cancelled", "refunded", "disputed"]),
   created_at: recordedDate, paid_at: recordedDate, provider_payment_id: z.string().nullable(),

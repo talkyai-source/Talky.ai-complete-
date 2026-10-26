@@ -63,6 +63,10 @@ from app.core.jwt_security import JWTValidationError, decode_and_validate_token
 from app.core.db_utils import acquire_with_tenant
 from app.core.security.principal import (PrincipalUnavailable, load_session_principal,
     assistant_session_context, check_assistant_session)
+from app.core.security.assistant_session_watch import AssistantSessionWatch
+from app.core.security.assistant_runtime import (
+    AssistantRuntime, complete_cleanup, owned_stream, runtime_context,
+)
 from app.domain.models.conversation import AudioChunk
 from app.infrastructure.assistant.model_config import get_tenant_assistant_model
 from app.infrastructure.assistant.proposals import (
@@ -214,11 +218,46 @@ async def _run_voice_session(
     conversation_id: Optional[str],
     db_client: Any,
 ) -> None:
-    """Own the STT + TTS providers and the three concurrent loops for one
-    voice session, tearing everything down cleanly on disconnect."""
-    from app.domain.services.credential_resolver import get_credential_resolver
+    """Own provider cleanup even if authority ends during initialization."""
     from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
     from app.infrastructure.tts.cartesia import CartesiaTTSProvider
+
+    try:
+        runtime = await AssistantRuntime.register(db_client.pool,
+            assistant_session_context.get() or {}, endpoint_kind="voice")
+    except Exception as exc:
+        await websocket.close(code=1008 if isinstance(exc, PrincipalUnavailable) else 1011,
+                              reason="Session unavailable")
+        return
+    runtime_token = runtime_context.set(runtime)
+    stt = tts = None
+    authority_watch = AssistantSessionWatch(websocket, db_client.pool,
+        assistant_session_context.get() or {"sub": user_id, "tenant_id": tenant_id})
+    try:
+        stt, tts = DeepgramFluxSTTProvider(), CartesiaTTSProvider()
+        await _run_voice_session_body(websocket=websocket, session_id=session_id,
+            tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id,
+            db_client=db_client, stt=stt, tts=tts, runtime=runtime)
+    except asyncio.CancelledError:
+        if not authority_watch.terminated:
+            raise
+    finally:
+        try:
+            await authority_watch.stop()
+            await runtime.stop_tasks()
+            for provider in (stt, tts):
+                if provider is None:
+                    continue
+                if not await complete_cleanup(provider.cleanup()):
+                    logger.warning("assistant_voice: provider cleanup unavailable")
+            await runtime.record_stopped(close_frame_status=authority_watch.close_frame_status)
+        finally:
+            runtime_context.reset(runtime_token)
+
+
+async def _run_voice_session_body(*, websocket, session_id, tenant_id, user_id,
+                                  conversation_id, db_client, stt, tts, runtime):
+    from app.domain.services.credential_resolver import get_credential_resolver
 
     # A closed socket must never raise out of a send — one helper swallows the
     # post-close RuntimeError/WebSocketDisconnect for every emitter below.
@@ -255,8 +294,10 @@ async def _run_voice_session(
     # --- resolve provider keys ---------------------------------------------
     resolver = get_credential_resolver()
     try:
-        deepgram_key = await resolver.resolve("deepgram", tenant_id=tenant_id)
-        cartesia_key = await resolver.resolve("cartesia", tenant_id=tenant_id)
+        deepgram_credential = await resolver.resolve_with_metadata("deepgram", tenant_id=tenant_id)
+        cartesia_credential = await resolver.resolve_with_metadata("cartesia", tenant_id=tenant_id)
+        deepgram_key = deepgram_credential.secret if deepgram_credential else None
+        cartesia_key = cartesia_credential.secret if cartesia_credential else None
     except Exception as exc:
         logger.error("assistant_voice: credential resolve failed: %s", exc)
         await send_json({"type": "error", "content": "Voice providers are not configured."})
@@ -267,22 +308,24 @@ async def _run_voice_session(
         await websocket.close(code=1011)
         return
 
-    stt = DeepgramFluxSTTProvider()
-    tts = CartesiaTTSProvider()
     try:
         # eot/eager thresholds MUST be passed — Flux's initialize() defaults to a
         # 5s end-of-turn timeout with eager OFF when these keys are omitted, which
         # makes every turn feel ~5s unresponsive. Match the Ask-AI voice config.
+        await require_current_socket()
         await stt.initialize({
             "api_key": deepgram_key,
+            "observation_context": deepgram_credential.observation_context,
             "sample_rate": _STT_SAMPLE_RATE,
             "encoding": "linear16",
             "eot_threshold": 0.7,
             "eager_eot_threshold": 0.5,
             "eot_timeout_ms": 3000,
         })
+        await require_current_socket()
         await tts.initialize({
             "api_key": cartesia_key,
+            "observation_context": cartesia_credential.observation_context,
             "voice_id": _TTS_VOICE_ID,
             "model_id": _TTS_MODEL_ID,
             "sample_rate": _TTS_SAMPLE_RATE,
@@ -404,15 +447,17 @@ async def _run_voice_session(
         send tts_end so the client leaves the 'speaking' state."""
         if not text.strip() or not active:
             return
+        await require_current_socket()
         speak_state["active"] = True
         await send_json({"type": "tts_start", "sample_rate": _TTS_SAMPLE_RATE, "encoding": "float32"})
         try:
-            async for ac in tts.stream_synthesize(
+            async with owned_stream(tts.stream_synthesize(
                 text=text, voice_id=_TTS_VOICE_ID, sample_rate=_TTS_SAMPLE_RATE, call_id=session_id
-            ):
-                if not active:
-                    break
-                await send_bytes(ac.data)  # Cartesia yields float32 PCM bytes
+            )) as speech_stream:
+                async for ac in speech_stream:
+                    if not active:
+                        break
+                    await send_bytes(ac.data)  # Cartesia yields float32 PCM bytes
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -445,105 +490,111 @@ async def _run_voice_session(
         current_msg_id: Optional[str] = None
         buf: List[str] = []
         spoken = False
+        cancelled = False
         try:
-            async for ev in stream_assistant_reply(
+            await require_current_socket()
+            async with owned_stream(stream_assistant_reply(
                 chat_messages=chat_messages,
                 tenant_id=tenant_id,
                 user_id=user_id,
                 conversation_id=current_conversation_id,
                 db_client=db_client,
                 model=tenant_model,
-            ):
-                etype = ev.get("type")
-                if etype != "token":
-                    await require_current_socket()
-                if etype == "token":
-                    if current_msg_id is None:
-                        current_msg_id = str(uuid.uuid4())
+            )) as reply_stream:
+                async for ev in reply_stream:
+                    etype = ev.get("type")
+                    if etype != "token":
+                        await require_current_socket()
+                    if etype == "token":
+                        if current_msg_id is None:
+                            current_msg_id = str(uuid.uuid4())
+                            buf = []
+                            await send_json({"type": "assistant_typing", "content": False})
+                            await send_json({"type": "assistant_message_start", "id": current_msg_id})
+                        buf.append(ev.get("delta", ""))
+                        await send_json({"type": "assistant_token", "id": current_msg_id, "delta": ev.get("delta", "")})
+
+                    elif etype == "tool_start":
+                        if current_msg_id is not None:
+                            text = "".join(buf)
+                            await send_json({"type": "assistant_message_end", "id": current_msg_id, "content": text})
+                            if text.strip():
+                                messages_history.append({"role": "assistant", "content": text, "timestamp": datetime.utcnow().isoformat()})
+                            current_msg_id = None
+                            buf = []
+                        await send_json({"type": "assistant_typing", "content": True})
+
+                    elif etype == "final":
+                        final_text = ev.get("content", "") or "".join(buf)
+                        if current_msg_id is not None:
+                            await send_json({"type": "assistant_message_end", "id": current_msg_id, "content": final_text})
+                        else:
+                            msg_id = str(uuid.uuid4())
+                            if not final_text.strip():
+                                final_text = "Okay."
+                            await send_json({"type": "assistant_message_start", "id": msg_id})
+                            await send_json({"type": "assistant_message_end", "id": msg_id, "content": final_text})
+                        if final_text.strip():
+                            messages_history.append({"role": "assistant", "content": final_text, "timestamp": datetime.utcnow().isoformat()})
+                        current_msg_id = None
                         buf = []
+                        await speak(final_text)
+                        spoken = True
+
+                    elif etype == "proposal":
+                        # A create/edit tool returned a preview → confirm card. Speak
+                        # a short spoken cue so the voice user knows to look/confirm.
+                        if current_msg_id is not None:
+                            text = "".join(buf)
+                            await send_json({"type": "assistant_message_end", "id": current_msg_id, "content": text})
+                            if text.strip():
+                                messages_history.append({"role": "assistant", "content": text, "timestamp": datetime.utcnow().isoformat()})
+                            current_msg_id = None
+                            buf = []
                         await send_json({"type": "assistant_typing", "content": False})
-                        await send_json({"type": "assistant_message_start", "id": current_msg_id})
-                    buf.append(ev.get("delta", ""))
-                    await send_json({"type": "assistant_token", "id": current_msg_id, "delta": ev.get("delta", "")})
+                        proposal = store_proposal(
+                            tool=ev.get("tool", ""),
+                            args=ev.get("args") or {},
+                            result=ev.get("result") or {},
+                            tenant_id=tenant_id,
+                            actor_user_id=user_id,
+                            conversation_id=current_conversation_id,
+                        )
+                        await send_json({
+                            "type": "edit_proposal",
+                            "proposal_id": proposal["proposal_id"],
+                            "tool": proposal["tool"],
+                            "note": proposal["note"],
+                            "warnings": proposal["warnings"],
+                            "changes": proposal["changes"],
+                            "campaigns": proposal["campaigns"],
+                            "duplicate": proposal.get("duplicate"),
+                        })
+                        messages_history.append({
+                            "role": "assistant",
+                            "content": "_Proposed changes — awaiting your approval._",
+                            "timestamp": datetime.utcnow().isoformat(),
+                        })
+                        cue = proposal.get("note") or "I've prepared that — review it and tap Confirm to apply."
+                        await speak(cue)
+                        spoken = True
 
-                elif etype == "tool_start":
-                    if current_msg_id is not None:
-                        text = "".join(buf)
-                        await send_json({"type": "assistant_message_end", "id": current_msg_id, "content": text})
-                        if text.strip():
-                            messages_history.append({"role": "assistant", "content": text, "timestamp": datetime.utcnow().isoformat()})
-                        current_msg_id = None
-                        buf = []
-                    await send_json({"type": "assistant_typing", "content": True})
-
-                elif etype == "final":
-                    final_text = ev.get("content", "") or "".join(buf)
-                    if current_msg_id is not None:
-                        await send_json({"type": "assistant_message_end", "id": current_msg_id, "content": final_text})
-                    else:
-                        msg_id = str(uuid.uuid4())
-                        if not final_text.strip():
-                            final_text = "Okay."
-                        await send_json({"type": "assistant_message_start", "id": msg_id})
-                        await send_json({"type": "assistant_message_end", "id": msg_id, "content": final_text})
-                    if final_text.strip():
-                        messages_history.append({"role": "assistant", "content": final_text, "timestamp": datetime.utcnow().isoformat()})
-                    current_msg_id = None
-                    buf = []
-                    await speak(final_text)
-                    spoken = True
-
-                elif etype == "proposal":
-                    # A create/edit tool returned a preview → confirm card. Speak
-                    # a short spoken cue so the voice user knows to look/confirm.
-                    if current_msg_id is not None:
-                        text = "".join(buf)
-                        await send_json({"type": "assistant_message_end", "id": current_msg_id, "content": text})
-                        if text.strip():
-                            messages_history.append({"role": "assistant", "content": text, "timestamp": datetime.utcnow().isoformat()})
-                        current_msg_id = None
-                        buf = []
-                    await send_json({"type": "assistant_typing", "content": False})
-                    proposal = store_proposal(
-                        tool=ev.get("tool", ""),
-                        args=ev.get("args") or {},
-                        result=ev.get("result") or {},
-                        tenant_id=tenant_id,
-                        actor_user_id=user_id,
-                        conversation_id=current_conversation_id,
-                    )
-                    await send_json({
-                        "type": "edit_proposal",
-                        "proposal_id": proposal["proposal_id"],
-                        "tool": proposal["tool"],
-                        "note": proposal["note"],
-                        "warnings": proposal["warnings"],
-                        "changes": proposal["changes"],
-                        "campaigns": proposal["campaigns"],
-                        "duplicate": proposal.get("duplicate"),
-                    })
-                    messages_history.append({
-                        "role": "assistant",
-                        "content": "_Proposed changes — awaiting your approval._",
-                        "timestamp": datetime.utcnow().isoformat(),
-                    })
-                    cue = proposal.get("note") or "I've prepared that — review it and tap Confirm to apply."
-                    await speak(cue)
-                    spoken = True
-
-                elif etype == "error":
-                    err_text = ev.get("content", "Sorry, I hit an error.")
-                    await send_json({"type": "assistant_typing", "content": False})
-                    await send_json({"type": "assistant_message", "content": err_text})
-                    messages_history.append({"role": "assistant", "content": err_text, "timestamp": datetime.utcnow().isoformat()})
-                    await speak(err_text)
-                    spoken = True
+                    elif etype == "error":
+                        err_text = ev.get("content", "Sorry, I hit an error.")
+                        await send_json({"type": "assistant_typing", "content": False})
+                        await send_json({"type": "assistant_message", "content": err_text})
+                        messages_history.append({"role": "assistant", "content": err_text, "timestamp": datetime.utcnow().isoformat()})
+                        await speak(err_text)
+                        spoken = True
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
         except Exception as exc:
             logger.error("assistant_voice: agent turn failed: %s", exc, exc_info=True)
             await send_json({"type": "error", "content": "Something went wrong on that turn."})
         finally:
             await send_json({"type": "assistant_typing", "content": False})
-            if not spoken and current_msg_id is not None:
+            if not cancelled and active and not spoken and current_msg_id is not None:
                 # A dangling text bubble with no final event — close + speak it.
                 text = "".join(buf)
                 await send_json({"type": "assistant_message_end", "id": current_msg_id, "content": text})
@@ -560,20 +611,21 @@ async def _run_voice_session(
         talked over."""
         try:
             barged = False
-            async for tc in stt.stream_transcribe(audio_gen(), language="en"):
-                if not active:
-                    break
-                text = getattr(tc, "text", "") or ""
-                is_final = bool(getattr(tc, "is_final", False))
-                if is_final and text.strip():
-                    await send_json({"type": "stt_final", "text": text})
-                    await final_queue.put(text)
-                    barged = False
-                elif text.strip():
-                    if not barged and speak_state["active"]:
-                        barged = True
-                        await barge_in()
-                    await send_json({"type": "stt_partial", "text": text})
+            async with owned_stream(stt.stream_transcribe(audio_gen(), language="en")) as transcript_stream:
+                async for tc in transcript_stream:
+                    if not active:
+                        break
+                    text = getattr(tc, "text", "") or ""
+                    is_final = bool(getattr(tc, "is_final", False))
+                    if is_final and text.strip():
+                        await send_json({"type": "stt_final", "text": text})
+                        await final_queue.put(text)
+                        barged = False
+                    elif text.strip():
+                        if not barged and speak_state["active"]:
+                            barged = True
+                            await barge_in()
+                        await send_json({"type": "stt_partial", "text": text})
         except Exception as exc:
             logger.warning("assistant_voice: STT loop ended: %s", exc)
         finally:
@@ -602,7 +654,7 @@ async def _run_voice_session(
                 except (asyncio.CancelledError, Exception):
                     pass
             await require_current_socket()
-            current_turn["task"] = asyncio.create_task(run_agent_turn(user_text))
+            current_turn["task"] = runtime.own_task(run_agent_turn(user_text))
             try:
                 await current_turn["task"]
             except (asyncio.CancelledError, Exception):
@@ -710,8 +762,8 @@ async def _run_voice_session(
 
         active = False
 
-    stt_task = asyncio.create_task(stt_loop())
-    turn_task = asyncio.create_task(turn_loop())
+    runtime.own_task(stt_loop())
+    runtime.own_task(turn_loop())
 
     # Opening greeting so the user hears the assistant come alive and learns it
     # can create campaigns. Recorded in history so the model never re-greets.
@@ -721,14 +773,10 @@ async def _run_voice_session(
     # awaited the full greeting synth first, early mic frames the client sends
     # right after `ready` would sit unread in the transport and be processed
     # late (agent finding). The greeting audio still streams concurrently.
-    messages_history.append({"role": "assistant", "content": _VOICE_GREETING, "timestamp": datetime.utcnow().isoformat()})
-    await send_json({"type": "assistant_message", "content": _VOICE_GREETING})
-    greeting_task = asyncio.create_task(speak(_VOICE_GREETING))
-    # Register the greeting as the current turn so a user barge-in during the
-    # greeting cancels it too.
-    current_turn["task"] = greeting_task
-
     try:
+        messages_history.append({"role": "assistant", "content": _VOICE_GREETING, "timestamp": datetime.utcnow().isoformat()})
+        await send_json({"type": "assistant_message", "content": _VOICE_GREETING})
+        current_turn["task"] = runtime.own_task(speak(_VOICE_GREETING))
         await receive_loop()
     except WebSocketDisconnect:
         pass
@@ -743,19 +791,5 @@ async def _run_voice_session(
         except asyncio.QueueFull:
             pass
         await final_queue.put(None)
-        for task in (stt_task, turn_task, greeting_task):
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
-        try:
-            await stt.cleanup()
-        except Exception:
-            pass
-        try:
-            await tts.cleanup()
-        except Exception:
-            pass
+        await runtime.stop_tasks()
         logger.info("assistant_voice: session ended %s", session_id)

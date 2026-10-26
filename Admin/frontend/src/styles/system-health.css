@@ -134,7 +134,7 @@
 
 .queue-name {
     font-weight: 500;
-    color: var(--color-text, #fff);
+    color: var(--text-primary);
 }
 
 .queue-stats {

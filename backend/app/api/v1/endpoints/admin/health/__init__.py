@@ -4,8 +4,8 @@ Aggregates: detailed health, workers, queues, database, incidents, alerts.
 
 Public surface mirrors the previous single-file `health.py`:
   - `router` — FastAPI router (used by admin/__init__.py)
-  - `send_email_alert`, `send_slack_alert`, `trigger_alert` — public
-    helpers callable from background monitoring code
+  - `send_email_alert`, `send_slack_alert`, `trigger_alert` — legacy imports
+    retained as explicitly unavailable; Alertmanager owns alert delivery
 """
 from __future__ import annotations
 

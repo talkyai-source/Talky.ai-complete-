@@ -76,3 +76,42 @@ test('the pause status is re-read on the live-call poll and recovers from unknow
     assert.match(text(), /Provider outage/);
     assert.doesNotMatch(text(), /unknown/i);
 });
+
+test('a failed refresh retires the current pause claim and recovers through reads without another write', async () => {
+    ticks.length = 0;
+    let observation = 'paused';
+    state.route = route({
+        status: () => observation === 'unavailable'
+            ? response({ detail: 'The shared pause state is unavailable' }, 503)
+            : response(pauseBody(observation === 'paused', observation === 'paused' ? 'Previous operator pause' : null)),
+        put: () => { throw new Error('Observation recovery must not write pause state'); },
+    });
+    await render(el(C.LiveCalls));
+    await settle();
+    assert.match(text(), /New outbound calls are paused across all workers\./);
+    assert.equal(find('.btn-resume').disabled, false);
+    const initialStatusReads = state.requests.filter(request => request.path.endsWith('/admin/calls/pause-status')).length;
+
+    // The operator cannot observe a later resume while this status read fails.
+    observation = 'unavailable';
+    await tick();
+    await settle();
+    const unavailableView = text();
+    assert.match(unavailableView, /Pause status unknown:/);
+    assert.equal(find('.btn-resume').disabled, true);
+
+    observation = 'resumed';
+    await tick();
+    await settle();
+    assert.doesNotMatch(text(), /Pause status unknown:|New outbound calls are paused|Last observed:/);
+    assert.equal(find('.btn-pause').disabled, false);
+    assert.equal(puts().length, 0, 'read recovery must never replay a pause or resume');
+    assert.equal(state.requests.filter(request => request.path.endsWith('/admin/calls/pause-status')).length,
+        initialStatusReads + 2, 'each recovery step performs one status read after StrictMode mount');
+
+    // Check the failed-read view after recovery so the baseline also proves zero-write recovery.
+    assert.doesNotMatch(unavailableView, /New outbound calls are paused across all workers\./,
+        'a failed observation cannot retain an unconditional current fleet-pause claim');
+    assert.match(unavailableView, /Last observed: new outbound calls were paused\./);
+    assert.match(unavailableView, /Previous operator pause/, 'retain the last observed reason as historical evidence');
+});

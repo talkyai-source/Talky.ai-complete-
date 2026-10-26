@@ -113,7 +113,7 @@ def _reviewed_account_row(db_client, tenant_id, connector_id, provider, account_
         raise ReviewedConnectorChanged("The reviewed connection is no longer active.")
     response = db_client.table("connector_accounts").select(
         "id,created_at,external_account_id,account_email,access_token_encrypted,refresh_token_encrypted,"
-        "token_expires_at,last_refreshed_at"
+        "token_expires_at,last_refreshed_at,refresh_state"
     ).eq("tenant_id", tenant_id).eq("connector_id", connector_id).eq(
         "status", "active").order("created_at", desc=True).limit(2).execute()
     if getattr(response, "error", None):
@@ -142,6 +142,8 @@ def _reviewed_account_row(db_client, tenant_id, connector_id, provider, account_
         raise ReviewedConnectorChanged("The current authorization cannot be established. Reconnect and review.") from exc
     if account_id is not None and row_id != str(account_id):
         raise ReviewedConnectorChanged("The connected authorization changed after review.")
+    if rows[0].get("refresh_state", "idle") != "idle":
+        raise ReviewedConnectorChanged("The authorization refresh is unresolved. Wait for completion or reauthorize before review.")
     return {**rows[0], "id": row_id}
 
 
@@ -284,53 +286,14 @@ async def _refresh_and_store(
     existing_config: Optional[dict] = None,
 ) -> str:
     """Refresh the OAuth token, persist the new tokens, return the access token."""
-    enc = get_encryption_service()
-    new_tokens = await connector.refresh_tokens(refresh_token)
-    if not getattr(new_tokens, "access_token", None):
-        raise ConnectorProviderError(
-            provider=connector.provider_name,
-            operation="refresh_tokens",
-            category="authentication",
-            message="The provider returned no access token.",
-        )
-    # Providers that return per-org state with the tokens (Salesforce's
-    # instance_url) may move; keep connectors.config current. Best-effort:
-    # a failed config write never invalidates a successful token refresh.
-    try:
-        extra = connector.config_from_tokens(new_tokens)
-        if isinstance(extra, dict) and extra:
-            base = dict(existing_config) if isinstance(existing_config, dict) else {}
-            if any(base.get(k) != v for k, v in extra.items()):
-                base.update(extra)
-                db_client.table("connectors").update({"config": base}).eq("id", connector_id).eq(
-                    "tenant_id", tenant_id
-                ).execute()
-    except Exception as exc:  # noqa: BLE001 - config write is auxiliary
-        logger.warning("connector_resolver: config write-back failed for %s: %s", connector_id, exc)
-    try:
-        write = db_client.table("connector_accounts").update({
-            "access_token_encrypted": enc.encrypt(new_tokens.access_token),
-            "refresh_token_encrypted": enc.encrypt(new_tokens.refresh_token or refresh_token),
-            "token_expires_at": new_tokens.expires_at.isoformat() if getattr(new_tokens, "expires_at", None) else None,
-            "last_refreshed_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("id", account_id).eq("connector_id", connector_id).eq(
-            "tenant_id", tenant_id
-        ).eq("status", "active").execute()
-    except Exception as exc:
-        logger.error("connector_resolver: token write-back raised for %s: %s", connector_id, exc)
-        raise _ConnectorTokenStoreError(str(exc)) from exc
-    if getattr(write, "error", None) or not getattr(write, "data", None):
-        detail = str(getattr(write, "error", None) or "no matching account row")
-        logger.error("connector_resolver: token write-back failed for %s: %s", connector_id, detail)
-        raise _ConnectorTokenStoreError(detail)
-    # The returned row is the database's acknowledged generation. Never
-    # re-encrypt to construct proof: encryption can produce different ciphertext.
-    stored_rows = write.data if isinstance(write.data, list) else [write.data]
-    stored_row = stored_rows[0] if len(stored_rows) == 1 else None
-    connector._authorization_snapshot = (
-        _authorization_snapshot_for_row(tenant_id, connector_id, connector.provider_name, stored_row)
-        if isinstance(stored_row, dict) and str(stored_row.get("id")) == account_id
-        else None
+    from app.services.connector_lifecycle import ConnectorActor, ConnectorLifecycle
+
+    new_tokens, stored_row = await ConnectorLifecycle(db_client,
+        actor=ConnectorActor.system("connector_resolver")).refresh(
+        tenant_id, connector_id, connector=connector, account_id=account_id,
+    )
+    connector._authorization_snapshot = _authorization_snapshot_for_row(
+        tenant_id, connector_id, connector.provider_name, stored_row
     )
     return new_tokens.access_token
 
@@ -399,7 +362,7 @@ async def resolve_active_connector(
     falls back to another account. Returned ``account_row_id`` identifies that
     local authorization, not a provider-stable external account identity.
     Reviewed email/calendar effects opt into unique creation-time selection;
-    ordinary reads and CRM retain their existing refresh-time ordering.
+    ordinary reads and CRM use the same creation-time current authorization.
     ``read_only`` is an inspection-only opt-in: require the original connector,
     provider and either authorization row or external account, one active match, and a
     safely unexpired token. It never refreshes or writes connector state.
@@ -463,12 +426,16 @@ async def resolve_active_connector(
         cid = str(row["id"])
         account_query = (
             db_client.table("connector_accounts")
-            .select("id, access_token_encrypted, refresh_token_encrypted, token_expires_at, last_refreshed_at, external_account_id")
+            .select("id, access_token_encrypted, refresh_token_encrypted, token_expires_at, last_refreshed_at, external_account_id, refresh_state, created_at")
             .eq("connector_id", cid)
             .eq("tenant_id", tenant_id)
             .eq("status", "active")
         )
-        if account_id is not None:
+        # Do not filter to a pinned row before establishing the current one:
+        # an older retained authorization must never become current by refresh.
+        # Saved-receipt inspection is deliberately different: it may read its
+        # original still-active account, but can neither refresh nor substitute.
+        if read_only and account_id is not None:
             account_query = account_query.eq("id", account_id)
         if read_only and external_account_id is not None:
             account_query = account_query.eq("external_account_id", external_account_id)
@@ -476,7 +443,7 @@ async def resolve_active_connector(
             selected = _reviewed_account_row(db_client, tenant_id, cid, row["provider"], account_id)
             account_rows = [selected]
         else:
-            acc = account_query.order("last_refreshed_at", desc=True).limit(2 if read_only else 1).execute()
+            acc = account_query.order("created_at", desc=True).limit(2).execute()
             if getattr(acc, "error", None):
                 logger.error("resolve_active_connector: connector_accounts query error cid=%s err=%s", cid, acc.error)
                 raise ConnectorLookupError(connector_type, str(acc.error))
@@ -484,9 +451,22 @@ async def resolve_active_connector(
             account_rows = adata if isinstance(adata, list) else ([adata] if isinstance(adata, dict) else [])
             if read_only and len(account_rows) != 1:
                 raise ConnectorNotConnectedError(connector_type, reason="original_authorization_unavailable")
+            if len(account_rows) > 1 and account_rows[0].get("created_at") == account_rows[1].get("created_at"):
+                raise ConnectorNotConnectedError(connector_type, reason="authorization_ambiguous")
+            account_rows = account_rows[:1]
+            if account_id is not None and account_rows and str(account_rows[0]["id"]) != str(account_id):
+                raise ConnectorNotConnectedError(connector_type, reason="original_authorization_unavailable")
+            if read_only and external_account_id is not None and account_rows and account_rows[0].get("external_account_id") != external_account_id:
+                raise ConnectorNotConnectedError(connector_type, reason="original_authorization_unavailable")
         if account_id is not None and not account_rows:
             first_failure_reason = "account_unavailable"
         for arow in account_rows:
+            if arow.get("refresh_state", "idle") != "idle":
+                raise ConnectorNotConnectedError(
+                    connector_type,
+                    "The token refresh is unresolved. Wait for completion; if it remains unresolved, reauthorize the connector.",
+                    connector_id=cid, reason="refresh_unresolved",
+                )
             first_failure_snapshot = _authorization_snapshot_for_row(tenant_id, cid, row["provider"], arow)
             try:
                 candidate_access = enc.decrypt(arow["access_token_encrypted"])

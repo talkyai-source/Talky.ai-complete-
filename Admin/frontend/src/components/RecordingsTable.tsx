@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import {
     AudioLines,
     Building2,
@@ -15,9 +15,14 @@ import {
 } from 'lucide-react';
 
 import { api } from '../lib/api';
-import type { AdminRecordingItem, AdminRecordingParams, TenantListItem } from '../lib/api';
+import { useAuthGeneration } from '../lib/use-auth-generation';
+import { TenantFilter } from './TenantFilter';
+import { useOperationOwner } from '../lib/use-operation-owner';
+import type { AdminRecordingItem, AdminRecordingParams } from '../lib/api';
 import { AdminMediaPlayer } from './AdminMediaPlayer';
 import { ConfirmationModal } from './ConfirmationModal';
+import { MediaDeletionHistory } from './MediaDeletionHistory';
+import { mediaDeletionTarget, matchesMediaDeletionReceipt, recoveredMediaDeletion, type MediaDeletionNotice } from '../lib/media-deletion-contracts';
 
 interface RecordingsTableProps {
     onCallSelect: (callId: string) => void;
@@ -42,9 +47,13 @@ function formatDate(value: string): string {
     return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 }
 
-export function RecordingsTable({ onCallSelect }: RecordingsTableProps) {
+export function RecordingsTable(props: RecordingsTableProps) {
+    const generation = useAuthGeneration();
+    return <OwnedRecordingsTable key={generation} {...props} generation={generation} />;
+}
+
+function OwnedRecordingsTable({ onCallSelect, generation }: RecordingsTableProps & { generation: number }) {
     const [items, setItems] = useState<AdminRecordingItem[]>([]);
-    const [tenants, setTenants] = useState<TenantListItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [page, setPage] = useState(1);
@@ -59,8 +68,21 @@ export function RecordingsTable({ onCallSelect }: RecordingsTableProps) {
     const [toDate, setToDate] = useState('');
     const [deleteTarget, setDeleteTarget] = useState<AdminRecordingItem | null>(null);
     const [deleteReason, setDeleteReason] = useState('');
+    const [reasonReadOnly, setReasonReadOnly] = useState(false);
+    const submittedReason = useRef<string | null>(null);
     const [deleteIdempotencyKey, setDeleteIdempotencyKey] = useState('');
     const [deleting, setDeleting] = useState(false);
+    const [actionError, setActionError] = useState<string | null>(null);
+    const [deletionNotice, setDeletionNotice] = useState<MediaDeletionNotice | null>(null);
+    const mutation = useRef(false);
+    const searchInput = useRef<HTMLInputElement>(null);
+    const [deleteQuery, setDeleteQuery] = useState('');
+
+    const query = JSON.stringify([page, debouncedSearch, status, tenantId, direction, fromDate, toDate]);
+    const capture = useOperationOwner(generation, query);
+    const captureRecovery = useOperationOwner(generation, 'deletion-notice');
+    const request = useRef(0);
+    const [loadedQuery, setLoadedQuery] = useState('');
 
     useEffect(() => {
         const timer = window.setTimeout(() => {
@@ -70,13 +92,22 @@ export function RecordingsTable({ onCallSelect }: RecordingsTableProps) {
         return () => window.clearTimeout(timer);
     }, [search]);
 
+
+
     useEffect(() => {
-        api.getTenants().then((response) => {
-            if (response.data) setTenants(response.data);
-        });
-    }, []);
+        mutation.current = false;
+        setDeletionNotice(previous => previous?.state === 'pending'
+            ? { ...previous, state: 'unconfirmed', message: 'The view changed before the deletion result was confirmed. Check the saved deletion.' } : previous);
+        // The query owns both its rows and its pending confirmation state.
+        setDeleteTarget(null);
+        setDeleteReason(''); submittedReason.current = null; setReasonReadOnly(false); setDeleteIdempotencyKey(''); setDeleting(false); setActionError(null);
+    }, [capture]);
 
     const fetchItems = useCallback(async () => {
+        const owns = capture();
+        if (!owns()) return;
+        const sequence = ++request.current;
+        const current = () => owns() && sequence === request.current;
         setLoading(true);
         setError(null);
         const params: AdminRecordingParams = { page, page_size: pageSize };
@@ -87,55 +118,88 @@ export function RecordingsTable({ onCallSelect }: RecordingsTableProps) {
         if (fromDate) params.from_date = fromDate;
         if (toDate) params.to_date = toDate;
         const response = await api.getAdminRecordings(params);
+        if (!current()) return;
+        setLoadedQuery(query);
         if (response.error) {
             setError(response.error.message);
-            setItems([]);
-        } else if (response.data) {
-            setItems(response.data.items);
+            setItems([]); setTotal(0);
+        } else if (response.data && Array.isArray(response.data.items) && Number.isSafeInteger(response.data.total) && response.data.total >= 0
+            && response.data.items.every(item => item.id && item.call_id && item.tenant_id && (!tenantId || item.tenant_id === tenantId))) {
+            const lastPage = Math.max(1, Math.ceil(response.data.total / pageSize));
             setTotal(response.data.total);
-        }
+            if (page > lastPage) {
+                // This owned response proves the requested page no longer exists.
+                // The normal query effect reads the corrected page without repeating the mutation.
+                setItems([]); setLoadedQuery(''); setPage(lastPage);
+                return;
+            }
+            setItems(response.data.items);
+        } else { setItems([]); setTotal(0); setError('The media list response is incomplete or belongs to another tenant.'); }
         setLoading(false);
-    }, [page, debouncedSearch, status, tenantId, direction, fromDate, toDate]);
+    }, [page, debouncedSearch, status, tenantId, direction, fromDate, toDate, capture, query]);
+
+    const retryInventory = (trigger: HTMLButtonElement) => {
+        if (!capture()() || !trigger.isConnected || !error) return;
+        // Clearing the error removes Retry immediately; hand off only its owned focus.
+        if (document.activeElement === trigger) searchInput.current?.focus();
+        void fetchItems();
+    };
 
     useEffect(() => {
         // The request is intentionally tied to the complete filter snapshot.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
         void fetchItems();
     }, [fetchItems]);
 
     const deleteRecording = async () => {
-        if (!deleteTarget || !deleteIdempotencyKey) return;
-        setDeleting(true);
-        const response = await api.deleteAdminRecording(
-            deleteTarget.id,
-            deleteReason.trim(),
-            deleteIdempotencyKey,
-        );
-        if (response.error) {
-            setError(response.error.message);
-        } else {
+        const owns = capture();
+        if (!owns() || mutation.current || deleteQuery !== query || !deleteTarget || !deleteIdempotencyKey) return;
+        mutation.current = true;
+        submittedReason.current ??= deleteReason.trim();
+        const target = mediaDeletionTarget('recording', deleteTarget);
+        setDeletionNotice({ target, state: 'pending' });
+        setReasonReadOnly(true);
+        setDeleting(true); setActionError(null);
+        try {
+            const response = await api.deleteAdminRecording(deleteTarget.id, submittedReason.current, deleteIdempotencyKey);
+            if (!owns()) return;
+            if (response.error || !matchesMediaDeletionReceipt(response.data, target)) {
+                const message = response.error?.message ?? 'Deletion was not confirmed. Check the saved deletion or explicitly retry the same reviewed request.';
+                setActionError(message);
+                setDeletionNotice({ target, state: 'unconfirmed', message });
+                return;
+            }
+            setDeletionNotice({ target, state: response.data.outcome, receipt: response.data });
             setDeleteTarget(null);
-            setDeleteReason('');
+            setDeleteReason(''); submittedReason.current = null; setReasonReadOnly(false);
             setDeleteIdempotencyKey('');
             await fetchItems();
+        } catch (caught) {
+            if (owns()) {
+                const message = caught instanceof Error ? caught.message : 'Deletion could not be confirmed. Check the saved deletion.';
+                setActionError(message);
+                setDeletionNotice(previous => previous?.state === 'completed' || previous?.state === 'absent'
+                    ? previous : { target, state: 'unconfirmed', message });
+            }
+        } finally {
+            if (owns()) { mutation.current = false; setDeleting(false); }
         }
-        setDeleting(false);
     };
 
     const openDelete = (item: AdminRecordingItem) => {
-        if (item.legal_hold) return;
+        if (!capture()() || mutation.current || item.legal_hold) return;
+        setDeleteQuery(query); setActionError(null);
         const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto
             ? crypto.randomUUID()
             : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
         setDeleteTarget(item);
-        setDeleteReason('');
+        setDeleteReason(''); submittedReason.current = null; setReasonReadOnly(false);
         setDeleteIdempotencyKey(`admin-media:recording:${item.id}:${id}`);
     };
 
     const closeDelete = () => {
-        if (deleting) return;
+        if (mutation.current) return;
         setDeleteTarget(null);
-        setDeleteReason('');
+        setDeleteReason(''); submittedReason.current = null; setReasonReadOnly(false);
         setDeleteIdempotencyKey('');
     };
 
@@ -154,11 +218,14 @@ export function RecordingsTable({ onCallSelect }: RecordingsTableProps) {
 
     return (
         <div className="call-history-container">
+            {actionError && !deleteTarget && <p role="alert">{actionError}</p>}
             <div className="table-toolbar media-toolbar">
                 <div className="search-box">
                     <Search size={18} />
                     <input
                         className="search-input"
+                        ref={searchInput}
+                        aria-label="Search recordings"
                         value={search}
                         onChange={(event) => setSearch(event.target.value)}
                         placeholder="Phone, call ID, tenant, or campaign…"
@@ -191,20 +258,7 @@ export function RecordingsTable({ onCallSelect }: RecordingsTableProps) {
                     <option value="inbound">Inbound</option>
                     <option value="outbound">Outbound</option>
                 </select>
-                <select
-                    className="filter-select"
-                    value={tenantId}
-                    onChange={(event) => {
-                        setTenantId(event.target.value);
-                        setPage(1);
-                    }}
-                    aria-label="Filter recordings by tenant"
-                >
-                    <option value="">All tenants</option>
-                    {tenants.map((tenant) => (
-                        <option key={tenant.id} value={tenant.id}>{tenant.business_name}</option>
-                    ))}
-                </select>
+                <TenantFilter includeArchived value={tenantId} onChange={value => { setTenantId(value); setPage(1); }} />
                 <div className="date-filter-group">
                     <CalendarDays size={16} />
                     <input
@@ -241,17 +295,17 @@ export function RecordingsTable({ onCallSelect }: RecordingsTableProps) {
             {error && (
                 <div className="error-banner">
                     <p>{error}</p>
-                    <button onClick={() => void fetchItems()}>Retry</button>
+                    <button onClick={event => retryInventory(event.currentTarget)}>Retry</button>
                 </div>
             )}
 
             <div className="table-container">
-                {loading ? (
+                {loading || loadedQuery !== query ? (
                     <div className="table-loading">
                         <div className="loading-spinner"></div>
                         <p>Loading recordings…</p>
                     </div>
-                ) : items.length === 0 ? (
+                ) : error ? null : items.length === 0 ? (
                     <div className="empty-state">
                         <AudioLines size={48} />
                         <h3>No recordings found</h3>
@@ -278,10 +332,10 @@ export function RecordingsTable({ onCallSelect }: RecordingsTableProps) {
                                         <div className="stacked-cell">
                                             <span><Building2 size={13} /> {item.tenant_name}</span>
                                             <strong>{item.phone_number || 'Unknown number'}</strong>
-                                            <span className={`direction-badge direction-${item.direction || 'outbound'}`}>
-                                                {item.direction || 'outbound'}{item.called_did ? ` · DID ${item.called_did}` : ''}
+                                            <span className={`direction-badge direction-${item.direction || 'unknown'}`}>
+                                                {item.direction || 'unknown'}{item.called_did ? ` · DID ${item.called_did}` : ''}
                                             </span>
-                                            <button className="link-button" onClick={() => onCallSelect(item.call_id)}>
+                                            <button className="link-button" onClick={() => { if (capture()()) onCallSelect(item.call_id); }}>
                                                 {item.call_id.slice(0, 8)}… <ExternalLink size={11} />
                                             </button>
                                         </div>
@@ -289,6 +343,7 @@ export function RecordingsTable({ onCallSelect }: RecordingsTableProps) {
                                     <td>{item.campaign_name || '—'}</td>
                                     <td>
                                         <AdminMediaPlayer
+                                            resourceId={`recording:${item.id}`}
                                             compact
                                             disabled={!item.playable}
                                             filenameBase={`call-${item.call_id}`}
@@ -307,13 +362,13 @@ export function RecordingsTable({ onCallSelect }: RecordingsTableProps) {
                                     </td>
                                     <td>
                                         <div className="row-actions">
-                                            <button className="btn btn-secondary btn-sm" onClick={() => onCallSelect(item.call_id)}>
+                                            <button className="btn btn-secondary btn-sm" onClick={() => { if (capture()()) onCallSelect(item.call_id); }}>
                                                 <ExternalLink size={14} /> Call
                                             </button>
                                             <button
                                                 className="btn btn-danger btn-sm"
                                                 onClick={() => openDelete(item)}
-                                                disabled={item.legal_hold}
+                                                disabled={item.legal_hold || deleting}
                                                 title={item.legal_hold ? 'Deletion blocked by an active compliance/legal hold' : undefined}
                                             >
                                                 {item.legal_hold ? <ShieldAlert size={14} /> : <Trash2 size={14} />}
@@ -328,32 +383,42 @@ export function RecordingsTable({ onCallSelect }: RecordingsTableProps) {
                 )}
             </div>
 
-            {!loading && total > 0 && (
+            {!loading && loadedQuery === query && !error && total > 0 && (
                 <div className="pagination">
                     <span className="pagination-info">
                         Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
                     </span>
                     <div className="pagination-controls">
-                        <button className="btn btn-secondary btn-sm" disabled={page === 1} onClick={() => setPage((value) => value - 1)}>
+                        <button className="btn btn-secondary btn-sm" aria-label="Previous recordings page" disabled={page === 1} onClick={() => setPage((value) => value - 1)}>
                             <ChevronLeft size={16} />
                         </button>
                         <span className="page-indicator">Page {page} of {totalPages}</span>
-                        <button className="btn btn-secondary btn-sm" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}>
+                        <button className="btn btn-secondary btn-sm" aria-label="Next recordings page" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}>
                             <ChevronRight size={16} />
                         </button>
                     </div>
                 </div>
             )}
 
+            <MediaDeletionHistory resourceType="recording" tenantId={tenantId || undefined} notice={deletionNotice}
+                onRecovered={(expected, saved) => {
+                    if (!captureRecovery()()) return;
+                    setDeletionNotice(previous => previous === expected ? recoveredMediaDeletion(previous, saved) : previous);
+                }}
+            />
+
             <ConfirmationModal
-                isOpen={Boolean(deleteTarget)}
+                returnFocusFallback={searchInput}
+                isOpen={Boolean(deleteTarget) && deleteQuery === query}
+                error={actionError}
                 title="Permanently delete recording?"
                 message={`This permanently removes the audio for ${deleteTarget?.phone_number || 'this call'} from storage and cannot be undone.`}
                 confirmLabel="Delete recording"
                 variant="danger"
                 loading={deleting}
                 reason={deleteReason}
-                onReasonChange={setDeleteReason}
+                reasonReadOnly={reasonReadOnly}
+                onReasonChange={value => { if (submittedReason.current === null) setDeleteReason(value); }}
                 reasonLabel="Deletion reason"
                 onConfirm={() => void deleteRecording()}
                 onCancel={closeDelete}

@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from app.domain.services.telephony.termination_receipts import TerminationReceiptResult
+from tests.unit.pbx_identity_helpers import BINDING, bind_test_adapter, bound_test_adapter
 from fastapi import HTTPException
 from pydantic import ValidationError
 
@@ -165,6 +167,7 @@ class _Adapter:
 
     def __init__(self):
         self.hung_up = []
+        bind_test_adapter(self)
 
     async def hangup_confirmed(self, external_id):
         self.hung_up.append(external_id)
@@ -188,9 +191,18 @@ def _stub_admin_termination_context(monkeypatch, conn: _TerminateConn) -> None:
             previous_status=previous_status,
             provider_leg_ids=(),
             provider=row.get("provider"),
+            control_backend=BINDING,
+            leg_inventory=(),
         )
 
     monkeypatch.setattr(calls, "mark_termination_pending_and_load_context", mark)
+
+    async def receipt(_pool, context, *, requested):
+        assert context.call_id == str(conn.call_row["id"])
+        assert context.leg_inventory == () and context.control_backend == BINDING
+        return TerminationReceiptResult(True, True, "saved")
+
+    monkeypatch.setattr(calls, "_persist_admin_termination_receipt", receipt)
 
     async def finalize(*_args, **_kwargs):
         return None
@@ -272,7 +284,7 @@ async def test_admin_terminate_keeps_call_live_without_provider_confirmation(mon
 
     audit = _Audit()
     monkeypatch.setattr(calls, "acquire_with_tenant", acquire)
-    monkeypatch.setattr(telephony_bridge, "_adapter", UnconfirmedAdapter())
+    monkeypatch.setattr(telephony_bridge, "_adapter", bound_test_adapter(UnconfirmedAdapter()))
     _stub_admin_termination_context(monkeypatch, conn)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -324,7 +336,7 @@ async def test_admin_terminal_replay_still_requires_provider_absence_proof(monke
 
     audit = _Audit()
     monkeypatch.setattr(calls, "acquire_with_tenant", acquire)
-    monkeypatch.setattr(telephony_bridge, "_adapter", UnconfirmedAdapter())
+    monkeypatch.setattr(telephony_bridge, "_adapter", bound_test_adapter(UnconfirmedAdapter()))
     _stub_admin_termination_context(monkeypatch, conn)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -625,7 +637,7 @@ async def test_failed_media_delete_can_be_resumed_by_another_authorized_actor(
 
         async def fetchval(self, query, *args):
             if "media-delete-key" in query:
-                assert args == (recovery_actor, "recovery-delete-key")
+                assert args == (str(recovery_actor), "recovery-delete-key")
                 return True
             assert "suspension_events" in query
             assert args == (tenant_id,)
@@ -669,7 +681,7 @@ async def test_recovery_actor_idempotency_key_cannot_bind_two_media_resources(
     class Conn:
         async def fetchval(self, query, *args):
             assert "media-delete-key" in query
-            assert args == (actor_id, "recovery-shared-key")
+            assert args == (str(actor_id), "recovery-shared-key")
             return True
 
         async def fetchrow(self, query, *args):
@@ -722,10 +734,11 @@ async def test_serialized_media_deletion_try_locks_then_checks_partner_hold_befo
 
     class Conn:
         async def fetchval(self, query, *args):
-            assert args == (tenant_id,)
             if "pg_try_advisory_xact_lock" in query:
+                assert args == (str(tenant_id),)
                 order.append("advisory_try_lock")
                 return True
+            assert args == (tenant_id,)
             assert "suspension_events" in query
             assert "se.target_type = 'tenant'" in query
             assert "se.target_type = 'partner'" in query
@@ -770,7 +783,7 @@ async def test_serialized_media_deletion_busy_lock_fails_without_waiting_or_yiel
     class Conn:
         async def fetchval(self, query, *args):
             queries.append(query)
-            assert args == (tenant_id,)
+            assert args == (str(tenant_id),)
             assert "pg_try_advisory_xact_lock" in query
             return False
 
@@ -948,7 +961,10 @@ async def test_completed_delete_idempotency_replay_returns_without_storage(monke
         audit_logger=_Audit(),
     )
 
-    assert response == cached
+    assert response == {
+        **cached, "resource_type": "recording", "resource_id": str(recording_id),
+        "outcome": "completed",
+    }
 
 
 def test_live_duration_accepts_native_and_serialized_database_timestamps():

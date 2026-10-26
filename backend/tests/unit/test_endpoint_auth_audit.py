@@ -65,6 +65,10 @@ _AUTH_FLOWS = {
 # Webhook callbacks from third parties / internal — these use payload
 # signature verification or short-lived state tokens, NOT session auth.
 _WEBHOOKS = {
+    "POST /api/v1/webhooks/alertmanager": (
+        "Alertmanager intake; dedicated write-only Bearer secret verified inline "
+        "before body/database access, without user or internal-service authority"
+    ),
     "POST /api/v1/billing/webhooks": "Stripe webhook; signature verified inline",
     "GET /api/v1/connectors/callback": "OAuth callback; state token verified inline",
     "POST /api/v1/connectors/salesforce/callback-requests/{tenant_id}/{token}": (
@@ -291,4 +295,51 @@ def test_contact_intake_exception_does_not_exempt_admin_read_or_update():
             assert key not in KNOWN_PUBLIC_ROUTES
             assert _route_has_db_dep(route.endpoint)
             assert _route_level_auth(route)
+    assert found == expected
+
+
+def test_alertmanager_exception_does_not_exempt_admin_incident_controls():
+    """The dedicated integration credential grants one write-only POST route."""
+    from app.main import app
+    from app.api.v1.dependencies import require_platform_admin
+
+    webhook_path = "/api/v1/webhooks/alertmanager"
+    assert {
+        key for key in KNOWN_PUBLIC_ROUTES
+        if key.split(" ", 1)[1].startswith(webhook_path)
+    } == {f"POST {webhook_path}"}
+    assert not any(
+        key.split(" ", 1)[1].startswith("/api/v1/admin/")
+        for key in KNOWN_PUBLIC_ROUTES
+    )
+    expected = {
+        "GET /api/v1/admin/incidents",
+        "GET /api/v1/admin/incidents/{incident_id}",
+        "POST /api/v1/admin/incidents/{incident_id}/acknowledge",
+        "POST /api/v1/admin/incidents/{incident_id}/resolve",
+        "GET /api/v1/admin/alerts/settings",
+        "PUT /api/v1/admin/alerts/settings",
+    }
+    found = set()
+    for path, route in _collect_api_routes(app.routes):
+        for method in route.methods:
+            key = _norm_route_key(method, path)
+            if key not in expected:
+                continue
+            found.add(key)
+            assert key not in KNOWN_PUBLIC_ROUTES
+            assert _route_level_auth(route)
+            # An ordinary user-auth guard would not preserve platform authority.
+            stack = list(route.dependant.dependencies)
+            seen = set()
+            platform_guard_found = False
+            while stack:
+                dep = stack.pop()
+                if id(dep) in seen:
+                    continue
+                seen.add(id(dep))
+                if dep.call is require_platform_admin:
+                    platform_guard_found = True
+                stack.extend(dep.dependencies)
+            assert platform_guard_found, f"Platform-admin guard missing: {key}"
     assert found == expected

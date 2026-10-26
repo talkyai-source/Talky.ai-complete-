@@ -107,6 +107,7 @@ class XAIRealtimeSession(OpenAIRealtimeSession):
 
     # Per-response instructions are documented; metadata echo is not verified.
     supports_response_metadata = False
+    observation_provider = "xai"
 
     def __init__(
         self,
@@ -119,6 +120,7 @@ class XAIRealtimeSession(OpenAIRealtimeSession):
         tools: Optional[List[Dict[str, Any]]] = None,
         settings: Optional[Dict[str, Any]] = None,
         call_id: Optional[str] = None,
+        observation_context: Optional[Dict[str, Any]] = None,
     ) -> None:
         super().__init__(
             api_key=api_key,
@@ -133,6 +135,7 @@ class XAIRealtimeSession(OpenAIRealtimeSession):
             tools=tools,
             settings={**(settings or {}), "provider": "xai"},
             call_id=call_id,
+            observation_context=observation_context,
         )
         self._voice = (voice or "").strip()
         # When set, connect() targets ?agent_id=... (a console-built xAI

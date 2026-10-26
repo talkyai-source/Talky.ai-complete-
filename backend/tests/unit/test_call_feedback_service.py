@@ -92,7 +92,8 @@ class FakeRepository:
         self.row["transcription_attempts"] += 1
         return dict(self.row)
 
-    async def mark_done(self, tenant_id: str, feedback_id: str, result):
+    async def mark_done(self, tenant_id: str, feedback_id: str, result, *, attempt: int):
+        assert attempt == self.row["transcription_attempts"]
         self.events.append("marked_done")
         self.row.update(
             transcript=result.text,
@@ -102,7 +103,8 @@ class FakeRepository:
         )
         return dict(self.row)
 
-    async def mark_failed(self, tenant_id: str, feedback_id: str, error: str):
+    async def mark_failed(self, tenant_id: str, feedback_id: str, error: str, *, attempt: int):
+        assert attempt == self.row["transcription_attempts"]
         self.events.append("marked_failed")
         self.row.update(transcript_status="failed", transcript_error=error)
         return dict(self.row)

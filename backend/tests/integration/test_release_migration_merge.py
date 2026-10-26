@@ -23,7 +23,13 @@ BACKEND = Path(__file__).resolve().parents[2]
 BASELINE = "0008_tenant_voice_tuning"
 HEARTBEAT = "0048_audit_skip_heartbeat"
 RECEIPTS = "0062_saved_acknowledgement"
-HEAD = "0063_release_history_merge"
+MERGE = "0063_release_history_merge"
+HEAD = "0076_admin_user_operations"
+CURRENT_ADMIN_REVISIONS = {
+    "0070_trunk_soft_delete", "0071_connector_lifecycle",
+    "0072_admin_incidents", "0073_alertmanager_incidents", "0074_contact_enquiry_revision",
+    "0075_admin_user_review", HEAD,
+}
 RUN_EVIDENCE = []
 pytestmark = pytest.mark.integration
 
@@ -104,6 +110,68 @@ async def verify_merged(dsn, tenant, trunk, report):
         assert recovery["relrowsecurity"] and recovery["relforcerowsecurity"]
         assert await conn.fetchval("SELECT count(*) FROM pg_trigger WHERE tgrelid='public.assistant_action_resolutions'::regclass AND tgname='action_resolutions_immutable'") == 1
         report["both_branch_contracts"] = True
+        # A current-head drill must prove the additive Admin schema too, not
+        # merely accept a changed version marker after the historical merge.
+        columns = await conn.fetch("""SELECT table_name,column_name FROM information_schema.columns
+            WHERE table_schema='public' AND table_name=ANY($1::text[])""",
+            ["tenant_sip_trunks", "connector_accounts", "connectors", "incidents", "public_contact_enquiries", "user_profiles", "tenant_users"])
+        present = {(row["table_name"],row["column_name"]) for row in columns}
+        required = {
+            ("tenant_sip_trunks","deleted_at"),
+            ("connectors","provider_revocation_status"),
+            ("public_contact_enquiries", "revision"),
+            ("user_profiles", "admin_revision"),
+            ("tenant_users", "admin_revision"),
+            *(("connector_accounts",column) for column in (
+                "credential_generation","refresh_claim_id","refresh_claimed_at","refresh_state","refresh_error")),
+            *(("incidents",column) for column in (
+                "acknowledged_at","acknowledged_by","resolved_at","resolved_by",
+                "source_system","source_fingerprint","source_started_at","source_status",
+                "source_recovered_at","source_last_received_at","source_labels")),
+        }
+        assert required <= present
+        incidents = await conn.fetchrow("SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE oid='public.incidents'::regclass")
+        assert incidents["relrowsecurity"] and incidents["relforcerowsecurity"]
+        assert await conn.fetchval("SELECT count(*) FROM pg_policies WHERE schemaname='public' AND tablename='incidents' AND policyname='incidents_platform_only'") == 1
+        assert await conn.fetchval("SELECT count(*) FROM pg_constraint WHERE conrelid='public.connector_accounts'::regclass AND conname='connector_refresh_claim_consistent'") == 1
+        assert await conn.fetchval("SELECT count(*) FROM pg_constraint WHERE conrelid='public.incidents'::regclass AND conname IN ('incident_source_shape','incident_source_labels_object')") == 2
+        episode_index = await conn.fetchrow("""SELECT i.indisunique,pg_get_expr(i.indpred,i.indrelid) AS predicate
+            FROM pg_index i WHERE i.indexrelid='public.incidents_source_episode_unique'::regclass""")
+        assert episode_index["indisunique"] and "source_system IS NOT NULL" in episode_index["predicate"]
+        enquiry_revision = await conn.fetchrow("""SELECT is_nullable,column_default,data_type
+            FROM information_schema.columns WHERE table_schema='public'
+            AND table_name='public_contact_enquiries' AND column_name='revision'""")
+        assert enquiry_revision["is_nullable"] == "NO" and enquiry_revision["column_default"] == "0"
+        assert enquiry_revision["data_type"] == "integer"
+        assert await conn.fetchval("""SELECT COUNT(*) FROM pg_constraint
+            WHERE conrelid='public.public_contact_enquiries'::regclass
+            AND contype='c' AND pg_get_constraintdef(oid) LIKE '%revision >= 0%'""") == 1
+        for table, trigger in (
+            ("user_profiles", "advance_user_profile_admin_revision"),
+            ("tenant_users", "advance_tenant_user_admin_revision"),
+        ):
+            version = await conn.fetchrow("""SELECT is_nullable,column_default,data_type
+                FROM information_schema.columns WHERE table_schema='public'
+                AND table_name=$1 AND column_name='admin_revision'""", table)
+            assert dict(version) == {"is_nullable": "NO", "column_default": "0", "data_type": "bigint"}
+            assert await conn.fetchval("""SELECT COUNT(*) FROM pg_trigger
+                WHERE tgrelid=$1::regclass AND tgname=$2 AND tgenabled='O'""", "public." + table, trigger) == 1
+            assert await conn.fetchval("""SELECT COUNT(*) FROM pg_constraint
+                WHERE conrelid=$1::regclass AND conname=$2 AND contype='c'""",
+                "public." + table, table + "_admin_revision_nonnegative") == 1
+        request_index = await conn.fetchrow("""SELECT i.indisunique,pg_get_expr(i.indpred,i.indrelid) AS predicate
+            FROM pg_index i WHERE i.indexrelid='public.audit_user_create_request_unique'::regclass""")
+        assert request_index["indisunique"] and "user_create_request_id" in request_index["predicate"]
+        operation_index = await conn.fetchrow("""SELECT i.indisunique,pg_get_expr(i.indpred,i.indrelid) AS predicate
+            FROM pg_index i WHERE i.indexrelid='public.audit_user_operation_terminal_unique'::regclass""")
+        assert operation_index["indisunique"]
+        assert all(value in operation_index["predicate"] for value in (
+            "user_operation_version", "user_operation_id", "user_operation_cancelled",
+            "user_created", "user_updated", "user_deleted", "user_deactivated",
+            "user_primary_membership_configured"))
+        assert await conn.fetchval("SELECT to_regclass('public.audit_user_operation_actor_prepared') IS NOT NULL")
+        report["user_operation_terminal_uniqueness_and_discovery_indexes"] = True
+        report["current_admin_contract"] = True
 
 
 @pytest.mark.parametrize("start", [HEARTBEAT, RECEIPTS, BASELINE])
@@ -113,14 +181,19 @@ def test_actual_upgrade_retains_both_histories_and_audit_evidence(monkeypatch, s
         pytest.skip("Explicit reviewed local migration owner fixture required")
     parsed = urlparse(admin_dsn)
     assert parsed.scheme == "postgresql" and parsed.hostname == "127.0.0.1" and parsed.port == 55434
-    assert parsed.path == "/cp04_acceptance_test" and not parsed.query and not parsed.fragment
+    assert parsed.path in {"/cp04_acceptance_test", "/admin_premortem_20261021_test"} and not parsed.query and not parsed.fragment
     name = "release_merge_" + uuid4().hex + "_test"
     dsn = urlunparse(parsed._replace(path="/" + name))
     monkeypatch.setenv("DATABASE_URL", dsn)
     monkeypatch.chdir(BACKEND)
     config = Config(str(BACKEND / "alembic.ini"))
     config.set_main_option("script_location", str(BACKEND / "Alembic"))
-    assert ScriptDirectory.from_config(config).get_heads() == [HEAD]
+    scripts = ScriptDirectory.from_config(config)
+    assert scripts.get_heads() == [HEAD]
+    assert set(scripts.get_revision(MERGE).down_revision) == {HEARTBEAT, RECEIPTS}
+    assert CURRENT_ADMIN_REVISIONS <= {
+        revision.revision for revision in scripts.iterate_revisions(HEAD, BASELINE, implicit_base=True)
+    }
     report = {"start": start, "database": name, "steps": []}
     RUN_EVIDENCE.append(report)
     tenant, trunk = uuid4(), uuid4()

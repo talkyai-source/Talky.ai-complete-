@@ -650,6 +650,8 @@ async def hangup_live_call(
             tb._adapter,
             str(termination_context.provider_call_id or ext or ""),
             expected_provider=termination_context.provider,
+            expected_backend=termination_context.control_backend,
+            require_backend_identity=True,
             provider_legs=termination_context.provider_legs,
             provider_leg_ids=termination_context.provider_leg_ids,
         )

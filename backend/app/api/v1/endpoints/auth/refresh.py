@@ -15,6 +15,7 @@ from app.core.db_utils import acquire_with_tenant
 from app.core.jwt_security import ACCESS_TOKEN_TTL_MINUTES, encode_access_token
 from app.core.postgres_adapter import Client
 from app.core.security.principal import PrincipalUnavailable, assert_expected_identity, load_current_principal
+from app.core.security.credential_issuance import lock_user_credential_issuance
 from app.core.security.cookies import (
     REFRESH_COOKIE_NAME,
     set_access_cookie,
@@ -92,12 +93,12 @@ async def refresh(
     ua = get_user_agent(request)
 
     rejection = None
-    # Lock the presented row before identity checks and rotation. A competing
-    # request sees committed consumption; security rejection writes must commit.
+    # Resolve ownership without locking, then take the shared profile fence
+    # before the token/session locks. This matches formal hold revocation.
     async with acquire_with_tenant(db_client.pool, None) as conn:
         owned = await conn.fetchrow(
             """SELECT user_id,tenant_id FROM refresh_tokens
-               WHERE token_hash=$1 FOR UPDATE""",
+               WHERE token_hash=$1""",
             hashlib.sha256(talky_rt.encode()).hexdigest(),
         )
         if owned is None:
@@ -106,6 +107,14 @@ async def refresh(
             assert_expected_identity(request, {"id":str(owned["user_id"]),
                 "tenant_id":str(owned["tenant_id"]) if owned["tenant_id"] else None})
             try:
+                await lock_user_credential_issuance(conn, owned["user_id"])
+                current = await conn.fetchrow(
+                    """SELECT user_id,tenant_id FROM refresh_tokens
+                       WHERE token_hash=$1 AND user_id=$2::uuid FOR UPDATE""",
+                    hashlib.sha256(talky_rt.encode()).hexdigest(), str(owned["user_id"]),
+                )
+                if current is None or current["tenant_id"] != owned["tenant_id"]:
+                    raise PrincipalUnavailable("credentials_changed")
                 principal = await load_current_principal(conn, owned["user_id"], tenant_id=owned["tenant_id"])
                 assert_expected_identity(request, principal)
             except PrincipalUnavailable:

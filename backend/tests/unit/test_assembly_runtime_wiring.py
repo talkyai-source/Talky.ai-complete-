@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from app.domain.services.credential_resolver import ResolvedCredential
 
 from app.domain.models.ai_config import AIProviderConfig
 from app.domain.services.telephony_session_config import (
@@ -69,8 +70,8 @@ async def test_assembly_only_account_needs_no_deepgram_key(monkeypatch, failover
     monkeypatch.setenv("STT_FAILOVER_ENABLED", str(failover).lower())
     fake = SimpleNamespace(initialize=AsyncMock())
     resolver = SimpleNamespace(
-        resolve=AsyncMock(
-            side_effect=lambda provider, **kw: "assembly-secret"
+        resolve_with_metadata=AsyncMock(
+            side_effect=lambda provider, **kw: ResolvedCredential("assembly-secret", source="platform", tenant_id=kw.get("tenant_id"))
             if provider == "assemblyai"
             else None
         )
@@ -87,14 +88,15 @@ async def test_assembly_only_account_needs_no_deepgram_key(monkeypatch, failover
     assert actual is fake
     sent = fake.initialize.await_args.args[0]
     assert sent["api_key"] == "assembly-secret"
+    assert sent["observation_context"] == {"source": "platform", "tenant_id": "tenant-a", "credential_id": None}
     assert sent["model"] == "universal-3-6-pro"
     assert sent["assemblyai_settings"] == {"mode": "min_latency"}
     # The call's campaign names reach AssemblyAI, as they already reach Flux.
     assert sent["keyterms"] == ["Dojo", "Alex", "Dojo Go"]
     assert not {"eot_threshold", "eager_eot_threshold", "eot_timeout_ms"}.intersection(sent)
-    resolver.resolve.assert_any_await("assemblyai", tenant_id="tenant-a")
+    resolver.resolve_with_metadata.assert_any_await("assemblyai", tenant_id="tenant-a")
     if not failover:
-        resolver.resolve.assert_awaited_once()
+        resolver.resolve_with_metadata.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -108,7 +110,7 @@ async def test_opt_in_failover_keeps_provider_credentials_separate(monkeypatch):
     primary = SimpleNamespace(initialize=AsyncMock(), name="assemblyai")
     secondary = SimpleNamespace(initialize=AsyncMock(), name="nova")
     resolver = SimpleNamespace(
-        resolve=AsyncMock(side_effect=lambda provider, **kw: provider + "-secret")
+        resolve_with_metadata=AsyncMock(side_effect=lambda provider, **kw: ResolvedCredential(provider + "-secret", source="platform", tenant_id=kw.get("tenant_id")))
     )
     monkeypatch.setattr(credential_resolver, "get_credential_resolver", lambda: resolver)
     monkeypatch.setattr(assemblyai, "AssemblyAISTTProvider", lambda: primary)
@@ -133,7 +135,7 @@ async def test_privacy_settings_fail_closed_without_a_deepgram_fallback(monkeypa
     primary = SimpleNamespace(initialize=AsyncMock(), name="assemblyai")
     secondary = SimpleNamespace(initialize=AsyncMock(), name="nova")
     resolver = SimpleNamespace(
-        resolve=AsyncMock(side_effect=lambda provider, **kw: provider + "-secret")
+        resolve_with_metadata=AsyncMock(side_effect=lambda provider, **kw: ResolvedCredential(provider + "-secret", source="platform", tenant_id=kw.get("tenant_id")))
     )
     monkeypatch.setattr(credential_resolver, "get_credential_resolver", lambda: resolver)
     monkeypatch.setattr(assemblyai, "AssemblyAISTTProvider", lambda: primary)

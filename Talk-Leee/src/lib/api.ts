@@ -375,7 +375,11 @@ class ApiClient {
      * The backend decides which path it serves based on whether
      * `password` is in the body.
      */
-    async login(email: string, password?: string): Promise<LoginResponse> {
+    async login(
+        email: string,
+        password?: string,
+        options?: { signal?: AbortSignal; ownsOperation?: () => boolean }
+    ): Promise<LoginResponse> {
         const path = "/auth/login";
         const method = "POST" as const;
         const body: Record<string, string> = { email };
@@ -386,6 +390,8 @@ class ApiClient {
             path,
             method,
             body,
+            signal: options?.signal,
+            ownsOperation: options?.ownsOperation,
             timeoutMs: 12_000,
         });
         return this.parseOrThrow(LoginResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
@@ -570,13 +576,16 @@ class ApiClient {
     async verifyMfaChallenge(
         challengeToken: string,
         code?: string,
-        recoveryCode?: string
+        recoveryCode?: string,
+        options?: { signal?: AbortSignal; ownsOperation?: () => boolean }
     ): Promise<LoginResponse> {
         const path = "/auth/mfa/verify";
         const method = "POST" as const;
         const data = await this.client().request({
             path,
             method,
+            signal: options?.signal,
+            ownsOperation: options?.ownsOperation,
             body: {
                 challenge_token: challengeToken,
                 ...(code ? { code } : {}),
@@ -839,20 +848,23 @@ class ApiClient {
         });
         return z.object({
             ceremony_id: z.string(),
-            options: z.record(z.unknown()),
+            options: z.record(z.string(), z.unknown()),
             has_passkeys: z.boolean(),
         }).parse(data);
     }
 
     async completePasskeyLogin(
         ceremonyId: string,
-        credentialResponse: Record<string, unknown>
+        credentialResponse: Record<string, unknown>,
+        options?: { signal?: AbortSignal; ownsOperation?: () => boolean }
     ): Promise<LoginResponse> {
         const path = "/auth/passkeys/login/complete";
         const method = "POST" as const;
         const data = await this.client().request({
             path,
             method,
+            signal: options?.signal,
+            ownsOperation: options?.ownsOperation,
             body: {
                 ceremony_id: ceremonyId,
                 credential_response: credentialResponse,
@@ -879,7 +891,7 @@ class ApiClient {
         });
         return z.object({
             ceremony_id: z.string(),
-            options: z.record(z.unknown()),
+            options: z.record(z.string(), z.unknown()),
         }).parse(data);
     }
 

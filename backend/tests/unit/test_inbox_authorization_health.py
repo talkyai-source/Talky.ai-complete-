@@ -23,11 +23,13 @@ def account(**changes):
     return {
         "id": ACCOUNT,
         "status": "active",
+        "refresh_state": "idle",
         "access_token_encrypted": "synthetic-ciphertext",
         "refresh_token_encrypted": "synthetic-refresh",
         "external_account_id": None,
         "token_expires_at": None,
         "last_refreshed_at": "2026-10-05T00:00:00Z",
+        "created_at": "2026-10-05T00:00:00Z",
         **changes,
     }
 
@@ -79,7 +81,7 @@ class Connection:
         self.events.append("fresh_active_read")
         return sorted(
             (row for row in self.rows if row["status"] == "active"),
-            key=lambda row: row["last_refreshed_at"] or "~",
+            key=lambda row: row["created_at"] or "~",
             reverse=True,
         )[:2]
 

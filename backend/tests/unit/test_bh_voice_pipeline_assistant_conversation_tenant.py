@@ -109,6 +109,8 @@ class _ChatWs:
 
 @pytest.fixture
 def chat_env(monkeypatch):
+    from tests.helpers.assistant_runtime import stub_runtime_receipts
+    stub_runtime_receipts(monkeypatch)
     monkeypatch.setattr(assistant_ws, "decode_and_validate_token", lambda _t: {"sub": "u1", "sid": "s1"})
     monkeypatch.setattr(assistant_ws, "get_tenant_assistant_model", AsyncMock(return_value="m"))
 
@@ -196,9 +198,11 @@ class _Tts:
 
 @pytest.fixture
 def voice_env(monkeypatch):
+    from tests.helpers.assistant_runtime import stub_runtime_receipts
+    stub_runtime_receipts(monkeypatch)
     class _Resolver:
-        async def resolve(self, *_a, **_k):
-            return "key"
+        async def resolve_with_metadata(self, *_a, **_k):
+            return SimpleNamespace(secret="key", observation_context={"source": "unattributed"})
 
     monkeypatch.setattr(
         "app.domain.services.credential_resolver.get_credential_resolver", lambda: _Resolver()

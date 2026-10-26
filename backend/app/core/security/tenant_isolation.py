@@ -96,7 +96,7 @@ def get_current_tenant_id() -> Optional[str]:
     return _tenant_context.get()
 
 
-def set_current_tenant_id(tenant_id: str) -> None:
+def set_current_tenant_id(tenant_id: Optional[str]) -> None:
     """Set the current tenant ID in context."""
     _tenant_context.set(tenant_id)
 

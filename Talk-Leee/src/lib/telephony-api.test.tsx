@@ -8,7 +8,18 @@ import { surfaceProblemDetail, useDeleteSipTrunk, useTestSipTrunk } from "./tele
 
 const realFetch = globalThis.fetch;
 const clients: QueryClient[] = [];
-afterEach(() => { cleanup(); clients.splice(0).forEach((client) => client.clear()); globalThis.fetch = realFetch; });
+afterEach(() => {
+    try {
+        cleanup();
+    } finally {
+        // Unmount observers first; removing them can schedule mutation GC.
+        clients.splice(0).forEach((client) => {
+            client.getMutationCache().getAll().forEach((mutation) => mutation.destroy());
+            client.clear();
+        });
+        globalThis.fetch = realFetch;
+    }
+});
 
 function makeWrapper() {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });

@@ -26,6 +26,7 @@ Audio Streaming:
 Reference: https://developers.deepgram.com/docs/flux/configuration
 """
 import os
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
 import json
 import asyncio
 import time
@@ -55,9 +56,20 @@ class _FluxConnection:
 
     ws: object
     slot: object
+    observation: ProviderAttempt | None = None
+    recognition: ProviderAttempt | None = None
     closed: bool = False
     adopted: bool = False
     _close_task: Optional[asyncio.Task] = None
+
+    def recognized(self) -> None:
+        if self.observation and self.observation.closed:
+            return
+        if self.observation:
+            self.observation.recognized()
+        if self.recognition:
+            self.recognition.recognized()
+            self.recognition.finish(outcome="recognized")
 
     async def close(self) -> None:
         if self._close_task is None:
@@ -71,6 +83,9 @@ class _FluxConnection:
         try:
             await self.ws.close()
         finally:
+            if self.observation:
+                # Closing an adopted stream outside its normal completion is cancellation.
+                self.observation.finish(asyncio.CancelledError() if self.adopted else None, outcome="connected")
             await self.slot.__aexit__(None, None, None)
 
 logger = logging.getLogger(__name__)
@@ -170,6 +185,7 @@ class DeepgramFluxSTTProvider(STTProvider):
     """
     
     def __init__(self):
+        self._observation_context = None
         self._api_key: Optional[str] = None
         self._config: dict = {}
         self._model: str = "flux-general-en"
@@ -311,6 +327,7 @@ class DeepgramFluxSTTProvider(STTProvider):
         self._config = config
         
         # Get API key
+        self._observation_context = config.get("observation_context")
         self._api_key = config.get("api_key") or os.getenv("DEEPGRAM_API_KEY")
         if not self._api_key:
             raise ValueError("DEEPGRAM_API_KEY not set")
@@ -539,19 +556,25 @@ class DeepgramFluxSTTProvider(STTProvider):
         params = self._build_connection_params(call_id)
         query = "&".join(f"{k}={v}" for k, v in params)
         url = f"wss://api.deepgram.com/v2/listen?{query}"
+        api_key = self._api_key
         headers = {
-            "Authorization": f"Token {self._api_key}",
+            "Authorization": f"Token {api_key}",
             "User-Agent": "TalkyAI-VoiceAgent/1.0",
         }
 
         slot = self._guard.acquire()
         await slot.__aenter__()
+        observation = ProviderAttempt("stt", "flux", api_key, self._observation_context)
+        recognition = ProviderAttempt("stt", "flux", api_key, self._observation_context)
         try:
             ws = await websockets.connect(url, additional_headers=headers)
-        except BaseException:
+        except BaseException as exc:
+            observation.finish(exc)
             await slot.__aexit__(None, None, None)
             raise
-        connection = _FluxConnection(ws, slot)
+        observation.accepted()
+        recognition.accepted()
+        connection = _FluxConnection(ws, slot, observation=observation, recognition=recognition)
         self._connections.add(connection)
         if generation != self._connection_generation or not self._api_key:
             await self._close_connection(connection)
@@ -1068,6 +1091,8 @@ class DeepgramFluxSTTProvider(STTProvider):
             while True:
                 try:
                     chunk = await asyncio.wait_for(transcript_queue.get(), timeout=.05)
+                    if isinstance(chunk, TranscriptChunk) and chunk.is_final and chunk.text.strip():
+                        connection.recognized()
                     yield chunk
                 except asyncio.TimeoutError:
                     if stop_event.is_set() and transcript_queue.empty():
@@ -1077,7 +1102,15 @@ class DeepgramFluxSTTProvider(STTProvider):
                     if input_exhausted_at is not None and time.monotonic() - input_exhausted_at >= 1.0:
                         break
             if stream_error is not None:
+                if connection.observation:
+                    connection.observation.finish(stream_error)
                 raise RuntimeError(f"Flux stream failed: {stream_error}") from stream_error
+            if connection.observation:
+                connection.observation.finish(outcome="recognized" if connection.observation.output_seen else "connected")
+        except BaseException as exc:
+            if connection and connection.observation:
+                connection.observation.finish(exc)
+            raise
         finally:
             stop_event.set()
             for task in tasks:

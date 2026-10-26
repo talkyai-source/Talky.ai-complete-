@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Activity, ChevronLeft, ChevronRight, CreditCard, Filter, LogIn, LockKeyhole, RefreshCw, Shield, ShieldAlert, UserCog, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,19 +12,20 @@ import { Select } from "@/components/ui/select";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states/page-states";
 import { useAuth } from "@/hooks/useAuth";
 import { getAdminUiCapabilities } from "@/lib/admin-access";
-import { useAdminPartners, useAdminTenants, useAuditLogs, useReactivatePartner, useReactivateTenant, useSecurityEvents, useSuspendPartner, useSuspendTenant } from "@/lib/api-hooks";
+import { queryKeys, useAdminEventReadScope, useAdminPartners, useAdminTenants, useAuditLogs, useReactivateTenant, useSecurityEvents, useSuspendTenant } from "@/lib/api-hooks";
 import { publicAppConfig } from "@/lib/env";
 import { cn } from "@/lib/utils";
-import { useSuspensionState } from "@/components/admin/suspension-state-provider";
-import type { PartnerSummary, TenantSummary } from "@/lib/models";
+import type { AuditSeverity, EventBoundary, SecurityEventStatus, PartnerSummary, TenantSummary } from "@/lib/models";
+import { FormalPartnerHoldPanel } from "@/components/admin/formal-partner-hold-panel";
+import { getRequestIdentityGeneration } from "@/lib/http-client";
 
 type AdminTab = "audit" | "security" | "suspensions" | "config";
 
-type PendingAction =
-    | { kind: "partner_suspend"; item: PartnerSummary }
-    | { kind: "partner_reactivate"; item: PartnerSummary }
-    | { kind: "tenant_suspend"; item: TenantSummary }
-    | { kind: "tenant_reactivate"; item: TenantSummary };
+type PendingAction = {
+    kind: "tenant_suspend" | "tenant_reactivate"; item: TenantSummary;
+    owner: string; query: string; generation: number; id: number;
+};
+type PartnerReview = { partner: PartnerSummary; owner: string; operatorId: string; generation: number; opener: HTMLButtonElement };
 
 const AUDIT_PAGE_SIZE = 20;
 const RESOURCE_PAGE_SIZE = 8;
@@ -41,9 +43,8 @@ function formatDateTime(value: string | null | undefined) {
     }).format(date);
 }
 
-function formatActor(actor: { name?: string; email?: string } | undefined) {
-    if (!actor) return "System";
-    return actor.name?.trim() || actor.email?.trim() || "System";
+function formatActor(actor: { id?: string; type: string }) {
+    return actor.id ? `${actor.type}: ${actor.id}` : `${actor.type} (ID unavailable)`;
 }
 
 function formatTarget(target: { type: string; name?: string; id?: string } | undefined) {
@@ -75,16 +76,16 @@ function canGoNext(total: number | undefined, page: number, pageSize: number, cu
     return currentCount >= pageSize;
 }
 
-function SeverityPill({ severity }: { severity: "low" | "medium" | "high" }) {
+function SeverityPill({ severity }: { severity: AuditSeverity }) {
     return (
         <span
             className={cn(
                 "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold",
-                severity === "high"
+                ["CRITICAL", "HIGH"].includes(severity)
                     ? "bg-red-500/15 text-red-700"
-                    : severity === "medium"
+                    : severity === "MEDIUM"
                       ? "bg-amber-500/15 text-amber-700"
-                      : "bg-emerald-500/15 text-emerald-700"
+                      : "bg-muted text-muted-foreground"
             )}
         >
             {severity}
@@ -92,15 +93,15 @@ function SeverityPill({ severity }: { severity: "low" | "medium" | "high" }) {
     );
 }
 
-function StatusBadge({ status }: { status: "active" | "suspended" }) {
+function StatusBadge({ status, prefix = "" }: { status: PartnerSummary["status"] | TenantSummary["status"]; prefix?: string }) {
     return (
         <span
             className={cn(
                 "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold",
-                status === "suspended" ? "bg-red-500/15 text-red-700" : "bg-emerald-500/15 text-emerald-700"
+                status === "suspended" ? "bg-red-500/15 text-red-700" : status === "active" ? "bg-emerald-500/15 text-emerald-700" : "bg-amber-500/15 text-amber-700"
             )}
         >
-            {status === "suspended" ? "Suspended" : "Active"}
+            {prefix}{status.replaceAll("_", " ")}
         </span>
     );
 }
@@ -181,15 +182,24 @@ function PaginationControls({
     );
 }
 
+type EventNavigation = { scope: string; boundaries: Array<EventBoundary | undefined>; index: number };
+const firstEventPage = (scope: string): EventNavigation => ({ scope, boundaries: [undefined], index: 0 });
+
 export function AdminOperationsConsole() {
-    const { user } = useAuth();
-    const { applyScopedUpdate } = useSuspensionState();
-    const capabilities = useMemo(() => getAdminUiCapabilities(user), [user]);
+    const { user, refreshUser } = useAuth();
+    const eventOwner = useAdminEventReadScope();
+    const queryClient = useQueryClient();
+    const capabilities = useMemo(() => ({ ...getAdminUiCapabilities(user),
+        canManageTenantSuspensions: user?.role === "platform_admin" }), [user]);
     const config = useMemo(() => publicAppConfig(), []);
     const [activeTab, setActiveTab] = useState<AdminTab>("audit");
     const [confirmAction, setConfirmAction] = useState<PendingAction | null>(null);
+    const tenantReviewId = useRef(0);
+    const tenantInFlight = useRef<{ review: PendingAction; promise: Promise<void> } | null>(null);
+    const [formalPartner, setFormalPartner] = useState<PartnerReview | null>(null);
+    const partnerSearchRef = useRef<HTMLInputElement>(null);
 
-    const [auditPage, setAuditPage] = useState(1);
+    const [auditNavigation, setAuditNavigation] = useState(() => firstEventPage(""));
     const [auditEventType, setAuditEventType] = useState("all");
     const [auditFrom, setAuditFrom] = useState("");
     const [auditTo, setAuditTo] = useState("");
@@ -197,9 +207,10 @@ export function AdminOperationsConsole() {
     const [auditTenant, setAuditTenant] = useState("");
     const [auditPartner, setAuditPartner] = useState("");
 
-    const [securityPage, setSecurityPage] = useState(1);
+    const [securityNavigation, setSecurityNavigation] = useState(() => firstEventPage(""));
     const [securityEventType, setSecurityEventType] = useState("all");
     const [securitySeverity, setSecuritySeverity] = useState("all");
+    const [securityStatus, setSecurityStatus] = useState("all");
     const [securityFrom, setSecurityFrom] = useState("");
     const [securityTo, setSecurityTo] = useState("");
     const [securityUser, setSecurityUser] = useState("");
@@ -212,45 +223,55 @@ export function AdminOperationsConsole() {
     const [tenantPage, setTenantPage] = useState(1);
     const [tenantQuery, setTenantQuery] = useState("");
     const [tenantStatus, setTenantStatus] = useState("all");
-    const [tenantPartnerFilter, setTenantPartnerFilter] = useState("");
 
     const [confirmReason, setConfirmReason] = useState("");
 
-    const auditQuery = useMemo(
-        () => ({
-            page: auditPage,
-            pageSize: AUDIT_PAGE_SIZE,
-            eventType: auditEventType === "all" ? undefined : auditEventType,
-            from: auditFrom ? `${auditFrom}T00:00:00.000Z` : undefined,
-            to: auditTo ? `${auditTo}T23:59:59.999Z` : undefined,
-            userQuery: auditUser.trim() || undefined,
-            tenantId: (capabilities.allowedTenantId ?? auditTenant.trim()) || undefined,
-            partnerId: (capabilities.allowedPartnerId ?? auditPartner.trim()) || undefined,
-        }),
-        [auditEventType, auditFrom, auditPage, auditPartner, auditTenant, auditTo, auditUser, capabilities.allowedPartnerId, capabilities.allowedTenantId]
-    );
-
-    const securityQuery = useMemo(
-        () => ({
-            page: securityPage,
-            pageSize: AUDIT_PAGE_SIZE,
-            eventType: securityEventType === "all" ? undefined : securityEventType,
-            severity: securitySeverity === "all" ? undefined : (securitySeverity as "low" | "medium" | "high"),
-            from: securityFrom ? `${securityFrom}T00:00:00.000Z` : undefined,
-            to: securityTo ? `${securityTo}T23:59:59.999Z` : undefined,
-            userQuery: securityUser.trim() || undefined,
-            tenantId: (capabilities.allowedTenantId ?? securityTenant.trim()) || undefined,
-            partnerId: capabilities.allowedPartnerId ?? undefined,
-        }),
-        [capabilities.allowedPartnerId, capabilities.allowedTenantId, securityEventType, securityFrom, securityPage, securitySeverity, securityTenant, securityTo, securityUser]
-    );
+    const auditFilters = useMemo(() => ({
+        pageSize: AUDIT_PAGE_SIZE,
+        eventGroup: auditEventType === "all" ? undefined : auditEventType,
+        from: auditFrom ? `${auditFrom}T00:00:00Z` : undefined,
+        to: auditTo ? `${auditTo}T23:59:59.999999Z` : undefined,
+        userQuery: auditUser.trim() || undefined,
+        tenantId: (capabilities.allowedTenantId ?? auditTenant.trim()) || undefined,
+        partnerId: (capabilities.allowedPartnerId ?? auditPartner.trim()) || undefined,
+    }), [auditEventType, auditFrom, auditPartner, auditTenant, auditTo, auditUser, capabilities.allowedPartnerId, capabilities.allowedTenantId]);
+    const securityFilters = useMemo(() => ({
+        pageSize: AUDIT_PAGE_SIZE,
+        eventGroup: securityEventType === "all" ? undefined : securityEventType,
+        severity: securitySeverity === "all" ? undefined : securitySeverity as AuditSeverity,
+        status: securityStatus === "all" ? undefined : securityStatus as SecurityEventStatus,
+        from: securityFrom ? `${securityFrom}T00:00:00Z` : undefined,
+        to: securityTo ? `${securityTo}T23:59:59.999999Z` : undefined,
+        userQuery: securityUser.trim() || undefined,
+        tenantId: (capabilities.allowedTenantId ?? securityTenant.trim()) || undefined,
+        partnerId: capabilities.allowedPartnerId ?? undefined,
+    }), [capabilities.allowedPartnerId, capabilities.allowedTenantId, securityEventType, securityFrom, securitySeverity, securityStatus, securityTenant, securityTo, securityUser]);
+    const auditScope = JSON.stringify([eventOwner.key, auditFilters]);
+    const securityScope = JSON.stringify([eventOwner.key, securityFilters]);
+    // Resolve a new identity/filter to page one during render, before any read
+    // can reuse a prior actor's boundary. No effect-time reset race.
+    const auditPosition = auditNavigation.scope === auditScope ? auditNavigation : firstEventPage(auditScope);
+    const securityPosition = securityNavigation.scope === securityScope ? securityNavigation : firstEventPage(securityScope);
+    // Commit the reset after the synchronous derived guard. Otherwise returning
+    // to an earlier filter could resurrect its stored page-two boundary.
+    useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- retire stored navigation so returning to an old filter cannot revive its cursor
+        setAuditNavigation(current => current.scope === auditScope ? current : firstEventPage(auditScope));
+    }, [auditScope]);
+    useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- retire stored navigation so returning to an old filter cannot revive its cursor
+        setSecurityNavigation(current => current.scope === securityScope ? current : firstEventPage(securityScope));
+    }, [securityScope]);
+    const auditPage = auditPosition.index + 1, securityPage = securityPosition.index + 1;
+    const auditQuery = { ...auditFilters, before: auditPosition.boundaries[auditPosition.index] };
+    const securityQuery = { ...securityFilters, before: securityPosition.boundaries[securityPosition.index] };
 
     const partnerListQuery = useMemo(
         () => ({
             page: partnerPage,
             pageSize: RESOURCE_PAGE_SIZE,
             query: partnerQuery.trim() || undefined,
-            status: partnerStatus === "all" ? undefined : (partnerStatus as "active" | "suspended"),
+            status: partnerStatus === "all" ? undefined : (partnerStatus as PartnerSummary["status"]),
         }),
         [partnerPage, partnerQuery, partnerStatus]
     );
@@ -261,57 +282,158 @@ export function AdminOperationsConsole() {
             pageSize: RESOURCE_PAGE_SIZE,
             query: tenantQuery.trim() || undefined,
             status: tenantStatus === "all" ? undefined : (tenantStatus as "active" | "suspended"),
-            partnerId: capabilities.allowedPartnerId ?? (tenantPartnerFilter.trim() || undefined),
         }),
-        [capabilities.allowedPartnerId, tenantPage, tenantPartnerFilter, tenantQuery, tenantStatus]
+        [tenantPage, tenantQuery, tenantStatus]
     );
 
-    const auditLogsQ = useAuditLogs(auditQuery, { enabled: capabilities.canViewAuditLogs });
-    const securityEventsQ = useSecurityEvents(securityQuery, { enabled: capabilities.canViewSecurityEvents });
+    const auditLogsQ = useAuditLogs(auditQuery, { enabled: capabilities.canViewAuditLogs && activeTab === "audit" });
+    const securityEventsQ = useSecurityEvents(securityQuery, { enabled: capabilities.canViewSecurityEvents && activeTab === "security" });
     const partnersQ = useAdminPartners(partnerListQuery, { enabled: capabilities.canManagePartnerSuspensions && activeTab === "suspensions" });
     const tenantsQ = useAdminTenants(tenantListQuery, { enabled: capabilities.canManageTenantSuspensions && activeTab === "suspensions" });
 
-    const suspendPartnerM = useSuspendPartner();
-    const reactivatePartnerM = useReactivatePartner();
+    const generation = getRequestIdentityGeneration();
+    const partnerOwner = JSON.stringify([user?.id, user?.role, user?.tenant_id, user?.partner_id, generation]);
+    const tenantOwner = partnerOwner;
+    const tenantQueryScope = JSON.stringify([eventOwner.key, tenantListQuery]);
+    const tenantReview = confirmAction && eventOwner.ready && capabilities.canManageTenantSuspensions
+        && activeTab === "suspensions" && confirmAction.owner === tenantOwner && confirmAction.query === tenantQueryScope
+        ? confirmAction : null;
+    const tenantContext = useRef<{
+        owner: string; query: string; ready: boolean; active: boolean; fetching: boolean;
+        selection: PendingAction | null; items: TenantSummary[] | undefined;
+    } | null>(null);
+    useLayoutEffect(() => {
+        tenantContext.current = { owner: tenantOwner, query: tenantQueryScope, ready: eventOwner.ready,
+            active: activeTab === "suspensions" && capabilities.canManageTenantSuspensions,
+            fetching: tenantsQ.isFetching, selection: tenantReview, items: tenantsQ.data?.items };
+        return () => { tenantContext.current = null; };
+    }, [activeTab, capabilities.canManageTenantSuspensions, eventOwner.ready, tenantOwner, tenantQueryScope, tenantReview, tenantsQ.data?.items, tenantsQ.isFetching]);
+    useEffect(() => {
+        if (!confirmAction || tenantReview) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- retire stored review after its synchronous render/dispatch ownership guard
+        setConfirmAction(null);
+        setConfirmReason("");
+    }, [confirmAction, tenantReview]);
+
+    function ownsTenantReview(review: PendingAction) {
+        const current = tenantContext.current;
+        return Boolean(current?.ready && current.active && current.owner === review.owner
+            && current.query === review.query && current.selection === review
+            && getRequestIdentityGeneration() === review.generation);
+    }
+    function openTenantReview(tenant: TenantSummary, opener: HTMLButtonElement) {
+        const current = tenantContext.current;
+        if (!current?.ready || !current.active || current.fetching || current.owner !== tenantOwner
+            || current.query !== tenantQueryScope || getRequestIdentityGeneration() !== generation
+            || !current.items?.includes(tenant) || tenant.updatedAt === undefined
+            || !["active", "suspended"].includes(tenant.status) || !opener.isConnected || opener.disabled) return;
+        setConfirmReason("");
+        setConfirmAction({ kind: tenant.status === "suspended" ? "tenant_reactivate" : "tenant_suspend", item: tenant,
+            owner: tenantOwner, query: tenantQueryScope, generation, id: ++tenantReviewId.current });
+    }
+    function closeTenantReview(review: PendingAction) {
+        if (!ownsTenantReview(review)) return;
+        setConfirmAction(null);
+        setConfirmReason("");
+    }
+    function retryTenants() {
+        const current = tenantContext.current;
+        if (!current?.ready || !current.active || current.owner !== tenantOwner || current.query !== tenantQueryScope
+            || getRequestIdentityGeneration() !== generation) return;
+        void tenantsQ.refetch();
+    }
+
+    const partnerQueryScope = JSON.stringify([eventOwner.key, partnerListQuery]);
+    const partnerContext = useRef<{
+        owner: string; query: string; ready: boolean; active: boolean;
+        selection: PartnerReview | null; items: PartnerSummary[] | undefined;
+    } | null>(null);
+    // A retained row/notification callback must use the latest committed owner
+    // and query. Checking/loading does not retire a saved decision for the same
+    // principal; a real identity-generation change does.
+    useLayoutEffect(() => {
+        partnerContext.current = { owner: partnerOwner, query: partnerQueryScope, ready: eventOwner.ready,
+            active: activeTab === "suspensions", selection: formalPartner, items: partnersQ.data?.items };
+        return () => { partnerContext.current = null; };
+    }, [activeTab, eventOwner.ready, formalPartner, partnerOwner, partnerQueryScope, partnersQ.data?.items]);
+
+    function openPartnerReview(partner: PartnerSummary, opener: HTMLButtonElement) {
+        const current = partnerContext.current;
+        if (!current?.ready || !current.active || current.owner !== partnerOwner || current.query !== partnerQueryScope
+            || user?.role !== "platform_admin" || !current.items?.includes(partner) || !opener.isConnected || opener.disabled) return;
+        setFormalPartner({ partner, owner: partnerOwner, operatorId: user.id, generation, opener });
+    }
+    function ownsPartnerReview(review: PartnerReview) {
+        const current = partnerContext.current;
+        return current?.active && current.owner === review.owner && current.selection === review
+            && getRequestIdentityGeneration() === review.generation;
+    }
+    function partnerChanged(review: PartnerReview) {
+        if (!ownsPartnerReview(review)) return;
+        // Refetch the active current query, while marking other cached pages
+        // stale. A receipt is not an optimistic account-status override.
+        void queryClient.invalidateQueries({ queryKey: ["adminPartners"], refetchType: "active" }).catch(() => {});
+        // Keep the saved decision mounted while canonical authority refreshes.
+        // This read may fail silently; the receipt is not a freshness claim.
+        void refreshUser({ silent: true }).catch(() => {});
+    }
+    function closePartnerReview(review: PartnerReview) {
+        if (!ownsPartnerReview(review)) return;
+        setFormalPartner(null);
+        const target = review.opener.isConnected && !review.opener.disabled ? review.opener : partnerSearchRef.current;
+        if (target?.isConnected) target.focus();
+    }
+
+    function refreshEventHistory(kind: "audit" | "security") {
+        if (!eventOwner.ready) return;
+        const audit = kind === "audit", filters = audit ? auditFilters : securityFilters;
+        const firstQuery = { ...filters, before: undefined };
+        const key = audit ? queryKeys.auditLogs(JSON.stringify([eventOwner.key, firstQuery]))
+            : queryKeys.securityEvents(JSON.stringify([eventOwner.key, firstQuery]));
+        // Mark exactly this owner's first page stale before changing the stack;
+        // refetching the current page here would otherwise fetch the old cursor.
+        void queryClient.invalidateQueries({ queryKey: key, exact: true, refetchType: "none" });
+        if (audit) {
+            setAuditNavigation(firstEventPage(auditScope));
+            if (auditPosition.index === 0) void auditLogsQ.refetch();
+        } else {
+            setSecurityNavigation(firstEventPage(securityScope));
+            if (securityPosition.index === 0) void securityEventsQ.refetch();
+        }
+    }
+
     const suspendTenantM = useSuspendTenant();
     const reactivateTenantM = useReactivateTenant();
 
-    const mutationBusyId =
-        suspendPartnerM.variables?.partnerId ??
-        reactivatePartnerM.variables?.partnerId ??
-        suspendTenantM.variables?.tenantId ??
-        reactivateTenantM.variables?.tenantId ??
-        null;
+    const mutationBusyId = suspendTenantM.isPending && suspendTenantM.variables?.queryKey[1] === tenantQueryScope
+        ? suspendTenantM.variables.tenantId
+        : reactivateTenantM.isPending && reactivateTenantM.variables?.queryKey[1] === tenantQueryScope
+          ? reactivateTenantM.variables.tenantId : null;
 
-    async function runConfirmedAction() {
-        if (!confirmAction) return;
-
-        const reasonForRequest = confirmReason.trim() || undefined;
-
-        if (confirmAction.kind === "partner_suspend") {
-            const updated = await suspendPartnerM.mutateAsync({ partnerId: confirmAction.item.id, reason: reasonForRequest });
-            applyScopedUpdate({ targetType: "partner", targetId: updated.id, status: "suspended" });
-            setConfirmReason("");
-            return;
-        }
-
-        if (confirmAction.kind === "partner_reactivate") {
-            const updated = await reactivatePartnerM.mutateAsync({ partnerId: confirmAction.item.id, reason: reasonForRequest });
-            applyScopedUpdate({ targetType: "partner", targetId: updated.id, status: "active" });
-            setConfirmReason("");
-            return;
-        }
-
-        if (confirmAction.kind === "tenant_suspend") {
-            const updated = await suspendTenantM.mutateAsync({ tenantId: confirmAction.item.id, reason: reasonForRequest });
-            applyScopedUpdate({ targetType: "tenant", targetId: updated.id, status: "suspended" });
-            setConfirmReason("");
-            return;
-        }
-
-        const updated = await reactivateTenantM.mutateAsync({ tenantId: confirmAction.item.id, reason: reasonForRequest });
-        applyScopedUpdate({ targetType: "tenant", targetId: updated.id, status: "active" });
-        setConfirmReason("");
+    function runConfirmedAction(review: PendingAction): Promise<void> {
+        if (!ownsTenantReview(review)) return Promise.resolve();
+        if (tenantInFlight.current?.review === review) return tenantInFlight.current.promise;
+        const expectedUpdatedAt = review.item.updatedAt;
+        if (expectedUpdatedAt === undefined) return Promise.reject(new Error("Refresh and review this tenant before changing its subscription."));
+        const promise = (async () => {
+            try {
+                const mutation = review.kind === "tenant_suspend" ? suspendTenantM : reactivateTenantM;
+                await mutation.mutateAsync({ tenantId: review.item.id, expectedUpdatedAt,
+                    reason: confirmReason.trim() || undefined, ownsOperation: () => ownsTenantReview(review),
+                    queryKey: queryKeys.adminTenants(review.query) });
+                if (!ownsTenantReview(review)) return;
+                // The subscription receipt is not an account-access override or a
+                // guarantee that this independent canonical read will succeed.
+                void refreshUser({ silent: true }).catch(() => {});
+                setConfirmReason("");
+            } catch (error) {
+                if (ownsTenantReview(review)) throw error;
+            } finally {
+                if (tenantInFlight.current?.review === review) tenantInFlight.current = null;
+            }
+        })();
+        tenantInFlight.current = { review, promise };
+        return promise;
     }
 
     return (
@@ -326,7 +448,7 @@ export function AdminOperationsConsole() {
                     </div>
                     <SectionTabs
                         activeTab={activeTab}
-                        onChange={setActiveTab}
+                        onChange={tab => { setFormalPartner(null); setActiveTab(tab); }}
                         canViewSecurityEvents={capabilities.canViewSecurityEvents}
                         canManageSuspensions={capabilities.canManagePartnerSuspensions || capabilities.canManageTenantSuspensions}
                     />
@@ -338,7 +460,7 @@ export function AdminOperationsConsole() {
                             Role Scope
                         </div>
                         <div className="mt-2 text-sm text-muted-foreground">
-                            {capabilities.allowedPartnerId ? `Scoped to partner ${capabilities.allowedPartnerId}.` : "Cross-partner visibility enabled."}
+                            {user?.role === "platform_admin" ? "Platform operator; each read is authorized by the server." : "Requested scope does not grant access; the server decides each read."}
                         </div>
                     </div>
                     <div className="rounded-2xl border border-border bg-muted/20 p-4">
@@ -346,7 +468,7 @@ export function AdminOperationsConsole() {
                             <UserRound className="h-4 w-4" />
                             Audit Access
                         </div>
-                        <div className="mt-2 text-sm text-muted-foreground">{capabilities.canViewAuditLogs ? "Audit views are available for your role." : "Audit views are restricted."}</div>
+                        <div className="mt-2 text-sm text-muted-foreground">Read results confirm access for the current session. A denied or unavailable read is shown explicitly.</div>
                     </div>
                     <div className="rounded-2xl border border-border bg-muted/20 p-4">
                         <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
@@ -371,43 +493,44 @@ export function AdminOperationsConsole() {
                                 <Select
                                     value={auditEventType}
                                     onChange={(next) => {
-                                        setAuditPage(1);
                                         setAuditEventType(next);
                                     }}
                                     ariaLabel="Audit event type"
                                 >
                                     <option value="all">All events</option>
                                     <option value="login">Login events</option>
-                                    <option value="role_change">Role changes</option>
-                                    <option value="billing_change">Billing changes</option>
+                                    <option value="role_change">Role operations</option>
+                                    <option value="billing_change">Billing events</option>
                                     <option value="suspension">Suspension events</option>
                                 </Select>
                             </div>
                             <div className="space-y-2">
                                 <Label>From</Label>
-                                <Input type="date" value={auditFrom} onChange={(e) => { setAuditPage(1); setAuditFrom(e.target.value); }} />
+                                <Input aria-label="Audit from date (UTC)" type="date" value={auditFrom} onChange={(e) => {  setAuditFrom(e.target.value); }} />
                             </div>
                             <div className="space-y-2">
                                 <Label>To</Label>
-                                <Input type="date" value={auditTo} onChange={(e) => { setAuditPage(1); setAuditTo(e.target.value); }} />
+                                <Input aria-label="Audit to date (UTC)" type="date" value={auditTo} onChange={(e) => {  setAuditTo(e.target.value); }} />
                             </div>
                             <div className="space-y-2">
-                                <Label>User</Label>
-                                <Input value={auditUser} onChange={(e) => { setAuditPage(1); setAuditUser(e.target.value); }} placeholder="Name or email" />
+                                <Label>Actor name, email or ID</Label>
+                                <Input aria-label="Audit actor search" value={auditUser} onChange={(e) => {  setAuditUser(e.target.value); }} placeholder="Name or email" />
                             </div>
                             <div className="space-y-2">
                                 <Label>Tenant</Label>
-                                <Input value={capabilities.allowedTenantId ?? auditTenant} onChange={(e) => { setAuditPage(1); setAuditTenant(e.target.value); }} disabled={Boolean(capabilities.allowedTenantId)} placeholder="tenant-id" />
+                                <Input aria-label="Audit tenant ID" value={capabilities.allowedTenantId ?? auditTenant} onChange={(e) => {  setAuditTenant(e.target.value); }} disabled={Boolean(capabilities.allowedTenantId)} placeholder="tenant-id" />
                             </div>
                             <div className="space-y-2">
-                                <Label>Partner</Label>
-                                <Input value={capabilities.allowedPartnerId ?? auditPartner} onChange={(e) => { setAuditPage(1); setAuditPartner(e.target.value); }} disabled={Boolean(capabilities.allowedPartnerId)} placeholder="partner-id" />
+                                <Label>Partner (current assignment)</Label>
+                                <Input aria-label="Audit partner ID (current assignment)" value={capabilities.allowedPartnerId ?? auditPartner} onChange={(e) => {  setAuditPartner(e.target.value); }} disabled={Boolean(capabilities.allowedPartnerId)} placeholder="partner-id" />
                             </div>
                         </div>
 
-                        {auditLogsQ.isLoading ? <LoadingState title="Loading audit logs" description="Fetching backend activity history." /> : null}
-                        {auditLogsQ.isError ? <ErrorState title="Audit logs unavailable" message="Could not load audit activity from the backend." onRetry={() => auditLogsQ.refetch().then(() => {})} /> : null}
-                        {!auditLogsQ.isLoading && !auditLogsQ.isError ? (
+                        <p className="text-xs text-muted-foreground">User search uses current profile names/emails or the saved actor ID. Partner matches current tenant assignment and direct partner records, not historical ownership. Dates are UTC. History may change while you browse.</p>
+                        <Button type="button" variant="outline" disabled={!eventOwner.ready || auditLogsQ.isFetching} onClick={() => refreshEventHistory("audit")}>Refresh audit history</Button>
+                        {auditLogsQ.isPending ? <LoadingState title="Loading audit logs" description="Fetching backend activity history." /> : null}
+                        {auditLogsQ.isError ? <ErrorState title="Audit logs unavailable" message={auditLogsQ.error instanceof Error ? auditLogsQ.error.message : "Could not load audit activity from the backend."} onRetry={() => auditLogsQ.refetch().then(() => {})} /> : null}
+                        {!auditLogsQ.isPending && !auditLogsQ.isError ? (
                             auditLogsQ.data?.items.length ? (
                                 <div className="space-y-4">
                                     <div className="overflow-hidden rounded-2xl border border-border">
@@ -425,7 +548,8 @@ export function AdminOperationsConsole() {
                                                         <AuditEventIcon eventType={event.eventType ?? event.actionType} />
                                                         {event.actionType}
                                                     </div>
-                                                    <div className="text-sm text-muted-foreground">{formatActor(event.actor)}</div>
+                                                    <div className="break-all text-sm text-muted-foreground">{formatActor(event.actor)}</div>
+                                                    <SeverityPill severity={event.severity} />
                                                 </div>
                                                 <div className="text-sm text-foreground">{formatTarget(event.target)}</div>
                                                 <div className="flex flex-wrap gap-2">
@@ -438,18 +562,24 @@ export function AdminOperationsConsole() {
                                             </div>
                                         ))}
                                     </div>
-                                    <PaginationControls
-                                        page={auditPage}
-                                        disabled={auditLogsQ.isFetching}
-                                        canNext={canGoNext(auditLogsQ.data?.total, auditPage, AUDIT_PAGE_SIZE, auditLogsQ.data?.items.length ?? 0)}
-                                        onPrevious={() => setAuditPage((current) => Math.max(1, current - 1))}
-                                        onNext={() => setAuditPage((current) => current + 1)}
-                                    />
+
                                 </div>
                             ) : (
                                 <EmptyState title="No audit activity found" message="Adjust filters or widen the date range to see more events." kind="search" />
                             )
                         ) : null}
+                        <PaginationControls
+                            page={auditPage}
+                            disabled={auditLogsQ.isFetching}
+                            canNext={!auditLogsQ.isError && Boolean(auditLogsQ.data?.hasNext)}
+                            onPrevious={() => setAuditNavigation({ ...auditPosition, index: Math.max(0, auditPosition.index - 1) })}
+                            onNext={() => {
+                                const boundary = auditLogsQ.data?.nextBoundary;
+                                if (!boundary || auditLogsQ.isFetching || auditLogsQ.isError) return;
+                                setAuditNavigation({ scope: auditScope, index: auditPosition.index + 1,
+                                    boundaries: [...auditPosition.boundaries.slice(0, auditPosition.index + 1), boundary] });
+                            }}
+                        />
                     </CardContent>
                 </Card>
             ) : null}
@@ -464,7 +594,7 @@ export function AdminOperationsConsole() {
                         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
                             <div className="space-y-2">
                                 <Label>Event type</Label>
-                                <Select value={securityEventType} onChange={(next) => { setSecurityPage(1); setSecurityEventType(next); }} ariaLabel="Security event type">
+                                <Select value={securityEventType} onChange={(next) => {  setSecurityEventType(next); }} ariaLabel="Security event type">
                                     <option value="all">All events</option>
                                     <option value="failed_login">Failed logins</option>
                                     <option value="rate_limit_violation">Rate limit violations</option>
@@ -473,34 +603,43 @@ export function AdminOperationsConsole() {
                             </div>
                             <div className="space-y-2">
                                 <Label>Severity</Label>
-                                <Select value={securitySeverity} onChange={(next) => { setSecurityPage(1); setSecuritySeverity(next); }} ariaLabel="Security severity">
+                                <Select value={securitySeverity} onChange={(next) => {  setSecuritySeverity(next); }} ariaLabel="Security severity">
                                     <option value="all">All severities</option>
-                                    <option value="low">Low</option>
-                                    <option value="medium">Medium</option>
-                                    <option value="high">High</option>
+                                    {["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"].map(value => <option key={value} value={value}>{value}</option>)}
+                                </Select>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Status</Label>
+                                <Select value={securityStatus} onChange={setSecurityStatus} ariaLabel="Security status">
+                                    <option value="all">All statuses</option>
+                                    <option value="open">Open</option><option value="investigating">Investigating</option>
+                                    <option value="resolved">Resolved</option><option value="false_positive">False positive</option>
+                                    <option value="escalated">Escalated</option>
                                 </Select>
                             </div>
                             <div className="space-y-2">
                                 <Label>From</Label>
-                                <Input type="date" value={securityFrom} onChange={(e) => { setSecurityPage(1); setSecurityFrom(e.target.value); }} />
+                                <Input aria-label="Security from date (UTC)" type="date" value={securityFrom} onChange={(e) => {  setSecurityFrom(e.target.value); }} />
                             </div>
                             <div className="space-y-2">
                                 <Label>To</Label>
-                                <Input type="date" value={securityTo} onChange={(e) => { setSecurityPage(1); setSecurityTo(e.target.value); }} />
+                                <Input aria-label="Security to date (UTC)" type="date" value={securityTo} onChange={(e) => {  setSecurityTo(e.target.value); }} />
                             </div>
                             <div className="space-y-2">
-                                <Label>User</Label>
-                                <Input value={securityUser} onChange={(e) => { setSecurityPage(1); setSecurityUser(e.target.value); }} placeholder="Name or email" />
+                                <Label>Affected user name, email or ID</Label>
+                                <Input aria-label="Security affected user search" value={securityUser} onChange={(e) => {  setSecurityUser(e.target.value); }} placeholder="Name or email" />
                             </div>
                             <div className="space-y-2">
                                 <Label>Tenant</Label>
-                                <Input value={capabilities.allowedTenantId ?? securityTenant} onChange={(e) => { setSecurityPage(1); setSecurityTenant(e.target.value); }} disabled={Boolean(capabilities.allowedTenantId)} placeholder="tenant-id" />
+                                <Input aria-label="Security tenant ID" value={capabilities.allowedTenantId ?? securityTenant} onChange={(e) => {  setSecurityTenant(e.target.value); }} disabled={Boolean(capabilities.allowedTenantId)} placeholder="tenant-id" />
                             </div>
                         </div>
 
-                        {securityEventsQ.isLoading ? <LoadingState title="Loading security events" description="Fetching authentication and abuse detection signals." /> : null}
-                        {securityEventsQ.isError ? <ErrorState title="Security events unavailable" message="Could not load security events from the backend." onRetry={() => securityEventsQ.refetch().then(() => {})} /> : null}
-                        {!securityEventsQ.isLoading && !securityEventsQ.isError ? (
+                        <p className="text-xs text-muted-foreground">User search uses current affected-user names/emails or the saved user ID. It does not identify the actor who caused the event. Dates are UTC. History may change while you browse.</p>
+                        <Button type="button" variant="outline" disabled={!eventOwner.ready || securityEventsQ.isFetching} onClick={() => refreshEventHistory("security")}>Refresh security history</Button>
+                        {securityEventsQ.isPending ? <LoadingState title="Loading security events" description="Fetching authentication and abuse detection signals." /> : null}
+                        {securityEventsQ.isError ? <ErrorState title="Security events unavailable" message={securityEventsQ.error instanceof Error ? securityEventsQ.error.message : "Could not load security events from the backend."} onRetry={() => securityEventsQ.refetch().then(() => {})} /> : null}
+                        {!securityEventsQ.isPending && !securityEventsQ.isError ? (
                             securityEventsQ.data?.items.length ? (
                                 <div className="space-y-4">
                                     <div className="overflow-hidden rounded-2xl border border-border">
@@ -508,18 +647,19 @@ export function AdminOperationsConsole() {
                                             <div>Timestamp</div>
                                             <div>Severity</div>
                                             <div>Event</div>
-                                            <div>Actor</div>
-                                            <div>Metadata</div>
+                                            <div>Affected user</div>
+                                            <div>Evidence</div>
                                         </div>
                                         {securityEventsQ.data.items.map((event) => (
                                             <div key={event.id} className="grid gap-3 border-b border-border/70 px-4 py-4 last:border-b-0 md:grid-cols-[170px_130px_1fr_180px_1.2fr]">
                                                 <div className="text-sm text-muted-foreground">{formatDateTime(event.timestamp)}</div>
                                                 <div><SeverityPill severity={event.severity} /></div>
                                                 <div className="space-y-1">
-                                                    <div className="text-sm font-semibold text-foreground">{event.eventType}</div>
-                                                    <div className="text-sm text-muted-foreground">{formatTarget(event.target)}</div>
+                                                    <div className="text-sm font-semibold text-foreground">{event.title || "Untitled security event"}</div>
+                                                    <div className="text-xs text-muted-foreground">{event.eventType} / {event.status.replaceAll("_", " ")}</div>
+                                                    <div className="text-sm text-muted-foreground">{event.description ?? "Description unavailable"}</div>
                                                 </div>
-                                                <div className="text-sm text-muted-foreground">{formatActor(event.actor)}</div>
+                                                <div className="text-sm text-muted-foreground">{event.subjectId ?? "No affected user recorded"}</div>
                                                 <div className="flex flex-wrap gap-2">
                                                     {metadataEntries(event.metadata).length ? metadataEntries(event.metadata).map((entry) => (
                                                         <span key={`${event.id}-${entry.key}`} className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
@@ -530,18 +670,24 @@ export function AdminOperationsConsole() {
                                             </div>
                                         ))}
                                     </div>
-                                    <PaginationControls
-                                        page={securityPage}
-                                        disabled={securityEventsQ.isFetching}
-                                        canNext={canGoNext(securityEventsQ.data?.total, securityPage, AUDIT_PAGE_SIZE, securityEventsQ.data?.items.length ?? 0)}
-                                        onPrevious={() => setSecurityPage((current) => Math.max(1, current - 1))}
-                                        onNext={() => setSecurityPage((current) => current + 1)}
-                                    />
+
                                 </div>
                             ) : (
                                 <EmptyState title="No security events found" message="No matching security signals were returned for the active filters." kind="search" />
                             )
                         ) : null}
+                        <PaginationControls
+                            page={securityPage}
+                            disabled={securityEventsQ.isFetching}
+                            canNext={!securityEventsQ.isError && Boolean(securityEventsQ.data?.hasNext)}
+                            onPrevious={() => setSecurityNavigation({ ...securityPosition, index: Math.max(0, securityPosition.index - 1) })}
+                            onNext={() => {
+                                const boundary = securityEventsQ.data?.nextBoundary;
+                                if (!boundary || securityEventsQ.isFetching || securityEventsQ.isError) return;
+                                setSecurityNavigation({ scope: securityScope, index: securityPosition.index + 1,
+                                    boundaries: [...securityPosition.boundaries.slice(0, securityPosition.index + 1), boundary] });
+                            }}
+                        />
                     </CardContent>
                 </Card>
             ) : null}
@@ -552,13 +698,13 @@ export function AdminOperationsConsole() {
                         <Card className="border-border bg-background/80">
                             <CardHeader>
                                 <CardTitle className="text-lg">Partner Suspension Controls</CardTitle>
-                                <CardDescription>Suspend or reactivate entire partner scopes with explicit confirmation before the request is sent.</CardDescription>
+                                <CardDescription>Review formal holds, appeals and exact restorations. Independent or historical account restrictions are not automatically reactivated.</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-5">
                                 <div className="grid gap-4 md:grid-cols-[1fr_180px]">
                                     <div className="space-y-2">
-                                        <Label>Search partners</Label>
-                                        <Input value={partnerQuery} onChange={(e) => { setPartnerPage(1); setPartnerQuery(e.target.value); }} placeholder="Partner name or ID" />
+                                        <Label htmlFor="admin-partner-search">Search partners</Label>
+                                        <Input id="admin-partner-search" ref={partnerSearchRef} value={partnerQuery} onChange={(e) => { setPartnerPage(1); setPartnerQuery(e.target.value); }} placeholder="Partner name or ID" />
                                     </div>
                                     <div className="space-y-2">
                                         <Label>Status</Label>
@@ -566,17 +712,17 @@ export function AdminOperationsConsole() {
                                             <option value="all">All statuses</option>
                                             <option value="active">Active</option>
                                             <option value="suspended">Suspended</option>
+                                            <option value="pending_deletion">Pending deletion</option>
+                                            <option value="unknown">Unknown</option>
                                         </Select>
                                     </div>
                                 </div>
-                                {partnersQ.isLoading ? <LoadingState title="Loading partners" description="Fetching partner account scopes." /> : null}
-                                {partnersQ.isError ? <ErrorState title="Partner controls unavailable" message="Could not load partner suspension data." onRetry={() => partnersQ.refetch().then(() => {})} /> : null}
-                                {!partnersQ.isLoading && !partnersQ.isError ? (
+                                {partnersQ.isPending ? <LoadingState title="Loading partners" description="Fetching partner account scopes." /> : null}
+                                {partnersQ.isError ? <ErrorState title="Partner controls unavailable" message="Could not load partner suspension data." onRetry={() => eventOwner.ready ? partnersQ.refetch().then(() => {}) : Promise.resolve()} /> : null}
+                                {!partnersQ.isPending && !partnersQ.isError ? (
                                     partnersQ.data?.items.length ? (
                                         <div className="space-y-3">
                                             {partnersQ.data.items.map((partner) => {
-                                                const pending = mutationBusyId === partner.id;
-                                                const suspended = partner.status === "suspended";
                                                 return (
                                                     <div key={partner.id} className="rounded-2xl border border-border bg-muted/20 p-4">
                                                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -592,12 +738,12 @@ export function AdminOperationsConsole() {
                                                             </div>
                                                             <Button
                                                                 type="button"
-                                                                variant={suspended ? "outline" : "destructive"}
-                                                                disabled={pending}
-                                                                onClick={() => setConfirmAction({ kind: suspended ? "partner_reactivate" : "partner_suspend", item: partner })}
+                                                                variant="outline"
+                                                                disabled={!eventOwner.ready}
+                                                                onClick={event => openPartnerReview(partner, event.currentTarget)}
                                                             >
-                                                                {pending ? <RefreshCw className="h-4 w-4 animate-spin" /> : suspended ? <RefreshCw className="h-4 w-4" /> : <ShieldAlert className="h-4 w-4" />}
-                                                                {suspended ? "Reactivate partner" : "Suspend partner"}
+                                                                <ShieldAlert className="h-4 w-4" />
+                                                                Manage suspension
                                                             </Button>
                                                         </div>
                                                     </div>
@@ -622,36 +768,27 @@ export function AdminOperationsConsole() {
                     {capabilities.canManageTenantSuspensions ? (
                         <Card className="border-border bg-background/80">
                             <CardHeader>
-                                <CardTitle className="text-lg">Tenant Suspension Controls</CardTitle>
-                                <CardDescription>Apply tenant-level blocks instantly in the UI while deferring source-of-truth enforcement to backend APIs.</CardDescription>
+                                <CardTitle className="text-lg">Tenant subscription controls</CardTitle>
+                                <CardDescription>Change subscription status. Formal holds and other account restrictions are separate and still apply.</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-5">
                                 <div className="grid gap-4 md:grid-cols-3">
                                     <div className="space-y-2">
                                         <Label>Search tenants</Label>
-                                        <Input value={tenantQuery} onChange={(e) => { setTenantPage(1); setTenantQuery(e.target.value); }} placeholder="Tenant name or ID" />
+                                        <Input value={tenantQuery} onChange={(e) => { setTenantPage(1); setTenantQuery(e.target.value); }} placeholder="Tenant business name" />
                                     </div>
                                     <div className="space-y-2">
-                                        <Label>Status</Label>
-                                        <Select value={tenantStatus} onChange={(next) => { setTenantPage(1); setTenantStatus(next); }} ariaLabel="Tenant status">
+                                        <Label>Subscription status</Label>
+                                        <Select value={tenantStatus} onChange={(next) => { setTenantPage(1); setTenantStatus(next); }} ariaLabel="Tenant subscription status">
                                             <option value="all">All statuses</option>
                                             <option value="active">Active</option>
                                             <option value="suspended">Suspended</option>
                                         </Select>
                                     </div>
-                                    <div className="space-y-2">
-                                        <Label>Partner filter</Label>
-                                        <Input
-                                            value={capabilities.allowedPartnerId ?? tenantPartnerFilter}
-                                            onChange={(e) => { setTenantPage(1); setTenantPartnerFilter(e.target.value); }}
-                                            disabled={Boolean(capabilities.allowedPartnerId)}
-                                            placeholder="partner-id"
-                                        />
-                                    </div>
                                 </div>
-                                {tenantsQ.isLoading ? <LoadingState title="Loading tenants" description="Fetching tenant account scopes." /> : null}
-                                {tenantsQ.isError ? <ErrorState title="Tenant controls unavailable" message="Could not load tenant suspension data." onRetry={() => tenantsQ.refetch().then(() => {})} /> : null}
-                                {!tenantsQ.isLoading && !tenantsQ.isError ? (
+                                {tenantsQ.isPending ? <LoadingState title="Loading tenants" description="Fetching tenant subscription status." /> : null}
+                                {tenantsQ.isError ? <ErrorState title="Tenant controls unavailable" message="Could not load tenant subscription data." onRetry={retryTenants} /> : null}
+                                {!tenantsQ.isPending && !tenantsQ.isError ? (
                                     tenantsQ.data?.items.length ? (
                                         <div className="space-y-3">
                                             {tenantsQ.data.items.map((tenant) => {
@@ -663,7 +800,7 @@ export function AdminOperationsConsole() {
                                                             <div className="min-w-0">
                                                                 <div className="flex flex-wrap items-center gap-2">
                                                                     <div className="text-sm font-semibold text-foreground">{tenant.name}</div>
-                                                                    <StatusBadge status={tenant.status} />
+                                                                    <StatusBadge status={tenant.status} prefix="Subscription: " />
                                                                 </div>
                                                                 <div className="mt-1 text-sm text-muted-foreground">Tenant ID: {tenant.id}</div>
                                                                 <div className="mt-1 text-xs text-muted-foreground">
@@ -673,11 +810,11 @@ export function AdminOperationsConsole() {
                                                             <Button
                                                                 type="button"
                                                                 variant={suspended ? "outline" : "destructive"}
-                                                                disabled={pending}
-                                                                onClick={() => setConfirmAction({ kind: suspended ? "tenant_reactivate" : "tenant_suspend", item: tenant })}
+                                                                disabled={pending || tenantsQ.isFetching || tenant.updatedAt === undefined || !["active", "suspended"].includes(tenant.status)}
+                                                                onClick={(event) => openTenantReview(tenant, event.currentTarget)}
                                                             >
                                                                 {pending ? <RefreshCw className="h-4 w-4 animate-spin" /> : suspended ? <RefreshCw className="h-4 w-4" /> : <ShieldAlert className="h-4 w-4" />}
-                                                                {suspended ? "Reactivate tenant" : "Suspend tenant"}
+                                                                {suspended ? "Resume subscription" : "Suspend subscription"}
                                                             </Button>
                                                         </div>
                                                     </div>
@@ -760,46 +897,31 @@ export function AdminOperationsConsole() {
                 </div>
             ) : null}
 
-            <ConfirmDialog
-                open={Boolean(confirmAction)}
+            {tenantReview && <ConfirmDialog
+                key={tenantReview.id}
+                open
+                description="This changes subscription status. Separate account restrictions still apply."
                 onOpenChange={(next) => {
-                    if (!next) {
-                        setConfirmAction(null);
-                        setConfirmReason("");
-                    }
+                    if (!next) closeTenantReview(tenantReview);
                 }}
-                intent={
-                    confirmAction?.kind === "partner_suspend" || confirmAction?.kind === "tenant_suspend"
-                        ? "suspend"
-                        : confirmAction?.kind === "partner_reactivate" || confirmAction?.kind === "tenant_reactivate"
-                          ? "reactivate"
-                          : "cancel"
-                }
-                title={
-                    confirmAction?.kind === "partner_suspend"
-                        ? "Suspend partner"
-                        : confirmAction?.kind === "tenant_suspend"
-                          ? "Suspend tenant"
-                          : confirmAction?.kind === "partner_reactivate"
-                            ? "Reactivate partner"
-                            : "Reactivate tenant"
-                }
+                intent={tenantReview.kind === "tenant_suspend" ? "suspend" : "reactivate"}
+                title={tenantReview.kind === "tenant_suspend" ? "Suspend subscription" : "Resume subscription"}
+                confirmLabel={tenantReview.kind === "tenant_suspend" ? "Confirm subscription suspension" : "Confirm subscription resume"}
                 warningText={
-                    confirmAction?.kind === "partner_suspend"
-                        ? `Suspending ${confirmAction.item.name} immediately blocks partner-scoped activity in the UI after the backend confirms the request.`
-                        : confirmAction?.kind === "tenant_suspend"
-                          ? `Suspending ${confirmAction.item.name} immediately blocks tenant-scoped activity in the UI after the backend confirms the request.`
-                          : confirmAction?.kind === "partner_reactivate"
-                            ? `Reactivating ${confirmAction.item.name} restores partner access after the backend confirms the request.`
-                            : confirmAction
-                              ? `Reactivating ${confirmAction.item.name} restores tenant access after the backend confirms the request.`
-                              : ""
+                    tenantReview.kind === "tenant_suspend"
+                        ? `This marks the subscription for ${tenantReview.item.name} suspended after confirmation. Formal holds and other account restrictions remain separate.`
+                        : `This marks the subscription for ${tenantReview.item.name} active after confirmation. It does not remove formal holds or other account restrictions.`
                 }
-                onConfirm={runConfirmedAction}
-                showReasonInput={confirmAction?.kind.includes("suspend") || confirmAction?.kind.includes("reactivate")}
+                onConfirm={() => runConfirmedAction(tenantReview)}
+                showReasonInput
                 reasonValue={confirmReason}
-                onReasonChange={setConfirmReason}
-            />
+                onReasonChange={(value) => { if (ownsTenantReview(tenantReview)) setConfirmReason(value); }}
+            />}
+            {formalPartner && formalPartner.owner === partnerOwner && user?.role === "platform_admin" && activeTab === "suspensions" && <FormalPartnerHoldPanel
+                partnerId={formalPartner.partner.id} partnerName={formalPartner.partner.name} operatorId={formalPartner.operatorId}
+                identityGeneration={formalPartner.generation} onClose={() => closePartnerReview(formalPartner)}
+                onChanged={() => partnerChanged(formalPartner)}
+            />}
         </div>
     );
 }

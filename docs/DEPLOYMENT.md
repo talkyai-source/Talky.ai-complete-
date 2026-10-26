@@ -189,6 +189,55 @@ The unit runs `/opt/talky/backend/venv/bin/alembic -c /opt/talky/backend/alembic
 with `TimeoutStartSec=180`. It is deliberately **not** install-enabled — a
 migration must never run merely because the machine rebooted.
 
+### Admin runtime database privilege check
+
+After migrations and the existing Alembic-head check, run this read-only gate
+using the **same environment and OS identity as the backend application**. The
+supported API and migration units currently load `/opt/talky/backend/.env`;
+environment variables already supplied to the command take precedence over
+that file. Do not substitute migration-owner credentials when the application
+has a separate runtime connection. Do not print or copy connection strings.
+
+```bash
+cd /opt/talky/backend
+venv/bin/python scripts/verify_admin_runtime_privileges.py > admin-runtime-privileges.json
+```
+
+Require exit code zero before accepting the database capability portion of an
+Admin release. This is a documented gate; `deploy_to_server.sh` does not yet
+invoke it automatically. It opens bounded, read-only transactions and reads
+catalogs plus the Alembic version metadata. It never grants privileges, changes
+roles, changes application RLS settings, or reads customer records. The role
+must be able to read `public.alembic_version` for the head check. Reports omit
+connection strings, role names, passwords and raw connection-error messages.
+
+The contract checks the existing Admin routes and their identity, audit,
+connector authorization and call-settlement dependencies. `DATABASE_URL`
+covers both the primary pool and the legacy adapter's independent connections;
+changing a test pool alone does not change that adapter. A running adapter
+captures its URL at import, so a fresh preflight cannot certify an old process's
+environment. If `READ_DATABASE_URL` differs, its role/head/schema posture is
+checked separately; no active Admin route uses that read pool, so the check
+does not require Admin writes there or certify its other consumers.
+
+Missing privileges, schema/head drift, required RLS flags, shadowed table
+resolution, or SUPERUSER/BYPASSRLS authority on the effective **or login** role
+fail the gate. Table ownership is reported separately from effective grants:
+ordinary ownership retains DDL/regrant authority, while FORCE RLS still applies.
+Column-only grants are an explicit unverified result needing a review of the
+exact SQL statements, not a recommendation to grant broad access. Policy
+presence is not proof of policy semantics, authorization, or provider effects;
+retain the restricted-role behavior tests and normal-auth acceptance journey.
+
+The engineer changing an Admin route, a mandatory shared writer, a table or its
+RLS migration must update `GROUPS`, `RLS_TABLES` and `NEW_COLUMNS` in the script
+as applicable and have the release reviewer check the cited source paths.
+`python scripts/verify_admin_runtime_privileges.py --contract` prints that
+inventory offline without loading environment files or connecting. Contract
+drift, hosted execution and a successful report remain release requirements;
+synthetic unit tests do not establish the host's grants. Optional platform SIP
+seeding is included only when its existing configuration enables that hook.
+
 ## Rollback
 
 Rollback begins by stopping new ingress, not by restarting application
@@ -317,6 +366,12 @@ Postgres and Redis on the box are compose-managed:
 ```bash
 docker compose -f /opt/talky/docker-compose.yml ps
 ```
+
+## Website enquiry intake configuration
+
+Set `CONTACT_ENQUIRY_PUBLIC_ORIGIN` in the Next server environment to the exact public website origin; the backend's allowed origins must include it. When browser API requests use a same-origin reverse proxy, also set server-only `CONTACT_ENQUIRY_API_BASE_URL` to the explicit FastAPI base ending in `/api/v1`, such as `http://127.0.0.1:8000/api/v1` on a host where that is the actual backend listener. Do not point it at the public website or Next listener. If the override is absent, the existing separate-origin `NEXT_PUBLIC_API_BASE_URL` remains the fallback; an explicitly empty or invalid override fails closed. No caller-supplied destination, cookies or authorization headers are forwarded.
+
+Verify public contact submission produces a committed receipt, then use normal platform-admin access to find that exact reference, mark it handled and reopen it. This saves an enquiry; it does not send email. Apply migration `0074_contact_enquiry_revision` before the matching backend and Admin client: status writes require the reviewed revision, and an unknown response requires a saved-state read before another deliberate decision. Older clients without that revision are rejected rather than overwriting a newer decision.
 
 ## Pre-production checklist
 

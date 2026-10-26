@@ -2,7 +2,6 @@ import { Navbar } from "@/components/home/navbar";
 import { HomeLazySections } from "@/components/home/home-lazy-sections";
 import type { Metadata } from "next";
 import localFont from "next/font/local";
-import { Orbitron } from "next/font/google";
 
 const satoshi = localFont({
   src: [
@@ -13,8 +12,11 @@ const satoshi = localFont({
   display: "swap",
 });
 
-const orbitron = Orbitron({
-  subsets: ["latin"],
+const orbitron = localFont({
+  src: "../fonts/orbitron/Orbitron-Variable.ttf",
+  weight: "400 900",
+  style: "normal",
+  display: "swap",
   variable: "--font-orbitron",
 });
 

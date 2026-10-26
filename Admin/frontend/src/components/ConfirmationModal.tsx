@@ -1,6 +1,7 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useRef, type RefObject } from 'react';
 import { X, AlertTriangle, AlertCircle, Info, Loader2 } from 'lucide-react';
 import './ConfirmationModal.css';
+import { useDialogFocus } from '../lib/use-dialog-focus';
 
 interface ConfirmationModalProps {
     isOpen: boolean;
@@ -17,8 +18,12 @@ interface ConfirmationModalProps {
     reasonLabel?: string;
     reasonPlaceholder?: string;
     reasonMinLength?: number;
+    /** Preserve the exact reason/body after a deletion intent has been sent. */
+    reasonReadOnly?: boolean;
     /** Failure from the confirmed action; the modal stays open and shows it. */
     error?: string | null;
+    /** Stable owning-page control when the invoking row is removed. */
+    returnFocusFallback?: RefObject<HTMLElement | null>;
 }
 
 export function ConfirmationModal({
@@ -36,7 +41,9 @@ export function ConfirmationModal({
     reasonLabel = 'Reason for this action',
     reasonPlaceholder = 'Explain why this irreversible action is required',
     reasonMinLength = 8,
+    reasonReadOnly = false,
     error = null,
+    returnFocusFallback,
 }: ConfirmationModalProps) {
     const modalRef = useRef<HTMLDivElement>(null);
     const confirmButtonRef = useRef<HTMLButtonElement>(null);
@@ -46,30 +53,7 @@ export function ConfirmationModal({
     const reasonIsValid = !requiresReason
         || (normalizedReason.length >= reasonMinLength && /\p{L}/u.test(normalizedReason));
 
-    // Handle Escape key
-    const handleKeyDown = useCallback((e: KeyboardEvent) => {
-        if (e.key === 'Escape' && !loading) {
-            onCancel();
-        }
-    }, [onCancel, loading]);
-
-    // Focus trap
-    useEffect(() => {
-        if (isOpen) {
-            document.addEventListener('keydown', handleKeyDown);
-            // Irreversible actions require a reason, so start at the evidence
-            // field rather than putting a destructive button under focus.
-            if (requiresReason) reasonInputRef.current?.focus();
-            else confirmButtonRef.current?.focus();
-            // Prevent body scroll
-            document.body.style.overflow = 'hidden';
-        }
-
-        return () => {
-            document.removeEventListener('keydown', handleKeyDown);
-            document.body.style.overflow = '';
-        };
-    }, [isOpen, handleKeyDown, requiresReason]);
+    useDialogFocus(isOpen, modalRef, onCancel, loading, returnFocusFallback);
 
     // Handle backdrop click
     const handleBackdropClick = (e: React.MouseEvent) => {
@@ -104,6 +88,7 @@ export function ConfirmationModal({
             <div
                 className="modal-content"
                 ref={modalRef}
+                tabIndex={-1}
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="modal-header">
@@ -126,6 +111,7 @@ export function ConfirmationModal({
                             <span>{reasonLabel}</span>
                             <textarea
                                 ref={reasonInputRef}
+                                data-dialog-autofocus
                                 value={reason}
                                 onChange={(event) => onReasonChange(event.target.value)}
                                 placeholder={reasonPlaceholder}
@@ -134,10 +120,11 @@ export function ConfirmationModal({
                                 rows={3}
                                 required
                                 disabled={loading}
+                                readOnly={reasonReadOnly}
                                 aria-describedby="modal-reason-help"
                             />
                             <small id="modal-reason-help">
-                                {reasonIsValid
+                                {reasonReadOnly ? 'This request has been sent. Its reason stays fixed when retrying the same deletion.' : reasonIsValid
                                     ? 'This reason will be retained in the deletion audit.'
                                     : `Enter a meaningful reason of at least ${reasonMinLength} characters.`}
                             </small>

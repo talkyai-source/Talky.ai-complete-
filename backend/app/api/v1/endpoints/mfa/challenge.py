@@ -72,7 +72,7 @@ async def create_mfa_challenge(
     return raw_token
 
 
-async def resolve_mfa_challenge(conn, raw_token: str) -> Optional[dict[str, str]]:
+async def resolve_mfa_challenge(conn, raw_token: str, *, for_update: bool = True) -> Optional[dict[str, str]]:
     """
     Validate a raw challenge token and return the challenge row if valid.
 
@@ -95,8 +95,7 @@ async def resolve_mfa_challenge(conn, raw_token: str) -> Optional[dict[str, str]
         WHERE  challenge_hash = $1
           AND  used           = FALSE
           AND  expires_at     > $2
-        FOR UPDATE
-        """,
+        """ + (" FOR UPDATE" if for_update else ""),
         token_hash,
         now,
     )

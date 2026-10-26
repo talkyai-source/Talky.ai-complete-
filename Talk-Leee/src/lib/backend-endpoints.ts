@@ -48,12 +48,16 @@ export const backendEndpoints = {
 
     assistantActionsList: { method: "GET", path: "/assistant/actions", tags: ["Assistant"], summary: "List assistant actions" },
 
-    auditLogsList: { method: "GET", path: "/admin/audit-logs", tags: ["Admin"], summary: "List audit logs" },
-    securityEventsList: { method: "GET", path: "/admin/security-events", tags: ["Admin"], summary: "List security events" },
+    auditLogsList: { method: "GET", path: "/admin/audit/logs", tags: ["Admin"], summary: "List audit logs" },
+    securityEventsList: { method: "GET", path: "/admin/security-events/events", tags: ["Admin"], summary: "List security events" },
     partnersList: { method: "GET", path: "/admin/partners", tags: ["Admin"], summary: "List partners" },
     tenantsList: { method: "GET", path: "/admin/tenants", tags: ["Admin"], summary: "List tenants" },
-    partnerSuspend: { method: "POST", path: "/admin/partners/{id}/suspend", tags: ["Admin"], summary: "Suspend partner" },
-    partnerReactivate: { method: "POST", path: "/admin/partners/{id}/reactivate", tags: ["Admin"], summary: "Reactivate partner" },
+    formalPartnerStatus: { method: "GET", path: "/admin/suspensions/partners/{id}/status", tags: ["Admin"], summary: "Inspect formal partner holds" },
+    formalPartnerSuspend: { method: "POST", path: "/admin/suspensions/partners/{id}/suspend", tags: ["Admin"], summary: "Create audited formal partner hold" },
+    formalPartnerRestore: { method: "POST", path: "/admin/suspensions/partners/{id}/restore", tags: ["Admin"], summary: "Restore the reviewed formal partner hold" },
+    formalHoldAppeal: { method: "POST", path: "/admin/suspensions/{id}/appeal", tags: ["Admin"], summary: "Record an operator appeal" },
+    formalHoldReview: { method: "POST", path: "/admin/suspensions/{id}/appeal/review", tags: ["Admin"], summary: "Review the selected hold appeal" },
+    formalHoldEvidence: { method: "GET", path: "/admin/suspensions/propagation-status/{id}", tags: ["Admin"], summary: "Inspect exact hold enforcement evidence" },
     tenantSuspend: { method: "POST", path: "/admin/tenants/{id}/suspend", tags: ["Admin"], summary: "Suspend tenant" },
-    tenantReactivate: { method: "POST", path: "/admin/tenants/{id}/reactivate", tags: ["Admin"], summary: "Reactivate tenant" },
+    tenantReactivate: { method: "POST", path: "/admin/tenants/{id}/resume", tags: ["Admin"], summary: "Resume tenant subscription" },
 } as const;

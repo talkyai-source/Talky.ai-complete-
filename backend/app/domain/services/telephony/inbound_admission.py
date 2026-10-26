@@ -13,6 +13,7 @@ import json
 import logging
 import re
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping, Optional
@@ -20,6 +21,7 @@ from typing import Any, Mapping, Optional
 import asyncpg
 
 from app.core.db_utils import acquire_with_tenant
+from app.core.security.platform_admin_guard import require_platform_admin_mutation
 from app.domain.services.call_status import TERMINAL_CALL_STATUSES
 from app.domain.services.telephony.business_hours import evaluate_business_hours
 from app.domain.services.telephony.inbound_address import canonical_extension
@@ -84,6 +86,8 @@ class InboundAdmissionRequest:
     reservation_seconds: int = 60
     metadata: Mapping[str, Any] = field(default_factory=dict)
     provider_event_id: Optional[str] = None
+    # Only the server-owned adapter supplies this; it is never a routing input.
+    control_backend: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -206,6 +210,10 @@ class InboundHoldResolutionResult:
 
 class InboundHoldResolutionConflictError(RuntimeError):
     """The held row or immutable resolution disagrees with the request."""
+
+
+class InboundHoldResolutionUnavailableError(RuntimeError):
+    """The billing decision outcome is unconfirmed; reconcile its original key."""
 
 
 class InboundHoldResolutionNotFoundError(LookupError):
@@ -584,6 +592,9 @@ class InboundAdmissionService:
                     provider_event_id=provider_event_id,
                 )
                 if existing:
+                    from app.domain.services.telephony.control_backend_identity import saved_control_backend
+                    if request.control_backend and saved_control_backend(existing.get("route_snapshot")) != request.control_backend:
+                        return self._deny(provider, "provider_backend_identity_mismatch", call_id=str(existing["id"]))
                     if not bool(existing.get("replay_state_live")):
                         return self._deny(
                             provider,
@@ -814,6 +825,11 @@ class InboundAdmissionService:
                 for passed, reason in eligibility:
                     if not passed:
                         return self._deny(provider, reason)
+
+                from app.domain.services.telephony.call_authority import read_call_authority
+                authority = await read_call_authority(conn, tenant_id)
+                if not authority.allowed:
+                    return self._deny(provider, authority.reason or "account_inactive")
 
                 if bool(route["recording_enabled"]):
                     consent_text = str(route.get("consent_message") or "").strip()
@@ -1065,6 +1081,8 @@ class InboundAdmissionService:
                         "nodes": knowledge_nodes,
                     },
                 }
+                from app.domain.services.telephony.control_backend_identity import valid_control_backend
+                snapshot["control_backend"] = valid_control_backend(request.control_backend)
                 call_uuid = str(uuid.uuid4())
                 talklee_call_id = "IN" + uuid.uuid4().hex[:18]
                 try:
@@ -1121,6 +1139,9 @@ class InboundAdmissionService:
                         provider_event_id=provider_event_id,
                     )
                     if existing:
+                        from app.domain.services.telephony.control_backend_identity import saved_control_backend
+                        if request.control_backend and saved_control_backend(existing.get("route_snapshot")) != request.control_backend:
+                            return self._deny(provider, "provider_backend_identity_mismatch", call_id=str(existing["id"]))
                         if not bool(existing.get("replay_state_live")):
                             return self._deny(
                                 provider,
@@ -1734,6 +1755,24 @@ class InboundAdmissionService:
             release_only=True,
         )
 
+    @asynccontextmanager
+    async def _admin_hold_transaction(self, tenant_id: str, actor_id: str):
+        """Retain tenant RLS and accounting order after current Admin admission."""
+        try:
+            async with asyncio.timeout(10.0):
+                async with acquire_with_tenant(self._pool, tenant_id) as conn:
+                    # The helper restores this transaction's tenant scope before
+                    # any accounting/idempotency/call rows are read or written.
+                    await require_platform_admin_mutation(conn, actor_id)
+                    await conn.execute("SET LOCAL lock_timeout='3s'")
+                    yield conn
+        except (TimeoutError, asyncpg.PostgresError, asyncpg.InterfaceError, OSError) as exc:
+            # Timeout at commit is deliberately not described as a rollback.
+            raise InboundHoldResolutionUnavailableError(
+                "The Inbound billing hold outcome could not be confirmed. "
+                "Reconcile using the same idempotency key."
+            ) from exc
+
     async def resolve_billing_hold(
         self,
         request: InboundHoldResolutionRequest,
@@ -1938,7 +1977,7 @@ class InboundAdmissionService:
                 and _json_obj(row.get("metadata")) == resolution_metadata
             )
 
-        async with acquire_with_tenant(self._pool, tenant_id) as conn:
+        async with self._admin_hold_transaction(tenant_id, actor_id) as conn:
             # Use the exact same lock domain as admission/quota reads. It must
             # precede the row lock so every tenant accounting writer has one
             # deterministic lock order.

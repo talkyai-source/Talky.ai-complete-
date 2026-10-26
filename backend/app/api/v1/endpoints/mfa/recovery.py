@@ -8,11 +8,12 @@ from __future__ import annotations
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.core.postgres_adapter import Client
 from app.core.db_utils import acquire_with_tenant
+from app.core.security.credential_issuance import lock_authenticated_credential_change
 from app.core.security.recovery import (
     format_recovery_code,
     generate_recovery_codes,
@@ -30,6 +31,7 @@ router = APIRouter(tags=["mfa"])
 
 @router.post("/recovery-codes/regenerate", response_model=MFARegenerateCodesResponse)
 async def regenerate_recovery_codes(
+    request: Request,
     body: MFARegenerateCodesRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
@@ -48,6 +50,7 @@ async def regenerate_recovery_codes(
     was compromised.
     """
     async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
+        await lock_authenticated_credential_change(conn, request, current_user)
         mfa_row = await conn.fetchrow(
             "SELECT totp_secret_enc, enabled, last_used_at FROM user_mfa WHERE user_id = $1 FOR UPDATE",
             current_user.id,

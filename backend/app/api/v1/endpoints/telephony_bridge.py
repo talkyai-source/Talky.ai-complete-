@@ -177,6 +177,7 @@ _telephony_sessions: dict[str, object] = {}  # VoiceSession objects
 # Watchdog task handle — started when the adapter connects, cancelled on stop.
 _watchdog_task: Optional[asyncio.Task] = None
 _media_watchdog_task: Optional[asyncio.Task] = None
+_account_authority_watchdog_task: Optional[asyncio.Task] = None
 
 # A provider may have accepted an originate at the exact moment both Redis and
 # Postgres are unavailable.  The request cannot honestly declare that attempt
@@ -295,6 +296,8 @@ from app.domain.services.telephony.lifecycle import (  # noqa: E402
     _get_orchestrator,
     _session_watchdog,
     _media_session_watchdog,
+    _require_call_authority,
+    _account_call_authority_watchdog,
     _SESSION_INACTIVITY_TIMEOUT_S,
     _on_early_ringing,
     _on_ringing,
@@ -328,7 +331,7 @@ def ensure_session_management_started() -> None:
     lifespan, not the REST endpoint) left the pod-capacity drain gate and the
     zombie-session watchdog permanently disarmed. (audit #9)
     """
-    global _watchdog_task, _media_watchdog_task
+    global _watchdog_task, _media_watchdog_task, _account_authority_watchdog_task
     # GAP 5 — session inactivity watchdog (also does zombie reconcile,
     # ringing-warmup GC, global-concurrency lease refresh, dead-pod recovery).
     if _watchdog_task is None or _watchdog_task.done():
@@ -337,6 +340,8 @@ def ensure_session_management_started() -> None:
     if _media_watchdog_task is None or _media_watchdog_task.done():
         _media_watchdog_task = asyncio.create_task(_media_session_watchdog())
         logger.info("telephony_media_watchdog: started")
+    if _account_authority_watchdog_task is None or _account_authority_watchdog_task.done():
+        _account_authority_watchdog_task = asyncio.create_task(_account_call_authority_watchdog())
     # Phase 1.4 — wire pod capacity into the readiness probe so the k8s/LB
     # readiness gate can drain a saturated pod without touching internals.
     from app.core import readiness as _readiness
@@ -349,10 +354,10 @@ def ensure_session_management_started() -> None:
 
 async def stop_session_management() -> None:
     """Cancel every session-management worker and release their references."""
-    global _watchdog_task, _media_watchdog_task
+    global _watchdog_task, _media_watchdog_task, _account_authority_watchdog_task
     tasks = [
         task
-        for task in (_watchdog_task, _media_watchdog_task)
+        for task in (_watchdog_task, _media_watchdog_task, _account_authority_watchdog_task)
         if task is not None and not task.done()
     ]
     for task in tasks:
@@ -361,6 +366,7 @@ async def stop_session_management() -> None:
         await asyncio.gather(*tasks, return_exceptions=True)
     _watchdog_task = None
     _media_watchdog_task = None
+    _account_authority_watchdog_task = None
 
 
 @router.post("/start")
@@ -903,11 +909,15 @@ async def _claim_internal_dialer_intent(
     intent: _InternalDialerIntent,
     provider: str,
     planned_provider_call_id: str,
+    control_backend: str | None = None,
 ) -> tuple[bool, _InternalDialerIntent]:
     """CAS one durable planned provider identity before ARI can ring."""
     from app.core.db_utils import acquire_with_tenant
+    from app.domain.services.telephony.control_backend_identity import valid_control_backend
 
     try:
+        if not valid_control_backend(control_backend):
+            raise ValueError("control backend identity unavailable before origination")
         async with asyncio.timeout(_OUTBOUND_BOUNDARY_DB_TIMEOUT_S):
             async with acquire_with_tenant(
                 db_pool,
@@ -920,6 +930,8 @@ async def _claim_internal_dialer_intent(
                        SET external_call_uuid = $5,
                            provider_call_id = $5,
                            provider = $6,
+                           route_snapshot = COALESCE(route_snapshot, '{}'::jsonb)
+                               || jsonb_build_object('control_backend', $7::text),
                            status = 'dialing',
                            started_at = COALESCE(started_at, NOW()),
                            updated_at = NOW()
@@ -931,6 +943,8 @@ async def _claim_internal_dialer_intent(
                        AND provider_call_id IS NULL
                        AND external_call_uuid IS NULL
                        AND status IN ('queued', 'initiated')
+                       AND (route_snapshot->>'control_backend' IS NULL
+                            OR route_snapshot->>'control_backend'=$7::text)
                     RETURNING status, provider, provider_call_id
                     """,
                     intent.call_id,
@@ -939,6 +953,7 @@ async def _claim_internal_dialer_intent(
                     intent.attempt_number,
                     planned_provider_call_id,
                     provider,
+                    control_backend,
                 )
                 claimed = row is not None
                 if row is None:
@@ -1117,7 +1132,23 @@ async def _bind_durable_outbound_call_provider(
                            THEN $3
                            ELSE provider_call_id
                        END,
-                       provider = $4,
+                       provider = $4::text,
+                        route_snapshot = COALESCE(route_snapshot, '{}'::jsonb)
+                            || jsonb_build_object('provider_acknowledgement',
+                                CASE WHEN route_snapshot->'provider_acknowledgement'->>'provider'=$4
+                                      AND route_snapshot->'provider_acknowledgement'->>'provider_call_id'=
+                                          CASE WHEN provider_call_id IS NULL OR provider_call_id=external_call_uuid
+                                               THEN $3 ELSE provider_call_id END
+                                      AND route_snapshot->'provider_acknowledgement'->>'control_backend'=route_snapshot->>'control_backend'
+                                     THEN route_snapshot->'provider_acknowledgement'
+                                     ELSE
+                                jsonb_build_object(
+                                    'provider', $4::text,
+                                    'provider_call_id', CASE
+                                        WHEN provider_call_id IS NULL OR provider_call_id=external_call_uuid
+                                        THEN $3 ELSE provider_call_id END,
+                                    'control_backend', route_snapshot->>'control_backend',
+                                    'acknowledged_at', clock_timestamp()) END),
                        status = CASE
                            WHEN status IN ('queued', 'initiated') THEN 'dialing'
                            ELSE status
@@ -1261,7 +1292,13 @@ async def _persist_durable_outbound_channel_alias(
                 """
                 UPDATE calls
                    SET provider_call_id = $4,
-                       provider = $5,
+                       provider = $5::text,
+                       route_snapshot = CASE
+                           WHEN route_snapshot->'provider_acknowledgement'->>'provider_call_id'=$3
+                            AND route_snapshot->'provider_acknowledgement'->>'provider'=$5
+                            AND route_snapshot->'provider_acknowledgement'->>'control_backend'=route_snapshot->>'control_backend'
+                           THEN jsonb_set(route_snapshot, '{provider_acknowledgement,provider_call_id}', to_jsonb($4::text))
+                           ELSE route_snapshot END,
                        status = CASE
                            WHEN status IN ('queued', 'initiated') THEN 'dialing'
                            ELSE status
@@ -1754,6 +1791,8 @@ async def make_call(request: Request, body: MakeCallRequest):
     # consumer of this endpoint; keeping that route would expose a second,
     # non-idempotent provider-origination protocol. Reject it before campaign,
     # guard, warmup, database, or adapter work.
+    origin_adapter = _adapter
+    origin_backend = getattr(origin_adapter, "control_backend_identity", None)
     caller_ctx = require_internal_or_tenant(request)
     if not caller_ctx.is_internal:
         raise HTTPException(
@@ -1821,7 +1860,7 @@ async def make_call(request: Request, body: MakeCallRequest):
             detail={"error": "telephony_not_active_on_node", "owner": owner},
         )
 
-    if not _adapter or not _adapter.connected:
+    if not origin_adapter or not origin_adapter.connected:
         # A coded, retryable 503 (same shape as telephony_not_active_on_node):
         # the bare 400 carried no code, so the dialer classified it INTERNAL
         # and failed the lead after one retry for what is a transient outage
@@ -1939,7 +1978,7 @@ async def make_call(request: Request, body: MakeCallRequest):
                 {
                     "status": "calling",
                     "call_id": internal_dialer_intent.provider_call_id,
-                    "adapter": internal_dialer_intent.provider or _adapter.name,
+                    "adapter": internal_dialer_intent.provider or origin_adapter.name,
                     "durable_call_id": internal_dialer_intent.call_id,
                     "idempotent_replay": True,
                 }
@@ -1961,7 +2000,7 @@ async def make_call(request: Request, body: MakeCallRequest):
     # Resolve the final route and caller ID before ownership, guards, or costly
     # provider warmup. Never validate one DID and originate with another.
     _outbound_route = None
-    if getattr(_adapter, "name", "") == "asterisk":
+    if getattr(origin_adapter, "name", "") == "asterisk":
         from app.domain.services.telephony.trunk_resolver import resolve_outbound_trunk
 
         _outbound_route = await resolve_outbound_trunk(
@@ -2159,7 +2198,7 @@ async def make_call(request: Request, body: MakeCallRequest):
     )
 
     planned_call_id = None
-    if getattr(_adapter, "name", "") == "asterisk":
+    if getattr(origin_adapter, "name", "") == "asterisk":
         # Internal retries derive the provider identity from the already
         # durable call UUID. A process restart therefore cannot mint another
         # Asterisk channel for the same attempt.
@@ -2226,7 +2265,7 @@ async def make_call(request: Request, body: MakeCallRequest):
                         campaign_id=(str(campaign_id) if campaign_id else None),
                         state="termination_pending",
                         durable_call_id=durable_call_id,
-                        provider=str(getattr(_adapter, "name", "unknown") or "unknown"),
+                        provider=str(getattr(origin_adapter, "name", "unknown") or "unknown"),
                         provider_call_id=provider_identity,
                     )
                     cleanup_ledger_registered = True
@@ -2243,7 +2282,7 @@ async def make_call(request: Request, body: MakeCallRequest):
                         getattr(container, "db_pool", None),
                         tenant_id=str(effective_tenant_id),
                         durable_call_id=durable_call_id,
-                        provider=str(getattr(_adapter, "name", "unknown") or "unknown"),
+                        provider=str(getattr(origin_adapter, "name", "unknown") or "unknown"),
                         provider_call_id=provider_identity,
                         reason=reason,
                     )
@@ -2258,9 +2297,11 @@ async def make_call(request: Request, body: MakeCallRequest):
                     # This identity was just originated by this adapter, even
                     # when its durable provider binding failed to commit.
                     proof = await request_confirmed_hangup(
-                        _adapter,
+                        origin_adapter,
                         provider_identity,
-                        expected_provider=getattr(_adapter, "name", None),
+                        expected_provider=getattr(origin_adapter, "name", None),
+                        expected_backend=origin_backend,
+                        require_backend_identity=True,
                     )
                 else:
                     proof = HangupProof(
@@ -2288,7 +2329,7 @@ async def make_call(request: Request, body: MakeCallRequest):
                             getattr(container, "db_pool", None),
                             tenant_id=str(effective_tenant_id),
                             durable_call_id=durable_call_id,
-                            provider=str(getattr(_adapter, "name", "unknown") or "unknown"),
+                            provider=str(getattr(origin_adapter, "name", "unknown") or "unknown"),
                             provider_call_id=provider_identity,
                             reason=reason,
                         )
@@ -2332,7 +2373,7 @@ async def make_call(request: Request, body: MakeCallRequest):
                         campaign_id=(str(campaign_id) if campaign_id else None),
                         durable_call_id=durable_call_id,
                         provider=str(
-                            getattr(_adapter, "name", "unknown") or "unknown"
+                            getattr(origin_adapter, "name", "unknown") or "unknown"
                         ),
                         provider_call_id=provider_identity,
                         reason=reason,
@@ -2407,8 +2448,9 @@ async def make_call(request: Request, body: MakeCallRequest):
                 claimed, current_intent = await _claim_internal_dialer_intent(
                     getattr(container, "db_pool", None),
                     intent=internal_dialer_intent,
-                    provider=str(getattr(_adapter, "name", "unknown") or "unknown"),
+                    provider=str(getattr(origin_adapter, "name", "unknown") or "unknown"),
                     planned_provider_call_id=planned_call_id,
+                    control_backend=origin_backend,
                 )
             if not claimed:
                 try:
@@ -2441,7 +2483,7 @@ async def make_call(request: Request, body: MakeCallRequest):
                         {
                             "status": "calling",
                             "call_id": current_intent.provider_call_id,
-                            "adapter": current_intent.provider or _adapter.name,
+                            "adapter": current_intent.provider or origin_adapter.name,
                             "durable_call_id": current_intent.call_id,
                             "idempotent_replay": True,
                         }
@@ -2494,20 +2536,31 @@ async def make_call(request: Request, body: MakeCallRequest):
                 effective_first_speaker,
             )
 
-        if planned_call_id is not None:
-            originate_attempted = True
-            call_id = await _adapter.originate_call(
-                destination=destination,
-                caller_id=caller_id,
-                channel_id=planned_call_id,
-                trunk_endpoint=trunk_endpoint,
-            )
-        else:
-            originate_attempted = True
-            call_id = await _adapter.originate_call(
-                destination=destination,
-                caller_id=caller_id,
-            )
+        # The saved binding and the side effect use the same retained adapter.
+        from app.domain.services.telephony.control_backend_identity import control_backend_error
+        identity_error = control_backend_error(origin_adapter, origin_backend)
+        guard = getattr(origin_adapter, "control_backend_guard", None)
+        if identity_error or not callable(guard):
+            raise RuntimeError(identity_error or "control backend identity unavailable")
+        async with asyncio.timeout(15.0):
+            async with guard(origin_backend):
+                await _require_call_authority(
+                    str(effective_tenant_id), pool=getattr(container, "db_pool", None),
+                )
+                if planned_call_id is not None:
+                    originate_attempted = True
+                    call_id = await origin_adapter.originate_call(
+                        destination=destination,
+                        caller_id=caller_id,
+                        channel_id=planned_call_id,
+                        trunk_endpoint=trunk_endpoint,
+                    )
+                else:
+                    originate_attempted = True
+                    call_id = await origin_adapter.originate_call(
+                        destination=destination,
+                        caller_id=caller_id,
+                    )
         originated_call_id = call_id
 
         if durable_call_id is not None:
@@ -2515,7 +2568,7 @@ async def make_call(request: Request, body: MakeCallRequest):
                 getattr(container, "db_pool", None),
                 tenant_id=str(effective_tenant_id),
                 durable_call_id=durable_call_id,
-                provider=str(getattr(_adapter, "name", "unknown") or "unknown"),
+                provider=str(getattr(origin_adapter, "name", "unknown") or "unknown"),
                 provider_call_id=call_id,
                 from_number=caller_id,
                 route_meta=(
@@ -2527,6 +2580,10 @@ async def make_call(request: Request, body: MakeCallRequest):
                     if _outbound_route is not None
                     else None
                 ),
+            )
+            await _require_call_authority(
+                str(effective_tenant_id), pool=getattr(container, "db_pool", None),
+                existing_call_id=durable_call_id,
             )
 
         # Non-Asterisk adapters do not expose a pre-generated channel ID, so we
@@ -2575,7 +2632,7 @@ async def make_call(request: Request, body: MakeCallRequest):
                 "status": "calling",
                 "call_id": call_id,
                 "destination": destination,
-                "adapter": _adapter.name,
+                "adapter": origin_adapter.name,
                 "guard_latency_ms": guard_result.total_latency_ms,
                 "durable_call_id": durable_call_id,
             }
@@ -2833,6 +2890,8 @@ async def hangup_call(call_id: str, request: Request):
         _adapter,
         str(termination_context.provider_call_id or call_id),
         expected_provider=termination_context.provider,
+        expected_backend=termination_context.control_backend,
+        require_backend_identity=True,
         provider_legs=termination_context.provider_legs,
         provider_leg_ids=termination_context.provider_leg_ids,
     )
@@ -2980,7 +3039,7 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
                     await conn.fetch(
                         """
                         SELECT c.id::text AS durable_call_id,
-                               c.provider,
+                               c.provider, c.route_snapshot,
                                COALESCE(c.provider_call_id, c.external_call_uuid)
                                    AS provider_call_id
                         FROM calls c
@@ -3031,6 +3090,7 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
                         "durable_call_id": str(row["durable_call_id"]),
                         "provider_call_id": row["provider_call_id"],
                         "provider": row["provider"],
+                        "route_snapshot": row.get("route_snapshot"),
                         "provider_leg_ids": legs_by_call[str(row["durable_call_id"])],
                         "provider_legs": providers_by_call[str(row["durable_call_id"])],
                     }
@@ -3057,6 +3117,7 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
     semaphore = asyncio.Semaphore(8)
 
     async def terminate_one(row) -> HangupProof:
+        from app.domain.services.telephony.control_backend_identity import saved_control_backend
         async with semaphore:
             provider_call_id = str(row["provider_call_id"] or "").strip()
             provider_leg_ids = tuple(
@@ -3071,6 +3132,8 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
                     _adapter,
                     provider_call_id,
                     expected_provider=row["provider"],
+                    expected_backend=saved_control_backend(row["route_snapshot"]),
+                    require_backend_identity=True,
                     provider_leg_ids=provider_leg_ids,
                     provider_legs=row["provider_legs"],
                 )
@@ -3081,6 +3144,8 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
                     _adapter,
                     provider_leg_ids[0],
                     expected_provider=row["provider"],
+                    expected_backend=saved_control_backend(row["route_snapshot"]),
+                    require_backend_identity=True,
                     provider_leg_ids=provider_leg_ids[1:],
                     provider_legs=row["provider_legs"],
                 )
@@ -3276,6 +3341,8 @@ async def _apply_inbound_transfer_failure_action(attempt, result: dict) -> dict:
             # parent/current target would manufacture a terminal state while
             # that linked channel can still bill.
             expected_provider=termination_context.provider,
+            expected_backend=termination_context.control_backend,
+            require_backend_identity=True,
             provider_legs=termination_context.provider_legs,
             provider_leg_ids=termination_context.provider_leg_ids,
         )

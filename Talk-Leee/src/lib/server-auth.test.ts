@@ -28,7 +28,7 @@ function read(cookie: string) {
   const req = new NextRequest("https://frontend.example/dashboard/", { headers: { cookie } });
   const requestStore = createRequestStoreForAPI(req, req.nextUrl, { tags: [], expirationsByCacheKind: new Map() }, undefined, undefined, undefined);
   requestStore.phase = "render";
-  return workAsyncStorage.run({ route: "/dashboard", isStaticGeneration: false } as WorkStore,
+  return workAsyncStorage.run({ route: "/dashboard" } as WorkStore,
     () => workUnitAsyncStorage.run(requestStore, getServerMe));
 }
 

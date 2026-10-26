@@ -20,6 +20,8 @@ from app.core.db_utils import acquire_with_tenant
 from app.core.security.principal import (
     PrincipalUnavailable, load_session_principal, assistant_session_context, check_assistant_session,
 )
+from app.core.security.assistant_session_watch import AssistantSessionWatch
+from app.core.security.assistant_runtime import AssistantRuntime, owned_stream, runtime_context
 from app.core.config import get_settings
 from app.core.jwt_security import JWTValidationError, decode_and_validate_token
 from app.infrastructure.assistant.agent import assistant_graph, AgentState
@@ -293,6 +295,9 @@ async def assistant_chat(
     # STEP 1: Accept WebSocket connection (per FastAPI docs)
     await manager.connect(websocket, connection_id)
     identity_context = None
+    authority_watch = None
+    runtime = None
+    runtime_token = None
 
     try:
         # STEP 2: Resolve auth token (first-message preferred, ?token= fallback for 24h soak)
@@ -361,6 +366,16 @@ async def assistant_chat(
         identity_context = assistant_session_context.set({
             "sub": user_id, "sid": payload["sid"], "tenant_id": tenant_id,
         })
+        try:
+            runtime = await AssistantRuntime.register(db_client.pool,
+                assistant_session_context.get(), endpoint_kind="chat")
+        except Exception as exc:
+            await websocket.close(code=1008 if isinstance(exc, PrincipalUnavailable) else 1011,
+                                  reason="Session unavailable")
+            return
+        runtime_token = runtime_context.set(runtime)
+        authority_watch = AssistantSessionWatch(websocket, db_client.pool,
+                                               assistant_session_context.get())
 
         async def require_current_socket():
             try:
@@ -511,148 +526,150 @@ async def assistant_chat(
                     buf: list[str] = []  # tokens for the currently-open bubble
 
                     tenant_model = await get_tenant_assistant_model(db_client, tenant_id)
-                    async for ev in stream_assistant_reply(
+                    await require_current_socket()
+                    async with owned_stream(stream_assistant_reply(
                         chat_messages=chat_messages,
                         tenant_id=tenant_id,
                         user_id=user_id,
                         conversation_id=current_conversation_id,
                         db_client=db_client,
                         model=tenant_model,
-                    ):
-                        etype = ev.get("type")
-                        if etype != "token":
-                            await require_current_socket()
+                    )) as reply_stream:
+                        async for ev in reply_stream:
+                            etype = ev.get("type")
+                            if etype != "token":
+                                await require_current_socket()
 
-                        if etype == "token":
-                            if current_msg_id is None:
-                                current_msg_id = str(uuid.uuid4())
+                            if etype == "token":
+                                if current_msg_id is None:
+                                    current_msg_id = str(uuid.uuid4())
+                                    buf = []
+                                    # first token: drop the thinking indicator and
+                                    # open a fresh assistant bubble on the client
+                                    await manager.send_json(connection_id, {
+                                        "type": "assistant_typing", "content": False
+                                    })
+                                    await manager.send_json(connection_id, {
+                                        "type": "assistant_message_start", "id": current_msg_id
+                                    })
+                                buf.append(ev.get("delta", ""))
+                                await manager.send_json(connection_id, {
+                                    "type": "assistant_token",
+                                    "id": current_msg_id,
+                                    "delta": ev.get("delta", ""),
+                                })
+
+                            elif etype == "tool_start":
+                                # close any open preamble bubble, then show the
+                                # thinking indicator while the tool runs
+                                if current_msg_id is not None:
+                                    text = "".join(buf)
+                                    await manager.send_json(connection_id, {
+                                        "type": "assistant_message_end",
+                                        "id": current_msg_id,
+                                        "content": text,
+                                    })
+                                    if text.strip():
+                                        messages_history.append({
+                                            "role": "assistant",
+                                            "content": text,
+                                            "timestamp": datetime.utcnow().isoformat(),
+                                        })
+                                    current_msg_id = None
+                                    buf = []
+                                await manager.send_json(connection_id, {
+                                    "type": "assistant_typing", "content": True
+                                })
+
+                            elif etype == "final":
+                                final_text = ev.get("content", "") or "".join(buf)
+                                if current_msg_id is not None:
+                                    await manager.send_json(connection_id, {
+                                        "type": "assistant_message_end",
+                                        "id": current_msg_id,
+                                        "content": final_text,
+                                    })
+                                else:
+                                    # no tokens streamed this turn (e.g. empty answer)
+                                    msg_id = str(uuid.uuid4())
+                                    if not final_text.strip():
+                                        final_text = "I processed your request."
+                                    await manager.send_json(connection_id, {
+                                        "type": "assistant_message_start", "id": msg_id
+                                    })
+                                    await manager.send_json(connection_id, {
+                                        "type": "assistant_message_end",
+                                        "id": msg_id, "content": final_text,
+                                    })
+                                if final_text.strip():
+                                    messages_history.append({
+                                        "role": "assistant",
+                                        "content": final_text,
+                                        "timestamp": datetime.utcnow().isoformat(),
+                                    })
+                                current_msg_id = None
                                 buf = []
-                                # first token: drop the thinking indicator and
-                                # open a fresh assistant bubble on the client
+
+                            elif etype == "proposal":
+                                # An edit tool returned a preview. Close any open
+                                # preamble bubble, register the proposal server-side,
+                                # and send a diff card for the user to Apply/Reject.
+                                if current_msg_id is not None:
+                                    text = "".join(buf)
+                                    await manager.send_json(connection_id, {
+                                        "type": "assistant_message_end",
+                                        "id": current_msg_id,
+                                        "content": text,
+                                    })
+                                    if text.strip():
+                                        messages_history.append({
+                                            "role": "assistant",
+                                            "content": text,
+                                            "timestamp": datetime.utcnow().isoformat(),
+                                        })
+                                    current_msg_id = None
+                                    buf = []
+                                await manager.send_json(connection_id, {
+                                    "type": "assistant_typing", "content": False
+                                })
+                                proposal = store_proposal(
+                                    tool=ev.get("tool", ""),
+                                    args=ev.get("args") or {},
+                                    result=ev.get("result") or {},
+                                    tenant_id=tenant_id,
+                                    actor_user_id=user_id,
+                                    conversation_id=current_conversation_id,
+                                )
+                                await manager.send_json(connection_id, {
+                                    "type": "edit_proposal",
+                                    "proposal_id": proposal["proposal_id"],
+                                    "tool": proposal["tool"],
+                                    "note": proposal["note"],
+                                    "warnings": proposal["warnings"],
+                                    "changes": proposal["changes"],
+                                    "campaigns": proposal["campaigns"],
+                                    "duplicate": proposal.get("duplicate"),
+                                })
+                                # Record a marker so reloading the thread stays coherent.
+                                messages_history.append({
+                                    "role": "assistant",
+                                    "content": "_Proposed changes — awaiting your approval._",
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                })
+
+                            elif etype == "error":
+                                err_text = ev.get("content", "Sorry, I encountered an error.")
                                 await manager.send_json(connection_id, {
                                     "type": "assistant_typing", "content": False
                                 })
                                 await manager.send_json(connection_id, {
-                                    "type": "assistant_message_start", "id": current_msg_id
+                                    "type": "assistant_message", "content": err_text
                                 })
-                            buf.append(ev.get("delta", ""))
-                            await manager.send_json(connection_id, {
-                                "type": "assistant_token",
-                                "id": current_msg_id,
-                                "delta": ev.get("delta", ""),
-                            })
-
-                        elif etype == "tool_start":
-                            # close any open preamble bubble, then show the
-                            # thinking indicator while the tool runs
-                            if current_msg_id is not None:
-                                text = "".join(buf)
-                                await manager.send_json(connection_id, {
-                                    "type": "assistant_message_end",
-                                    "id": current_msg_id,
-                                    "content": text,
-                                })
-                                if text.strip():
-                                    messages_history.append({
-                                        "role": "assistant",
-                                        "content": text,
-                                        "timestamp": datetime.utcnow().isoformat(),
-                                    })
-                                current_msg_id = None
-                                buf = []
-                            await manager.send_json(connection_id, {
-                                "type": "assistant_typing", "content": True
-                            })
-
-                        elif etype == "final":
-                            final_text = ev.get("content", "") or "".join(buf)
-                            if current_msg_id is not None:
-                                await manager.send_json(connection_id, {
-                                    "type": "assistant_message_end",
-                                    "id": current_msg_id,
-                                    "content": final_text,
-                                })
-                            else:
-                                # no tokens streamed this turn (e.g. empty answer)
-                                msg_id = str(uuid.uuid4())
-                                if not final_text.strip():
-                                    final_text = "I processed your request."
-                                await manager.send_json(connection_id, {
-                                    "type": "assistant_message_start", "id": msg_id
-                                })
-                                await manager.send_json(connection_id, {
-                                    "type": "assistant_message_end",
-                                    "id": msg_id, "content": final_text,
-                                })
-                            if final_text.strip():
                                 messages_history.append({
                                     "role": "assistant",
-                                    "content": final_text,
+                                    "content": err_text,
                                     "timestamp": datetime.utcnow().isoformat(),
                                 })
-                            current_msg_id = None
-                            buf = []
-
-                        elif etype == "proposal":
-                            # An edit tool returned a preview. Close any open
-                            # preamble bubble, register the proposal server-side,
-                            # and send a diff card for the user to Apply/Reject.
-                            if current_msg_id is not None:
-                                text = "".join(buf)
-                                await manager.send_json(connection_id, {
-                                    "type": "assistant_message_end",
-                                    "id": current_msg_id,
-                                    "content": text,
-                                })
-                                if text.strip():
-                                    messages_history.append({
-                                        "role": "assistant",
-                                        "content": text,
-                                        "timestamp": datetime.utcnow().isoformat(),
-                                    })
-                                current_msg_id = None
-                                buf = []
-                            await manager.send_json(connection_id, {
-                                "type": "assistant_typing", "content": False
-                            })
-                            proposal = store_proposal(
-                                tool=ev.get("tool", ""),
-                                args=ev.get("args") or {},
-                                result=ev.get("result") or {},
-                                tenant_id=tenant_id,
-                                actor_user_id=user_id,
-                                conversation_id=current_conversation_id,
-                            )
-                            await manager.send_json(connection_id, {
-                                "type": "edit_proposal",
-                                "proposal_id": proposal["proposal_id"],
-                                "tool": proposal["tool"],
-                                "note": proposal["note"],
-                                "warnings": proposal["warnings"],
-                                "changes": proposal["changes"],
-                                "campaigns": proposal["campaigns"],
-                                "duplicate": proposal.get("duplicate"),
-                            })
-                            # Record a marker so reloading the thread stays coherent.
-                            messages_history.append({
-                                "role": "assistant",
-                                "content": "_Proposed changes — awaiting your approval._",
-                                "timestamp": datetime.utcnow().isoformat(),
-                            })
-
-                        elif etype == "error":
-                            err_text = ev.get("content", "Sorry, I encountered an error.")
-                            await manager.send_json(connection_id, {
-                                "type": "assistant_typing", "content": False
-                            })
-                            await manager.send_json(connection_id, {
-                                "type": "assistant_message", "content": err_text
-                            })
-                            messages_history.append({
-                                "role": "assistant",
-                                "content": err_text,
-                                "timestamp": datetime.utcnow().isoformat(),
-                            })
 
                     # Persist chat state without breaking the already-sent assistant reply.
                     await persist_conversation(user_content)
@@ -752,6 +769,9 @@ async def assistant_chat(
             elif data.get("type") == "ping":
                 await manager.send_json(connection_id, {"type": "pong"})
     
+    except asyncio.CancelledError:
+        if authority_watch is None or not authority_watch.terminated:
+            raise
     except WebSocketDisconnect:
         # Normal disconnection - per FastAPI docs, catch this exception
         logger.info(f"Client {connection_id} disconnected")
@@ -760,9 +780,19 @@ async def assistant_chat(
         logger.error(f"WebSocket error: {e}", exc_info=True)
     
     finally:
-        if identity_context is not None:
-            assistant_session_context.reset(identity_context)
-        manager.disconnect(connection_id)
+        try:
+            if authority_watch is not None:
+                await authority_watch.stop()
+            if runtime is not None:
+                await runtime.stop_tasks()
+                await runtime.record_stopped(close_frame_status=(
+                    authority_watch.close_frame_status if authority_watch else "not_attempted"))
+        finally:
+            if runtime_token is not None:
+                runtime_context.reset(runtime_token)
+            if identity_context is not None:
+                assistant_session_context.reset(identity_context)
+            manager.disconnect(connection_id)
 
 
 # =============================================================================

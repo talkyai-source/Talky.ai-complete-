@@ -11,6 +11,7 @@ from app.api.v1.dependencies import get_audit_logger, get_db_client
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.principal import PrincipalUnavailable, load_current_principal
+from app.core.security.credential_issuance import lock_user_credential_issuance
 from app.core.security.lockout import (
     check_account_locked,
     record_login_attempt,
@@ -219,6 +220,11 @@ async def login(
             )
 
         try:
+            # Verify expensive password work first, then fence issuance against
+            # formal holds and revalidate the exact password proof under lock.
+            locked = await lock_user_credential_issuance(conn, user_id)
+            if locked["password_hash"] != row["password_hash"]:
+                raise PrincipalUnavailable("credentials_changed")
             principal = await load_current_principal(conn, user_id)
         except PrincipalUnavailable as exc:
             await record_login_attempt(conn,email=normalised_email,user_id=user_id,
@@ -233,7 +239,9 @@ async def login(
         # the failure counter on every fresh password login and so disable the
         # lockout that protects TOTP/recovery-code guessing. /auth/mfa/verify
         # records the success once the second factor is accepted.
-        mfa_enabled = bool(row.get("mfa_enabled", False))
+        # MFA may have been enabled while password verification ran. The
+        # profile fence makes this the current, serialized factor decision.
+        mfa_enabled = locked["mfa_enabled"] is True
         if not mfa_enabled:
             await record_login_attempt(
                 conn,

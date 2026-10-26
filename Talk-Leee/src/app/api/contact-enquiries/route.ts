@@ -54,7 +54,10 @@ export async function POST(request: Request): Promise<Response> {
   }
   // The only upstream is deployment configuration, never a caller URL/header.
   let target: URL;
-  const configuredBase = process.env.NEXT_PUBLIC_API_BASE_URL;
+  // A browser may reach /api/v1 through the public same-origin reverse proxy.
+  // This server hop needs an explicit backend target rather than the Next
+  // catch-all. Keep the existing separate-origin deployment as the fallback.
+  const configuredBase = process.env.CONTACT_ENQUIRY_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL;
   try {
     const base = new URL(configuredBase ?? "");
     if (!["https:", "http:"].includes(base.protocol) || base.username || base.password || base.search || base.hash || base.host === new URL(origin).host || base.host === new URL(request.url).host) throw new Error("Invalid backend");

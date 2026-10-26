@@ -14,7 +14,13 @@ interface CallTerminationActionProps {
     onConfirmed: (callId: string) => void;
 }
 
-type LocalPhase = 'idle' | 'submitting' | 'requested' | 'failed';
+type LocalPhase = 'idle' | 'submitting' | 'requested' | 'failed' | 'unknown' | 'confirmed';
+
+function terminationDetails(value: unknown, callId: string): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const details = value as Record<string, unknown>;
+    return details.call_id === callId ? details : null;
+}
 
 export function CallTerminationAction({
     call,
@@ -25,7 +31,21 @@ export function CallTerminationAction({
     const [localPhase, setLocalPhase] = useState<LocalPhase>('idle');
     const [localError, setLocalError] = useState<string | null>(null);
     const [confirming, setConfirming] = useState(false);
+    const [checking, setChecking] = useState(false);
     const requestInFlight = useRef(false);
+    const selection = useRef<{ active: boolean } | null>(null);
+    const session = api.getAuthGeneration();
+
+    useEffect(() => {
+        const owner = { active: true };
+        selection.current = owner;
+        requestInFlight.current = false;
+        setLocalPhase('idle');
+        setLocalError(null);
+        setConfirming(false);
+        setChecking(false);
+        return () => { owner.active = false; };
+    }, [call.id, session]);
 
     useEffect(() => {
         if (serverPhase === 'requested') {
@@ -33,14 +53,14 @@ export function CallTerminationAction({
             setLocalError(null);
             setConfirming(false);
         } else if (serverPhase === 'failed') {
-            setLocalPhase('failed');
-            setLocalError(call.termination_error || 'The hangup was not confirmed.');
+            // An older poll cannot erase a pending or transport-unknown request.
+            setLocalPhase((current) => ['requested', 'unknown', 'submitting'].includes(current) ? current : 'failed');
             setConfirming(false);
         }
     }, [call.termination_error, serverPhase]);
 
-    const effectivePhase: LocalPhase = localPhase === 'submitting'
-        ? 'submitting'
+    const effectivePhase: LocalPhase = ['submitting', 'requested', 'unknown'].includes(localPhase)
+        ? localPhase
         : serverPhase === 'failed'
             ? 'failed'
             : serverPhase === 'requested'
@@ -53,7 +73,7 @@ export function CallTerminationAction({
 
     const requestConfirmation = (event: React.MouseEvent<HTMLButtonElement>) => {
         stopRowClick(event);
-        if (effectivePhase === 'requested' || effectivePhase === 'submitting') return;
+        if (['requested', 'submitting', 'unknown'].includes(effectivePhase)) return;
         setConfirming(true);
     };
 
@@ -64,7 +84,9 @@ export function CallTerminationAction({
 
     const terminate = async (event: React.MouseEvent<HTMLButtonElement>) => {
         stopRowClick(event);
-        if (requestInFlight.current || effectivePhase === 'requested') return;
+        const owner = selection.current;
+        const isCurrent = () => Boolean(owner?.active && session === api.getAuthGeneration());
+        if (!isCurrent() || requestInFlight.current || ['requested', 'unknown'].includes(effectivePhase)) return;
 
         requestInFlight.current = true;
         setConfirming(false);
@@ -73,13 +95,51 @@ export function CallTerminationAction({
 
         try {
             const response = await api.terminateCall(call.id);
-            if (response.error) throw new Error(response.error.message);
-            if (!response.data) throw new Error('The termination request returned no result.');
+            if (!isCurrent()) return;
+            if (response.error) {
+                const details = terminationDetails(response.error.details, call.id);
+                if (details?.termination_status === 'requested' && details.provider_hangup_confirmed === false) {
+                    setLocalPhase('requested');
+                    setLocalError(null);
+                    onPatch(call.id, {
+                        termination_status: 'requested',
+                        termination_requested_at: new Date().toISOString(),
+                        provider_hangup_requested: details.provider_hangup_requested === true,
+                        provider_hangup_confirmed: false,
+                        termination_error: null,
+                    });
+                    return;
+                }
+                // Only an explicit rejection before dispatch permits another
+                // confirmed attempt. A timeout may follow a committed request.
+                const rejected = (details?.termination_status === 'failed' && details.provider_hangup_requested === false)
+                    || [400, 401, 403, 422].includes(response.error.status ?? 0);
+                if (rejected) {
+                    setLocalPhase('failed');
+                    setLocalError(response.error.message);
+                    return;
+                }
+                throw new Error(response.error.message);
+            }
+            if (!response.data || response.data.call_id !== call.id) throw new Error('The termination result could not be verified.');
 
             const classification = classifyTerminationResult(response.data);
             if (classification.phase === 'confirmed') {
+                if (response.data.termination_status !== 'confirmed' || response.data.provider_hangup_confirmed !== true) {
+                    throw new Error('Provider confirmation is unavailable.');
+                }
+                if (response.data.termination_receipt_saved === false) {
+                    const gap = response.data.termination_reconciliation_error || 'Provider hangup confirmed; the durable confirmation could not be saved.';
+                    setLocalPhase('confirmed');
+                    setLocalError(gap);
+                    onPatch(call.id, { termination_status: 'confirmed', provider_hangup_confirmed: true, termination_error: gap });
+                    return;
+                }
                 onConfirmed(call.id);
                 return;
+            }
+            if (classification.phase === 'failed' && response.data.provider_hangup_requested !== false) {
+                throw new Error(classification.error || 'The termination outcome is unknown.');
             }
 
             const patch = terminationPatchFromResult(response.data);
@@ -87,22 +147,50 @@ export function CallTerminationAction({
             setLocalPhase(classification.phase);
             setLocalError(classification.error);
         } catch (error) {
+            if (!isCurrent()) return;
             const message = error instanceof Error
                 ? error.message
                 : 'Failed to request call termination.';
-            setLocalPhase('failed');
-            setLocalError(message);
-            onPatch(call.id, {
-                termination_status: 'failed',
-                termination_error: message,
-                provider_hangup_confirmed: false,
-            });
+            setLocalPhase('unknown');
+            setLocalError(`${message} The request may have been applied. Check its status before another action.`);
         } finally {
-            requestInFlight.current = false;
+            if (isCurrent()) requestInFlight.current = false;
         }
     };
 
-    if (serverPhase === 'confirmed') {
+    const checkStatus = async (event: React.MouseEvent<HTMLButtonElement>) => {
+        stopRowClick(event);
+        const owner = selection.current;
+        const isCurrent = () => Boolean(owner?.active && session === api.getAuthGeneration());
+        if (!isCurrent() || requestInFlight.current) return;
+        requestInFlight.current = true;
+        setChecking(true);
+        try {
+            const response = await api.getAdminCallDetail(call.id);
+            if (!isCurrent()) return;
+            if (response.error || response.data?.id !== call.id) {
+                throw new Error(response.error?.message || 'The selected call status is unavailable.');
+            }
+            const current = response.data;
+            if (current.termination_status === 'confirmed' && current.provider_hangup_confirmed === true) {
+                onConfirmed(call.id);
+            } else if (current.status === 'termination_pending' || current.termination_status === 'requested') {
+                setLocalPhase('requested');
+                setLocalError(null);
+                onPatch(call.id, { termination_status: 'requested', termination_error: null, provider_hangup_confirmed: false });
+            } else {
+                // A terminal DB label alone does not prove all provider legs
+                // are absent. This read must never issue a second hangup.
+                setLocalError(`Latest recorded call status: ${current.status}. ${current.termination_reconciliation_error || 'Provider confirmation is still unavailable; review the call before another action.'}`);
+            }
+        } catch (error) {
+            if (isCurrent()) setLocalError(error instanceof Error ? error.message : 'Could not check call status.');
+        } finally {
+            if (isCurrent()) { setChecking(false); requestInFlight.current = false; }
+        }
+    };
+
+    if (serverPhase === 'confirmed' || localPhase === 'confirmed') {
         return (
             <div className="termination-action" onClick={stopRowClick}>
                 <button
@@ -114,25 +202,28 @@ export function CallTerminationAction({
                     <PhoneOff size={14} />
                     Ended
                 </button>
+                {(localError || call.termination_error) && <span className="termination-error" role="alert">{localError || call.termination_error}</span>}
             </div>
         );
     }
 
-    if (effectivePhase === 'requested' || effectivePhase === 'submitting') {
+    if (effectivePhase === 'requested' || effectivePhase === 'submitting' || effectivePhase === 'unknown') {
         return (
             <div className="termination-action" onClick={stopRowClick}>
                 <button
                     className="btn btn-secondary btn-sm termination-pending-button"
                     type="button"
                     disabled
-                    aria-label="Call termination is awaiting provider confirmation"
+                    aria-label={effectivePhase === 'unknown' ? 'Call termination outcome unknown' : 'Call termination is awaiting provider confirmation'}
                 >
                     <Loader2 className="animate-spin" size={14} />
-                    Ending…
+                    {effectivePhase === 'unknown' ? 'Outcome unknown' : 'Ending…'}
                 </button>
                 <span className="termination-note" role="status" aria-live="polite">
-                    Awaiting provider confirmation
+                    {effectivePhase === 'unknown' ? 'Check the existing request; do not resend it.' : 'Awaiting provider confirmation'}
                 </span>
+                {effectivePhase !== 'submitting' && <button type="button" className="btn btn-secondary btn-sm" disabled={checking} onClick={(event) => void checkStatus(event)}>{checking ? 'Checking…' : 'Check status'}</button>}
+                {localError && <span className="termination-error" role="alert">{localError}</span>}
             </div>
         );
     }

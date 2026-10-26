@@ -43,7 +43,7 @@ const notificationSchema = z.object({
     id: z.string().min(1).max(200), type: z.enum(["success", "warning", "error", "info"]), priority,
     title: z.string().min(1).max(1000), message: z.string().max(20000).optional(),
     createdAt: z.number().finite().nonnegative(), readAt: z.number().finite().nonnegative().optional(),
-    data: z.record(z.unknown()).optional(),
+    data: z.record(z.string(), z.unknown()).optional(),
 });
 export function defaultNotificationsSettings(): NotificationsSettings {
     return {

@@ -34,7 +34,7 @@ export const invoiceLineSchema = z.object({
   currency: currencyCode, period_start: date, period_end: date,
 });
 export const invoiceSchema = z.object({
-  id: z.string().uuid(), stripe_invoice_id: text, invoice_number: text.default(null), status: z.string(),
+  id: z.guid(), stripe_invoice_id: text, invoice_number: text.default(null), status: z.string(),
   currency: currencyCode, currency_exponent: currencyExponent,
   subtotal: minorAmount, total: minorAmount, amount_due: minorAmount, amount_paid: minorAmount, amount_remaining: minorAmount,
   period_start: date, period_end: date, paid_at: date, due_date: date, created_at: date,
@@ -71,7 +71,7 @@ export const overageAlertsSchema = z.array(z.object({ type: z.enum(["minutes", "
 }));
 
 export const billingLedgerSchema = z.object({
-  id: z.string(), order_id: z.string().uuid().nullable(), provider_event_id: text, provider_payment_id: text,
+  id: z.string(), order_id: z.guid().nullable(), provider_event_id: text, provider_payment_id: text,
   kind: z.enum(["topup", "refund", "adjustment", "dispute"]), minutes_delta: z.number().int().safe(),
   amount_cents: minorAmount, currency: currencyCode, currency_exponent: currencyExponent,
   note: text, created_at: date,

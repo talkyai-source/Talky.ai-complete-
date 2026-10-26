@@ -50,6 +50,7 @@ from app.domain.services.telephony_rate_limiter import TelephonyRateLimiter, Rat
 from app.domain.services.telephony_concurrency_limiter import TelephonyConcurrencyLimiter, LeaseKind
 from app.domain.services.phone_number_normalizer import normalize_e164_digits
 from app.domain.services.platform_runtime_controls import get_outbound_call_pause
+from app.domain.services.telephony.call_authority import read_call_authority
 from app.domain.services.subscription_status import (
     SUBSCRIPTION_BLOCKED_STATUSES,
     TENANT_BLOCKED_STATUSES,
@@ -102,6 +103,7 @@ class GuardCheck(str, Enum):
 _FAIL_CLOSED_ON_ERROR_CHECKS = frozenset(
     {
         GuardCheck.PLATFORM_CALLS_ENABLED,
+        GuardCheck.TENANT_ACTIVE,
         GuardCheck.DNC_CHECK,
         GuardCheck.SPEND_LIMIT,
         GuardCheck.MINUTES_QUOTA,
@@ -497,56 +499,19 @@ class CallGuard:
         )
 
     async def _check_tenant_active(self, tenant_id: str, **kwargs) -> CheckResult:
-        """Check if tenant is active and not suspended."""
+        """Read current tenant, formal parent and active holds before admission."""
         try:
-            async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
-                row = await conn.fetchrow(
-                    """
-                    SELECT id, subscription_status, status
-                    FROM tenants
-                    WHERE id = $1
-                    """,
-                    tenant_id,
-                )
-
-                if not row:
-                    return CheckResult(
-                        check=GuardCheck.TENANT_ACTIVE,
-                        passed=False,
-                        reason="tenant_not_found",
-                    )
-
-                # Suspension (suspension_service) writes tenants.status and
-                # leaves subscription_status alone, so both must be read.
-                account_status = row.get("status")
-                if account_status is not None and account_status != "active":
-                    return CheckResult(
-                        check=GuardCheck.TENANT_ACTIVE,
-                        passed=False,
-                        reason=f"tenant_{account_status}",
-                    )
-
-                status = canonical_subscription_status(row.get("subscription_status") or "active")
-                if subscription_status_is_blocked(status, TENANT_BLOCKED_STATUSES):
-                    return CheckResult(
-                        check=GuardCheck.TENANT_ACTIVE,
-                        passed=False,
-                        reason=f"tenant_{status}",
-                    )
-
-                return CheckResult(
-                    check=GuardCheck.TENANT_ACTIVE,
-                    passed=True,
-                )
+            # The formal parent/audit rows belong to another tenant. Use the
+            # existing service read with an explicit bound tenant predicate;
+            # child-scoped RLS would hide required authority evidence.
+            async with acquire_with_tenant(self._db_pool, None) as conn:
+                authority = await read_call_authority(conn, tenant_id)
+            return CheckResult(check=GuardCheck.TENANT_ACTIVE,
+                               passed=authority.allowed, reason=authority.reason)
         except Exception as e:
-            if not _is_missing_schema_error(e):
-                return _check_unavailable(GuardCheck.TENANT_ACTIVE, e)
-            logger.debug(f"tenant active check skipped (column may not exist): {e}")
-            return CheckResult(
-                check=GuardCheck.TENANT_ACTIVE,
-                passed=True,
-                reason=_SCHEMA_CHECK_SKIPPED,
-            )
+            # Missing formal schema is unknown authority, not a compatibility
+            # permission. The dialer already defers this transient vocabulary.
+            return _check_unavailable(GuardCheck.TENANT_ACTIVE, e)
 
     async def _check_partner_active(
         self,

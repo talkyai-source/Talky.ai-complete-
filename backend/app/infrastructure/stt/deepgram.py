@@ -3,6 +3,7 @@ Deepgram STT Provider Implementation
 Standard Deepgram STT using v2 API (non-Flux)
 """
 import os
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
 import asyncio
 from typing import AsyncIterator, Dict, Optional
 from deepgram import AsyncDeepgramClient
@@ -89,6 +90,11 @@ class DeepgramSTT(STTProvider):
                     if self._pool is not None and lease.key
                     else self._client
                 )
+                context = self._config.get("observation_context")
+                if lease.key != self._primary_key and (context or {}).get("source") == "tenant":
+                    context = None
+                observation = ProviderAttempt("stt", "deepgram", lease.key, context)
+                recognition = ProviderAttempt("stt", "deepgram", lease.key, context)
                 try:
                     async with chosen_client.listen.v2.connect(
                         model=self._model,
@@ -97,9 +103,18 @@ class DeepgramSTT(STTProvider):
                         language=language,
                     ) as connection:
                         self._connection = connection
+                        observation.accepted()
+                        recognition.accepted()
 
                         def on_message(message: ListenV2SocketClientResponse) -> None:
                             if hasattr(message, "transcript") and message.transcript:
+                                # v2 has interim TurnInfo too; only provider-confirmed final turns certify recognition.
+                                if (getattr(message, "event", None) == "EndOfTurn"
+                                        and isinstance(message.transcript, str) and message.transcript.strip()
+                                        and not observation.closed):
+                                    observation.recognized()
+                                    recognition.recognized()
+                                    recognition.finish(outcome="recognized")
                                 confidence = None
                                 if hasattr(message, "words") and message.words:
                                     confidences = [
@@ -119,6 +134,7 @@ class DeepgramSTT(STTProvider):
                                     pass
 
                         def on_error(error) -> None:
+                            observation.finish(error if isinstance(error, BaseException) else RuntimeError("Deepgram stream error"))
                             print(f"Deepgram error: {error}")
 
                         connection.on(EventType.OPEN, lambda _: None)
@@ -133,6 +149,7 @@ class DeepgramSTT(STTProvider):
                                 async for audio_chunk in audio_stream:
                                     await connection._send(audio_chunk.data)
                             except Exception as e:
+                                observation.finish(e)
                                 print(f"Error sending audio: {e}")
 
                         sender_task = asyncio.create_task(send_audio())
@@ -164,8 +181,14 @@ class DeepgramSTT(STTProvider):
                     lease.report_success()
 
                 except Exception as e:
+                    observation.finish(e)
                     lease.report_failure(retryable=True)
                     raise RuntimeError(f"Deepgram transcription failed: {str(e)}")
+                except BaseException as exc:
+                    observation.finish(exc)
+                    raise
+                finally:
+                    observation.finish(outcome="recognized" if observation.output_seen else "connected")
     
     async def detect_turn_end(self) -> bool:
         """Detect turn end using VAD"""

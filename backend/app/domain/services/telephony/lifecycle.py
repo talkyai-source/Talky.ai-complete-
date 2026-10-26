@@ -33,6 +33,7 @@ import math
 import os
 import time
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Dict, Mapping, Optional
 
 # Imports from already-extracted telephony submodules
@@ -47,6 +48,9 @@ from app.domain.services.telephony.adapter_registry import get_adapter
 from app.domain.services.telephony.modes import resolve_first_speaker
 from app.domain.services.telephony.modes.agent_first import _send_outbound_greeting
 from app.domain.services.telephony.recording import _save_call_recording
+from app.domain.services.telephony.termination_receipts import (
+    persist_termination_receipt as _save_confirmed_termination_receipt,
+)
 from app.services.scripts import (
     bind_telephony_call,
     save_call_transcript_on_hangup,
@@ -90,6 +94,212 @@ async def _serialized_global_release(release_callback, redis_client, call_id) ->
 
 class InboundTerminalProofMissing(RuntimeError):
     """A confirmed Answer has no authoritative PBX-absence timestamp."""
+
+
+_CALL_AUTHORITY_POLL_S = 1.0
+_CALL_AUTHORITY_READ_TIMEOUT_S = 2.0
+_CALL_AUTHORITY_BATCH = 200
+_account_hold_scan_after: Optional[str] = None
+_account_hold_termination_tasks: dict[str, asyncio.Task] = {}
+
+
+def _proven_call_started_at(row: Mapping[str, Any]) -> Optional[datetime]:
+    """Only a provider acknowledgement/Answer proves a pre-hold live call.
+
+    Creation/started_at and a preallocated channel identify intent, not effect.
+    A historical ringing call without acknowledgement has no exemption proof.
+    """
+    import json
+    from app.domain.services.telephony.control_backend_identity import saved_control_backend
+
+    def timestamp(value):
+        try:
+            parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    proofs = []
+    answered = timestamp(row.get("answered_at"))
+    if answered is not None:
+        proofs.append(answered)
+    snapshot = row.get("route_snapshot") or {}
+    if isinstance(snapshot, str):
+        try:
+            snapshot = json.loads(snapshot)
+        except (ValueError, TypeError):
+            snapshot = {}
+    ack = snapshot.get("provider_acknowledgement") if isinstance(snapshot, dict) else None
+    if isinstance(ack, dict) and (
+        ack.get("provider") == row.get("provider")
+        and ack.get("provider_call_id") == row.get("provider_call_id")
+        and ack.get("control_backend") == saved_control_backend(snapshot)
+        and saved_control_backend(snapshot) is not None
+    ):
+        acknowledged = timestamp(ack.get("acknowledged_at"))
+        if acknowledged is not None:
+            proofs.append(acknowledged)
+    return min(proofs) if proofs else None
+
+
+async def _require_call_authority(
+    tenant_id: str, *, pool: Any = None, existing_call_id: Optional[str] = None,
+) -> None:
+    """Current account/parent policy at the provider boundary; no network locks."""
+    from fastapi import HTTPException
+    from app.core.container import get_container
+    from app.core.db_utils import acquire_with_tenant
+    from app.domain.services.telephony.call_authority import read_call_authority
+
+    try:
+        pool = pool if pool is not None else get_container().db_pool
+        async with asyncio.timeout(_CALL_AUTHORITY_READ_TIMEOUT_S):
+            # Parent accounts and audit-backed holds are service-visible. The
+            # shared reader explicitly binds its predicates to this tenant.
+            async with acquire_with_tenant(pool, None, timeout=_CALL_AUTHORITY_READ_TIMEOUT_S) as conn:
+                started_at = None
+                if existing_call_id is not None:
+                    row = await conn.fetchrow(
+                        """SELECT provider, provider_call_id, answered_at, route_snapshot
+                           FROM calls WHERE id=$1::uuid AND tenant_id=$2::uuid""",
+                        str(existing_call_id), str(tenant_id),
+                    )
+                    if row is None:
+                        raise RuntimeError("call effect identity unavailable")
+                    started_at = _proven_call_started_at(row)
+                authority = await read_call_authority(
+                    conn, str(tenant_id), existing_call_started_at=started_at,
+                    purpose="existing_call" if existing_call_id is not None else "admission",
+                )
+        if not authority.allowed:
+            raise HTTPException(409, detail={
+                "error": "call_authority_denied", "reason": authority.reason,
+            })
+        if not _state().is_telephony_owner():
+            raise HTTPException(503, detail={"error": "telephony_not_active_on_node"})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, detail={"error": "call_authority_unavailable"}) from exc
+
+
+async def _reconcile_account_call_authority() -> int:
+    """One bounded owner scan; provider proof never delays policy observation.
+
+    Keyset rotation visits every candidate even when an old PBX never confirms.
+    Up to 200 calls per tick are covered by the 1s cadence plus 2s DB budget;
+    larger unresolved backlogs take successive batches, not a false 5s claim.
+    """
+    global _account_hold_scan_after
+    from app.core.container import get_container
+    from app.core.db_utils import acquire_with_tenant
+    from app.domain.services.call_status import TERMINAL_CALL_STATUSES
+    from app.domain.services.telephony.call_authority import (
+        read_call_authority_rows, evaluate_call_authority,
+    )
+
+    state, adapter = _state(), get_adapter()
+    if not state.is_telephony_owner() or adapter is None:
+        return 0
+    # This is the existing confirmed-control backend, not a new provider path.
+    if getattr(adapter, "name", None) != "asterisk":
+        return 0
+    pool = get_container().db_pool
+    async with asyncio.timeout(_CALL_AUTHORITY_READ_TIMEOUT_S):
+        async with acquire_with_tenant(pool, None, timeout=_CALL_AUTHORITY_READ_TIMEOUT_S) as conn:
+            candidate_sql = """SELECT c.id, c.tenant_id, c.provider, c.provider_call_id,
+                          c.external_call_uuid, c.answered_at, c.route_snapshot,
+                          c.campaign_id, c.direction, c.status
+                   FROM calls c
+                   WHERE c.provider='asterisk'
+                     AND COALESCE(NULLIF(c.provider_call_id,''),NULLIF(c.external_call_uuid,'')) IS NOT NULL
+                     AND ($1::uuid IS NULL OR c.id>$1::uuid)
+                     AND (c.status <> ALL($2::text[])
+                          OR (c.provider_terminated_at IS NULL AND (
+                              (c.direction='inbound' AND c.billing_status='reserved')
+                              OR (c.direction='outbound' AND c.terminal_settled_at IS NULL)))
+                          OR EXISTS (SELECT 1 FROM call_legs l WHERE l.call_id=c.id
+                              AND l.status IN ('initiated','ringing','answered','in_progress','in_call','active')))
+                   ORDER BY c.id LIMIT $3"""
+            rows = await conn.fetch(
+                candidate_sql,
+                _account_hold_scan_after, list(TERMINAL_CALL_STATUSES), _CALL_AUTHORITY_BATCH,
+            )
+            if not rows and _account_hold_scan_after is not None:
+                # A full final page must not add an empty polling tick before
+                # revisiting active calls. Wrap within this same 2s read budget.
+                rows = await conn.fetch(
+                    candidate_sql, None, list(TERMINAL_CALL_STATUSES), _CALL_AUTHORITY_BATCH,
+                )
+            policies = await read_call_authority_rows(conn, list({str(r["tenant_id"]) for r in rows})) if rows else {}
+    if not state.is_telephony_owner() or get_adapter() is not adapter:
+        return 0
+    _account_hold_scan_after = str(rows[-1]["id"]) if len(rows) == _CALL_AUTHORITY_BATCH else None
+    dispatched = 0
+    for row in rows:
+        try:
+            decision = evaluate_call_authority(
+                policies.get(str(row["tenant_id"])), existing_call_started_at=_proven_call_started_at(row),
+                purpose="existing_call",
+            )
+        except Exception as exc:
+            # One corrupt tenant projection cannot suppress the other tenants'
+            # decisions or be mistaken for permission to terminate this call.
+            logger.error("account_call_policy_invalid call=%s err_type=%s",
+                         str(row["id"]), type(exc).__name__)
+            continue
+        call_id = str(row["id"])
+        if decision.allowed or call_id in _account_hold_termination_tasks:
+            continue
+        task = _track_task(_terminate_account_restricted_call(dict(row), pool=pool))
+        _account_hold_termination_tasks[call_id] = task
+        def finished(done, owned_id=call_id):
+            if _account_hold_termination_tasks.get(owned_id) is done:
+                _account_hold_termination_tasks.pop(owned_id, None)
+        task.add_done_callback(finished)
+        dispatched += 1
+    return dispatched
+
+
+async def _terminate_account_restricted_call(row: Mapping[str, Any], *, pool: Any) -> bool:
+    """Recheck a delayed decision; retain existing durable termination recovery."""
+    from fastapi import HTTPException
+    try:
+        await _require_call_authority(str(row["tenant_id"]), pool=pool, existing_call_id=str(row["id"]))
+        return False  # Restored while the observation/task was waiting.
+    except HTTPException as exc:
+        if exc.status_code != 409 or not isinstance(exc.detail, dict) or exc.detail.get("error") != "call_authority_denied":
+            return False  # Unknown authority/owner cannot initiate control.
+    if not _state().is_telephony_owner():
+        return False
+    provider_id = str(row.get("provider_call_id") or row.get("external_call_uuid") or "")
+    return await _fence_inbound_call_after_lease_loss(
+        SimpleNamespace(db_pool=pool),
+        pbx_call_id=provider_id, durable_call_id=str(row["id"]),
+        admission=row, require_owner=True,
+    )
+
+
+async def _account_call_authority_watchdog() -> None:
+    """Existing telephony owner's bounded account enforcement; starts immediately."""
+    global _account_hold_scan_after
+    _account_hold_scan_after = None
+    try:
+        while True:
+            try:
+                await _reconcile_account_call_authority()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.error("account_call_authority_unavailable err_type=%s", type(exc).__name__)
+            await asyncio.sleep(_CALL_AUTHORITY_POLL_S)
+    finally:
+        tasks = list(_account_hold_termination_tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        _account_hold_termination_tasks.clear()
 
 
 def _state():
@@ -733,7 +943,50 @@ async def _force_end_and_hangup(
         recovery_context.pop("_pbx_all_leg_absence_confirmed", None)
     adapter = get_adapter()
     hangup_confirmed = not require_confirmation
-    if adapter is not None:
+    receipt_context = None
+    receipt_pool = None
+    if recovery_context is not None:
+        from app.domain.services.telephony.control_backend_identity import saved_control_backend
+        from app.domain.services.telephony.termination import (
+            mark_termination_pending_and_load_context,
+            request_confirmed_hangup,
+        )
+
+        provider = recovery_context.get("provider")
+        if recovery_context.get("durable_call_id"):
+            try:
+                from app.core.container import get_container
+
+                receipt_pool = get_container().db_pool
+                async with asyncio.timeout(5.0):
+                    receipt_context = await mark_termination_pending_and_load_context(
+                        receipt_pool,
+                        call_reference=str(recovery_context["durable_call_id"]),
+                        tenant_id=str(recovery_context.get("tenant_id") or "") or None,
+                    )
+                if (
+                    receipt_context.provider_call_id != call_id
+                    or receipt_context.provider != provider
+                    or receipt_context.control_backend != saved_control_backend(recovery_context.get("route_snapshot"))
+                ):
+                    raise ValueError("recovery call identity changed before termination")
+                # A restarted call may still be ringing/active in PostgreSQL.
+                # Fence new transfers and refresh its durable leg inventory
+                # before any PBX effect, using the ordinary termination path.
+                provider_leg_ids = list(receipt_context.provider_leg_ids)
+            except Exception:
+                logger.exception("recovery termination fence unavailable call=%s", call_id[:12])
+                return False
+        proof = await request_confirmed_hangup(
+            adapter, call_id, expected_provider=provider,
+            expected_backend=saved_control_backend(recovery_context.get("route_snapshot")),
+            require_backend_identity=True,
+            provider_leg_ids=provider_leg_ids or (),
+            provider_legs=(receipt_context.provider_legs if receipt_context is not None
+                           else tuple((leg, provider) for leg in (provider_leg_ids or ()))),
+        )
+        hangup_confirmed = proof.confirmed
+    elif adapter is not None:
         try:
             confirm_many = getattr(adapter, "hangup_many_confirmed", None)
             confirm = getattr(adapter, "hangup_confirmed", None)
@@ -776,6 +1029,17 @@ async def _force_end_and_hangup(
         )
         return False
     if recovery_context is not None:
+        # Save proof while the callback fence still owns finalization. A failed
+        # evidence write cannot undo the already-confirmed provider effect.
+        # Missing/failed receipts remain explicitly unverified in Admin.
+        if receipt_context is not None:
+            receipt_result = await _save_confirmed_termination_receipt(
+                receipt_pool, receipt_context, requested=proof.requested,
+            )
+            if not receipt_result.current_identity_verified:
+                logger.warning("recovery termination current identity unverified call=%s reason=%s",
+                               call_id[:12], receipt_result.code)
+                return False
         recovery_context["_awaiting_all_leg_absence_proof"] = False
         recovery_context["_pbx_all_leg_absence_confirmed"] = True
     # Settle only after the PBX accepted deletion (or proved the channel was
@@ -2509,6 +2773,7 @@ async def _admit_inbound_call(
             # campaign's pinned maximum and the tenant's exact remaining
             # quota, then reserves that full enforceable window pre-answer.
             reservation_seconds=14_400,
+            control_backend=metadata.get("control_backend"),
             metadata={
                 "ingress_endpoint": metadata.get("ingress_endpoint"),
                 "linked_id": metadata.get("linked_id"),
@@ -2976,6 +3241,7 @@ async def _fence_inbound_call_after_lease_loss(
     pbx_call_id: str,
     durable_call_id: str,
     admission: Mapping[str, Any],
+    require_owner: bool = False,
 ) -> bool:
     """Persist termination ownership and require all-leg PBX absence proof.
 
@@ -2984,6 +3250,9 @@ async def _fence_inbound_call_after_lease_loss(
     proving termination if this process exits between attempts.
     """
 
+    owned_adapter = get_adapter()
+    if require_owner and not _state().is_telephony_owner():
+        return False
     # Register the existing callback fence synchronously: a natural terminal
     # event may arrive while either Redis or the durable inventory is awaited.
     if pbx_call_id in _orphan_recovery_in_flight:
@@ -3003,6 +3272,7 @@ async def _fence_inbound_call_after_lease_loss(
     provider_call_id = str(admission.get("provider_call_id") or pbx_call_id)
     provider_leg_ids: tuple[str, ...] = ()
     expected_provider = admission.get("provider")
+    expected_backend = None
     provider_legs: tuple[tuple[str, str | None], ...] = ()
     inventory_verified = False
     try:
@@ -3034,11 +3304,12 @@ async def _fence_inbound_call_after_lease_loss(
             provider_call_id = context.provider_call_id or provider_call_id
             provider_leg_ids = context.provider_leg_ids
             expected_provider = context.provider
+            expected_backend = context.control_backend
             provider_legs = context.provider_legs
             inventory_verified = True
         except Exception as exc:
-            # Still request the known parent's hangup, but parent-only absence
-            # cannot certify that unavailable durable children have ended.
+            # Without the saved backend identity even a parent-only request
+            # could hit a replacement host. Preserve the retry fence instead.
             logger.critical(
                 "inbound_lease_loss_db_fence_failed call=%s durable_call=%s err=%s",
                 pbx_call_id[:12], durable_call_id[:12], exc,
@@ -3051,10 +3322,14 @@ async def _fence_inbound_call_after_lease_loss(
             # The callback fence is bound to this exact provider channel. A
             # changed durable identity or coordinator requires reconciliation.
             return False
+        if require_owner and (not _state().is_telephony_owner() or get_adapter() is not owned_adapter):
+            return False
         proof = await request_confirmed_hangup(
-            get_adapter(),
+            owned_adapter,
             provider_call_id,
             expected_provider=expected_provider,
+            expected_backend=expected_backend,
+            require_backend_identity=True,
             provider_leg_ids=provider_leg_ids,
             provider_legs=provider_legs,
         )
@@ -3063,6 +3338,16 @@ async def _fence_inbound_call_after_lease_loss(
                 "inbound_lease_loss_termination_unconfirmed call=%s inventory=%s reason=%s",
                 pbx_call_id[:12], inventory_verified, proof.code,
             )
+            return False
+        if _orphan_recovery_contexts_by_call.get(pbx_call_id) is not fence:
+            return False
+
+        receipt_result = await _save_confirmed_termination_receipt(
+            container.db_pool, context, requested=proof.requested,
+        )
+        if not receipt_result.current_identity_verified:
+            logger.warning("owned termination current identity unverified call=%s reason=%s",
+                           pbx_call_id[:12], receipt_result.code)
             return False
         if _orphan_recovery_contexts_by_call.get(pbx_call_id) is not fence:
             return False

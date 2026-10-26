@@ -5,10 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-// Actual drawer/section with synthetic hook scheduling and API promises.
+// Actual CRM section with synthetic hook scheduling and API promises.
 // This is component-boundary evidence, not browser/React-concurrency acceptance.
+// Drawer ownership is covered with actual ReactDOM in media-ownership.test.mjs.
 const bundle = await build({
-    stdin: { contents: `export { CallDetailDrawer, CRMReceiptsSection } from './src/components/CallDetailDrawer';
+    stdin: { contents: `export { CRMReceiptsSection } from './src/components/CallDetailDrawer';
         export { api } from './src/lib/api';`, resolveDir: fileURLToPath(new URL('..', import.meta.url)) },
     bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external',
     define: { 'import.meta.env': '{}' }, jsx: 'automatic',
@@ -20,12 +21,13 @@ const bundle = await build({
             export const useState = (...a) => globalThis.__crmHooks.useState(...a);
             export const useRef = (...a) => globalThis.__crmHooks.useRef(...a);
             export const useCallback = (fn) => fn;
-            export const useEffect = (...a) => globalThis.__crmHooks.useEffect(...a);` }));
+            export const useEffect = (...a) => globalThis.__crmHooks.useEffect(...a);
+            export const useLayoutEffect = useEffect;` }));
     } }],
 });
 const loaded = { exports: {} };
 new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createRequire(import.meta.url), loaded, loaded.exports);
-const { CallDetailDrawer, CRMReceiptsSection, api } = loaded.exports;
+const { CRMReceiptsSection, api } = loaded.exports;
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 function hooks() {
@@ -199,30 +201,4 @@ test('actual API request is one GET with only call and provider in its URL', asy
         assert.equal(requests[0].options.method, 'GET');
         assert.equal(requests[0].options.body, undefined);
     } finally { globalThis.fetch = original; }
-});
-
-test('late detail A cannot supply CRM receipt props to selected B', async () => {
-    const h = hooks(), pending = [], reads = [], originals = {
-        detail: api.getAdminCallDetail, recordings: api.getAdminRecordings, feedback: api.getAdminFeedback,
-    };
-    api.getAdminCallDetail = (id) => new Promise((resolve) => pending.push({ id, resolve }));
-    api.getAdminRecordings = async ({ call_id }) => { reads.push(call_id); return { data: { items: [] } }; };
-    api.getAdminFeedback = async () => ({ data: { items: [] } });
-    const selected = (id) => ({ callId: id, onClose() {} });
-    const detail = (id) => ({ id, summary_json: null, timeline: [], cost: null, duration_seconds: 0,
-        crm_receipts_available: true, crm_deliveries: [receipt({ destination_account_id: `original-${id}` })] });
-    try {
-        h.render(CallDetailDrawer, selected('A'));
-        h.render(CallDetailDrawer, selected('B'));
-        pending[1].resolve({ data: detail('B') }); await settle();
-        pending[0].resolve({ data: detail('A') }); await settle();
-        const tree = h.render(CallDetailDrawer, selected('B'));
-        const section = walk(tree, (node) => node.type === CRMReceiptsSection);
-        assert.equal(section.props.callId, 'B');
-        assert.equal(section.props.receipts[0].destination_account_id, 'original-B');
-        assert.deepEqual(reads, ['B']);
-    } finally {
-        h.close(); api.getAdminCallDetail = originals.detail;
-        api.getAdminRecordings = originals.recordings; api.getAdminFeedback = originals.feedback;
-    }
 });

@@ -106,6 +106,184 @@ receivers, so it can group alerts locally but cannot notify a person.
 This configuration artifact does not install a production Prometheus service
 or a real paging route; those release gates remain separate operational work.
 
+## AD08: production incident delivery overlay
+
+The production path is the existing Prometheus rules and Alertmanager. The
+backend adapter at `POST /api/v1/webhooks/alertmanager` records delivered alerts
+in the existing incident store. It does not evaluate thresholds or send pages.
+Keep external notification delivery in Alertmanager so an API/database outage
+does not also disable the route to the responsible operator. The legacy Admin
+memory settings are not the configuration source for this path.
+
+`alertmanager/render_production_config.py` preserves the checked-in grouping,
+severity routes and inhibition rules. It requires an operator-approved native
+receiver input containing **all three** names (`telephony-default`,
+`telephony-critical`, `telephony-warning`) and adds incident ingestion to each.
+Adding only a default receiver is insufficient because the severity child
+routes select their own receivers. The safe baseline files stay unchanged.
+
+Use the backend Python environment; `backend/requirements.txt` already pins
+PyYAML. No extra runtime, notification service, or template engine is needed.
+The approved input, generated configuration and credentials must be absolute
+paths outside any Git checkout. The renderer performs no network requests,
+notification sends, deployments or credential generation. It writes atomically
+and preserves an existing output when rendering or requested native validation
+fails. It prints only the configuration hash and validation state.
+
+Have operations supply the approved receiver, ownership/escalation contact and
+change reference. An input file contains only a native `receivers` list. For
+an approved service that accepts Alertmanager's native webhook payload, the
+following is the **structure**, not an approved destination or delivery proof:
+
+```yaml
+receivers:
+  - name: telephony-default
+    webhook_configs:
+      - url_file: /etc/alertmanager/external/receiver_url
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/alertmanager/external/receiver_credential
+  - name: telephony-critical
+    webhook_configs:
+      - url_file: /etc/alertmanager/external/receiver_url
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/alertmanager/external/receiver_credential
+  - name: telephony-warning
+    webhook_configs:
+      - url_file: /etc/alertmanager/external/receiver_url
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/alertmanager/external/receiver_credential
+```
+
+Distinct approved destinations per severity are allowed. The renderer also
+accepts native `slack_configs` with `api_url_file`, `pagerduty_configs` with
+`routing_key_file` or `service_key_file`, `opsgenie_configs` with `api_key_file`,
+and `email_configs` with explicit `to`, `from`, `smarthost` and TLS. Use native
+file fields for authentication (for example `auth_password_file`); no inline
+passwords, secret URLs or tokens. Referenced external files must exist beneath
+the mounted `/etc/alertmanager/external` directory. These are supported native
+configuration formats, not newly configured or approved providers. Unsupported
+native fields still require the exact-image validation below.
+
+Provision a separate `ALERTMANAGER_INGEST_TOKEN` for the backend: 32–256 printable
+ASCII nonwhitespace characters. Put the same value in the host file named by
+`ALERTMANAGER_INGEST_TOKEN_FILE`. Never reuse the broad internal telephony token
+or the read-only metrics token. Set a stable backend `ALERTMANAGER_SOURCE_ID`
+(default `platform-alertmanager`) so changing a release does not change alert
+identity. Do not place token bytes in command arguments or repository files.
+Limit file ownership/read access to the operator and the container's dedicated
+supplementary group; use `0640` files and traversable `0750` directories. The
+renderer initially writes its output with private permissions; grant that
+group read access to the completed artifact before container validation.
+
+Set these nonsecret deployment inputs through the approved host environment:
+
+- `ALERTMANAGER_CONFIG_FILE`: absolute generated production configuration path.
+- `ALERTMANAGER_INGEST_TOKEN_FILE`: absolute dedicated ingestion credential file.
+- `ALERTMANAGER_EXTERNAL_SECRETS_DIR`: absolute approved receiver secret directory.
+- `ALERTMANAGER_SECRET_GID`: numeric group with read access to all three mounts.
+- `ALERTMANAGER_APPROVED_RECEIVERS_FILE`: absolute approved native input file.
+- `ALERTMANAGER_INGEST_URL`: exact `/api/v1/webhooks/alertmanager` URL, HTTPS
+  unless it uses same-host loopback. No URL credentials, query or fragment.
+
+Render without deploying or contacting a receiver:
+
+```bash
+python telephony/observability/alertmanager/render_production_config.py \
+  --approved-receivers "$ALERTMANAGER_APPROVED_RECEIVERS_FILE" \
+  --output "$ALERTMANAGER_CONFIG_FILE" \
+  --ingestion-url "$ALERTMANAGER_INGEST_URL" \
+  --external-secrets-dir "$ALERTMANAGER_EXTERNAL_SECRETS_DIR" \
+  --ingest-token-file "$ALERTMANAGER_INGEST_TOKEN_FILE"
+```
+
+An optional `--amtool /absolute/path/to/amtool` validates before replacement
+and refuses versions other than **0.27.0**. Without that argument the renderer
+explicitly reports **NOT natively validated**. Structural tests are not a
+substitute for native validation. The source-pinned supported file syntax is
+in [Alertmanager 0.27.0](https://github.com/prometheus/alertmanager/blob/v0.27.0/config/notifiers.go)
+and its [Prometheus common 0.46.0 dependency](https://github.com/prometheus/common/blob/v0.46.0/config/http_config.go).
+
+Validate the actual mounted artifact with the exact deployed image, without
+network access. This checks native configuration, not recipient delivery:
+
+```bash
+docker run --rm --network none \
+  --group-add "$ALERTMANAGER_SECRET_GID" \
+  --mount "type=bind,src=$ALERTMANAGER_CONFIG_FILE,dst=/etc/alertmanager/alertmanager.yml,readonly" \
+  --mount "type=bind,src=$ALERTMANAGER_INGEST_TOKEN_FILE,dst=/etc/alertmanager/secrets/ingest_token,readonly" \
+  --mount "type=bind,src=$ALERTMANAGER_EXTERNAL_SECRETS_DIR,dst=/etc/alertmanager/external,readonly" \
+  --entrypoint /bin/amtool prom/alertmanager:v0.27.0 \
+  check-config /etc/alertmanager/alertmanager.yml
+
+docker compose \
+  -f telephony/deploy/docker/docker-compose.observability.yml \
+  -f telephony/deploy/docker/docker-compose.observability.production.yml \
+  config --quiet
+```
+
+The production override replaces the mount at the actual container config
+path and adds read-only secret mounts. Missing source paths fail instead of
+being created as directories. It preserves the persistent Alertmanager volume
+and non-root container user. The base Prometheus metrics-token environment is
+also required when rendering the combined compose. Use both files for an
+approved deployment; the override alone is not a stack. Review mount paths,
+read permissions, image and the generated hash in the deployment manifest.
+The configuration hash does not attest to later changes in mounted destination
+or credential files; retain their approved secret-manager version references
+and repeat delivery acceptance after changes, without publishing secret bytes.
+Keep a prior validated config for rollback; retain incident records. Rotating
+the ingestion secret requires coordinated backend/Alertmanager configuration,
+then a delivery probe; an authentication failure is not evidence of recovery.
+Because rendering replaces a file atomically, recreate the Alertmanager
+container with the same two compose files during the approved rollout. A hot
+reload alone may still read the old inode from an existing file bind mount.
+
+### AD08 acceptance and limits
+
+- The adapter accepts webhook version 4, 1–100 alerts, at most 256 KiB, and
+  requires `truncatedAlerts: 0`. Ingestion sets `max_alerts: 0` because truncation drops
+  data rather than paging it. A larger group is rejected as a whole; correct
+  trusted grouping/rule cardinality and redeliver. Do not count rejected or
+  truncated groups as successfully recorded incidents.
+- Alertmanager 0.27 retries HTTP 5xx responses; HTTP 4xx responses (including
+  408) are terminal for that delivery. The adapter uses retryable 503 for a
+  transient body-read timeout or database unavailability. Invalid credentials,
+  malformed/truncated payloads and exceeded bounds need operator correction
+  and redelivery; they are not automatically retried into successful records.
+  This follows the pinned [native webhook retrier](https://github.com/prometheus/alertmanager/blob/v0.27.0/notify/util.go).
+- Deduplication uses the configured source plus alert fingerprint and start
+  time. Repeats and concurrent deliveries must preserve one episode across
+  API/database restarts; a genuinely new episode must create another incident.
+  Test wrong/missing credentials, malformed batches, database failure and
+  retry. Only committed ingestion is success.
+- Alertmanager `firing`/`resolved` maps to stored source `firing`/`recovered`
+  and describes monitoring's observation. Human
+  acknowledgement/resolution is separate and must preserve the responsible
+  actor/time. Source recovery must not fabricate human acknowledgement.
+- Silence and inhibition suppress deliveries to the incident webhook too.
+  Recorded incidents represent delivered notifications, not every evaluated
+  alert. Preserve the approved silencing/inhibition scope in acceptance notes.
+- A persistent Alertmanager volume is not proof of a durable historical event
+  queue. Exercise an alert that fires **and recovers while ingestion is down**,
+  including an Alertmanager restart. Record any gap; do not claim lossless
+  incident history from a successful post-recovery request.
+- Independently prove the approved recipient receives and acknowledges the
+  page when the API/database is unavailable, plus recovery notification where
+  configured. A webhook 200, failed systemd unit or healthwatch log is not
+  evidence that a responsible person received an alert.
+- Record named recipient, rule/config hash, fault time, notification receipt,
+  operator acknowledgement and recovery. Measure the worker-death target
+  against heartbeat expiry, polling/retries, grouping and actual delivery.
+  The existing healthwatch timer only logs/exits; it is not wired to this
+  adapter. Missing worker/provider/queue observations listed above remain
+  explicit acceptance gaps; do not add a second evaluator or imagined metrics.
+
 ## Validation
 
 Use WS-K verifier:

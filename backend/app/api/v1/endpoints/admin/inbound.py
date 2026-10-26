@@ -13,6 +13,7 @@ from app.api.v1.schemas.inbound_campaigns import (
     AdminInboundBillingHoldResolutionRequest,
     AdminInboundBillingHoldResolutionResponse,
     InboundReassignmentApproveRequest,
+    InboundReassignmentCancelRequest,
     InboundReassignmentCreateRequest,
     InboundReassignmentListResponse,
     InboundReassignmentResponse,
@@ -29,6 +30,7 @@ from app.domain.services.telephony.inbound_admission import (
     InboundHoldResolutionConflictError,
     InboundHoldResolutionNotFoundError,
     InboundHoldResolutionRequest,
+    InboundHoldResolutionUnavailableError,
 )
 
 
@@ -55,7 +57,10 @@ def _raise_service(exc: InboundCampaignError) -> None:
 
 
 def _raise_hold_resolution(exc: Exception) -> None:
-    if isinstance(exc, InboundHoldResolutionNotFoundError):
+    if isinstance(exc, InboundHoldResolutionUnavailableError):
+        status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        code = "inbound_hold_resolution_unconfirmed"
+    elif isinstance(exc, InboundHoldResolutionNotFoundError):
         status_code = status.HTTP_404_NOT_FOUND
         code = "inbound_hold_not_found"
     elif isinstance(exc, InboundHoldResolutionConflictError):
@@ -123,6 +128,7 @@ async def resolve_inbound_billing_hold(
     except (
         InboundHoldResolutionConflictError,
         InboundHoldResolutionNotFoundError,
+        InboundHoldResolutionUnavailableError,
         PermissionError,
         ValueError,
     ) as exc:
@@ -262,13 +268,27 @@ async def unquarantine_inbound_assignment(
 @router.get("/reassignments", response_model=InboundReassignmentListResponse)
 async def list_inbound_reassignments(
     reassignment_status: str = Query(default="pending", alias="status"),
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor: Optional[str] = Query(default=None, min_length=1, max_length=512),
     _user: CurrentUser = Depends(require_platform_admin),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> dict:
     try:
         return await InboundCampaignService(db_pool).list_reassignment_requests(
-            status=reassignment_status
+            status=reassignment_status, limit=limit, cursor=cursor,
         )
+    except InboundCampaignError as exc:
+        _raise_service(exc)
+
+
+@router.get("/reassignments/{request_id}", response_model=InboundReassignmentResponse)
+async def get_inbound_reassignment(
+    request_id: str,
+    _user: CurrentUser = Depends(require_platform_admin),
+    db_pool: asyncpg.Pool = Depends(get_db_pool),
+) -> dict:
+    try:
+        return await InboundCampaignService(db_pool).get_reassignment_request(request_id)
     except InboundCampaignError as exc:
         _raise_service(exc)
 
@@ -317,6 +337,26 @@ async def approve_inbound_reassignment(
             actor_id=user.id,
             actor_role=user.role,
             idempotency_key=idempotency_key,
+        )
+    except InboundCampaignError as exc:
+        _raise_service(exc)
+
+
+@router.post(
+    "/reassignments/{request_id}/cancel",
+    response_model=InboundReassignmentResponse,
+)
+async def cancel_inbound_reassignment(
+    request_id: str,
+    payload: InboundReassignmentCancelRequest,
+    user: CurrentUser = Depends(require_platform_admin),
+    idempotency_key: str = Depends(_key),
+    db_pool: asyncpg.Pool = Depends(get_db_pool),
+) -> dict:
+    try:
+        return await InboundCampaignService(db_pool).cancel_reassignment(
+            request_id=request_id, reason=payload.reason,
+            actor_id=user.id, actor_role=user.role, idempotency_key=idempotency_key,
         )
     except InboundCampaignError as exc:
         _raise_service(exc)

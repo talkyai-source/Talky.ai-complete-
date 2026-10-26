@@ -182,6 +182,53 @@ async def _resolve_cookie_session(
         )
 
 
+def _clear_current_user_scope(request: Request) -> None:
+    """Discard claim-derived authority before resolving the current account."""
+    from app.core.security.tenant_isolation import clear_tenant_context
+
+    clear_tenant_context()
+    for name in (
+        "tenant_id", "user_id", "user_role", "authenticated_session_id",
+        "authenticated_user_id", "target_tenant_id",
+    ):
+        setattr(request.state, name, None)
+    request.state.cross_tenant_access = False
+
+
+def _publish_current_user_scope(
+    request: Request, user: CurrentUser, session_id: str,
+) -> None:
+    """Give every supported credential transport the same verified DB scope."""
+    try:
+        from app.core.security.tenant_isolation import (
+            set_bypass_rls, set_current_tenant_id, set_current_user_context,
+        )
+
+        bypass = normalize_role(user.role) == UserRole.PLATFORM_ADMIN
+        # Explicitly replace both values: a demotion must remove bypass, and a
+        # principal without a tenant must not inherit a previous tenant claim.
+        set_current_tenant_id(user.tenant_id)
+        set_bypass_rls(bypass)
+        set_current_user_context(user)
+        request.state.tenant_id = user.tenant_id
+        request.state.user_id = user.id
+        request.state.user_role = user.role
+        target_tenant = request.headers.get("X-Tenant-ID")
+        if bypass and target_tenant and target_tenant != user.tenant_id:
+            # Observation only. Target-specific dependencies still validate
+            # access; this header never selects the database tenant here.
+            request.state.cross_tenant_access = True
+            request.state.target_tenant_id = target_tenant
+        request.state.authenticated_session_id = session_id
+        request.state.authenticated_user_id = user.id
+    except Exception as exc:
+        _clear_current_user_scope(request)
+        logger.error("Current account scope failed type=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=503, detail="Account verification is temporarily unavailable",
+        ) from exc
+
+
 async def get_current_user(
     request: Request,
     authorization: Optional[str] = Header(None, alias="Authorization"),
@@ -198,6 +245,7 @@ async def get_current_user(
 
     JWT is signed with JWT_SECRET (HS256).
     """
+    _clear_current_user_scope(request)
     from app.core.security.principal import (
         PrincipalUnavailable, assert_expected_identity, load_current_principal,
     )
@@ -261,8 +309,6 @@ async def get_current_user(
         logger.error("Current account lookup failed type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Account verification is temporarily unavailable") from exc
     assert_expected_identity(request, row)
-    request.state.authenticated_session_id = str(session["id"])
-    request.state.authenticated_user_id = str(user_id)
 
     from app.services.scripts.tenant_minutes import compute_tenant_minutes_status
     meter = await compute_tenant_minutes_status(
@@ -272,22 +318,7 @@ async def get_current_user(
 
     resolved_tenant_id = str(row["tenant_id"]) if row["tenant_id"] else None
 
-    # Defensively set the RLS contextvar from the user profile we just fetched.
-    # TenantMiddleware also sets this from the JWT payload, but if the JWT was
-    # issued before tenant_id was added to the claim — or if BaseHTTPMiddleware
-    # task isolation strips contextvar updates from inner middleware — the
-    # postgres_adapter would otherwise see no tenant and set
-    # app.current_tenant_id to a sentinel UUID, making every INSERT/UPDATE
-    # against tenant-scoped tables fail the RLS WITH-CHECK clause.
-    if resolved_tenant_id:
-        try:
-            from app.core.security.tenant_isolation import set_current_tenant_id
-            set_current_tenant_id(resolved_tenant_id)
-        except Exception:
-            # Never block the request on a context-setting hiccup.
-            pass
-
-    return CurrentUser(
+    user = CurrentUser(
         id=str(row["id"]),
         email=row["email"] or "",
         tenant_id=resolved_tenant_id,
@@ -296,6 +327,8 @@ async def get_current_user(
         business_name=row["business_name"],
         **meter.allowance(),
     )
+    _publish_current_user_scope(request, user, str(session["id"]))
+    return user
 
 
 async def get_optional_user(
@@ -309,6 +342,7 @@ async def get_optional_user(
     Useful for endpoints that work both with and without auth.
     """
     if not authorization and not session_cookie and not access_cookie:
+        _clear_current_user_scope(request)
         return None
     try:
         return await get_current_user(
@@ -318,6 +352,7 @@ async def get_optional_user(
             access_cookie=access_cookie,
         )
     except HTTPException:
+        _clear_current_user_scope(request)
         return None
 
 
@@ -617,13 +652,7 @@ async def get_audit_logger(
     """Factory for AuditLogger service"""
     global _audit_logger_service
     if _audit_logger_service is None:
-        settings = get_settings()
-        signing_key = (
-            get_settings().effective_jwt_secret
-            if settings.environment.lower() != "production"
-            else None
-        )
-        _audit_logger_service = AuditLogger(db_pool, signing_key=signing_key)
+        _audit_logger_service = AuditLogger(db_pool)
     return _audit_logger_service
 
 
@@ -633,7 +662,7 @@ async def get_suspension_service(
     """Factory for SuspensionService"""
     global _suspension_service_instance
     if _suspension_service_instance is None:
-        _suspension_service_instance = SuspensionService(db_pool)
+        _suspension_service_instance = SuspensionService(db_pool, audit_logger=await get_audit_logger(db_pool))
     return _suspension_service_instance
 
 

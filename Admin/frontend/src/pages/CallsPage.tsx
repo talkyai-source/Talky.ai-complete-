@@ -104,7 +104,6 @@ export function CallsPage() {
                         <div className="card-body">
                             {activeTab === 'live' && (
                                 <LiveCallsTable
-                                    key={`live-${refreshKey}`}
                                     onRefresh={handleRefresh}
                                     onCallSelect={handleCallSelect}
                                 />

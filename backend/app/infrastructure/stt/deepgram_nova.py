@@ -27,6 +27,7 @@ Output contract MATCHES DeepgramFluxSTTProvider so the pipeline is unchanged:
 import asyncio
 import logging
 import os
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
 import time
 from typing import AsyncIterator, Callable, Optional
 
@@ -47,6 +48,7 @@ class DeepgramNovaSTTProvider(STTProvider):
     """Deepgram nova-3 streaming via /v1/listen with VAD + endpointing turn detection."""
 
     def __init__(self) -> None:
+        self._observation_context = None
         self._api_key: Optional[str] = None
         self._model: str = "nova-3"
         self._sample_rate: int = 16000
@@ -59,6 +61,7 @@ class DeepgramNovaSTTProvider(STTProvider):
         self._guard = get_provider_guard("deepgram")
 
     async def initialize(self, config: dict) -> None:
+        self._observation_context = config.get("observation_context")
         self._api_key = config.get("api_key") or os.getenv("DEEPGRAM_API_KEY")
         if not self._api_key:
             raise ValueError("Deepgram API key not found in config or environment")
@@ -138,8 +141,12 @@ class DeepgramNovaSTTProvider(STTProvider):
             if self._numerals:
                 connect_kwargs["numerals"] = "true"
 
+            observation = ProviderAttempt("stt", "deepgram_nova", self._api_key, self._observation_context)
+            recognition = ProviderAttempt("stt", "deepgram_nova", self._api_key, self._observation_context)
             try:
                 async with self._client.listen.v1.connect(**connect_kwargs) as conn:
+                    observation.accepted()
+                    recognition.accepted()
                     def on_message(m) -> None:
                         try:
                             mtype = getattr(m, "type", None)
@@ -162,6 +169,10 @@ class DeepgramNovaSTTProvider(STTProvider):
                                     if (getattr(item, "transcript", "") or "").strip()
                                 )
                                 is_final = bool(getattr(m, "is_final", False))
+                                if is_final and text and not observation.closed:
+                                    observation.recognized()
+                                    recognition.recognized()
+                                    recognition.finish(outcome="recognized")
                                 speech_final = bool(getattr(m, "speech_final", False))
                                 queue.put_nowait(
                                     (
@@ -190,6 +201,7 @@ class DeepgramNovaSTTProvider(STTProvider):
                             # caller's audio is still flowing. Remember it so the
                             # loop below raises instead of ending "cleanly".
                             send_error[0] = exc
+                            observation.finish(exc)
                             logger.warning("nova send_audio ended: %s", exc)
 
                     sender_task = asyncio.create_task(send_audio())
@@ -357,7 +369,13 @@ class DeepgramNovaSTTProvider(STTProvider):
                         except (asyncio.CancelledError, Exception):  # noqa: BLE001
                             pass
             except Exception as exc:  # noqa: BLE001
+                observation.finish(exc)
                 raise RuntimeError(f"Deepgram nova transcription failed: {exc}")
+            except BaseException as exc:
+                observation.finish(exc)
+                raise
+            finally:
+                observation.finish(outcome="recognized" if observation.output_seen else "connected")
 
     async def cleanup(self) -> None:
         self._client = None

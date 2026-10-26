@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
 import { Phone, AlertCircle, Users, AlertTriangle, Loader2 } from 'lucide-react';
 import { api } from '../lib/api';
-import type { DashboardStats } from '../lib/api';
+import { useAdminRead } from '../lib/use-admin-read';
+import { validStats } from '../lib/health-contracts';
+import { metric, observedAt } from '../lib/health-display';
 
 interface StatCardProps {
     icon: React.ReactNode;
@@ -27,34 +28,10 @@ function StatCard({ icon, label, value, iconColor, loading }: StatCardProps) {
     );
 }
 
+const loadStatsGrid = () => api.getDashboardStats();
+
 export function StatsGrid() {
-    const [stats, setStats] = useState<DashboardStats | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-
-    const fetchStats = useCallback(async () => {
-        try {
-            const response = await api.getDashboardStats();
-            if (response.data) {
-                setStats(response.data);
-                setError(null);
-            } else if (response.error) {
-                setError(response.error.message);
-            }
-        } catch {
-            setError('Failed to fetch stats');
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        fetchStats();
-
-        // Auto-refresh every 30 seconds
-        const interval = setInterval(fetchStats, 30000);
-        return () => clearInterval(interval);
-    }, [fetchStats]);
+    const { data: stats, loading, error } = useAdminRead(loadStatsGrid, 30000, validStats);
 
     // A failed read is "unavailable", never zero: zeros read as an all-clear.
     const UNAVAILABLE = '\u2014';
@@ -79,8 +56,8 @@ export function StatsGrid() {
             />
             <StatCard
                 icon={<AlertCircle />}
-                label="Error Rate (24h):"
-                value={stats?.error_rate_24h ?? UNAVAILABLE}
+                label="Failed Call Rate (24h):"
+                value={stats?.failed_call_rate_24h ?? (stats?.total_calls_24h === 0 && stats.failed_call_rate_24h === null ? 'No calls' : 'Unavailable')}
                 iconColor="red"
                 loading={loading}
             />
@@ -93,12 +70,13 @@ export function StatsGrid() {
             />
             <StatCard
                 icon={<AlertTriangle />}
-                label="API Errors (24h):"
-                value={stats?.api_errors_24h ?? UNAVAILABLE}
+                label="Failed Calls (24h):"
+                value={stats?.failed_calls_24h ?? UNAVAILABLE}
                 iconColor="teal"
                 loading={loading}
             />
         </div>
+        {stats && <p className="text-muted">{metric(stats.total_calls_24h)} calls created in the last 24 hours; failed/error states only. No-answer calls are excluded from failures. Active tenants have active accounts and active or trialing subscriptions. Observed {observedAt(stats.observed_at)}.</p>}
         </>
     );
 }

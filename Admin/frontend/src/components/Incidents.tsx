@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { api, type IncidentItem } from '../lib/api';
+import { api } from '../lib/api';
+import { useAdminRead } from '../lib/use-admin-read';
+import { validIncidentList } from '../lib/incident-contracts';
 
 function relativeTime(iso: string): string {
     const ts = Date.parse(iso);
@@ -16,49 +17,17 @@ function relativeTime(iso: string): string {
     return new Date(ts).toLocaleDateString();
 }
 
-export function Incidents() {
-    const [incidents, setIncidents] = useState<IncidentItem[]>([]);
-    const [loading, setLoading] = useState(true);
-    // Track failure separately from "empty": a failed read is not "no incidents".
-    const [error, setError] = useState<string | null>(null);
+const loadOpenIncidents = () => api.getIncidents({ status: 'open', page: 1, page_size: 5 });
 
-    useEffect(() => {
-        let cancelled = false;
-        const fetchOnce = async () => {
-            try {
-                // Show only currently-open and recently-acknowledged incidents.
-                const res = await api.getIncidents({
-                    status: 'open',
-                    page: 1,
-                    page_size: 5,
-                });
-                if (cancelled) return;
-                if (res.error) {
-                    // Keep the last good list (flagged stale below) rather than blanking it.
-                    setError(res.error.message || 'Failed to load incidents.');
-                } else {
-                    setIncidents(res.data?.items ?? []);
-                    setError(null);
-                }
-            } catch (err) {
-                if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load incidents.');
-            } finally {
-                if (!cancelled) setLoading(false);
-            }
-        };
-        void fetchOnce();
-        // Light poll — incidents update on a slow cadence.
-        const id = window.setInterval(fetchOnce, 30_000);
-        return () => {
-            cancelled = true;
-            window.clearInterval(id);
-        };
-    }, []);
+export function Incidents() {
+    const { data, loading, error } = useAdminRead(loadOpenIncidents, 30000, validIncidentList);
+    const incidents = data?.items ?? [];
 
     return (
         <div className="card">
             <div className="card-header">
                 <h3 className="card-title">Incidents</h3>
+                <a href="/incidents">Manage incidents</a>
             </div>
             <div className="card-body">
                 {loading && incidents.length === 0 && (
@@ -90,10 +59,10 @@ export function Incidents() {
                                 <span className="incident-time">{relativeTime(incident.triggered_at)}</span>
                             </div>
                         </div>
-                        <button className="btn btn-alert">
+                        <span className="badge badge-outline">
                             <AlertTriangle size={12} />
-                            {incident.severity === 'critical' ? 'Critical' : 'Alert'}
-                        </button>
+                            {incident.severity}
+                        </span>
                     </div>
                 ))}
             </div>

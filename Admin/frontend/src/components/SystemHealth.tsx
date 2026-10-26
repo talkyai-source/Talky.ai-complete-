@@ -1,44 +1,24 @@
-import { useState, useEffect, useCallback } from 'react';
 import { CheckCircle, Clock, BarChart3, AlertCircle, Loader2 } from 'lucide-react';
 import { api } from '../lib/api';
-import type { SystemHealthItem } from '../lib/api';
+import { useAdminRead } from '../lib/use-admin-read';
+import { validSystemHealth } from '../lib/health-contracts';
+import { observedAt } from '../lib/health-display';
+
+const loadSystemHealth = () => api.getSystemHealth();
 
 export function SystemHealth() {
-    const [healthItems, setHealthItems] = useState<SystemHealthItem[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-
-    const fetchHealth = useCallback(async () => {
-        try {
-            const response = await api.getSystemHealth();
-            if (response.data) {
-                setHealthItems(response.data.providers);
-                setError(null);
-            } else if (response.error) {
-                setError(response.error.message);
-            }
-        } catch {
-            setError('Failed to fetch health status');
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        fetchHealth();
-
-        // Auto-refresh every 60 seconds
-        const interval = setInterval(fetchHealth, 60000);
-        return () => clearInterval(interval);
-    }, [fetchHealth]);
+    const { data, loading, error } = useAdminRead(loadSystemHealth, 60000, validSystemHealth);
+    const healthItems = data?.providers ?? [];
 
     const getStatusIcon = (status: string) => {
         switch (status) {
             case 'operational':
+            case 'observed_success':
                 return <CheckCircle />;
             case 'degraded':
                 return <Clock />;
             case 'down':
+            case 'observed_failure':
                 return <AlertCircle />;
             default:
                 return <Clock />;
@@ -48,8 +28,10 @@ export function SystemHealth() {
     const getStatusClass = (status: string) => {
         switch (status) {
             case 'operational':
+            case 'observed_success':
                 return 'green';
             case 'degraded':
+            case 'observed_failure':
                 return 'orange';
             case 'down':
                 return 'red';
@@ -63,10 +45,16 @@ export function SystemHealth() {
         switch (status) {
             case 'operational':
                 return 'Operational';
+            case 'observed_success':
+                return 'Last observed request succeeded';
+            case 'observed_failure':
+                return 'Last observed request failed';
             case 'degraded':
                 return 'Degraded';
             case 'down':
                 return 'Down';
+            case 'unknown':
+                return 'Not measured';
             default:
                 return status;
         }
@@ -91,6 +79,7 @@ export function SystemHealth() {
                 <h3 className="card-title">System Health</h3>
             </div>
             <div className="card-body">
+                <p className="text-muted">Voice provider results show the latest attempt per observed engine and credential in the last 10 minutes, up to 128 scopes. They do not represent every configured account or a platform success rate.</p>
                 {error && (
                     <div className="error-banner inline" role="alert">
                         <p>
@@ -99,22 +88,25 @@ export function SystemHealth() {
                         </p>
                     </div>
                 )}
-                {healthItems.map((item, index) => (
-                    <div className="health-item" key={index}>
+                {healthItems.map((item) => (
+                    <div className="health-item" key={item.name}>
                         <div className="health-left">
-                            <div className={`health-status-icon ${getStatusClass(item.status)}`}>
+                            <div className={`health-status-icon ${error ? 'gray' : getStatusClass(item.status)}`}>
                                 {getStatusIcon(item.status)}
                             </div>
                             <div className="health-label">
                                 <span>{item.name}: </span>
-                                <span className={item.status === 'operational' ? 'operational' : 'degraded'}>
-                                    {getStatusLabel(item.status)}
+                                <span className={!error && item.status === 'operational' ? 'operational' : 'text-muted'}>
+                                    {error ? 'Last observed: ' : ''}{getStatusLabel(item.status)}
                                 </span>
+                                <p className="text-muted">{item.scope}</p>
+                                {item.detail && <p>{item.detail}</p>}
+                                <small>{observedAt(item.last_check)}</small>
                             </div>
                         </div>
                         <div className="health-right">
                             <BarChart3 />
-                            <span>{item.latency_display}</span>
+                            <span>{item.latency_ms === null ? 'Latency unavailable' : item.latency_display}</span>
                         </div>
                     </div>
                 ))}

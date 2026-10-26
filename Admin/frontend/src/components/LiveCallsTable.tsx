@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Phone, RefreshCw, Clock, Building2, PhoneIncoming, PhoneOutgoing } from 'lucide-react';
 import { api } from '../lib/api';
 import type { LiveCallItem } from '../lib/api';
 import { CallTerminationAction } from './CallTerminationAction';
 import { getTerminationPhase, mergePolledLiveCalls } from '../lib/call-termination';
+import { useAuthGeneration } from '../lib/use-auth-generation';
+import { useOperationOwner } from '../lib/use-operation-owner';
 
 interface LiveCallsTableProps {
     onRefresh?: () => void;
@@ -48,42 +50,67 @@ function StatusBadge({ call }: { call: LiveCallItem }) {
     );
 }
 
-export function LiveCallsTable({ onRefresh, onCallSelect }: LiveCallsTableProps) {
+export function LiveCallsTable(props: LiveCallsTableProps) {
+    const generation = useAuthGeneration();
+    return <OwnedLiveCallsTable key={generation} {...props} generation={generation} />;
+}
+
+function OwnedLiveCallsTable({ onRefresh, onCallSelect, generation }: LiveCallsTableProps & { generation: number }) {
     const [calls, setCalls] = useState<LiveCallItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const captureOwner = useOperationOwner(generation, 'live-calls-table');
+    const readSequence = useRef(0);
+    const pendingRead = useRef<object | null>(null);
 
-    const fetchLiveCalls = useCallback(async () => {
+    const fetchLiveCalls = useCallback(async (manual = false) => {
+        const ownsView = captureOwner();
+        if (!ownsView() || (!manual && pendingRead.current)) return;
+        const ticket = {};
+        pendingRead.current = ticket;
+        const sequence = ++readSequence.current;
+        const owns = () => ownsView() && sequence === readSequence.current;
         try {
             const response = await api.getLiveCalls();
+            if (!owns()) return;
             if (response.error) throw new Error(response.error.message);
+            if (!Array.isArray(response.data) || response.data.some(item => !item
+                || typeof item.id !== 'string' || !item.id || typeof item.status !== 'string' || !item.status)) {
+                throw new Error('The live-call response was incomplete or invalid.');
+            }
             if (response.data) {
                 setCalls((current) => mergePolledLiveCalls(current, response.data || []));
             }
             setError(null);
         } catch (err) {
+            if (!owns()) return;
             setError(err instanceof Error ? err.message : 'Failed to fetch live calls');
         } finally {
-            setLoading(false);
+            if (pendingRead.current === ticket) pendingRead.current = null;
+            if (owns()) setLoading(false);
         }
-    }, []);
+    }, [captureOwner]);
 
     // Initial fetch and auto-refresh every 10 seconds
     useEffect(() => {
         fetchLiveCalls();
-        const intervalId = setInterval(fetchLiveCalls, 10000);
-        return () => clearInterval(intervalId);
+        const intervalId = window.setInterval(() => void fetchLiveCalls(), 10000);
+        return () => { readSequence.current += 1; pendingRead.current = null; window.clearInterval(intervalId); };
     }, [fetchLiveCalls]);
 
     const patchCall = (callId: string, patch: Partial<LiveCallItem>) => {
+        if (!captureOwner()()) return;
+        readSequence.current += 1;
         setCalls((current) => current.map((call) => (
             call.id === callId ? { ...call, ...patch } : call
         )));
     };
 
     const confirmCallEnded = (callId: string) => {
+        if (!captureOwner()()) return;
+        readSequence.current += 1;
         setCalls((current) => current.filter((call) => call.id !== callId));
-        void fetchLiveCalls();
+        void fetchLiveCalls(true);
         onRefresh?.();
     };
 
@@ -100,7 +127,7 @@ export function LiveCallsTable({ onRefresh, onCallSelect }: LiveCallsTableProps)
         return (
             <div className="error-banner">
                 <p>{error}</p>
-                <button onClick={fetchLiveCalls}>Retry</button>
+                <button onClick={() => void fetchLiveCalls(true)}>Retry</button>
             </div>
         );
     }
@@ -120,7 +147,7 @@ export function LiveCallsTable({ onRefresh, onCallSelect }: LiveCallsTableProps)
             {error && (
                 <div className="error-banner inline" role="alert">
                     <p>{error} Existing call statuses remain visible until refresh succeeds.</p>
-                    <button type="button" onClick={fetchLiveCalls}>Retry</button>
+                    <button type="button" onClick={() => void fetchLiveCalls(true)}>Retry</button>
                 </div>
             )}
             <table className="data-table clickable-rows">
@@ -188,7 +215,7 @@ export function LiveCallsTable({ onRefresh, onCallSelect }: LiveCallsTableProps)
             </table>
             <div className="table-footer">
                 <span className="calls-count">{calls.length} active call{calls.length !== 1 ? 's' : ''}</span>
-                <button className="btn btn-secondary btn-sm" onClick={fetchLiveCalls}>
+                <button className="btn btn-secondary btn-sm" onClick={() => void fetchLiveCalls(true)}>
                     <RefreshCw size={14} />
                     Refresh
                 </button>

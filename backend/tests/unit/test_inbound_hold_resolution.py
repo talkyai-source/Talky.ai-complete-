@@ -168,6 +168,8 @@ class _ResolutionConn:
 
     async def execute(self, query: str, *args):
         sql = self._sql(query)
+        if sql == "SET LOCAL lock_timeout='3s'":
+            return "SET"
         if "pg_advisory_xact_lock" in sql:
             self.events.append(("lock", sql))
             return "SELECT 1"
@@ -376,6 +378,13 @@ class _ResolutionConn:
 
 
 def _wire(monkeypatch, conn: _ResolutionConn):
+    # Explicit policy-only port; actual actor/RLS/fence admission has separate
+    # normal-auth PostgreSQL evidence and is not manufactured by this fake.
+    async def admitted(actual_conn, actor_id):
+        assert actual_conn is conn
+        assert actor_id in {ACTOR_ID, APPROVER_ID, THIRD_ADMIN_ID}
+
+    monkeypatch.setattr(admission_module, "require_platform_admin_mutation", admitted)
     monkeypatch.setattr(
         admission_module,
         "acquire_with_tenant",
