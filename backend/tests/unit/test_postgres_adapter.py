@@ -15,6 +15,7 @@ import jwt
 import pytest
 
 from app.core import postgres_adapter
+from app.core.config import Settings
 from app.core.postgres_adapter import Client, QueryBuilder, RpcBuilder
 from app.api.v1.dependencies import get_db_client
 
@@ -461,6 +462,9 @@ def test_auth_get_user_uses_local_jwt_secret(monkeypatch):
     long_secret = "test-secret-with-minimum-32-bytes-1234567890"
     monkeypatch.setenv("JWT_SECRET", long_secret)
     monkeypatch.setenv("JWT_ALGORITHM", "HS256")
+    # Other tests may have initialized the process-wide settings cache already.
+    # Read this test's environment without clearing or replacing that shared cache.
+    monkeypatch.setattr(postgres_adapter, "get_settings", lambda: Settings(_env_file=None))
     token = jwt.encode(
         {"sub": "user-123", "email": "u@example.com"},
         long_secret,
