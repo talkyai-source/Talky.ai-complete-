@@ -9,21 +9,21 @@ SCRIPTS = ScriptDirectory(str(Path(__file__).resolve().parents[2] / "Alembic"))
 HEARTBEAT = "0048_audit_skip_heartbeat"
 RECEIPTS = "0062_saved_acknowledgement"
 MERGE = "0063_release_history_merge"
-HEAD = "0077_legacy_tenant_rls_repair"
+ADMIN = "0077_legacy_tenant_rls_repair"
+PAID = "0071_paid_only_billing"
+HEAD = "0078_admin_billing_merge"
 
 
 def test_release_exposes_one_head_containing_both_existing_histories():
     # 0064 (DNC phone_number compatibility trigger) sits on top of the merge;
     # 0065/0066 (bug hunt 2026-10-10 schema repairs), 0067/0068 (credential
     # history, API-key lookup hash), 0069 (AssemblyAI settings) and 0070 (PBX
-    # line soft delete), 0071 (connector lifecycle), 0072 (durable incidents) and
-    # 0073 (Alertmanager source episodes), 0074 (enquiry decision revision)
-    # 0075 (reviewed user/profile membership versions), and 0076 (terminal
-    # user-operation uniqueness and actor discovery), and 0077 (legacy tenant
-    # policy repair)
-    # are linear above the same merge.
+    # line soft delete) remain common ancestors. Published paid billing and
+    # connector/Admin histories now join through a metadata-only merge.
     assert SCRIPTS.get_heads() == [HEAD]
-    assert SCRIPTS.get_revision(HEAD).down_revision == "0076_admin_user_operations"
+    assert set(SCRIPTS.get_revision(HEAD).down_revision) == {ADMIN, PAID}
+    assert SCRIPTS.get_revision(PAID).down_revision == "0070_trunk_soft_delete"
+    assert SCRIPTS.get_revision(ADMIN).down_revision == "0076_admin_user_operations"
     assert SCRIPTS.get_revision("0076_admin_user_operations").down_revision == "0075_admin_user_review"
     assert SCRIPTS.get_revision("0075_admin_user_review").down_revision == "0074_contact_enquiry_revision"
     assert SCRIPTS.get_revision("0074_contact_enquiry_revision").down_revision == "0073_alertmanager_incidents"
@@ -58,13 +58,40 @@ def test_upgrade_plan_runs_only_the_missing_branch(start, required, already_pres
     assert required | {
         "0070_trunk_soft_delete", "0071_connector_lifecycle",
         "0072_admin_incidents", "0073_alertmanager_incidents", "0074_contact_enquiry_revision",
-        "0075_admin_user_review", "0076_admin_user_operations", HEAD,
+        "0075_admin_user_review", "0076_admin_user_operations", ADMIN, PAID, HEAD,
     } <= head_revisions
     assert already_present not in head_revisions
 
 
 def test_merge_has_no_schema_or_evidence_mutation_and_refuses_history_split():
     migration = import_module("Alembic.versions.0063_release_history_merge")
+    assert migration.upgrade() is None
+    with pytest.raises(RuntimeError, match="forward migration"):
+        migration.downgrade()
+
+
+@pytest.mark.parametrize("start,expected", [
+    (PAID, {"0071_connector_lifecycle", "0072_admin_incidents", "0073_alertmanager_incidents",
+            "0074_contact_enquiry_revision", "0075_admin_user_review", "0076_admin_user_operations", ADMIN, HEAD}),
+    (ADMIN, {PAID, HEAD}),
+    ((ADMIN, PAID), {HEAD}),
+    (HEAD, set()),
+])
+def test_current_release_upgrade_plan_never_replays_an_applied_branch(start, expected):
+    # This is the planner used by command.upgrade, including a database with
+    # two existing version rows. A paid deployment must not re-run catalog SQL.
+    steps = SCRIPTS._upgrade_revs("head", start)
+    revisions = [step.revision.revision for step in steps]
+    assert set(revisions) == expected
+    assert len(revisions) == len(expected)
+    if revisions:
+        assert revisions[-1] == HEAD
+    applied = {start} if isinstance(start, str) else set(start)
+    assert not applied.intersection(revisions)
+
+
+def test_admin_billing_merge_has_no_business_sql_and_refuses_history_split():
+    migration = import_module("Alembic.versions.0078_admin_billing_merge")
     assert migration.upgrade() is None
     with pytest.raises(RuntimeError, match="forward migration"):
         migration.downgrade()

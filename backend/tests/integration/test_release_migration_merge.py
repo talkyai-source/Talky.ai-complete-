@@ -24,11 +24,13 @@ BASELINE = "0008_tenant_voice_tuning"
 HEARTBEAT = "0048_audit_skip_heartbeat"
 RECEIPTS = "0062_saved_acknowledgement"
 MERGE = "0063_release_history_merge"
-HEAD = "0077_legacy_tenant_rls_repair"
+ADMIN = "0077_legacy_tenant_rls_repair"
+PAID = "0071_paid_only_billing"
+HEAD = "0078_admin_billing_merge"
 CURRENT_ADMIN_REVISIONS = {
     "0070_trunk_soft_delete", "0071_connector_lifecycle",
     "0072_admin_incidents", "0073_alertmanager_incidents", "0074_contact_enquiry_revision",
-    "0075_admin_user_review", "0076_admin_user_operations", HEAD,
+    "0075_admin_user_review", "0076_admin_user_operations", ADMIN, PAID, HEAD,
 }
 RUN_EVIDENCE = []
 pytestmark = pytest.mark.integration
@@ -212,6 +214,75 @@ def test_actual_upgrade_retains_both_histories_and_audit_evidence(monkeypatch, s
         command.upgrade(config, "head")
         report["steps"].append("repeat upgrade head")
         asyncio.run(verify_merged(dsn, tenant, trunk, report))
+    finally:
+        asyncio.run(cleanup(admin_dsn, name, report))
+    assert report["removed"] and report["connections_before_drop"] == 0
+
+
+async def billing_state(dsn, tenant):
+    async with connection(dsn) as conn:
+        return {
+            "heads": sorted(row["version_num"] for row in await conn.fetch("SELECT version_num FROM alembic_version")),
+            "tenant": await conn.fetchval("SELECT to_jsonb(t)::text FROM tenants t WHERE id=$1", tenant),
+            "catalog": {table: [row["value"] for row in await conn.fetch(
+                f'SELECT to_jsonb(t)::text AS value FROM public."{table}" t ORDER BY to_jsonb(t)::text')]
+                for table in ("plans", "plan_price_options", "topup_packages")},
+        }
+
+
+@pytest.mark.parametrize("start_heads", [(PAID,), (ADMIN,), (ADMIN, PAID)])
+def test_actual_admin_billing_merge_preserves_applied_terms_and_allowances(monkeypatch, start_heads):
+    admin_dsn = os.getenv("TALKY_RELEASE_MERGE_ADMIN_DSN", "")
+    if not admin_dsn:
+        pytest.skip("Explicit reviewed local migration owner fixture required")
+    parsed = urlparse(admin_dsn)
+    assert parsed.scheme == "postgresql" and parsed.hostname == "127.0.0.1" and parsed.port == 55434
+    assert parsed.path in {"/cp04_acceptance_test", "/admin_premortem_20261021_test"} and not parsed.query and not parsed.fragment
+    name = "release_merge_" + uuid4().hex + "_test"
+    dsn = urlunparse(parsed._replace(path="/" + name))
+    monkeypatch.setenv("DATABASE_URL", dsn)
+    monkeypatch.chdir(BACKEND)
+    config = Config(str(BACKEND / "alembic.ini"))
+    config.set_main_option("script_location", str(BACKEND / "Alembic"))
+    scripts = ScriptDirectory.from_config(config)
+    assert scripts.get_heads() == [HEAD]
+    report = {"start_heads": list(start_heads), "database": name, "steps": []}
+    RUN_EVIDENCE.append(report)
+    tenant = uuid4()
+
+    async def seed():
+        async with connection(dsn) as conn:
+            await conn.execute("""INSERT INTO tenants(id,business_name,plan_id,minutes_allocated,minutes_used)
+                VALUES($1,'Synthetic branch merge','basic',321,9)""", tenant)
+            if PAID in start_heads:
+                # An already-released catalog can have subsequent reviewed terms.
+                # Replaying paid0071 would erase this marker, even though its SQL
+                # uses UPSERT and superficially appears idempotent.
+                await conn.execute("UPDATE plans SET description='Synthetic post-release catalog marker' WHERE id='basic'")
+
+    try:
+        asyncio.run(provision(admin_dsn, name, report))
+        asyncio.run(bootstrap(dsn))
+        command.stamp(config, BASELINE)
+        for start in start_heads:
+            command.upgrade(config, start)
+        asyncio.run(seed())
+        before = asyncio.run(billing_state(dsn, tenant))
+        assert before["heads"] == sorted(start_heads)
+        command.upgrade(config, "head")
+        after = asyncio.run(billing_state(dsn, tenant))
+        assert after["heads"] == [HEAD]
+        assert after["tenant"] == before["tenant"]
+        if PAID in start_heads:
+            assert after["catalog"] == before["catalog"]
+            report["existing_paid_catalog_unchanged"] = True
+        else:
+            assert after["catalog"] != before["catalog"]
+            report["missing_paid_branch_applied"] = True
+        command.upgrade(config, "head")
+        assert asyncio.run(billing_state(dsn, tenant)) == after
+        report["tenant_allowance_retained"] = True
+        report["repeat_upgrade_unchanged"] = True
     finally:
         asyncio.run(cleanup(admin_dsn, name, report))
     assert report["removed"] and report["connections_before_drop"] == 0

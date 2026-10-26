@@ -6,10 +6,11 @@ Step 1: POST /auth/signup/start    {name, business_name, email}
            created yet.
 Step 2: POST /auth/signup/complete {email, code, password, confirm_password}
         -> validates the code, creates tenants + user_profiles
-           (plan_id="free" hardcoded), issues JWT + session cookie.
+           (no plan, zero minutes), issues JWT + session cookie.
 
-plan_id is never accepted from the frontend — every new account lands
-on the `free` tier and upgrades happen later from the dashboard.
+plan_id is never accepted from the frontend. Since 2026-10-27 billing is
+paid-only: a new account has no plan and no minutes, and can place calls
+only after buying a monthly or yearly plan in Billing.
 """
 
 import hashlib
@@ -281,7 +282,7 @@ async def signup_complete(
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ) -> AuthTokenResponse:
     """Step 2 of signup. Validate the code stored in Redis, then
-    create tenant + user_profiles (plan_id always "free") and issue
+    create tenant + user_profiles (no plan, zero minutes) and issue
     a session-bound JWT and cookie pair atomically."""
 
     email = body.email.strip().lower()
@@ -335,20 +336,12 @@ async def signup_complete(
             detail="Invalid verification code.",
         )
 
-    # All checks passed — create the account. plan_id is hardcoded.
-    forced_plan_id = "free"
+    # All checks passed — create the account with no plan and no minutes.
+    # Free minutes ended 2026-10-27 (owner decision); a plan is bought later.
+    # The meter reads a planless zero allowance as known and exhausted.
 
     # The tenant is created in this transaction, so no tenant UUID exists yet.
     async with acquire_with_tenant(db_client.pool, None) as conn:
-        plan = await conn.fetchrow(
-            "SELECT id, minutes FROM plans WHERE id = $1", forced_plan_id
-        )
-        if not plan:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Default plan unavailable; contact support.",
-            )
-
         tenant_admin_role_id = await conn.fetchval(
             "SELECT id FROM roles WHERE name = 'tenant_admin'"
         )
@@ -374,12 +367,10 @@ async def signup_complete(
             tenant = await conn.fetchrow(
                 """
                 INSERT INTO tenants (business_name, plan_id, minutes_allocated, minutes_used)
-                VALUES ($1, $2, $3, 0)
+                VALUES ($1, NULL, 0, 0)
                 RETURNING id, business_name, minutes_allocated
                 """,
                 pending["business_name"],
-                forced_plan_id,
-                plan["minutes"],
             )
 
             pw_hash = hash_password(body.password)
@@ -476,7 +467,7 @@ async def signup_complete(
         action="user_registered_two_step",
         description=f"New user registered (two-step): {email}",
         metadata={
-            "plan_id": forced_plan_id,
+            "plan_id": None,
             "business_name": pending["business_name"],
             "flow": "signup/start+complete",
         },

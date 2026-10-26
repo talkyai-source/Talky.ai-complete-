@@ -14,6 +14,8 @@ export const topupPackageSchema = z.object({ code: z.string(), name: z.string(),
 export type TopupPackage = z.infer<typeof topupPackageSchema>;
 export const topupBalanceSchema = z.object({ allocated: z.number().finite(), used_minutes: z.number().finite().nonnegative(),
   remaining_minutes: z.number().finite(), unlimited: z.boolean(), exhausted: z.boolean(), purchased_minutes: z.number().finite(),
+  // Bought minutes still unused: they carry over until used.
+  topup_minutes_left: z.number().finite().nonnegative().default(0),
 });
 export type TopupBalance = z.infer<typeof topupBalanceSchema>;
 export const topupOrderSchema = z.object({ id: z.guid(), package_code: z.string(), minutes: z.number().int().safe(),

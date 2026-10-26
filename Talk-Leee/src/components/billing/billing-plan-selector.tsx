@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useBillingPlan, useBillingPlans } from "@/lib/billing-api";
-import { formatPurchasedPrice, hasManagedSubscription, openBillingPortal } from "@/lib/billing-purchase";
+import { formatPurchasedPrice, hasManagedSubscription, openBillingPortal, yearlySaving } from "@/lib/billing-purchase";
 import { purchaseErrorText, useBillingPurchase } from "./use-billing-purchase";
 
 const navigate = (url: string) => window.location.assign(url);
@@ -69,7 +69,8 @@ export function BillingPlanSelector({ scope, onNavigate = navigate }: { scope: s
         const price = plan.price_options.find(option => option.kind === "free" && option.active) ?? plan.price_options.find(option => option.interval === selectedInterval && option.active);
         const available = Boolean(price?.checkout_available && price.active && (price.kind === "free" || ["live", "test"].includes(plan.billing_mode)));
         const currentFree = price?.kind === "free" && subscription?.purchased_price_option?.id === price.id;
-        return <Card key={plan.id} className="flex flex-col"><CardHeader><CardTitle>{plan.name}</CardTitle><CardDescription>{price ? formatPurchasedPrice(price) : "No approved offer for this interval"}</CardDescription>{plan.billing_mode === "test" && price?.kind === "stripe" && <p className="text-sm">Test billing — not a live purchase</p>}</CardHeader><CardContent className="flex flex-1 flex-col gap-4">
+        const saving = price ? yearlySaving(price, plan.price_options) : null;
+        return <Card key={plan.id} className="flex flex-col"><CardHeader><CardTitle>{plan.name}</CardTitle><CardDescription>{price ? formatPurchasedPrice(price) : "No approved offer for this interval"}</CardDescription>{saving && <p className="text-sm">{saving}</p>}{plan.billing_mode === "test" && price?.kind === "stripe" && <p className="text-sm">Test billing — not a live purchase</p>}</CardHeader><CardContent className="flex flex-1 flex-col gap-4">
           <ul className="flex-1 space-y-2 text-sm">{plan.features.map(feature => <li key={feature}>{feature}</li>)}</ul>
           <p className="text-sm">Monthly included allowance: {plan.minutes === 0 ? "Unlimited" : `${plan.minutes.toLocaleString()} minutes`}<br />Concurrent calls: {plan.concurrent_calls}</p>
           {!available && <p className="text-sm">{price?.unavailable_reason || "This offer is not available for checkout."}</p>}

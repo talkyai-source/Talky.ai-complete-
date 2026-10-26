@@ -83,6 +83,8 @@ def world(monkeypatch):
     _ModeBilling.sessions, _ModeBilling.instances = [], []
     monkeypatch.setattr(bt, "_service", lambda: topups)
     monkeypatch.setattr(bt, "BillingService", _ModeBilling)
+    # Top-ups add to a paid plan (2026-10-27); these accounts have one.
+    monkeypatch.setattr(bt, "_has_paid_plan", AsyncMock(return_value=True))
     monkeypatch.setattr(
         billing_checkout, "get_settings",
         lambda: SimpleNamespace(frontend_url="https://app.example", allowed_origins=["https://app.example"]),

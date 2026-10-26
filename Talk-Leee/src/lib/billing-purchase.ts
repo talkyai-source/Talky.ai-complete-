@@ -47,6 +47,20 @@ export function formatPurchasedPrice(price: PurchasedPrice | BillingPrice): stri
     minimumFractionDigits: price.currency_exponent, maximumFractionDigits: price.currency_exponent,
   }).format(price.amount_minor / (10 ** price.currency_exponent))} / ${price.interval}`;
 }
+/** A yearly offer's monthly equivalent and saving against the same plan's
+ * monthly offer, from server amounts only (never a UI-side discount). */
+export function yearlySaving(year: BillingPrice, options: readonly BillingPrice[]): string | null {
+  if (year.kind !== "stripe" || year.interval !== "year") return null;
+  const month = options.find(option => option.kind === "stripe" && option.active && option.interval === "month"
+    && option.currency === year.currency && option.currency_exponent === year.currency_exponent && option.amount_minor > 0);
+  if (!month) return null;
+  const perMonth = new Intl.NumberFormat(undefined, {
+    style: "currency", currency: year.currency.toUpperCase(),
+    minimumFractionDigits: year.currency_exponent, maximumFractionDigits: year.currency_exponent,
+  }).format(year.amount_minor / 12 / (10 ** year.currency_exponent));
+  const percent = Math.round((1 - year.amount_minor / (12 * month.amount_minor)) * 100);
+  return percent > 0 ? `Equals ${perMonth} / month · save ${percent}% vs monthly` : `Equals ${perMonth} / month`;
+}
 export function hasManagedSubscription(subscription: BillingSubscription | null): boolean {
   if (!subscription || ["inactive", "canceled", "cancelled", "incomplete_expired"].includes(subscription.status)) return false;
   if (subscription.purchased_price_option?.kind === "free") return false;

@@ -134,6 +134,7 @@ class ReminderWorker:
         crm_task = asyncio.create_task(self._crm_delivery_loop())
         callback_task = asyncio.create_task(self._voice_callback_loop())
         billing_task = asyncio.create_task(self._billing_delivery_loop())
+        topup_usage_task = asyncio.create_task(self._topup_usage_loop())
 
         try:
             while self.running:
@@ -170,6 +171,11 @@ class ReminderWorker:
 
                     await asyncio.sleep(min(5 * consecutive_errors, 60))
         finally:
+            topup_usage_task.cancel()
+            try:
+                await topup_usage_task
+            except (asyncio.CancelledError, Exception):
+                pass
             billing_task.cancel()
             try:
                 await billing_task
@@ -202,6 +208,22 @@ class ReminderWorker:
             except Exception as exc:
                 logger.warning("Billing notification scan failed: %s", type(exc).__name__)
             await asyncio.sleep(self.POLL_INTERVAL)
+
+    async def _topup_usage_loop(self):
+        """Record top-up minutes used in closed months (see ``topup_usage``).
+
+        The meter already subtracts unrecorded months, so this only makes them
+        durable; every ten minutes is plenty.
+        """
+        from app.domain.services.topup_usage import record_all_topup_usage
+        while self.running:
+            try:
+                recorded = await record_all_topup_usage(self._db_pool)
+                if recorded:
+                    logger.info("Recorded %d used top-up minutes", recorded)
+            except Exception as exc:
+                logger.warning("Top-up usage scan failed: %s", type(exc).__name__)
+            await asyncio.sleep(600)
 
     async def _voice_callback_loop(self):
         from app.services.voice_callback_service import drain_voice_callbacks

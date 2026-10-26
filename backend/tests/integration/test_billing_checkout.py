@@ -251,62 +251,48 @@ async def _tenant(fixture):
         )
 
 
-async def test_free_activation_commits_once_and_preserves_signed_topups(checkout_db):
+async def test_an_active_free_option_is_refused_and_grants_nothing(checkout_db):
+    """Paid-only billing (owner decision 2026-10-27): an old, still-active free
+    row never activates a plan or grants minutes, and Stripe is never called."""
     fixture = checkout_db
-    request_id = uuid4()
     async with acquire_with_tenant(fixture.pool, None) as conn:
         await conn.execute(
             "UPDATE tenants SET subscription_status='inactive' WHERE id=$1", fixture.tenants[0]
         )
-    first = await _create(fixture, request_id=request_id, option_id=fixture.free)
-    assert (
-        first["state"] == "activated" and first["checkout_url"] is None and not first["mock_mode"]
-    )
-    assert (await _tenant(fixture))["minutes_allocated"] == 163
-    assert (await _tenant(fixture))["minutes_used"] == 0
-    async with acquire_with_tenant(fixture.pool, None) as conn:
-        await conn.execute("UPDATE tenants SET minutes_used=11 WHERE id=$1", fixture.tenants[0])
-    replay = await _create(fixture, request_id=request_id, option_id=fixture.free)
-    assert replay == first and (await _tenant(fixture))["minutes_used"] == 11
+    before = await _tenant(fixture)
+    with pytest.raises(checkout.CheckoutError) as raised:
+        await _create(fixture, option_id=fixture.free)
+    assert raised.value.code == "billing_offer_unavailable" and raised.value.request_not_started
+    assert await _tenant(fixture) == before
     assert fixture.provider.calls == []
 
 
-async def test_free_activation_failure_rolls_back_allowance_and_can_resume(
-    checkout_db, monkeypatch
-):
+async def test_a_free_request_saved_before_the_change_never_grants_minutes(checkout_db):
     fixture = checkout_db
     request_id = uuid4()
     async with acquire_with_tenant(fixture.pool, None) as conn:
+        option = dict(
+            await conn.fetchrow(
+                """SELECT o.*, p.minutes, p.name AS plan_name FROM plan_price_options o
+                JOIN plans p ON p.id=o.plan_id WHERE o.id=$1""",
+                fixture.free,
+            )
+        )
+        await conn.execute(
+            """INSERT INTO billing_checkout_attempts(id,tenant_id,price_option_id,request_hash,snapshot,status)
+            VALUES($1,$2,$3,$4,$5::jsonb,'creating')""",
+            request_id, fixture.tenants[0], fixture.free, "0" * 64,
+            json.dumps({"option": {**option, "id": str(fixture.free)}}, default=str),
+        )
         await conn.execute(
             "UPDATE tenants SET subscription_status='inactive' WHERE id=$1", fixture.tenants[0]
         )
     before = await _tenant(fixture)
-    original = checkout.apply_plan_allocation
-
-    async def fail_after_allocation(*args):
-        await original(*args)
-        raise RuntimeError("Synthetic failure before activation commit")
-
-    monkeypatch.setattr(checkout, "apply_plan_allocation", fail_after_allocation)
-    with pytest.raises(RuntimeError, match="before activation"):
+    with pytest.raises(checkout.CheckoutError) as raised:
         await _create(fixture, request_id=request_id, option_id=fixture.free)
+    assert raised.value.code == "free_plan_retired"
     assert await _tenant(fixture) == before
-    row = await fixture.service._get(fixture.tenants[0], request_id)
-    assert row["status"] == "creating"
-    monkeypatch.setattr(checkout, "apply_plan_allocation", original)
-    assert (await _create(fixture, request_id=request_id, option_id=fixture.free))[
-        "state"
-    ] == "activated"
-
-
-async def test_new_identity_for_already_active_free_plan_does_not_reset_usage(checkout_db):
-    fixture = checkout_db
-    await _create(fixture, option_id=fixture.free)
-    async with acquire_with_tenant(fixture.pool, None) as conn:
-        await conn.execute("UPDATE tenants SET minutes_used=71 WHERE id=$1", fixture.tenants[0])
-    before = await _tenant(fixture)
-    await _create(fixture, option_id=fixture.free)
-    assert await _tenant(fixture) == before
+    assert fixture.provider.calls == []
 
 
 @pytest.mark.parametrize("interval", ["month", "year"])

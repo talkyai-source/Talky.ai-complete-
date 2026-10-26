@@ -72,11 +72,9 @@ class TestPlansEndpoint:
             assert response.status_code == 200
             data = response.json()
             assert isinstance(data, list)
-            assert len(data) == 1
-            assert data[0]["id"] == "basic"
-            assert data[0]["name"] == "Basic"
-            assert data[0]["price"] == 29
-            assert data[0]["price_options"] == []
+            # Paid-only billing (owner decision 2026-10-27): a plan with no paid
+            # price option in this billing mode is not offered at all.
+            assert data == []
             assert connection.fetch.await_count == 2
         finally:
             app.dependency_overrides.pop(get_db_pool, None)

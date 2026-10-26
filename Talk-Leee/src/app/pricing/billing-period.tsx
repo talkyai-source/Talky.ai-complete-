@@ -22,7 +22,7 @@ export function BillingPeriod({ children }: { children: ReactNode }) {
         </span>
         <Switch checked={annual} onCheckedChange={setAnnual} ariaLabel="Annual" />
         <span aria-hidden="true" className="justify-self-start">
-          Annual
+          Annual (save 17%)
         </span>
       </div>
       {children}

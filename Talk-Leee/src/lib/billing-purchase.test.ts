@@ -2,7 +2,7 @@ import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { api } from "./api";
 import { env } from "./env";
-import { formatPurchasedPrice, startBillingCheckout, type SavedPurchase } from "./billing-purchase";
+import { formatPurchasedPrice, startBillingCheckout, yearlySaving, type SavedPurchase } from "./billing-purchase";
 import { createHttpClient, __resetRefreshStateForTests } from "./http-client";
 const original = api.request;
 const originalFetch = globalThis.fetch;
@@ -35,4 +35,14 @@ test("actual shared auth client refreshes one 401 without changing the purchase 
   await startBillingCheckout(saved);
   assert.equal(refreshes, 1); assert.equal(bodies.length, 2); assert.equal(bodies[0], bodies[1]);
   assert.deepEqual(JSON.parse(bodies[0]!), { request_id: saved.request_id, price_option_id: saved.price_option.id });
+});
+
+test("yearly saving is worked out from the server's monthly and yearly amounts", () => {
+  const month = { id: "b1336f1f-6927-4680-8a6b-7b7c86a06e89", kind: "stripe" as const, interval: "month" as const, interval_count: 1 as const, amount_minor: 9900, currency: "usd", currency_exponent: 2 as const, active: true, checkout_available: true };
+  const year = { ...month, id: "bd8cb7f8-78ab-4ac8-bb15-24d9de9d34b0", interval: "year" as const, amount_minor: 98600 };
+  assert.equal(yearlySaving(year, [month, year]), "Equals $82.17 / month · save 17% vs monthly");
+  assert.equal(yearlySaving(month, [month, year]), null);
+  // No comparable monthly offer: no claim at all.
+  assert.equal(yearlySaving(year, [year]), null);
+  assert.equal(yearlySaving(year, [{ ...month, currency: "gbp" }, year]), null);
 });

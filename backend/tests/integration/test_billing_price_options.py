@@ -468,9 +468,10 @@ async def test_real_catalog_raw_json_uuid_sdk_shapes_and_provider_cleanup(
         raw = await conn.fetchval("SELECT features FROM plans WHERE id=$1", fixture.plan)
         assert isinstance(raw, str)
     resolved = await catalog.resolve_checkout_option(fixture.pool, fixture.option)
-    free = await catalog.resolve_checkout_option(fixture.pool, free_id)
     assert resolved["id"] == str(fixture.option) and resolved["free"] is False
-    assert free["id"] == str(free_id) and free["free"] is True
+    # Paid-only billing (2026-10-27): an active free row is never a checkout offer.
+    with pytest.raises(catalog.BillingCatalogUnavailable, match="no longer offered"):
+        await catalog.resolve_checkout_option(fixture.pool, free_id)
     clients = []
 
     class HttpClient:
@@ -517,8 +518,6 @@ async def test_real_catalog_raw_json_uuid_sdk_shapes_and_provider_cleanup(
     paid = next(item for item in plan["price_options"] if item["id"] == str(fixture.option))
     assert paid["checkout_available"] is not provider_fails
     assert bool(paid["unavailable_reason"]) is provider_fails
-    assert next(item for item in plan["price_options"] if item["id"] == str(free_id))[
-        "checkout_available"
-    ]
+    assert str(free_id) not in {item["id"] for item in plan["price_options"]}
     assert "stripe_price_id" not in paid and "provider_mode" not in paid
     assert clients and all(client.async_closed and client.sync_closed for client in clients)
