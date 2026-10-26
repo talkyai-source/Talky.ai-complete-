@@ -1,5 +1,11 @@
 # Admin monitoring maintenance — 27 October 2026
 
+**Follow-up:** [The remaining-limitations record](2026-10-27-admin-remaining-limitations.md)
+records live PBX observation/version repair `5470521a`, 360 px keyboard/touch
+acceptance, the broader Admin compatibility findings and the coordinated-release
+dependency. The original `80f011d4` activation and its unknown-PBX limitation below
+are retained as history; the provider-publication limitation remains open.
+
 ## Defect and bounded repair
 
 The deployed Admin frontend rejected all six HTTP-200 monitoring responses from
