@@ -91,6 +91,7 @@ export function WorkerStatusTable() {
             </div>
             <div className="card-body">
                 <p className="text-muted">{data.scope}. Observed {observedAt(data.checked_at)}.</p>
+                <div className="table-container" role="region" aria-label="Worker status details" tabIndex={0}>
                 <table className="data-table compact">
                     <thead>
                         <tr>
@@ -133,6 +134,7 @@ export function WorkerStatusTable() {
                         ))}
                     </tbody>
                 </table>
+                </div>
             </div>
         </div>
     );
