@@ -162,116 +162,112 @@ there about the schema not rolling back with the code.
 
 ## Backups
 
-Postgres runs in the compose container, so backups go through it:
+Use `talky-db-backup.service`, triggered by the existing
+`talky-db-backup.timer`, for scheduled and manual Postgres backups. The service
+runs [db-backup.sh](../backend/deploy/db-backup.sh) and its adjacent
+[backup_snapshot.py](../backend/deploy/backup_snapshot.py); production defaults
+are container `talky-postgres-1`, database `talkyai`, and role `talkyai`.
+Inspect the installed unit before a manual run: a reviewed backup-only
+maintenance release may pin `ExecStart` to an immutable worktree while retaining
+`WorkingDirectory=/opt/talky/backend`. Do not substitute a bare `pg_dump` command.
 
-```bash
-#!/usr/bin/env bash
-set -Eeuo pipefail
-umask 077
-backup_dir="${TALKY_BACKUP_DIR:-/var/backups/talky}"
-sudo install -d -o "$(id -un)" -g "$(id -gn)" -m 0700 "${backup_dir}"
-dump="${backup_dir}/talky-$(date -u +%Y%m%dT%H%M%SZ).dump"
-partial="${dump}.partial"
-checksum_file="${dump}.sha256"
-checksum_partial="${checksum_file}.partial"
-for output_path in "$dump" "$partial" "$checksum_file" "$checksum_partial"; do
-  if [[ -e "$output_path" ]]; then
-    echo "ERROR: refusing to overwrite existing backup artifact: $output_path" >&2
-    exit 1
-  fi
-done
-published=0
-cleanup_partial() {
-  rc=$?
-  if [[ -n "${partial:-}" && -e "$partial" ]]; then
-    rm -f -- "$partial"
-  fi
-  if [[ -n "${checksum_partial:-}" && -e "$checksum_partial" ]]; then
-    rm -f -- "$checksum_partial"
-  fi
-  if [[ "$rc" -ne 0 && "${published:-0}" -eq 1 ]]; then
-    rm -f -- "$dump" "$checksum_file"
-  fi
-  exit "$rc"
-}
-trap cleanup_partial EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-docker compose -f /opt/talky/docker-compose.yml exec -T postgres \
-  pg_dump -U talky -d talky --no-owner --format=custom \
-  > "${partial}"
-test -s "${partial}"
-docker compose -f /opt/talky/docker-compose.yml exec -T postgres \
-  pg_restore --list < "${partial}" >/dev/null
-digest="$(sha256sum "${partial}" | cut -d ' ' -f1)"
-[[ "$digest" =~ ^[0-9a-f]{64}$ ]]
-printf '%s  %s\n' "$digest" "$dump" > "${checksum_partial}"
-published=1
-mv -- "${partial}" "${dump}"
-partial=""
-mv -- "${checksum_partial}" "${checksum_file}"
-checksum_partial=""
-sha256sum --check "${checksum_file}"
-trap - EXIT INT TERM
+The root-owned configuration `/etc/talky/db-backup.env` must have mode `0600` and
+contain an explicitly selected **existing**, active, verified platform-admin
+UUID:
+
+```ini
+TALKY_BACKUP_PRINCIPAL_ID=<existing-platform-admin-UUID>
 ```
 
-Retain 30 days locally and ship off-host with server-side encryption. **Test
-restores monthly** — an untested backup is a hope, not a backup. Restore only
-into a newly created, isolated database; never use the production `talky`
-database as the restore target:
+Use `sudoedit` to configure that file, then verify its ownership and permissions.
+It is backup process context, not an account-creation step or a database role
+promotion. Do not place a password, token or MFA secret in it. The service's
+optional `EnvironmentFile` allows installation before configuration; the backup
+itself fails when the principal is missing or invalid.
+
+The helper opens a read-only repeatable-read transaction, sets the tenant bypass
+and explicit principal GUCs, validates that principal, and exports the snapshot
+used by `pg_dump --enable-row-security`. The keeper holds that same snapshot
+until the dump finishes. This includes saved acknowledgement receipts (and
+supplier evidence when that schema is installed) whose policies require an
+active verified administrator in addition to tenant bypass. A concurrent role
+change or deactivation cannot silently filter those rows from the validated
+snapshot. Policies and role grants remain unchanged. Invalid principal, dump
+failure or keeper failure prevents publication and retention; partial files are
+removed. Container and host deadlines bound the operation.
+
+For an on-demand run, first confirm the one-shot service is inactive; use the
+service so its reviewed executable and private configuration are applied:
 
 ```bash
-#!/usr/bin/env bash
-set -Eeuo pipefail
-cd /opt/talky
-backup_dir="${TALKY_BACKUP_DIR:-/var/backups/talky}"
-backup="${backup_dir}/talky-YYYYMMDDTHHMMSSZ.dump"
-restore_db="talky_restore_$(date -u +%Y%m%dT%H%M%SZ)"
-evidence="${backup_dir}/${restore_db}-compatibility.txt"
-restore_created=0
-cleanup_restore() {
-  rc=$?
-  if [[ "$restore_created" -eq 1 ]]; then
-    if ! docker compose -f /opt/talky/docker-compose.yml exec -T postgres \
-      dropdb -U talky --if-exists --force "${restore_db}"; then
-      echo "ERROR: failed to remove isolated restore DB ${restore_db}" >&2
-      rc=1
-    fi
-  fi
-  exit "$rc"
-}
-trap cleanup_restore EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
-date -u +%FT%TZ | tee "${evidence}"
-sha256sum --check "${backup}.sha256" | tee -a "${evidence}"
-docker compose -f /opt/talky/docker-compose.yml exec -T postgres \
-  createdb -U talky -O talky --template=template0 "${restore_db}"
-restore_created=1
-docker compose -f /opt/talky/docker-compose.yml exec -T postgres \
-  pg_restore -U talky -d "${restore_db}" --exit-on-error --no-owner \
-  < "${backup}"
-docker compose -f /opt/talky/docker-compose.yml exec -T postgres \
-  psql -U talky -d "${restore_db}" -v ON_ERROR_STOP=1 \
-  -c 'SELECT version_num FROM alembic_version;' \
-  -c 'SELECT count(*) AS calls FROM calls;' | tee -a "${evidence}"
-
-# Uses the current application pool/import path against the isolated DB,
-# verifies the exact repository Alembic head and representative query
-# contracts, and refuses production-like database names. It never migrates.
-backend/venv/bin/python backend/scripts/verify_restore_compatibility.py \
-  --database "${restore_db}" | tee -a "${evidence}"
-date -u +%FT%TZ | tee -a "${evidence}"
+sudo systemctl show talky-db-backup.service -p FragmentPath -p ExecStart -p ActiveState
+sudo systemctl start talky-db-backup.service
+sudo systemctl show talky-db-backup.service -p Result -p ExecMainStatus
+sudo journalctl -u talky-db-backup.service -n 30 --no-pager
+systemctl list-timers talky-db-backup.timer --no-pager
 ```
 
-Record backup size/checksum, restore start/end time, schema version,
-representative table counts, and the application compatibility smoke test
-result. The trap drops only the isolated `talky_restore_*` database and makes
-cleanup failure a failed drill; preserve the evidence file off-host. A daily
-logical dump provides at best a roughly 24-hour Postgres RPO; the release owner
-must approve explicit RTO/RPO targets and add WAL-based recovery if that RPO is
-insufficient.
+Success publishes `/var/backups/talky/talky-<UTC stamp>.dump` and `.dump.sha256`
+(default directory), checks the checksum and archive table-data entries, and
+retains 30 days by default. A dump below half the previous size is deliberately
+published but exits nonzero with a critical shrink alert; investigate it rather
+than treating that exit as proof no archive exists. Table-data entry counts do
+not prove every row is present. Keep dump contents and logs private.
+
+### Restore test
+
+Test restores monthly and before a release that changes recovery assumptions.
+The tested production method uses a **new, isolated PostgreSQL cluster from the
+exact production image ID**, not another database in the production container.
+In the recorded production drill, the live cluster had no superuser role;
+trusted extension restoration failed because its bootstrap role was demoted.
+Do not promote the production
+application role, use single-user mode, or change production privileges to make
+a drill pass.
+
+Use the reviewed, source-bound recovery procedure recorded in the
+[remaining remediation session](sessions/2026-10-27-admin-remaining-remediation.md).
+Its required boundaries are:
+
+1. Bind the private archive to its exact path, size and SHA-256. Capture source
+   schema heads, role flags, memberships, locale, extension versions/member
+   ownership and ACLs, and selected counts in a read-only transaction. Record
+   that this later observation is separate from the dump snapshot.
+2. Create one uniquely owned container and volume with the same image, no
+   network or published ports, bounded resources, and a Unix socket under a
+   root-only `0700` directory. Mount only its new data volume, private socket,
+   temporary initialization secret and read-only archive; never the production
+   data volume. Bind evidence to the actual created container identity.
+3. Recreate source non-system role metadata without copying passwords. Initialize
+   the isolated bootstrap role as `talkyai` to preserve extension ownership;
+   create an isolated maintenance role before demotion. Restore the **full**
+   custom archive with ownership and ACLs retained, `--exit-on-error` and a
+   transaction. Do not filter archive entries or pass restore-time `--no-owner`
+   or `--no-acl` to hide differences.
+4. Demote the isolated application role to the captured source flags before
+   application checks. Compare restored metadata and selected data to the
+   captured baseline. Keep populated receipt/decision roundtrips separate from
+   empty-table observations; representative counts are not full-content proof.
+5. For candidate migration validation, use an immutable matching checkout and
+   explicit clone-only `DATABASE_URL` **and** `READ_DATABASE_URL`. Prove the
+   actual Unix-socket database, role and NOSUPERUSER/NOBYPASSRLS state with each
+   client before any migration; do not load a production `.env`. Upgrade and
+   repeat only in that clone, then run the candidate runtime privilege and
+   [restore compatibility](../backend/scripts/verify_restore_compatibility.py)
+   checks. The compatibility checker does not migrate. Preserve selected full
+   tenant/billing/receipt hashes across migration and record their row counts.
+6. Preserve reports on failure. Close owned connections and remove only the
+   recorded container and its exact owned volume after identity checks, plus
+   the exact private temporary secret. Record cleanup and unchanged production
+   service identities; never use a production-cluster `dropdb --force` shortcut.
+
+Record archive size/checksum, start/end times, image and source/candidate schema
+heads, scope of data comparisons, application checks, failures and exact cleanup.
+Ship backups and evidence off-host with encryption; local restore success does
+not establish that off-host recovery is configured. A daily logical dump gives
+at best roughly a 24-hour Postgres RPO. Explicit RPO/RTO targets and measured
+recovery times remain release-owner requirements; add WAL-based recovery if
+that RPO is insufficient.
 
 Redis AOF at `everysec` gives roughly a 1 s RPO. For a snapshot:
 
