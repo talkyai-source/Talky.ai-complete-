@@ -19,6 +19,7 @@ from app.api.v1.dependencies import (
     get_current_user,
     get_db_client,
     get_db_pool,
+    get_optional_user,
 )
 from app.core.postgres_adapter import Client
 from app.core.security.rbac import Permission, require_permission
@@ -126,15 +127,32 @@ def get_billing_service(db_client: Client = Depends(get_db_client)) -> BillingSe
 # ============================================
 
 
-def _require_checkout_permitted_in_test_mode(current_user) -> None:
-    """Stripe TEST mode in production sells only to the team (billing_mode)."""
+def _is_platform_admin(current_user) -> bool:
     from app.core.security.rbac import UserRole, normalize_role
-    from app.domain.services.billing_mode import checkout_permitted_in_test_mode
 
     try:
-        is_platform_admin = normalize_role(current_user.role) == UserRole.PLATFORM_ADMIN
+        return normalize_role(current_user.role) == UserRole.PLATFORM_ADMIN
     except Exception:
-        is_platform_admin = False
+        return False
+
+
+def _is_billing_team(current_user) -> bool:
+    """Who may see and buy team-only plans (billing_mode.is_billing_team)."""
+    from app.domain.services.billing_mode import is_billing_team
+
+    if current_user is None:
+        return False
+    return is_billing_team(
+        is_platform_admin=_is_platform_admin(current_user),
+        email=getattr(current_user, "email", None),
+    )
+
+
+def _require_checkout_permitted_in_test_mode(current_user) -> None:
+    """Stripe TEST mode in production sells only to the team (billing_mode)."""
+    from app.domain.services.billing_mode import checkout_permitted_in_test_mode
+
+    is_platform_admin = _is_platform_admin(current_user)
     if not checkout_permitted_in_test_mode(is_platform_admin=is_platform_admin, email=current_user.email):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -169,6 +187,7 @@ async def create_checkout_session(
             request_id=str(body.request_id),
             price_option_id=str(body.price_option_id),
             business_name=current_user.business_name,
+            allow_team_only=_is_billing_team(current_user),
         )
 
         # Log event (Day 8)
@@ -844,15 +863,19 @@ async def get_adjustments(
 @router.get("/plans")
 async def list_billing_plans(
     db_client: Client = Depends(get_db_client),
+    current_user: Optional[CurrentUser] = Depends(get_optional_user),
 ):
     """
     Convenience pass-through to the plans catalog so the frontend can
-    fetch /billing/plans from a single billing module.
+    fetch /billing/plans from a single billing module. The team also sees
+    its team-only plans (the $1 payment check).
     """
     try:
         from app.domain.services.billing_catalog import list_plan_catalog
 
-        return await list_plan_catalog(db_client.pool)
+        return await list_plan_catalog(
+            db_client.pool, include_team_only=_is_billing_team(current_user)
+        )
     except Exception as e:
         logger.error(f"Failed to list plans: {e}")
         raise HTTPException(status_code=500, detail="Failed to list plans")

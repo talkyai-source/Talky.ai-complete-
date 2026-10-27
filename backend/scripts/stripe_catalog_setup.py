@@ -1,7 +1,8 @@
 """Create or verify the Stripe side of paid-only billing, then switch it on.
 
 Owner decision 2026-10-27: Basic $99/month and Business $299/month (the public
-pricing page), each also yearly at 17% off 12 months ($986 and $2,978).
+pricing page), each also yearly at 17% off 12 months ($986 and $2,978), plus
+the team-only $1/month payment check (migration 0073).
 
 Two steps, both idempotent. Neither ever prints a secret.
 
@@ -22,8 +23,10 @@ Two steps, both idempotent. Neither ever prints a secret.
      cancel-at-period-end, never a plan change (the purchase terms are frozen).
 
 Restart the services afterwards so they read the new environment. Switching
-to live keys later is step 1 with the live key (and without
-``STRIPE_TEST_MODE_IN_PRODUCTION``), then step 2 again. In live mode step 2
+to live keys later is step 1 with the live key, removing
+``STRIPE_TEST_MODE_IN_PRODUCTION``, ``STRIPE_WEBHOOK_SECRET`` and
+``STRIPE_PORTAL_CONFIGURATION_ID`` (both name test-mode objects: a kept test
+secret would fail every live signature), then step 2 again. In live mode step 2
 lists accounts still holding a plan bought with a TEST card: no money was
 taken for those, so end them (set subscription_status to 'cancelled') before
 opening checkout to customers.
@@ -45,6 +48,8 @@ CURRENCY = "usd"
 CATALOG = {
     "basic": ("Talk-Lee AI Basic", {"month": 9900, "year": 98600}),
     "business": ("Talk-Lee AI Business", {"month": 29900, "year": 297800}),
+    # Team-only real $1 charge that checks the money flow (billing_mode.TEAM_ONLY_PLAN_IDS).
+    "payment_test": ("Talk-Lee AI payment test", {"month": 100}),
 }
 WEBHOOK_EVENTS = [
     "checkout.session.completed",
@@ -196,7 +201,7 @@ async def save_options(options: list[dict], apply: bool) -> None:
             plans = {row["id"] for row in await conn.fetch("SELECT id FROM plans WHERE id = ANY($1::text[])", list(CATALOG))}
             missing = set(CATALOG) - plans
             if missing:
-                raise SystemExit(f"plans missing (run migration 0071 first): {sorted(missing)}")
+                raise SystemExit(f"plans missing (run the migrations first): {sorted(missing)}")
             for option in options:
                 if not apply:
                     print(f"would save price option {option['plan_id']} {option['interval']}")

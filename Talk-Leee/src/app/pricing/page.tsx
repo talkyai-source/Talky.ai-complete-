@@ -158,11 +158,11 @@ export default function PricingPage() {
                   ))}
                 </ul>
                 <div className="mt-8 flex flex-1 items-end justify-center">
-                  <Link href="/auth/register">
-                    <Button size="lg" className={primaryButtonClassName}>
+                  <Button asChild size="lg" className={primaryButtonClassName}>
+                    <Link href="/auth/register">
                       Get Started
-                    </Button>
-                  </Link>
+                    </Link>
+                  </Button>
                 </div>
               </div>
             ))}
@@ -280,16 +280,16 @@ export default function PricingPage() {
               Create an account to get started, or talk to our team about custom pricing for larger deployments.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-              <Link href="/auth/register">
-                <Button size="lg" className={primaryButtonClassName}>
+              <Button asChild size="lg" className={primaryButtonClassName}>
+                <Link href="/auth/register">
                   Get Started
-                </Button>
-              </Link>
-              <Link href="/contact">
-                <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                </Link>
+              </Button>
+              <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                <Link href="/contact">
                   Talk to Sales
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </div>
         </section>

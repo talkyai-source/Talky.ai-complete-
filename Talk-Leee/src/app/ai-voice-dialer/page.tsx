@@ -205,16 +205,16 @@ export default function AIVoiceDialerPage() {
             qualifies leads, and books the ones worth your time &mdash; while your team focuses on closing.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Start Calling with AI
-              </Button>
-            </Link>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+              </Link>
+            </Button>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 See a Live Call
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
           <div className="mt-10 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
             {capabilityPills.map((pill) => (
@@ -281,11 +281,11 @@ export default function AIVoiceDialerPage() {
             ))}
           </div>
           <div className={centeredCtaClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 See AI in Action
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -323,11 +323,11 @@ export default function AIVoiceDialerPage() {
             ))}
           </div>
           <div className={centeredCtaClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Launch Your First Campaign
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -346,11 +346,11 @@ export default function AIVoiceDialerPage() {
             ))}
           </div>
           <div className={centeredCtaClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Stop Dialing. Start Closing.
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -369,11 +369,11 @@ export default function AIVoiceDialerPage() {
             ))}
           </div>
           <div className={centeredCtaClassName}>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 Still Curious? See It Live
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -450,11 +450,11 @@ export default function AIVoiceDialerPage() {
             ))}
           </div>
           <div className={centeredCtaClassName}>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 Still Have Questions? Talk to Us &rarr;
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -467,16 +467,16 @@ export default function AIVoiceDialerPage() {
               gap only gets wider the longer manual dialing stays the default.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-              <Link href="/auth/register">
-                <Button size="lg" className={primaryButtonClassName}>
+              <Button asChild size="lg" className={primaryButtonClassName}>
+                <Link href="/auth/register">
                   Start Your AI Calling Campaign Now
-                </Button>
-              </Link>
-              <Link href="/#contact">
-                <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                </Link>
+              </Button>
+              <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                <Link href="/#contact">
                   Talk to a Growth Strategist
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
             <p className="mt-6 text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground">
               No contracts. Live in 48 hours. Cancel anytime.

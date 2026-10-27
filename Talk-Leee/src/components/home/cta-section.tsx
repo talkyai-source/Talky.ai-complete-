@@ -29,15 +29,16 @@ export function CTASection() {
             Set up your calling workflows with Talk-Lee AI and review their results with your team.
           </p>
 
-          <Link href="/auth/register">
-            <Button 
-              size="lg" 
-              className="bg-indigo-600 text-white hover:bg-indigo-700 rounded-full px-8 h-14 text-base font-bold shadow-xl transition-all hover:scale-105 hover:shadow-2xl group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:bg-indigo-500 dark:hover:bg-indigo-400"
-            >
+          <Button
+            asChild
+            size="lg"
+            className="bg-indigo-600 text-white hover:bg-indigo-700 rounded-full px-8 h-14 text-base font-bold shadow-xl transition-all hover:scale-105 hover:shadow-2xl group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:bg-indigo-500 dark:hover:bg-indigo-400"
+          >
+            <Link href="/auth/register">
               Get Started Now
               <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </motion.div>
       </div>
     </section>

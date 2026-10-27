@@ -897,15 +897,15 @@ export function CampaignPerformanceTable({
                         >
                             Export
                         </Button>
-                        <Link href="/campaigns/new" className="shrink-0">
-                            <Button
-                                type="button"
-                                variant="outline"
-                                className="h-10 border-teal-500/60 bg-teal-600 text-white shadow-sm hover:bg-teal-700 hover:text-white"
-                            >
+                        <Button
+                            asChild
+                            variant="outline"
+                            className="h-10 border-teal-500/60 bg-teal-600 text-white shadow-sm hover:bg-teal-700 hover:text-white"
+                        >
+                            <Link href="/campaigns/new" className="shrink-0">
                                 New Campaign
-                            </Button>
-                        </Link>
+                            </Link>
+                        </Button>
                     </div>
                 </div>
             </div>
@@ -1277,11 +1277,11 @@ export function CampaignPerformanceTable({
                             <div className="mt-2 text-sm text-muted-foreground">{detailsCampaign.description || "—"}</div>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
-                            <Link href={`/campaigns/${detailsCampaign.id}`}>
-                                <Button type="button" variant="secondary">
+                            <Button asChild variant="secondary">
+                                <Link href={`/campaigns/${detailsCampaign.id}`}>
                                     Open Page
-                                </Button>
-                            </Link>
+                                </Link>
+                            </Button>
                             {detailsCanResume ? <CampaignStartControl campaignIds={[detailsCampaign.id]} onStart={() => onResume(detailsCampaign.id)} label="Resume" /> : detailsCanPause ? (
                                 <Button
                                     type="button"

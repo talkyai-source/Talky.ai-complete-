@@ -193,16 +193,16 @@ export default function AutomatedLeadQualificationUseCasePage() {
             conversations worth having.
           </p>
           <div className={ctaPairClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Book a Demo
-              </Button>
-            </Link>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+              </Link>
+            </Button>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 See How It Works
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </header>
 
@@ -351,16 +351,16 @@ export default function AutomatedLeadQualificationUseCasePage() {
               Book a demo and we&rsquo;ll show you how it qualifies leads against your own criteria.
             </p>
             <div className={ctaPairClassName}>
-              <Link href="/auth/register">
-                <Button size="lg" className={primaryButtonClassName}>
+              <Button asChild size="lg" className={primaryButtonClassName}>
+                <Link href="/auth/register">
                   Book a Demo
-                </Button>
-              </Link>
-              <Link href="/#contact">
-                <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                </Link>
+              </Button>
+              <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                <Link href="/#contact">
                   Talk to Sales
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </div>
         </section>

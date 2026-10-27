@@ -177,11 +177,13 @@ class BillingService:
     async def create_checkout_session(
         self, *, tenant_id: str, email: str, request_id: str,
         price_option_id: str, business_name: Optional[str] = None,
+        allow_team_only: bool = False,
     ) -> Dict[str, Any]:
         from app.domain.services.billing_checkout import CheckoutAttempts
         return await CheckoutAttempts(self.db_client.pool, self).create(
             tenant_id=tenant_id, email=email, request_id=request_id,
             price_option_id=price_option_id, business_name=business_name,
+            allow_team_only=allow_team_only,
         )
 
     async def get_checkout_attempt(self, *, tenant_id: str, request_id: str):

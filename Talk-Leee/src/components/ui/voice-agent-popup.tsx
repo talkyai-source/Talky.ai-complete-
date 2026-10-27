@@ -56,6 +56,13 @@ const BAR_HEIGHT_ONE_ROW = 64;
 // CSS alone (88% / 14px); at and above it the bar takes the navbar's
 // measured width and radius inline.
 const BAR_ONE_ROW_QUERY = "(min-width: 640px)";
+// Pre-measurement fallback for the navbar's top offset: the same
+// clamp(1rem, 2.5vw, 1.25rem) that .home-navbar-fixed uses in globals.css
+// (16px on phones, 2.5vw, 20px from 800px), so the call bar sits where the
+// navbar is from first paint. Only reached when the navbar cannot be read.
+function navTopFallbackPx(): number {
+    return Math.min(20, Math.max(16, window.innerWidth * 0.025));
+}
 // Gap between the show and hide thresholds so scroll jitter exactly on
 // the boundary can never make the swap oscillate.
 const BAR_SWAP_HYSTERESIS_PX = 24;
@@ -220,7 +227,7 @@ export function VoiceAgentPopup() {
         const rect = nav.getBoundingClientRect();
         setNavGeom((prev) => {
             const next = {
-                top: Number.parseFloat(cs.top) || 8,
+                top: Number.parseFloat(cs.top) || navTopFallbackPx(),
                 width: rect.width,
                 radius: cs.borderRadius || "9999px",
             };
@@ -257,7 +264,7 @@ export function VoiceAgentPopup() {
             showObserver?.disconnect();
             hideObserver?.disconnect();
             const nav = document.querySelector('nav[aria-label="Primary"]');
-            const navTop = nav ? Number.parseFloat(getComputedStyle(nav).top) || 8 : 8;
+            const navTop = nav ? Number.parseFloat(getComputedStyle(nav).top) || navTopFallbackPx() : navTopFallbackPx();
             const oneRow = window.matchMedia(BAR_ONE_ROW_QUERY).matches;
             setOneRowBar(oneRow);
             const barHeight = oneRow ? BAR_HEIGHT_ONE_ROW : BAR_HEIGHT_TWO_ROW;

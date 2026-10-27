@@ -4,6 +4,7 @@ import "./globals.css";
 import { SuspensionStateProvider } from "@/components/admin/suspension-state-provider";
 import { AppProviders } from "@/components/providers/app-providers";
 import { CallEndedNotice } from "@/components/ui/call-ended-notice";
+import { sharedMetadata } from "@/lib/site-metadata";
 
 // Manrope is the navbar's typeface (navbar.tsx sets `font-family: var(--font-manrope)`
 // inline) and the navbar renders on every public page, so the variable has to be
@@ -17,6 +18,8 @@ const manrope = Manrope({
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
 export const metadata: Metadata = {
+  // Canonical URL, Open Graph and Twitter card, inherited by every route.
+  ...sharedMetadata,
   title: "Talk-Lee",
   description: "Intelligent voice communication platform powered by advanced AI agents",
   manifest: "/site.webmanifest",

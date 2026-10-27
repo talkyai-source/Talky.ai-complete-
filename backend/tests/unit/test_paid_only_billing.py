@@ -241,9 +241,12 @@ async def test_an_active_subscription_is_a_paid_plan(monkeypatch):
 def test_yearly_prices_are_seventeen_percent_off_twelve_months():
     from scripts.stripe_catalog_setup import CATALOG
 
-    assert set(CATALOG) == {"basic", "business"}
-    for _name, prices in CATALOG.values():
+    assert set(CATALOG) == {"basic", "business", "payment_test"}
+    for plan_id in ("basic", "business"):
+        prices = CATALOG[plan_id][1]
         discount = 1 - prices["year"] / (12 * prices["month"])
         assert round(discount * 100, 1) == 17.0
     assert CATALOG["basic"][1] == {"month": 9900, "year": 98600}
     assert CATALOG["business"][1] == {"month": 29900, "year": 297800}
+    # The team-only payment check is one real $1 monthly charge, no yearly offer.
+    assert CATALOG["payment_test"][1] == {"month": 100}
