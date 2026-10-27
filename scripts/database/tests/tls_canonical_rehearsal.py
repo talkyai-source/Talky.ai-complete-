@@ -41,12 +41,17 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
-def run(command, *, input=None, env=None, cwd=None, timeout=180):
+def run(command, *, input=None, env=None, cwd=None, timeout=180, redactions=None):
     result = subprocess.run(command, input=input, text=True, capture_output=True,
                             env=env, cwd=cwd, timeout=timeout)
     # Even synthetic passwords/DSNs must not leak into a public CI log.
     if result.returncode:
-        raise RuntimeError(f"{Path(command[0]).name} failed with exit {result.returncode}; output withheld")
+        detail = "output withheld"
+        if redactions is not None:
+            detail = (result.stdout + result.stderr)[-4000:]
+            for value in redactions:
+                detail = detail.replace(value, "[redacted fixture password]")
+        raise RuntimeError(f"{Path(command[0]).name} failed with exit {result.returncode}; {detail}")
     return result.stdout.strip()
 
 
@@ -73,7 +78,7 @@ class Fixture:
         self.passfile = work / "passwords"
 
     def docker(self, *arguments, **kwargs):
-        return run(["docker", *arguments], **kwargs)
+        return run(["docker", *arguments], redactions=self.passwords.values(), **kwargs)
 
     def prepare(self):
         require(sys.platform == "linux", "This fixture requires Linux and a local Docker daemon")
@@ -93,25 +98,26 @@ class Fixture:
         subnet = ipaddress.ip_network(network["IPAM"]["Config"][0]["Subnet"])
         require(network["Internal"] and subnet.version == 4 and subnet.is_private and subnet.num_addresses >= 8,
                 "Fixture requires its own private internal IPv4 bridge")
-        addresses = [str(subnet.network_address + offset) for offset in (2, 3)]
-        self.create_certificates(addresses)
+        addresses = []
         write_private(self.work / "bootstrap-password", self.passwords["fixture_admin"])
         # No plaintext TCP fallback, including inside the Docker bridge.
         write_private(self.work / "pg_hba.conf", "local all all trust\nhostssl all all all scram-sha-256\nhostnossl all all all reject\n")
-        for label, host in zip(("source", "target"), addresses):
+        for label in ("source", "target"):
             name = f"talklee-recovery-{label}-{self.token}"
             # Register the unique name before create: a timeout can occur after
             # Docker creates an object but before it returns its ID.
             self.container_names.add(name)
             container = self.docker(
                 "create", "--name", name, "--label", f"{LABEL}={self.token}",
-                "--network", self.network, "--ip", host, "--memory", "768m",
+                "--network", self.network, "--memory", "768m",
                 "--tmpfs", "/var/lib/postgresql/data:rw,nosuid,nodev,size=536870912",
                 "--mount", f"type=bind,source={self.work},target=/fixture,readonly",
                 "--env", "POSTGRES_USER=fixture_admin", "--env", "POSTGRES_DB=postgres",
                 "--env", "POSTGRES_PASSWORD_FILE=/fixture/bootstrap-password",
                 "--env", "POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256",
                 self.image_id, "bash", "-ec",
+                "for attempt in {1..60}; do test -f /fixture/tls-ready && break; sleep 1; done\n"
+                "test -f /fixture/tls-ready\n"
                 "install -o postgres -g postgres -m 0600 /fixture/server.key /tmp/server.key\n"
                 "install -o postgres -g postgres -m 0644 /fixture/server.crt /tmp/server.crt\n"
                 "install -o postgres -g postgres -m 0600 /fixture/pg_hba.conf /tmp/pg_hba.conf\n"
@@ -120,14 +126,23 @@ class Fixture:
             self.containers.append(container)
             self.docker("start", container)
             observed = json.loads(self.docker("inspect", container))[0]
-            require(not observed["HostConfig"]["PortBindings"] and
-                    observed["NetworkSettings"]["Networks"][self.network_name]["IPAddress"] == host,
+            endpoints = list(observed["NetworkSettings"]["Networks"].values())
+            require(not observed["HostConfig"]["PortBindings"] and len(endpoints) == 1
+                    and endpoints[0]["NetworkID"] == self.network,
                     "Fixture must use only its assigned unpublished bridge address")
+            host = endpoints[0]["IPAddress"]
+            require(ipaddress.ip_address(host) in subnet and host not in addresses,
+                    "Fixture endpoints must be distinct addresses on the owned bridge")
+            addresses.append(host)
             self.add_service(f"{label}_admin", host, "postgres", "fixture_admin")
             self.add_service(f"{label}_migration", host, SOURCE_DB if label == "source" else RESTORED_DB, "fixture_migration")
             self.add_service(f"{label}_runtime", host, SOURCE_DB if label == "source" else RESTORED_DB, "fixture_runtime")
             self.add_service(f"{label}_backup", host, SOURCE_DB if label == "source" else RESTORED_DB, "fixture_backup")
             self.add_service(f"{label}_restore", host, "postgres", "fixture_restore")
+        # Docker allocates addresses before PostgreSQL starts. Sign only those
+        # exact SANs, then release the bounded startup wait in both containers.
+        self.create_certificates(addresses)
+        write_private(self.work / "tls-ready", "ready\n")
         write_private(self.services, "\n".join(self.service_rows))
         write_private(self.passfile, "\n".join(self.pass_rows) + "\n")
 
@@ -437,7 +452,7 @@ def main():
                        tenant_isolation=restored["tenant_isolation"], postgres_client=pg.run("psql", ["--version"]))
     except Exception as error:
         receipt["failed_stage"] = stage
-        if isinstance(error, (RuntimeError, recovery.RecoveryError)):
+        if isinstance(error, (RuntimeError, recovery.RecoveryError, KeyError)):
             receipt["failure"] = str(error)
         # These are exclusively generated fixture servers. Redact their known
         # passwords before printing bounded server diagnostics for CI repairs.
@@ -470,6 +485,6 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except Exception as error:
-        detail = str(error) if isinstance(error, (RuntimeError, recovery.RecoveryError)) else type(error).__name__
+        detail = str(error) if isinstance(error, (RuntimeError, recovery.RecoveryError, KeyError)) else type(error).__name__
         print(f"Synthetic TLS recovery failed: {detail}; inspect the nonsecret receipt's failed_stage", file=sys.stderr)
         raise SystemExit(1) from None
