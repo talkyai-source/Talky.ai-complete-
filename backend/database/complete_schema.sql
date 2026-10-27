@@ -743,6 +743,42 @@ END
 $stream_events_bootstrap$;
 -- END STREAM_EVENTS BOOTSTRAP
 
+-- Persisted platform-wide operator incidents. 0074 repairs older floors.
+-- BEGIN INCIDENTS BOOTSTRAP
+DO $incidents_bootstrap$
+BEGIN
+    IF to_regclass('public.incidents') IS NOT NULL THEN
+        RETURN;
+    END IF;
+
+    CREATE TABLE public.incidents (
+        id text PRIMARY KEY,
+        title text NOT NULL,
+        severity text NOT NULL DEFAULT 'info',
+        status text NOT NULL DEFAULT 'open',
+        description text,
+        triggered_at timestamptz DEFAULT now(),
+        created_at timestamptz NOT NULL DEFAULT now(),
+        acknowledged_at timestamptz,
+        acknowledged_by text,
+        resolved_at timestamptz,
+        resolved_by text
+    );
+    CREATE INDEX idx_incidents_status ON public.incidents (status);
+    CREATE INDEX idx_incidents_severity ON public.incidents (severity);
+    CREATE INDEX idx_incidents_triggered_at ON public.incidents (triggered_at DESC);
+    COMMENT ON TABLE public.incidents IS
+        'Persisted platform-wide operator incidents; restricted to platform context.';
+
+    ALTER TABLE public.incidents ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.incidents FORCE ROW LEVEL SECURITY;
+    CREATE POLICY incidents_platform_only ON public.incidents FOR ALL
+        USING (COALESCE(NULLIF(current_setting('app.bypass_rls', true), '')::boolean, false))
+        WITH CHECK (COALESCE(NULLIF(current_setting('app.bypass_rls', true), '')::boolean, false));
+END
+$incidents_bootstrap$;
+-- END INCIDENTS BOOTSTRAP
+
 -- =============================================================================
 -- SECTION 3: VOICE CONTRACT & TRACING
 -- =============================================================================

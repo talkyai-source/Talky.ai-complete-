@@ -7,10 +7,12 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
 
 from app.api.v1.dependencies import CurrentUser, get_db_client, require_platform_admin
 from app.core.postgres_adapter import Client
@@ -18,6 +20,7 @@ from app.core.postgres_adapter import Client
 from .schemas import IncidentItem, IncidentListResponse
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/incidents", response_model=IncidentListResponse)
@@ -35,90 +38,61 @@ async def list_incidents(
     try:
         offset = (page - 1) * page_size
 
-        # Try to get from incidents table
-        try:
-            query = db_client.table("incidents").select("*", count="exact")
+        query = db_client.table("incidents").select("*", count="exact")
 
-            if status:
-                query = query.eq("status", status)
-            if severity:
-                query = query.eq("severity", severity)
+        if status:
+            query = query.eq("status", status)
+        if severity:
+            query = query.eq("severity", severity)
 
-            response = query.order("triggered_at", desc=True).range(
-                offset, offset + page_size - 1
-            ).execute()
+        response = query.order("triggered_at", desc=True).range(
+            offset, offset + page_size - 1
+        ).execute()
+        if response.error:
+            raise RuntimeError("Incident query failed")
 
-            items = []
-            for inc in response.data or []:
-                items.append(IncidentItem(
-                    id=inc["id"],
-                    title=inc["title"],
-                    severity=inc.get("severity", "info"),
-                    status=inc.get("status", "open"),
-                    description=inc.get("description"),
-                    triggered_at=inc.get("triggered_at", inc.get("created_at", "")),
-                    acknowledged_at=inc.get("acknowledged_at"),
-                    acknowledged_by=inc.get("acknowledged_by"),
-                    resolved_at=inc.get("resolved_at"),
-                    resolved_by=inc.get("resolved_by")
-                ))
+        items = []
+        for inc in jsonable_encoder(response.data or []):
+            items.append(IncidentItem(
+                id=inc["id"],
+                title=inc["title"],
+                severity=inc.get("severity", "info"),
+                status=inc.get("status", "open"),
+                description=inc.get("description"),
+                triggered_at=inc.get("triggered_at") or inc.get("created_at", ""),
+                acknowledged_at=inc.get("acknowledged_at"),
+                acknowledged_by=inc.get("acknowledged_by"),
+                resolved_at=inc.get("resolved_at"),
+                resolved_by=inc.get("resolved_by")
+            ))
 
-            # Get counts
-            open_response = db_client.table("incidents").select(
-                "id", count="exact"
-            ).eq("status", "open").execute()
+        open_response = db_client.table("incidents").select(
+            "id", count="exact"
+        ).eq("status", "open").execute()
+        if open_response.error:
+            raise RuntimeError("Open incident count failed")
 
-            critical_response = db_client.table("incidents").select(
-                "id", count="exact"
-            ).eq("severity", "critical").eq("status", "open").execute()
+        critical_response = db_client.table("incidents").select(
+            "id", count="exact"
+        ).eq("severity", "critical").eq("status", "open").execute()
+        if critical_response.error:
+            raise RuntimeError("Critical incident count failed")
 
-            return IncidentListResponse(
-                items=items,
-                total=response.count or 0,
-                page=page,
-                page_size=page_size,
-                open_count=open_response.count or 0,
-                critical_count=critical_response.count or 0
-            )
-
-        except Exception:
-            # Table doesn't exist, return empty with sample data
-            # Generate synthetic incidents from system state
-            items = []
-
-            # Check for failed calls as potential incidents
-            yesterday = (datetime.utcnow() - timedelta(hours=24)).isoformat()
-            try:
-                failed_calls = db_client.table("calls").select(
-                    "id", count="exact"
-                ).in_("status", ["failed", "error"]).gte("created_at", yesterday).execute()
-
-                if failed_calls.count and failed_calls.count > 5:
-                    items.append(IncidentItem(
-                        id="synthetic-calls-failed",
-                        title=f"High call failure rate ({failed_calls.count} in 24h)",
-                        severity="warning",
-                        status="open",
-                        description=f"{failed_calls.count} calls failed in the last 24 hours",
-                        triggered_at=datetime.utcnow().isoformat() + "Z"
-                    ))
-            except Exception:
-                pass
-
-            return IncidentListResponse(
-                items=items,
-                total=len(items),
-                page=page,
-                page_size=page_size,
-                open_count=len(items),
-                critical_count=len([i for i in items if i.severity == "critical"])
-            )
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to list incidents: {str(e)}"
+        return IncidentListResponse(
+            items=items,
+            total=response.count or 0,
+            page=page,
+            page_size=page_size,
+            open_count=open_response.count or 0,
+            critical_count=critical_response.count or 0
         )
+
+    except Exception:
+        logger.exception("Failed to list persisted incidents")
+        raise HTTPException(
+            status_code=503,
+            detail="Incident data is temporarily unavailable"
+        ) from None
 
 
 @router.get("/incidents/{incident_id}")
