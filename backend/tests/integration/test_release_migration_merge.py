@@ -62,8 +62,19 @@ async def cleanup(admin_dsn, name, report):
     assert re.fullmatch(r"release_merge_[0-9a-f]{32}_test", name)
     if report.get("created"):
         async with connection(admin_dsn) as conn:
-            report["connections_before_drop"] = await conn.fetchval(
-                "SELECT count(*) FROM pg_stat_activity WHERE datname=$1", name)
+            # asyncpg close can finish just before the backend disappears from
+            # pg_stat_activity. Wait briefly for that observation to settle;
+            # never terminate a session or force a drop to hide a leak.
+            for attempt in range(101):
+                remaining = await conn.fetchval(
+                    "SELECT count(*) FROM pg_stat_activity WHERE datname=$1", name)
+                if attempt == 0:
+                    report["connections_on_cleanup_entry"] = remaining
+                if remaining == 0 or attempt == 100:
+                    break
+                await asyncio.sleep(0.05)
+            report["connections_before_drop"] = remaining
+            assert remaining == 0, "Owned migration connections did not close within five seconds"
             await conn.execute(f'DROP DATABASE "{name}"')
             report["removed"] = not await conn.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=$1)", name)
