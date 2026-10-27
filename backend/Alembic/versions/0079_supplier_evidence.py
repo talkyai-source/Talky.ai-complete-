@@ -32,9 +32,13 @@ def upgrade():
             imported_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             supersedes_id uuid UNIQUE REFERENCES public.supplier_statement_evidence(id) ON DELETE RESTRICT,
             UNIQUE (supplier, account_id, reference)
-        );
+        )
+    """)
+    op.execute("""
         CREATE INDEX supplier_evidence_period ON public.supplier_statement_evidence
-            (period_start, period_end, imported_at DESC, id);
+            (period_start, period_end, imported_at DESC, id)
+    """)
+    op.execute("""
         CREATE TABLE public.supplier_statement_reviews (
             id uuid PRIMARY KEY,
             request_id uuid NOT NULL UNIQUE,
@@ -47,18 +51,24 @@ def upgrade():
             recorded_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             comparison jsonb NOT NULL CHECK (jsonb_typeof(comparison) = 'object'),
             UNIQUE (statement_id, stage)
-        );
+        )
+    """)
+    op.execute("""
         CREATE FUNCTION public.reject_supplier_evidence_rewrite() RETURNS trigger
         LANGUAGE plpgsql AS $$ BEGIN
             RAISE EXCEPTION 'Supplier evidence and reviews are append-only; retain corrections'
                 USING ERRCODE = '55000';
-        END $$;
+        END $$
+    """)
+    op.execute("""
         CREATE TRIGGER supplier_evidence_immutable BEFORE UPDATE OR DELETE
             ON public.supplier_statement_evidence FOR EACH ROW
-            EXECUTE FUNCTION public.reject_supplier_evidence_rewrite();
+            EXECUTE FUNCTION public.reject_supplier_evidence_rewrite()
+    """)
+    op.execute("""
         CREATE TRIGGER supplier_review_immutable BEFORE UPDATE OR DELETE
             ON public.supplier_statement_reviews FOR EACH ROW
-            EXECUTE FUNCTION public.reject_supplier_evidence_rewrite();
+            EXECUTE FUNCTION public.reject_supplier_evidence_rewrite()
     """)
     # Backup uses the same explicit existing principal context. Worker bypass
     # alone is insufficient for private supplier evidence, as for saved ACKs.

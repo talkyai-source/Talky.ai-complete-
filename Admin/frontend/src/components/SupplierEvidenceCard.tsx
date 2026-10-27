@@ -139,6 +139,7 @@ export function SupplierEvidenceCard({ fromDate, toDate, generation, refreshVers
             <button disabled={loading || locked || offset === 0} onClick={() => { if (!locked) { setSelected(null); setOffset(value => Math.max(0, value-20)); } }}>Previous evidence</button>
             <button disabled={loading || locked || !hasMore} onClick={() => { if (!locked) { setSelected(null); setOffset(value => value+20); } }}>Next evidence</button>
             {selected && <StatementReview key={selected.id} statement={selected} generation={generation}
+                importPending={busy || pendingImport !== null}
                 onLockedChange={setReviewLocked}
                 onCorrection={() => { if (!busy && !pendingImport) { setAccount(selected.account_id); setReference(''); setCorrection(selected.id); } }}
                 onSaved={row => { setSelected(row); void load(); }} />}
@@ -146,8 +147,8 @@ export function SupplierEvidenceCard({ fromDate, toDate, generation, refreshVers
     </section>;
 }
 
-function StatementReview({ statement, generation, onSaved, onCorrection, onLockedChange }: { statement: SupplierStatement;
-    generation: number; onSaved: (row: SupplierStatement) => void; onCorrection: () => void;
+function StatementReview({ statement, generation, importPending, onSaved, onCorrection, onLockedChange }: { statement: SupplierStatement;
+    generation: number; importPending: boolean; onSaved: (row: SupplierStatement) => void; onCorrection: () => void;
     onLockedChange: (locked: boolean) => void }) {
     const [busy, setBusy] = useState(false), [unknown, setUnknown] = useState(false);
     const [note, setNote] = useState(''), [reference, setReference] = useState('');
@@ -160,7 +161,7 @@ function StatementReview({ statement, generation, onSaved, onCorrection, onLocke
     const capture = useOperationOwner(generation, statement.id);
     const save = async () => {
         const owns = capture();
-        if (!owns() || busy || unknown) return;
+        if (!owns() || busy || unknown || importPending) return;
         const body = pending.current ?? { request_id: crypto.randomUUID(), source_sha256: statement.source_sha256,
             stage: statement.stage === 'imported' ? 'reviewed' : 'reconciled', review_reference: reference,
             notes: note, source_account_and_period_checked: checked, accept_unallocated_difference: difference };
@@ -208,16 +209,16 @@ function StatementReview({ statement, generation, onSaved, onCorrection, onLocke
         <p>Unallocated reported charges: {statement.reported_charges === null ? 'Unavailable' : `${statement.reported_charges} USD`}. No supplier-account allocation exists in retained call records. Net spend and credits remain unknown.</p>
         <button disabled={busy} onClick={() => void download()}>Download retained source</button>
         <button disabled={busy} onClick={() => void refresh()}>Read saved evidence</button>
-        <button disabled={locked || !!statement.superseded_by} onClick={onCorrection}>Prepare correction</button>
+        <button disabled={locked || importPending || !!statement.superseded_by} onClick={onCorrection}>Prepare correction</button>
         {statement.reviews.map(review => <p key={review.id}>{review.stage}: {review.review_reference}; {review.recorded_at}; operator {review.reviewer_id}. {review.notes}</p>)}
         {!statement.superseded_by && statement.stage !== 'reconciled' && <>
-            <fieldset disabled={busy || unknown || pending.current !== null}>
+            <fieldset disabled={busy || unknown || pending.current !== null || importPending}>
                 <label>Review reference<input value={reference} maxLength={120} onChange={event => setReference(event.target.value)} /></label>
                 <label>Evidence and differences<textarea value={note} maxLength={2000} onChange={event => setNote(event.target.value)} /></label>
                 <label><input type="checkbox" checked={checked} onChange={event => setChecked(event.target.checked)} />I checked this original source, project and period.</label>
                 {statement.stage === 'reviewed' && <label><input type="checkbox" checked={difference} onChange={event => setDifference(event.target.checked)} />I retain the full unallocated difference; this does not certify matched or net spending.</label>}
             </fieldset>
-            <button disabled={busy || unknown || !checked || note.trim().length < 10 || !reference.trim() || (statement.stage === 'reviewed' && !difference)} onClick={() => void save()}>
+            <button disabled={busy || unknown || importPending || !checked || note.trim().length < 10 || !reference.trim() || (statement.stage === 'reviewed' && !difference)} onClick={() => void save()}>
                 {statement.stage === 'imported' ? 'Record source review' : 'Record reconciliation with difference'}</button>
         </>}
         {message && <p role="status">{message}</p>}

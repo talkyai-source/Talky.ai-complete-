@@ -113,8 +113,9 @@ async function prepareImport(readFile) {
 }
 
 test('lost import receipt is recovered by exact GET with no repeated POST', async () => {
-    let posted, posts = 0, reads = 0;
+    let posted, posts = 0, reads = 0, reviews = 0;
     state.route = request => {
+        if (request.path.endsWith('/reviews')) { reviews += 1; return response({}, 503); }
         if (request.method === 'POST' && request.path.endsWith('/statements')) {
             posts += 1; posted = request.body; return response({}, 503);
         }
@@ -125,12 +126,25 @@ test('lost import receipt is recovered by exact GET with no repeated POST', asyn
         }
         return normal(request);
     };
-    await draw(); await prepareImport(async () => '\ufeff{"synthetic":true}');
+    await draw(); await click('Owned supplier export');
+    const section = find('section[aria-label="Selected supplier evidence"]');
+    await setInput(section.querySelector('input'), 'Prepared source review');
+    await act(async () => {
+        const textarea = section.querySelector('textarea');
+        Object.getOwnPropertyDescriptor(Object.getPrototypeOf(textarea), 'value').set.call(textarea, 'Owned original source compared.');
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        section.querySelector('input[type="checkbox"]').click();
+    });
+    assert.equal(button('Record source review').disabled, false);
+    await prepareImport(async () => '\ufeff{"synthetic":true}');
     await click('Save source evidence');
     assert.equal(posts, 1); assert.equal(button('Retry exact retained import').disabled, true);
     assert.equal(posted.source_content, '\ufeff{"synthetic":true}');
     assert.equal(button('Refresh').disabled, true);
     assert.equal(find('input[type="date"]').disabled, true);
+    assert.equal(button('Record source review').disabled, true);
+    await click('Record source review');
+    assert.equal(reviews, 0);
     await click('Refresh');
     await setInput(find('input[type="date"]'), '2026-08-01');
     assert.equal(button('Retry exact retained import').disabled, true);
