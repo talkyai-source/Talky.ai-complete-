@@ -61,6 +61,9 @@ export type HttpRequestOptions<TBody = unknown> = {
     // must not tear down a live session. Real authed calls omit this so genuine
     // expiry still redirects.
     suppressAuthRedirect?: boolean;
+    // Verify an explicitly supplied credential without substituting the
+    // browser's current refresh-cookie identity if that credential is rejected.
+    skipAuthRefresh?: boolean;
 };
 
 type TokenStorage = {
@@ -632,7 +635,7 @@ export function createHttpClient(config: HttpClientConfig) {
         let res: Response;
         try {
             res = await raw(opts, scope);
-            if (res.status === 401 && !isRefreshCall) {
+            if (res.status === 401 && !isRefreshCall && !opts.skipAuthRefresh) {
                 const refreshed = await refreshForScope(scope, opts);
                 if (refreshed) {
                     res = await raw(opts, scope);
@@ -772,7 +775,7 @@ export function createHttpClient(config: HttpClientConfig) {
         let res: Response;
         try {
             res = await raw(opts, scope);
-            if (res.status === 401 && !isRefreshCall) {
+            if (res.status === 401 && !isRefreshCall && !opts.skipAuthRefresh) {
                 const refreshed = await refreshForScope(scope, opts);
                 if (refreshed) {
                     res = await raw(opts, scope);

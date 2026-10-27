@@ -64,6 +64,9 @@ export function VoiceProviderPicker({
     const [voices, setVoices] = useState<VoiceInfo[]>([]);
     const [provider, setProvider] = useState<string>("");
     const [loaded, setLoaded] = useState(false);
+    // A failed catalog request is not an empty catalog: say so and offer a retry.
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [loadAttempt, setLoadAttempt] = useState(0);
     const [playingId, setPlayingId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const audioCtxRef = useRef<AudioContext | null>(null);
@@ -80,7 +83,7 @@ export function VoiceProviderPicker({
     useEffect(() => {
         let cancelled = false;
         Promise.all([
-            aiOptionsApi.getVoices().then((r) => r.voices).catch(() => [] as VoiceInfo[]),
+            aiOptionsApi.getVoices().then((r) => r.voices),
             aiOptionsApi.getConfig().catch(() => null),
         ]).then(([vs, cfg]) => {
             if (cancelled) return;
@@ -91,13 +94,17 @@ export function VoiceProviderPicker({
             setProvider(def);
             emitProvider.current?.(def);
             setLoaded(true);
+        }).catch((err: unknown) => {
+            if (cancelled) return;
+            setLoadError(err instanceof Error ? err.message : "The voice catalog is unavailable.");
+            setLoaded(true);
         });
         return () => {
             cancelled = true;
             if (audioCtxRef.current) { void audioCtxRef.current.close(); audioCtxRef.current = null; }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [loadAttempt]);
 
     // Keep the parent's notion of "what gender is the selected voice" in sync.
     // Depends on `voices` too so it resolves once the catalog arrives for a
@@ -191,7 +198,18 @@ export function VoiceProviderPicker({
             {voiceLatencyNote(provider) && (
                 <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-400">{voiceLatencyNote(provider)}</p>
             )}
-            {!loaded ? (
+            {loadError ? (
+                <div role="alert" className="mt-2 space-y-2 text-sm text-destructive">
+                    <p>Voices could not be loaded. {loadError}</p>
+                    <button
+                        type="button"
+                        className="font-medium underline underline-offset-2"
+                        onClick={() => { setLoaded(false); setLoadError(null); setLoadAttempt((attempt) => attempt + 1); }}
+                    >
+                        Retry voices
+                    </button>
+                </div>
+            ) : !loaded ? (
                 <p className="mt-1 text-xs text-muted-foreground">Loading voices…</p>
             ) : shownVoices.length === 0 ? (
                 <p className="mt-1 text-xs text-muted-foreground">No voices for this provider.</p>

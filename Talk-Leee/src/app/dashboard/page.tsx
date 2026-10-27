@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dashboard-charts";
 import { HoverTooltip, useHoverTooltip } from "@/components/ui/hover-tooltip";
 import { DialerInsights } from "@/components/dashboard/dialer-insights";
+import { FirstCallSetup } from "@/components/dashboard/first-call-setup";
 import { computeMinutesUsageFontPx, MINUTES_USAGE_LAYOUT_SPEC } from "@/lib/minutes-usage-layout.mjs";
 
 function Counter({ value }: { value: number }) {
@@ -1000,6 +1001,7 @@ export default function DashboardPage() {
     async function loadData() {
         try {
             setLoading(true);
+            setError("");
             const month = currentUtcMonthRange();
             const [summaryData, campaignsData, analytics, hourly, byCampaign] = await Promise.all([
                 dashboardApi.getDashboardSummary(),
@@ -1447,14 +1449,19 @@ export default function DashboardPage() {
 
     return (
         <DashboardLayout title="Dashboard" description="Outbound campaign performance and shared voice usage">
+            <FirstCallSetup />
             <CallIssuesBanner />
             {loading ? (
-                <div className="flex items-center justify-center h-64">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-800 dark:border-gray-200" />
+                <div className="flex items-center justify-center h-64" role="status" aria-live="polite">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-800 dark:border-gray-200" aria-hidden="true" />
+                    <span className="sr-only">Loading dashboard</span>
                 </div>
             ) : error ? (
-                <div className="content-card border-red-500/30 text-red-600 dark:text-red-400 font-bold">
-                    {error}
+                <div className="content-card border-red-500/30 text-red-600 dark:text-red-400">
+                    <p role="alert">{error}</p>
+                    <button type="button" onClick={() => void loadData()} className="mt-3 rounded-lg border border-current px-3 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+                        Retry dashboard
+                    </button>
                 </div>
             ) : (
                 <div className="space-y-8">

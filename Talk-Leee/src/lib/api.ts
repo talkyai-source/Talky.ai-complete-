@@ -467,10 +467,15 @@ class ApiClient {
         return this.parseOrThrow(SignupCompleteResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
     }
 
-    async getMe(): Promise<MeResponse> {
+    // With accessToken, checks that exact credential (an emailed callback
+    // link) without falling back to the browser's current refresh cookie.
+    async getMe(accessToken?: string): Promise<MeResponse> {
         const path = "/auth/me";
         const method = "GET" as const;
-        const data = await this.client().request({ path, method, timeoutMs: 12_000, suppressAuthRedirect: true });
+        const data = await this.client().request({
+            path, method, timeoutMs: 12_000, suppressAuthRedirect: true,
+            ...(accessToken ? { headers: { Authorization: `Bearer ${accessToken}` }, skipAuthRefresh: true } : {}),
+        });
         return this.parseOrThrow(MeResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
     }
 

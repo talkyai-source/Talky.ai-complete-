@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useId, useRef, useState } from "react";
+import { Suspense, useEffect, useId, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
     ArrowLeft,
@@ -40,13 +40,23 @@ function ForgotPasswordInner() {
     const [confirmPassword, setConfirmPassword] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
+    const [message, setMessage] = useState("");
     const [emailError, setEmailError] = useState("");
     const inputRef = useRef<HTMLInputElement | null>(null);
     const errorId = useId();
 
-    async function handleSendCode(e: React.FormEvent) {
-        e.preventDefault();
-        const result = emailSchema.safeParse(email);
+    useEffect(() => {
+        if (step !== "done") return;
+        const timeout = window.setTimeout(() => {
+            router.push(`/auth/login?email=${encodeURIComponent(email)}`);
+        }, 2500);
+        return () => window.clearTimeout(timeout);
+    }, [step, email, router]);
+
+    async function handleSendCode(e?: React.FormEvent) {
+        e?.preventDefault();
+        const normalizedEmail = email.trim().toLowerCase();
+        const result = emailSchema.safeParse(normalizedEmail);
         if (!result.success) {
             setEmailError(result.error.issues[0]?.message ?? "Invalid email");
             return;
@@ -54,20 +64,19 @@ function ForgotPasswordInner() {
         setEmailError("");
         setLoading(true);
         setError("");
+        setMessage("");
 
         try {
-            // Phase 8: routed through shared client. Endpoint is
-            // pre-login but the shared client tolerates missing
-            // Authorization (the backend rate-limits by email anyway).
             await api.request<unknown>({
                 path: "/auth/forgot-password",
                 method: "POST",
-                body: { email },
+                body: { email: normalizedEmail },
             });
-            // Backend always returns 200 to prevent user-enumeration. Move on
-            // to the code-entry step regardless — if the email isn't
-            // registered the user just won't receive a code, which is the
-            // expected UX for this defence.
+            // A successful request does not disclose whether this address
+            // has an account or guarantee email delivery.
+            setEmail(normalizedEmail);
+            setCode("");
+            setMessage("If this email is registered, check your inbox and spam folder for a reset code. Delivery may take a few minutes.");
             setStep("reset");
         } catch (err) {
             setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
@@ -79,7 +88,7 @@ function ForgotPasswordInner() {
     async function handleReset(e: React.FormEvent) {
         e.preventDefault();
         setError("");
-        if (!code.trim()) {
+        if (!/^\d{6}$/.test(code)) {
             setError("Enter the 6-digit code from your email.");
             return;
         }
@@ -104,11 +113,6 @@ function ForgotPasswordInner() {
                 },
             });
             setStep("done");
-            // Auto-redirect after a moment so the user actually reads the
-            // success state before being pulled back to /auth/login.
-            setTimeout(() => {
-                router.push(`/auth/login?email=${encodeURIComponent(email)}`);
-            }, 2500);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
         } finally {
@@ -152,8 +156,8 @@ function ForgotPasswordInner() {
                             {step === "done"
                                 ? "Redirecting you to sign in..."
                                 : step === "reset"
-                                  ? `Enter the 6-digit code we sent to ${email}, and choose a new password.`
-                                  : "Enter your email and we'll send you a 6-digit code."}
+                                  ? `Enter a valid 6-digit reset code for ${email}, and choose a new password.`
+                                  : "Request a reset code for your registered email address."}
                         </CardDescription>
                     </CardHeader>
 
@@ -186,6 +190,7 @@ function ForgotPasswordInner() {
                             aria-describedby={error ? errorId : undefined}
                         >
                             <CardContent className="space-y-4">
+                                {message && <p role="status" className="text-sm text-muted-foreground">{message}</p>}
                                 <div className="space-y-2">
                                     <Label htmlFor="reset-code">Code</Label>
                                     <div className="relative">
@@ -200,7 +205,7 @@ function ForgotPasswordInner() {
                                             placeholder="123456"
                                             value={code}
                                             onChange={(e) => {
-                                                setCode(e.target.value.replace(/[^0-9]/g, ""));
+                                                setCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6));
                                                 if (error) setError("");
                                             }}
                                             className="pl-10 font-mono tracking-widest"
@@ -287,11 +292,15 @@ function ForgotPasswordInner() {
                                         </>
                                     )}
                                 </Button>
+                                <Button type="button" variant="outline" className="w-full" disabled={loading} onClick={() => void handleSendCode()}>
+                                    Request a new code
+                                </Button>
                                 <button
                                     type="button"
                                     onClick={() => {
                                         setStep("email");
                                         setError("");
+                                        setMessage("");
                                         setCode("");
                                         setNewPassword("");
                                         setConfirmPassword("");

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
@@ -171,10 +171,11 @@ function TurnstileWidget({
 // ─── Main Login Component ────────────────────────────────────────────────────
 export default function LoginClientPage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
 
     const [step, setStep] = useState<Step>("email");
     const [direction, setDirection] = useState(1);
-    const [email, setEmail] = useState("");
+    const [email, setEmail] = useState(searchParams?.get("email") ?? "");
     const [password, setPassword] = useState("");
     const [showPassword, setShowPassword] = useState(false);
     const [rememberMe, setRememberMe] = useState(false);
@@ -351,12 +352,14 @@ export default function LoginClientPage() {
 
     // ─── Email validation (Zod) ──────────────────────────────────────
     function validateEmail(): boolean {
-        const result = emailSchema.safeParse(email);
+        const normalizedEmail = email.trim().toLowerCase();
+        const result = emailSchema.safeParse(normalizedEmail);
         if (!result.success) {
             setEmailError(result.error.issues[0]?.message ?? "Invalid email");
             return false;
         }
         setEmailError("");
+        setEmail(normalizedEmail);
         return true;
     }
 

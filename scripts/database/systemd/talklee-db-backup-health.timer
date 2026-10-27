@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Talklee database backup health hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+Unit=talklee-db-backup-health.service
+
+[Install]
+WantedBy=timers.target

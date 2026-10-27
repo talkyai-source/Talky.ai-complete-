@@ -1,0 +1,413 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-10-26T22:46:04.184782+00:00",
+  "work_package": "CP08",
+  "scope": "Local customer onboarding remediation, synthetic regression checks and source snapshot.",
+  "acceptance_status": "in_progress",
+  "production_accepted": false,
+  "source_snapshot_note": "Hashes describe complete current files, including preserved pre-existing changes; they do not attribute every dirty line to this task. Rehash any files edited after this snapshot.",
+  "test_groups": [
+    {
+      "id": "backend_onboarding_recovery",
+      "status": "passed",
+      "passed": 60,
+      "command": "python backend/tmp/run_onboarding_auth_tests.py",
+      "test_paths": [
+        "backend/tests/unit/test_signup_delivery_and_atomicity.py",
+        "backend/tests/unit/test_signup_complete_membership.py",
+        "backend/tests/unit/test_onboarding_recovery_contract.py",
+        "backend/tests/security/test_credential_revocation.py",
+        "backend/tests/security/test_refresh_revocation_reasons.py"
+      ],
+      "evidence_origin": "Root execution report, confirmed by backend owner; 60 passed in 28.77 seconds.",
+      "isolation": "Runner disables dotenv and forbids direct asyncpg and SMTP calls; database, Redis and email collaborators are synthetic."
+    },
+    {
+      "id": "frontend_auth_http",
+      "status": "passed",
+      "distinct_passed": 30,
+      "test_paths": [
+        "Talk-Leee/src/app/auth/auth-journey.test.tsx",
+        "Talk-Leee/src/lib/credential-exchange.test.ts",
+        "Talk-Leee/src/lib/post-auth-navigation.test.ts",
+        "Talk-Leee/src/lib/http-client.test.ts",
+        "Talk-Leee/src/lib/http-client.session-expired.test.ts"
+      ],
+      "runs": [
+        {
+          "scope": "Final focused run after cookie-only callback guard",
+          "passed": 17,
+          "test_paths": [
+            "Talk-Leee/src/app/auth/auth-journey.test.tsx",
+            "Talk-Leee/src/lib/credential-exchange.test.ts",
+            "Talk-Leee/src/lib/post-auth-navigation.test.ts"
+          ]
+        },
+        {
+          "scope": "Earlier existing HTTP regressions in this task",
+          "passed": 13,
+          "test_paths": [
+            "Talk-Leee/src/lib/http-client.test.ts",
+            "Talk-Leee/src/lib/http-client.session-expired.test.ts"
+          ]
+        }
+      ],
+      "evidence_origin": "Frontend auth owner execution report; 30 distinct tests across the stated runs, not a single final 30-test invocation.",
+      "isolation": "API and fetch collaborators are stubbed; no live network calls."
+    },
+    {
+      "id": "frontend_campaign",
+      "status": "passed",
+      "passed": 17,
+      "failed": 0,
+      "skipped": 0,
+      "exit_code": 0,
+      "command": "node --test --test-concurrency=1 --import tsx --import ./src/test-utils/setup.ts src/components/campaigns/campaign-lead-fields.test.ts src/components/campaigns/campaign-wizard.test.tsx src/components/campaigns/voice-provider-picker.test.tsx src/lib/campaign-guidance.test.ts",
+      "working_directory": "Talk-Leee",
+      "test_paths": [
+        "Talk-Leee/src/components/campaigns/campaign-lead-fields.test.ts",
+        "Talk-Leee/src/components/campaigns/campaign-wizard.test.tsx",
+        "Talk-Leee/src/components/campaigns/voice-provider-picker.test.tsx",
+        "Talk-Leee/src/lib/campaign-guidance.test.ts"
+      ],
+      "evidence_origin": "Observed execution session 94959 completed with exit 0; 17 passed in 223390.051 ms under memory contention.",
+      "isolation": "API collaborators stubbed; explicit assertions cover no campaign start during save/upload retry."
+    }
+  ],
+  "typecheck": {
+    "status": "passed",
+    "exit_code": 0,
+    "scope": "Talk-Leee frontend",
+    "evidence_origin": "Root execution report."
+  },
+  "scoped_lint": [
+    {
+      "id": "root_dashboard_setup",
+      "status": "passed",
+      "exit_code": 0,
+      "paths": [
+        "Talk-Leee/src/app/dashboard/page.tsx",
+        "Talk-Leee/src/components/dashboard/first-call-setup.tsx"
+      ],
+      "evidence_origin": "Root execution report."
+    },
+    {
+      "id": "frontend_auth",
+      "status": "passed",
+      "exit_code": 0,
+      "paths": [
+        "Talk-Leee/src/app/auth/callback/page.tsx",
+        "Talk-Leee/src/app/auth/forgot-password/page.tsx",
+        "Talk-Leee/src/app/auth/login/login-client.tsx",
+        "Talk-Leee/src/app/auth/register/register-client.tsx",
+        "Talk-Leee/src/lib/http-client.ts",
+        "Talk-Leee/src/lib/api.ts",
+        "Talk-Leee/src/lib/auth-context.tsx",
+        "Talk-Leee/src/app/auth/auth-journey.test.tsx",
+        "Talk-Leee/src/lib/credential-exchange.test.ts"
+      ],
+      "evidence_origin": "Frontend auth owner report; callback and both new auth tests rechecked after final cookie-only guard."
+    },
+    {
+      "id": "campaign_initial",
+      "status": "passed",
+      "exit_code": 0,
+      "paths": [
+        "Talk-Leee/src/components/campaigns/campaign-wizard.tsx",
+        "Talk-Leee/src/components/campaigns/campaign-wizard.test.tsx",
+        "Talk-Leee/src/components/campaigns/voice-provider-picker.tsx",
+        "Talk-Leee/src/components/campaigns/voice-provider-picker.test.tsx",
+        "Talk-Leee/src/app/campaigns/[id]/page.tsx"
+      ],
+      "evidence_origin": "Observed ESLint session 8872."
+    },
+    {
+      "id": "campaign_restored_integrations",
+      "status": "passed",
+      "exit_code": 0,
+      "paths": [
+        "Talk-Leee/src/components/campaigns/campaign-lead-fields.tsx",
+        "Talk-Leee/src/components/campaigns/campaign-lead-fields.test.ts",
+        "Talk-Leee/src/components/campaigns/rejected-inbound-calls-panel.tsx",
+        "Talk-Leee/src/lib/lead-details-api.ts"
+      ],
+      "evidence_origin": "Observed ESLint session 82220."
+    }
+  ],
+  "browser": {
+    "status": "incomplete",
+    "owner": "root",
+    "note": "Development registration page returned HTTP 200, but browser navigations timed out under compilation/memory contention. After the successful build, automatic approval review rejected starting the local production-mode preview with 'blocked by policy'. No completed rendered walkthrough or screenshot acceptance. Test-owned browser and fixture server stopped.",
+    "blocked_action": "npm run start -- --hostname 127.0.0.1 --port 3107",
+    "environment": "Synthetic loopback API only; no real inbox, customer records or calls."
+  },
+  "production_build": {
+    "status": "passed",
+    "exit_code": 0,
+    "owner": "root",
+    "command": "npm run build",
+    "working_directory": "Talk-Leee",
+    "note": "Root observed compilation, TypeScript, 67 static pages and final build traces finish with exit 0. Local verification build uses loopback fixture API and disabled monitoring; rebuild with intended environment before deployment.",
+    "warnings": ["Existing custom Cache-Control header warning", "Node module.register deprecation"]
+  },
+  "known_integration_limitations": [
+    {
+      "id": "rejected_inbound_history",
+      "status": "unavailable",
+      "route": "/api/v1/calls/rejected",
+      "note": "The current calls backend and frontend adapter lack the historical /calls/rejected integration. The panel explicitly reports unavailable history and does not imply zero rejected calls. No backend endpoint was restored."
+    },
+    {
+      "id": "campaign_lead_fields",
+      "status": "frontend_integration_restored",
+      "routes": [
+        "GET /api/v1/campaigns/{campaign_id}/lead-fields",
+        "PUT /api/v1/campaigns/{campaign_id}/lead-fields"
+      ],
+      "note": "Existing backend contract reused; custom server field definitions preserved during checkbox edits. This is local regression evidence, not live database acceptance."
+    }
+  ],
+  "external_activity": {
+    "live_email_sent": false,
+    "live_provider_calls": false,
+    "telephone_calls_placed": false,
+    "note": "Task scope and verification used local synthetic collaborators only."
+  },
+  "remaining_acceptance": [
+    "Rendered local browser walkthrough, including signup/recovery, dashboard retry and small-screen layout.",
+    "Designated-account real inbox/device recovery and cross-tab cookie behavior.",
+    "Released backend and database compatibility.",
+    "Explicitly authorized first telephone call and customer usability acceptance.",
+    "Staff invitation/acceptance journey remains unimplemented or unverified."
+  ],
+  "source_sha256": [
+    {
+      "path": "Talk-Leee/src/app/dashboard/page.tsx",
+      "group": "root_frontend_source",
+      "sha256": "27cf43f8ef7ffcf90742a9e74527cb3cdb86343f3f215ef1b2309605faffafd7",
+      "bytes": 106239
+    },
+    {
+      "path": "Talk-Leee/src/components/dashboard/first-call-setup.tsx",
+      "group": "root_frontend_source",
+      "sha256": "6a1aca7bfeb79a8e2ee587de6dcc705948114e81d3ac15ecfd8d9e931f4d62f1",
+      "bytes": 3544
+    },
+    {
+      "path": "Talk-Leee/src/app/auth/callback/page.tsx",
+      "group": "auth_frontend_source",
+      "sha256": "88e43bd05cba61eb4f223ef31991b01bb9b47c30ef36d5baebe4310ec5ebeb7f",
+      "bytes": 6413
+    },
+    {
+      "path": "Talk-Leee/src/app/auth/forgot-password/page.tsx",
+      "group": "auth_frontend_source",
+      "sha256": "48c7c1e646bbf3710f5c5ff7e0c8b59fbe068db424c2fafae6e4cfeeef501e43",
+      "bytes": 20233
+    },
+    {
+      "path": "Talk-Leee/src/app/auth/login/login-client.tsx",
+      "group": "auth_frontend_source",
+      "sha256": "bf4435fcbc9e28da65915052b98b3c04481bcdeaf5057ba64cbee326d271c066",
+      "bytes": 43881
+    },
+    {
+      "path": "Talk-Leee/src/app/auth/register/register-client.tsx",
+      "group": "auth_frontend_source",
+      "sha256": "620e9ad94ed632174190e8ed0d9564a9194e9aeac6a70b2e8d2828d5bd037e7b",
+      "bytes": 28244
+    },
+    {
+      "path": "Talk-Leee/src/lib/http-client.ts",
+      "group": "auth_frontend_source",
+      "sha256": "0f89aabdc7e1e8f0529be538d52262e1033a5d3007482a28204c739559dc2c99",
+      "bytes": 29645
+    },
+    {
+      "path": "Talk-Leee/src/lib/api.ts",
+      "group": "auth_frontend_source",
+      "sha256": "785e7f9530bf7451b833751896c2537a9950f7e12718e7ad612b4b8265fb1f8a",
+      "bytes": 33193
+    },
+    {
+      "path": "Talk-Leee/src/lib/auth-context.tsx",
+      "group": "auth_frontend_source",
+      "sha256": "a7699507ac8607e39848f080dcad1fb97b3203e14a85ad60b791c2558969f253",
+      "bytes": 26499
+    },
+    {
+      "path": "backend/app/api/v1/endpoints/auth/signup.py",
+      "group": "auth_backend_source",
+      "sha256": "50b5ac187cc343535892c5cf5eebcd11e92f7ccc46b995cfd2f1ea4789806b30",
+      "bytes": 17735
+    },
+    {
+      "path": "backend/app/api/v1/endpoints/auth/registration.py",
+      "group": "auth_backend_source",
+      "sha256": "c64e3d54afe006a2ce632324dbc7a6726f7442f26c7884dfd3551d4c25f841aa",
+      "bytes": 894
+    },
+    {
+      "path": "backend/app/api/v1/endpoints/auth/password_reset.py",
+      "group": "auth_backend_source",
+      "sha256": "686d1884aa978b1f508fd3eed21fd908f3316874cbaa096a711902004c1e8685",
+      "bytes": 19615
+    },
+    {
+      "path": "backend/app/api/v1/endpoints/auth/__init__.py",
+      "group": "auth_backend_source",
+      "sha256": "fa77a112e9497fa3b8214d8bf72db5652162fe7bae28bece45002a38b9a5c88c",
+      "bytes": 2990
+    },
+    {
+      "path": "Talk-Leee/src/components/campaigns/campaign-wizard.tsx",
+      "group": "campaign_frontend_source",
+      "sha256": "a0d10e55b450733b09865ca01e66a8fd10ede9a48b86f2e109dfe9262be7e9c0",
+      "bytes": 21989
+    },
+    {
+      "path": "Talk-Leee/src/components/campaigns/voice-provider-picker.tsx",
+      "group": "campaign_frontend_source",
+      "sha256": "5be6948da7e6a12a849237131ef120f3dc9096a72112620b65bc285591af42bc",
+      "bytes": 12825
+    },
+    {
+      "path": "Talk-Leee/src/app/campaigns/[id]/page.tsx",
+      "group": "campaign_frontend_source",
+      "sha256": "51c9ad8f521e54186f94778663374ade2e1697248417c7edb41f959f15d3a797",
+      "bytes": 55948
+    },
+    {
+      "path": "Talk-Leee/src/components/campaigns/campaign-lead-fields.tsx",
+      "group": "campaign_frontend_source",
+      "sha256": "84d8884302ca549374d565996c1902bc4fb34ce88646c1792b4390ab7c509d92",
+      "bytes": 10556
+    },
+    {
+      "path": "Talk-Leee/src/lib/lead-details-api.ts",
+      "group": "campaign_frontend_source",
+      "sha256": "16f812f345078207e40a4326947a34d6ab7fb51b06f07951192ecfe5e4288b93",
+      "bytes": 4901
+    },
+    {
+      "path": "Talk-Leee/src/components/campaigns/rejected-inbound-calls-panel.tsx",
+      "group": "campaign_frontend_source",
+      "sha256": "614a8f12849314670424b734b587ebe70de28809212562c6889ac9c9fdafac94",
+      "bytes": 832
+    },
+    {
+      "path": "backend/tests/unit/test_signup_delivery_and_atomicity.py",
+      "group": "test_source",
+      "sha256": "023a664eeffb61d002c7071d7dd89936d6dbf5af4f83d0d5d1ea74e4976272a5",
+      "bytes": 11553
+    },
+    {
+      "path": "backend/tests/unit/test_signup_complete_membership.py",
+      "group": "test_source",
+      "sha256": "bd68aa6f95c386a8b0e96bda5864629874cffc1efc1467c78f76be5190b815d9",
+      "bytes": 5418
+    },
+    {
+      "path": "backend/tests/unit/test_onboarding_recovery_contract.py",
+      "group": "test_source",
+      "sha256": "e237084c93a2a4e742be5be0b8bf46d20b711e1ec54da47347fe72822caef825",
+      "bytes": 9707
+    },
+    {
+      "path": "backend/tests/security/test_credential_revocation.py",
+      "group": "test_source",
+      "sha256": "f733aba74d408590c29c1eddeac7bb8d79f7f958d067be1a5e4db75f0d548701",
+      "bytes": 11149
+    },
+    {
+      "path": "backend/tests/security/test_refresh_revocation_reasons.py",
+      "group": "test_source",
+      "sha256": "37682c761c0eda43d3e1b470bfe83b5152d97f323ed9e8e69db3f5d25a96a7d1",
+      "bytes": 17485
+    },
+    {
+      "path": "Talk-Leee/src/app/auth/auth-journey.test.tsx",
+      "group": "test_source",
+      "sha256": "c84391218146ba389a3a6db18faace6417a4322a515a0d98652ca109bfb39c45",
+      "bytes": 11994
+    },
+    {
+      "path": "Talk-Leee/src/lib/credential-exchange.test.ts",
+      "group": "test_source",
+      "sha256": "30e90b07529c11c1b5af33c63014ee476914d3821e44df3a2893243e222b5f30",
+      "bytes": 4642
+    },
+    {
+      "path": "Talk-Leee/src/lib/post-auth-navigation.test.ts",
+      "group": "test_source",
+      "sha256": "9b10cd68e3c4a6ae8b0addbfa2df36e0ec21321aeaada2fb3e527f5fb1d197ad",
+      "bytes": 1796
+    },
+    {
+      "path": "Talk-Leee/src/lib/http-client.test.ts",
+      "group": "test_source",
+      "sha256": "3face094a6c30c8df7ed4c513b5b1c34d6afbec01340ac123a053767b73c5b89",
+      "bytes": 10350
+    },
+    {
+      "path": "Talk-Leee/src/lib/http-client.session-expired.test.ts",
+      "group": "test_source",
+      "sha256": "b02f52e410208bf1db3aa9f72182543c7e1abf0bf638da335166a847fb2ca586",
+      "bytes": 6714
+    },
+    {
+      "path": "Talk-Leee/src/components/campaigns/campaign-lead-fields.test.ts",
+      "group": "test_source",
+      "sha256": "2fb1b5ba4547e916db7312808db2e790023a3055d01600d1ee0e1ed7e201244d",
+      "bytes": 3736
+    },
+    {
+      "path": "Talk-Leee/src/components/campaigns/campaign-wizard.test.tsx",
+      "group": "test_source",
+      "sha256": "39deaef63603fb51e2036e1278755e4292076fbc7653f585ed6fef113194d6b3",
+      "bytes": 6139
+    },
+    {
+      "path": "Talk-Leee/src/components/campaigns/voice-provider-picker.test.tsx",
+      "group": "test_source",
+      "sha256": "e46f10fb291422fddb3458d5102999a339a0e7569fe20249e58411549a07472d",
+      "bytes": 2419
+    },
+    {
+      "path": "Talk-Leee/src/lib/campaign-guidance.test.ts",
+      "group": "test_source",
+      "sha256": "c0ae1cf3eb676f33e80c470e597f59a5942fe0333c09808aa97589505cfcc9c9",
+      "bytes": 2424
+    },
+    {
+      "path": "Talk-Leee/src/components/campaigns/campaign-form.tsx",
+      "group": "supporting_existing_integration_and_runner",
+      "sha256": "c6fee73c299ab6df48c0e9e9c576cf3272666b5bde0734ee88f9981e2ab51d2f",
+      "bytes": 67893
+    },
+    {
+      "path": "Talk-Leee/src/lib/campaign-guidance.ts",
+      "group": "supporting_existing_integration_and_runner",
+      "sha256": "29918d4fe14579411f18d2f6e72478425d2a88a18000e46c19c0d5f38e925af7",
+      "bytes": 2653
+    },
+    {
+      "path": "backend/app/api/v1/endpoints/calls.py",
+      "group": "supporting_existing_integration_and_runner",
+      "sha256": "b9ac1b0a557cc24ed79259d47951cebd86d85ab4f3e3cbd9734ff0f9786e320e",
+      "bytes": 61569
+    },
+    {
+      "path": "backend/app/api/v1/endpoints/lead_details.py",
+      "group": "supporting_existing_integration_and_runner",
+      "sha256": "239be814438a24c7312be31718bd0cce92fe48453195ec1950196aa65329dbea",
+      "bytes": 11076
+    },
+    {
+      "path": "backend/tmp/run_onboarding_auth_tests.py",
+      "group": "supporting_existing_integration_and_runner",
+      "sha256": "eae8b9ca6fb944c8e648e1dffbb5bc18fa8200dbc9c364e57bce237cce607b83",
+      "bytes": 1758
+    }
+  ]
+}
