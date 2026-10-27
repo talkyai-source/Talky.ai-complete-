@@ -106,7 +106,7 @@ def _read_small_file(path):
 
 def _backup_status(directory, now):
     status = json.loads(_read_small_file(Path(directory) / "backup-attempt.json"))
-    if not isinstance(status, dict) or set(status) != {"started_at", "completed_at", "result"}:
+    if not isinstance(status, dict) or set(status) != {"started_at", "completed_at", "result", "last_success_at"}:
         raise ValueError("Invalid backup receipt")
     start = _timestamp(status["started_at"], now)
     outcome = status["result"]
@@ -118,12 +118,10 @@ def _backup_status(directory, now):
             raise ValueError("Running backup has completion")
     elif _timestamp(end, now) < start:
         raise ValueError("Invalid backup completion")
-    try:
-        last_success = _timestamp(float(_read_small_file(Path(directory) / "backup-success.timestamp")), now)
-    except FileNotFoundError:
-        last_success = None
-    # Success publication precedes attempt publication. Never accept a complete
-    # successful attempt without its matching durable timestamp.
+    last_success = status["last_success_at"]
+    if last_success is not None:
+        last_success = _timestamp(last_success, now)
+    # Outcome and last success are in one atomic receipt.
     if outcome == "succeeded" and last_success != end:
         raise ValueError("Backup success receipt is incomplete")
     return {"started_at": start, "completed_at": end, "result": outcome, "last_success": last_success}

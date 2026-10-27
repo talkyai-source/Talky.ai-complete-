@@ -44,3 +44,49 @@ Alertmanager receivers remain empty. Live scrape continuity, actual fault-to-
 receiver arrival, accountable acknowledgement, recovery and outage/restart
 proof are still required. This checkpoint does not close OP09 or the feature
 freeze, and no production activation is recorded.
+
+## External database binding and atomic-receipt follow-up
+
+The unified candidate additionally binds the existing external PostgreSQL
+scheduled wrapper to the same exporter. Its systemd StateDirectory is
+`/var/lib/talklee-backup-monitoring`, owned by the dedicated backup identity;
+the API reads it through the explicit `TALKY_BACKUP_STATUS_DIR` environment
+setting. The installer does not enable the optional backup schedule or create
+a successful observation. No API write grant was added. The backup wrapper
+refuses placing public status inside its private archive root and preserves
+an active attempt when another invocation fails to acquire the existing lock.
+
+Review found that two separately atomic files could expose half an update if
+the second publication failed. Both producers now use the same standard-library
+publisher, `scripts/database/backup_status.py`, which stores the outcome and
+`last_success_at` together in one atomic `backup-attempt.json`. A failed
+pre-publication write preserves the previous receipt. The successful timestamp
+reflects the respective producer's actual checked publication; the external
+wrapper continues to report that retention, off-host copy and restore are not
+performed by its backup operation.
+
+Follow-up verification:
+
+- Current collector/legacy-backup/auth selection: **50 passed, one POSIX-only
+  skip** on Windows. The skipped symlink/FIFO protection case then passed on
+  Ubuntu WSL with no skip.
+- Shared publisher and external wrapper: **11 passed, zero skips** on Ubuntu
+  WSL, including real file modes and advisory-lock exclusion. Windows ran nine
+  cases and explicitly skipped those two POSIX cases.
+- Existing recovery safety tests: **23 passed**. No real database operation,
+  archive copy, service activation or notification was initiated by these
+  synthetic wrapper/file tests.
+- One additional cross-contract test passed using the actual shared publisher
+  and actual metrics reader together. The fresh-host environment example now
+  binds the external backup service's status directory without enabling it.
+- Independent review found and corrected the legacy shell path-separation
+  edge before directory permissions or failure publication. The final backup
+  selection passed **14 tests**, and its two new private-directory boundary
+  cases also passed on Ubuntu. The installer template tests passed **40 tests**.
+  The independent follow-up review found no further actionable issue within
+  the publisher/wrapper/permissions scope. These overlapping selections are
+  not added into a single total.
+
+Rule names and PromQL are unchanged by this follow-up; the recorded native
+rule validation remains applicable. Deployed service permissions, filesystem
+mounts, fault delivery and restore acceptance remain separate operating gates.

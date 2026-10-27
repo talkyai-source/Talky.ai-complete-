@@ -9,13 +9,16 @@ User=talklee-backup
 Group=talklee-backup
 UMask=0077
 Environment=PGPASSFILE=/etc/talklee/secrets/pgpass
+Environment=TALKY_BACKUP_STATUS_DIR=/var/lib/talklee-backup-monitoring
+StateDirectory=talklee-backup-monitoring
+StateDirectoryMode=0755
 ExecStart=/usr/bin/python3 /opt/talky/scripts/database/scheduled_backup.py --service-file /etc/talklee/secrets/pg_service.conf --service talklee_backup --backup-root /var/backups/talklee
 TimeoutStartSec=2h
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/backups/talklee
+ReadWritePaths=/var/backups/talklee /var/lib/talklee-backup-monitoring
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 # Installing/enabling this unit is an operator action after service, password,

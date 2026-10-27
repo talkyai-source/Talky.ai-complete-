@@ -79,11 +79,12 @@ signals rule. These observations do not depend on the canary evidence scope.
   ready-list enqueue age: job creation timestamps cannot establish queue wait.
   Deliberate campaign/quota deferral remains possible; inspect actual policy.
 - `talky_backup_*` reads the existing backup job's numeric timestamps and fixed
-  result from `/var/lib/talky/monitoring`. The job publishes each small file
-  atomically. Failure, including rejected/shrunken archives, leaves the prior
+  result from `/var/lib/talky/monitoring`. The job publishes outcome and prior
+  success together in one atomic JSON receipt. Failure, including rejected/shrunken archives, leaves the prior
   successful timestamp intact. A started attempt without completion stays
   running; interruption can therefore become a stuck-attempt alert. A successful
-  receipt requires zero command exit after archive verification and retention.
+  receipt requires the producer's verified archive publication; the legacy
+  Docker job also completes its existing retention step.
   This proves neither restoration nor off-host durability, and cannot prove a
   previously written archive has not subsequently been removed.
 
@@ -96,6 +97,12 @@ and metrics API environment and arrange a trusted local read-only mount. Do
 not point a web process at the dump directory or invent a receipt from a timer
 configuration. Missing/malformed/unreadable receipts emit unavailable, not
 successful backup. No previous archive is automatically adopted as success.
+The existing external-database scheduled wrapper uses a dedicated
+`/var/lib/talklee-backup-monitoring` systemd StateDirectory and the same atomic
+receipt contract. Its API must set `TALKY_BACKUP_STATUS_DIR` to that actual
+producer's directory. See [database scheduling](../../scripts/database/README.md#scheduling-and-health)
+for ownership and the explicit fresh-installer binding; the optional schedule
+is not enabled or falsely marked successful by installation.
 
 Checked-in initial rules use one-minute worker/failure persistence, scheduled
 due age above five minutes for two minutes, daily-backup freshness above 36

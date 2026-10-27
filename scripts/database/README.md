@@ -152,6 +152,39 @@ files readable only by that user before installing the units. The scheduled
 entry point locks the backup root and compares to the previous bundle. It does
 not enable itself or alter existing units.
 
+The scheduled wrapper publishes the same nonsecret monitoring receipt as the
+existing Docker backup job. `backup-attempt.json` contains numeric `started_at`,
+`completed_at` (null while running), `last_success_at` (null until verified),
+and the fixed `result` value `running`, `succeeded` or `failed`. One atomic file
+holds both outcome and last success; a failed write cannot publish half a
+success. Failed backups preserve the prior successful timestamp. A second run
+that cannot acquire the existing lock cannot replace the active run's receipt.
+No archive paths, service credentials, database identifiers or row counts are
+copied into that public status file.
+
+The opt-in backup service creates `StateDirectory=talklee-backup-monitoring`
+with mode 0755, owned by `talklee-backup`, and writes receipt files with mode
+0644. Its protected filesystem permits writes to that directory and the
+private backup root only. The API account receives read/traversal access,
+never backup ownership or write membership. For this external-database
+profile, set **`TALKY_BACKUP_STATUS_DIR=/var/lib/talklee-backup-monitoring`**
+in the API's existing protected backend environment before its normal release
+restart. The fresh installer copies that supplied environment but does not
+enable this optional backup schedule. For direct wrapper invocation use
+`--status-directory` with the same dedicated path; it must be outside the
+private archive root. The older Docker backup path uses
+`/var/lib/talky/monitoring` by default. Select the one actual backup producer
+for the observed API; do not combine unrelated hosts or run both producers
+against the same status file.
+
+Authenticated `/metrics` reports missing, malformed or unreadable status as
+`talky_backup_observation_success 0`; no installer-generated success receipt
+is permitted. Success means this wrapper completed its existing verified-bundle
+publication. It still does not apply retention, copy off-host, prove restoration
+or detect later archive deletion/corruption. The hourly integrity check below
+remains required. Review the Prometheus freshness threshold against the same
+recovery objective as this health timer and prove the approved receiver route.
+
 The daily timer proposes 02:00 UTC; the hourly health timer checks the latest
 bundle's checksum and a maximum age of 26 hours. Change those values only to
 match the approved recovery objectives. A successful daily job does not prove

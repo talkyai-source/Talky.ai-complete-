@@ -1,6 +1,7 @@
 """Real exposition, bounded Redis ports and backup files; no external calls."""
 import asyncio
 import json
+import importlib.util
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -30,10 +31,8 @@ def redis_port(**overrides):
 
 def backup(directory, *, outcome="succeeded", start=NOW - 120, end=NOW - 10, success=NOW - 10):
     (directory / "backup-attempt.json").write_text(json.dumps({
-        "started_at": start, "completed_at": end, "result": outcome,
+        "started_at": start, "completed_at": end, "result": outcome, "last_success_at": success,
     }))
-    if success is not None:
-        (directory / "backup-success.timestamp").write_text(str(success))
 
 
 @pytest.fixture(autouse=True)
@@ -135,6 +134,19 @@ async def test_backup_receipt_success_failure_and_restart_read(tmp_path):
     assert sample(second, "talky_backup_last_success_timestamp_seconds") == NOW - 10
 
 
+async def test_actual_shared_backup_publisher_matches_metrics_reader(tmp_path):
+    path = Path(__file__).resolve().parents[3] / "scripts/database/backup_status.py"
+    spec = importlib.util.spec_from_file_location("tested_backup_status_contract", path)
+    publisher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(publisher)
+    publisher.publish(tmp_path, "succeeded", int(NOW - 120), now=int(NOW - 60))
+    publisher.publish(tmp_path, "failed", int(NOW - 30), now=int(NOW - 10))
+    body = await signals.render_operational_signals(None, now=NOW, backup_directory=tmp_path)
+    assert sample(body, "talky_backup_observation_success") == 1
+    assert sample(body, "talky_backup_last_attempt_success") == 0
+    assert sample(body, "talky_backup_last_success_timestamp_seconds") == NOW - 60
+
+
 async def test_running_without_success_never_claims_completion(tmp_path):
     backup(tmp_path, outcome="running", end=None, success=None)
     body = await signals.render_operational_signals(None, now=NOW, backup_directory=tmp_path)
@@ -157,7 +169,7 @@ async def test_bad_backup_receipt_is_unknown(tmp_path, monkeypatch, case):
     elif case == "future":
         backup(tmp_path, start=NOW + 1)
     elif case == "incomplete":
-        (tmp_path / "backup-success.timestamp").unlink()
+        backup(tmp_path, success=None)
     elif case == "directory":
         path.unlink()
         path.mkdir()

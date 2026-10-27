@@ -40,31 +40,30 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # Only timestamps and a fixed outcome are public to the local metrics reader.
 # Dump files remain private. Both processes must use the same status directory.
 status_dir="${TALKY_BACKUP_STATUS_DIR:-/var/lib/talky/monitoring}"
+# Validate before chmod, trap installation or any public receipt publication.
+# realpath -m follows existing symlinks without creating missing directories.
+resolved_status_dir="$(realpath -m -- "$status_dir")"
+resolved_backup_dir="$(realpath -m -- "$backup_dir")"
+if [[ "$resolved_status_dir" == "$resolved_backup_dir" || "$resolved_status_dir" == "$resolved_backup_dir/"* ]]; then
+    echo "DB-BACKUP CRITICAL: monitoring status must be outside the private archive directory" >&2
+    exit 1
+fi
 started_at="$(date -u +%s)"
 partial=""
 partial_owned=0
-write_status_file() {
-    local name="$1" value="$2" temporary
-    temporary="$(mktemp "${status_dir}/.backup-status.XXXXXX")" || return 1
-    if ! printf '%s\n' "$value" > "$temporary" || ! chmod 0644 "$temporary" || ! mv -f -- "$temporary" "${status_dir}/${name}"; then
-        rm -f -- "$temporary"
-        return 1
-    fi
+write_backup_status() {
+    python3 "${script_dir}/../../scripts/database/backup_status.py" \
+        --directory "$status_dir" --started-at "$started_at" --result "$1"
 }
 cleanup_partial() {
     rc=$?
     trap - EXIT INT TERM HUP
     [[ "$partial_owned" -eq 0 ]] || rm -f -- "$partial"
-    completed_at="$(date -u +%s)"
     outcome="failed"
     if [[ "$rc" -eq 0 ]]; then
-        if write_status_file backup-success.timestamp "$completed_at"; then
-            outcome="succeeded"
-        else
-            rc=1
-        fi
+        outcome="succeeded"
     fi
-    if ! write_status_file backup-attempt.json "{\"started_at\":${started_at},\"completed_at\":${completed_at},\"result\":\"${outcome}\"}"; then
+    if ! write_backup_status "$outcome"; then
         echo "DB-BACKUP CRITICAL: could not publish backup monitoring receipt" >&2
         rc=1
     fi
@@ -78,7 +77,7 @@ trap cleanup_partial EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM HUP
 install -d -m 0755 "${status_dir}"
-write_status_file backup-attempt.json "{\"started_at\":${started_at},\"completed_at\":null,\"result\":\"running\"}"
+write_backup_status running
 if [[ -z "${TALKY_BACKUP_PRINCIPAL_ID:-}" ]]; then
     echo "DB-BACKUP CRITICAL: TALKY_BACKUP_PRINCIPAL_ID is required" >&2
     exit 1
