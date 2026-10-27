@@ -100,7 +100,9 @@ jobs:
       NEXT_PUBLIC_API_BASE_URL: https://127.0.0.1:9/api/v1
       NEXT_PUBLIC_SENTRY_ENABLED: ""
       SENTRY_AUTH_TOKEN: ""
-      VITE_API_BASE_URL: https://127.0.0.1:9/api/v1
+      # Verification-only build: satisfy the release URL contract without a
+      # routable API or production credentials. No runtime artifact is deployed.
+      VITE_API_BASE_URL: https://api.example.invalid/api/v1
       VITE_USE_DUMMY_AUTH: "false"
       VITE_ADMIN_DEV_MODE: "false"
     steps:
