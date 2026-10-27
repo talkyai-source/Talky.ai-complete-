@@ -10,6 +10,8 @@ This plan refines the existing [production ready plan](../production%20ready.md)
 
 ## Current implementation and acceptance checkpoint
 
+Current release status (28 October): [latest billing-compatible Admin checkpoint](../sessions/2026-10-28-admin-current-billing-compatibility.md) supersedes the earlier no-push/no-deploy statements below. The prior candidate passed all 14 CI checks and the backup repair is live. Current-main integration preserves the newer payment migration; full Admin activation and designated operating acceptance remain incomplete. Earlier sections retain their original evidence scope.
+
 The following supersedes the earlier implementation-gap descriptions. Work remains in the isolated Admin remediation checkout; no commit, push, server deployment or live-provider acceptance is claimed.
 
 ### Consolidated candidate and compatible recovery - 26 October 2026
