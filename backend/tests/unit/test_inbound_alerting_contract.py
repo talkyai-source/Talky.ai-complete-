@@ -147,7 +147,7 @@ def test_missing_exporter_signals_remain_documented_release_blockers() -> None:
         "oldest unresolved billing-hold age",
         "general ARI orphan backlog",
         "PostgreSQL/Redis target or saturation metrics",
-        "dialer queue depth",
+        "ready-list enqueue age",
     ):
         assert marker in normalized_readme
     assert (

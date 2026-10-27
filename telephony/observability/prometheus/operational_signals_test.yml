@@ -1,0 +1,278 @@
+rule_files:
+- rules/telephony_ws_k_rules.yml
+evaluation_interval: 15s
+tests:
+- name: healthy and empty observations do not alert
+  interval: 15s
+  input_series:
+  - series: up{job="talky_backend_telephony",instance="local:8000"}
+    values: 1+0x40
+  - series: talky_operational_signal_contract{job="talky_backend_telephony",instance="local:8000"}
+    values: 1+0x40
+  - series: talky_backup_observation_success{job="talky_backend_telephony",instance="local:8000"}
+    values: 1+0x40
+  - series: talky_backup_success_recorded{job="talky_backend_telephony",instance="local:8000"}
+    values: 1+0x40
+  - series: talky_backup_last_attempt_success{job="talky_backend_telephony",instance="local:8000"}
+    values: 1+0x40
+  - series: talky_worker_observation_success{job="talky_backend_telephony",instance="local:8000",worker="dialer"}
+    values: 1+0x40
+  - series: talky_worker_heartbeat_healthy{job="talky_backend_telephony",instance="local:8000",worker="dialer"}
+    values: 1+0x40
+  - series: talky_queue_observation_success{job="talky_backend_telephony",instance="local:8000",queue="dialer_lists"}
+    values: 1+0x40
+  - series: talky_scheduled_queue_overdue_seconds{job="talky_backend_telephony",instance="local:8000"}
+    values: 0+0x40
+  - series: talky_backup_running{job="talky_backend_telephony",instance="local:8000"}
+    values: 0+0x40
+  - series: talky_backup_last_success_timestamp_seconds{job="talky_backend_telephony",instance="local:8000"}
+    values: 1+0x40
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: TalkyOperationalSignalsMissing
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: TalkyWorkerObservationUnavailable
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: TalkyWorkerHeartbeatMissingOrStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: TalkyQueueObservationUnavailable
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: TalkyScheduledQueueOverdue
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: TalkyBackupObservationUnavailable
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: TalkyBackupAttemptFailed
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: TalkyBackupSuccessNotRecorded
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: TalkyBackupSuccessStale
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: TalkyBackupAttemptStuck
+    exp_alerts: []
+- name: missing signal contract on reachable target
+  interval: 15s
+  input_series:
+  - series: up{job="talky_backend_telephony",instance="local:8000"}
+    values: 1+0x12
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: TalkyOperationalSignalsMissing
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: TalkyOperationalSignalsMissing
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        team: telephony
+        job: talky_backend_telephony
+        instance: local:8000
+      exp_annotations:
+        summary: Operational observations are missing from the metrics target
+        description: The target is reachable but lacks the worker, queue and backup
+          signal contract. Check the deployed artifact and scraper.
+- name: target outage remains the existing target-down alert
+  interval: 15s
+  input_series:
+  - series: up{job="talky_backend_telephony",instance="local:8000"}
+    values: 0+0x12
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: TalkyOperationalSignalsMissing
+    exp_alerts: []
+- name: stale worker persists then recovers
+  interval: 15s
+  input_series:
+  - series: talky_worker_heartbeat_healthy{job="talky_backend_telephony",instance="local:8000",worker="dialer"}
+    values: 0+0x8 1+0x8
+  alert_rule_test:
+  - eval_time: 30s
+    alertname: TalkyWorkerHeartbeatMissingOrStale
+    exp_alerts: []
+  - eval_time: 1m
+    alertname: TalkyWorkerHeartbeatMissingOrStale
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        team: telephony
+        job: talky_backend_telephony
+        instance: local:8000
+        worker: dialer
+      exp_annotations:
+        summary: Worker role heartbeat is missing or stale
+        description: No fresh heartbeat was observed for a required worker role. Inspect
+          the worker service; a role timestamp does not inventory all replicas or
+          prove job progress.
+  - eval_time: 3m
+    alertname: TalkyWorkerHeartbeatMissingOrStale
+    exp_alerts: []
+- name: unavailable worker never claims measured death
+  interval: 15s
+  input_series:
+  - series: talky_worker_observation_success{job="talky_backend_telephony",instance="local:8000",worker="dialer"}
+    values: 0+0x12
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: TalkyWorkerObservationUnavailable
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        team: telephony
+        job: talky_backend_telephony
+        instance: local:8000
+        worker: dialer
+      exp_annotations:
+        summary: Worker heartbeat observation is unavailable
+        description: A worker role timestamp cannot be read or validated. This is
+          unknown health; check Redis connectivity and clocks.
+  - eval_time: 1m
+    alertname: TalkyWorkerHeartbeatMissingOrStale
+    exp_alerts: []
+- name: queue read failure is independent of zero depth
+  interval: 15s
+  input_series:
+  - series: talky_queue_observation_success{job="talky_backend_telephony",instance="local:8000",queue="dialer_lists"}
+    values: 0+0x12
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: TalkyQueueObservationUnavailable
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        team: telephony
+        job: talky_backend_telephony
+        instance: local:8000
+        queue: dialer_lists
+      exp_annotations:
+        summary: Dialer queue observation is unavailable
+        description: Queue reads failed, timed out, were invalid or exceeded the bounded
+          inventory. No empty-queue conclusion is available.
+- name: scheduled due age must cross threshold and persist
+  interval: 15s
+  input_series:
+  - series: talky_scheduled_queue_overdue_seconds{job="talky_backend_telephony",instance="local:8000"}
+    values: 301+0x12
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: TalkyScheduledQueueOverdue
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: TalkyScheduledQueueOverdue
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        team: telephony
+        job: talky_backend_telephony
+        instance: local:8000
+      exp_annotations:
+        summary: Scheduled dialer work is overdue
+        description: The earliest retained scheduled due time is over five minutes
+          old. Check worker progress and deliberate campaign/quota deferral; this
+          is not ready-list enqueue age.
+- name: TalkyBackupObservationUnavailable
+  interval: 15s
+  input_series:
+  - series: talky_backup_observation_success{job="talky_backend_telephony",instance="local:8000"}
+    values: 0+0x12
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: TalkyBackupObservationUnavailable
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        team: telephony
+        job: talky_backend_telephony
+        instance: local:8000
+      exp_annotations:
+        summary: Backup status cannot be observed
+        description: The backup receipt is missing, unreadable or invalid. Verify
+          the backup unit, status-directory configuration and read permissions.
+- name: TalkyBackupAttemptFailed
+  interval: 15s
+  input_series:
+  - series: talky_backup_last_attempt_success{job="talky_backend_telephony",instance="local:8000"}
+    values: 0+0x12
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: TalkyBackupAttemptFailed
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        team: telephony
+        job: talky_backend_telephony
+        instance: local:8000
+      exp_annotations:
+        summary: The recorded backup attempt failed
+        description: The backup command exited nonzero, including failed verification
+          or suspicious archive shrink. Inspect the backup journal and retained archive.
+- name: TalkyBackupSuccessNotRecorded
+  interval: 15s
+  input_series:
+  - series: talky_backup_success_recorded{job="talky_backend_telephony",instance="local:8000"}
+    values: 0+0x12
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: TalkyBackupSuccessNotRecorded
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        team: telephony
+        job: talky_backend_telephony
+        instance: local:8000
+      exp_annotations:
+        summary: No successful backup is recorded
+        description: The local backup status contains no successful publication. Historical
+          archives and configured timers do not establish a successful current backup.
+- name: backup absence of completion is not success
+  interval: 1m
+  input_series:
+  - series: talky_backup_running{job="talky_backend_telephony",instance="local:8000"}
+    values: 1+0x126
+  - series: talky_backup_attempt_started_timestamp_seconds{job="talky_backend_telephony",instance="local:8000"}
+    values: 1+0x126
+  alert_rule_test:
+  - eval_time: 120m
+    alertname: TalkyBackupAttemptStuck
+    exp_alerts: []
+  - eval_time: 126m
+    alertname: TalkyBackupAttemptStuck
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        team: telephony
+        job: talky_backend_telephony
+        instance: local:8000
+      exp_annotations:
+        summary: A backup has no completion receipt after two hours
+        description: The backup attempt may be interrupted or stalled. Inspect its
+          unit and archive; do not infer successful completion from an old success
+          receipt.
+- name: daily backup exceeds allowed age
+  interval: 1m
+  input_series:
+  - series: talky_backup_last_success_timestamp_seconds{job="talky_backend_telephony",instance="local:8000"}
+    values: 1+0x2166
+  alert_rule_test:
+  - eval_time: 36h
+    alertname: TalkyBackupSuccessStale
+    exp_alerts: []
+  - eval_time: 36h6m
+    alertname: TalkyBackupSuccessStale
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        team: telephony
+        job: talky_backend_telephony
+        instance: local:8000
+      exp_annotations:
+        summary: The last successful local backup is over 36 hours old
+        description: Verify the daily timer and backup job. A fresh local archive
+          alone does not establish off-host durability or successful restoration.

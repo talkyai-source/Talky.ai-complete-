@@ -37,6 +37,48 @@ backup_dir="${TALKY_BACKUP_DIR:-/var/backups/talky}"
 keep_days="${TALKY_BACKUP_KEEP_DAYS:-30}"
 min_table_data="${TALKY_BACKUP_MIN_TABLE_DATA:-50}"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# Only timestamps and a fixed outcome are public to the local metrics reader.
+# Dump files remain private. Both processes must use the same status directory.
+status_dir="${TALKY_BACKUP_STATUS_DIR:-/var/lib/talky/monitoring}"
+started_at="$(date -u +%s)"
+partial=""
+partial_owned=0
+write_status_file() {
+    local name="$1" value="$2" temporary
+    temporary="$(mktemp "${status_dir}/.backup-status.XXXXXX")" || return 1
+    if ! printf '%s\n' "$value" > "$temporary" || ! chmod 0644 "$temporary" || ! mv -f -- "$temporary" "${status_dir}/${name}"; then
+        rm -f -- "$temporary"
+        return 1
+    fi
+}
+cleanup_partial() {
+    rc=$?
+    trap - EXIT INT TERM HUP
+    [[ "$partial_owned" -eq 0 ]] || rm -f -- "$partial"
+    completed_at="$(date -u +%s)"
+    outcome="failed"
+    if [[ "$rc" -eq 0 ]]; then
+        if write_status_file backup-success.timestamp "$completed_at"; then
+            outcome="succeeded"
+        else
+            rc=1
+        fi
+    fi
+    if ! write_status_file backup-attempt.json "{\"started_at\":${started_at},\"completed_at\":${completed_at},\"result\":\"${outcome}\"}"; then
+        echo "DB-BACKUP CRITICAL: could not publish backup monitoring receipt" >&2
+        rc=1
+    fi
+    if [[ "$rc" -ne 0 ]]; then
+        echo "DB-BACKUP CRITICAL: backup failed (rc=$rc)" >&2
+    fi
+    exit "$rc"
+}
+# Register before checking the principal so configuration failures are visible.
+trap cleanup_partial EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+install -d -m 0755 "${status_dir}"
+write_status_file backup-attempt.json "{\"started_at\":${started_at},\"completed_at\":null,\"result\":\"running\"}"
 if [[ -z "${TALKY_BACKUP_PRINCIPAL_ID:-}" ]]; then
     echo "DB-BACKUP CRITICAL: TALKY_BACKUP_PRINCIPAL_ID is required" >&2
     exit 1
@@ -53,19 +95,8 @@ for output_path in "$dump" "$partial" "$checksum_file"; do
         exit 1
     fi
 done
-cleanup_partial() {
-    rc=$?
-    rm -f -- "$partial"
-    if [[ "$rc" -ne 0 ]]; then
-        echo "DB-BACKUP CRITICAL: backup failed (rc=$rc)" >&2
-    fi
-    exit "$rc"
-}
-trap cleanup_partial EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM HUP
-
 # --- validated snapshot dump; no publication before keeper completion --------
+partial_owned=1
 python3 "${script_dir}/backup_snapshot.py" \
     --container "$CONTAINER" --user "$DB_USER" --database "$DB_NAME" \
     > "${partial}"
@@ -100,8 +131,6 @@ digest="$(sha256sum "${partial}" | cut -d ' ' -f1)"
 mv -- "${partial}" "${dump}"
 printf '%s  %s\n' "$digest" "$dump" > "${checksum_file}"
 sha256sum --check --quiet "${checksum_file}"
-trap - EXIT INT TERM HUP
-
 # --- retention ----------------------------------------------------------------
 find "${backup_dir}" -maxdepth 1 -type f \( -name 'talky-*.dump' -o -name 'talky-*.dump.sha256' \) \
     -mtime "+${keep_days}" -delete
