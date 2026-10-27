@@ -1,6 +1,7 @@
 """Bounded text privacy controls; synthetic SQL/provider ports, never audio proof."""
 import asyncio
 from copy import deepcopy
+from datetime import datetime
 import hashlib
 import json
 import socket
@@ -19,6 +20,14 @@ MARKER = "[secret removed]"
 CONTACT = "My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671."
 SECRET = "My card number is 4111 1111 1111 1111."
 MIXED = f"{CONTACT} {SECRET} Our budget is 2500 and invoice number is 123456."
+
+
+class _DigitFreeClock(datetime):
+    """A turn timestamp sharing no digit run with the short secrets below."""
+
+    @classmethod
+    def utcnow(cls):
+        return cls(2000, 1, 1)
 
 
 @pytest.fixture(autouse=True)
@@ -354,8 +363,13 @@ def test_policy_exclusions_do_not_exempt_actual_values_without_length_descriptio
     ("My password is [q7!m9].", "[q7!m9]."),
     ("My password is [q7?m9]", "[q7?m9]"),
 ])
-async def test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords(offered, secret):
+async def test_scope_exclusions_cannot_retain_large_length_values_or_bracket_passwords(offered, secret, monkeypatch):
     from tests.unit.test_transcript_flush_pooled import _FakeConn, _FakePool
+    import app.domain.services.transcript_service as transcript_module
+    # The stored turn carries a utcnow() timestamp, and "123"/"042" turn up in
+    # its microseconds a few runs in a thousand, failing the substring check
+    # for a reason unrelated to redaction. Pin the clock; the check stays exact.
+    monkeypatch.setattr(transcript_module, "datetime", _DigitFreeClock)
     svc, conn = TranscriptService(), _FakeConn()
     turn = svc.accumulate_turn("synthetic", "user", offered + " " + CONTACT, is_final=True)
     assert turn.content == offered.replace(secret, MARKER) + " " + CONTACT
