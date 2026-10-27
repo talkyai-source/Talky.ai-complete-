@@ -1484,6 +1484,11 @@
           "path": "docs/sessions/2026-10-28-ubuntu-installer-release.md",
           "kind": "ubuntu_installer_dependency_build_and_control_verification_not_operating_acceptance",
           "candidate": "a152195b8b15257f33837932ee96917d7e3d3ba6"
+        },
+        {
+          "path": "docs/sessions/2026-10-28-local-ubuntu-runtime.md",
+          "kind": "local_postgresql_tls_role_and_bootstrap_verification_not_restore_acceptance",
+          "candidate": "8f45d12eadb3de02de6696b0bf6e7a90b644c3f1"
         }
       ],
       "blocker": "Production-shaped external database, backup/restore identities, off-host storage and designated recovery objectives/operator are still required for operating restore acceptance.",
@@ -1574,6 +1579,11 @@
           "path": "docs/sessions/2026-10-28-ubuntu-installer-release.md",
           "kind": "ubuntu_installer_dependency_build_and_control_verification_not_operating_acceptance",
           "candidate": "a152195b8b15257f33837932ee96917d7e3d3ba6"
+        },
+        {
+          "path": "docs/sessions/2026-10-28-local-ubuntu-runtime.md",
+          "kind": "local_ubuntu_runtime_and_frontend_artifacts_not_release_acceptance",
+          "candidate": "8f45d12eadb3de02de6696b0bf6e7a90b644c3f1"
         }
       ],
       "blocker": "Designated clean Ubuntu host and completed external database, DNS/TLS, network, provider and carrier inputs are still required for full installation and operating acceptance.",
