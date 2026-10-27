@@ -1,0 +1,18 @@
+{
+  "main_source": "5c4c908ede3a736354c6f5620664de33db60fc6c",
+  "main_schema_sha256": "c109eca88c24897dff8e1c3b62edc77fb375930da29d1921ce96e22655b67830",
+  "sole_head": "0075_release_history_merge",
+  "c_start": "0074_incidents_bootstrap",
+  "c_existing_event_incident_oid_rows_acl_policies_preserved": true,
+  "c_existing_purchase_terms_preserved": true,
+  "d_start": "0008_tenant_voice_tuning",
+  "d_published_billing_head_exercised": "0073_payment_test_plan",
+  "d_billing_rows_preserved_without_replay": true,
+  "d_missing_tables_repaired_with_forced_rls": true,
+  "repeat_upgrade_head_passed_for_both": true,
+  "payment_test_terms_verified": true,
+  "restricted_owner_and_verified_tls_for_both": true,
+  "synthetic_fixture_rows_retained": true,
+  "runtime_database_changed": false,
+  "production_accessed": false
+}

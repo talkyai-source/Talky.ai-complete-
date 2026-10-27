@@ -1226,10 +1226,14 @@
           "path": "docs/sessions/2026-10-27-admin-billing-release-compatibility.md",
           "kind": "preserved_deployed_billing_single_head_and_fresh_paid_database_restore"
         },
-        "docs/sessions/2026-10-27-admin-remaining-remediation.md"
+        "docs/sessions/2026-10-27-admin-remaining-remediation.md",
+        {
+          "path": "docs/sessions/2026-10-28-production-deliverables-integration.md",
+          "kind": "combined_candidate_tls_migration_recovery_and_monitoring_evidence_with_operating_limits"
+        }
       ],
       "blocker": "Prior candidate8df88718 passed all14 CI checks, including701 Admin PostgreSQL and943 Admin frontend cases. Runtime614 passed isolated production-backup0072-to0080 migration, restricted-role checks and exact cleanup; historical failures are retained in the preceding session. Backup repair eae0465e is live. A fresh read-only observation found independent production advancement to5c4c908e/schema0073_payment_test_plan/API-web92c943e2 with all eight observed services active and backup pin/timer retained. Merge50dda882 preserves current billing/frontend changes and adds metadata-only0081 joining published0080 and0073;68 focused and9 tenant checks pass. Expanded branch, current-production restore and combined CI receipts are tracked on PR22 and the new compatibility session, not inferred from prior runtime results. Full activation still lacks actual ingress/outbound freeze, fresh four-counter drain, topology/change references and two distinct operator attestations. The four live Admin contract failures await coherent activation; no newer hosted business-flow success is claimed. Designated MFA/call/connector/media/provider effects, real supplier account-period source formats and finance review, allocation, off-host recovery/RTO/RPO, load and policy/customer acceptance remain unfinished. CP09 stays in_progress, CP05/CP06 deferred and feature freeze active.",
-      "next_action": "Use PR22 current-candidate verification and preserve latest production billing plus the backup maintenance pin. Obtain the existing operating freeze/two-owner release record and designated owned call/connector/media destinations; measure fresh four-counter drain after freeze. Execute the coherent backend/schema/gateway deployment, promote matching Admin UI and repeat the failing hosted contracts and actual business/provider journeys. Complete supplier formats/account allocation only from designated real account-period exports and reviewed finance inputs. Retain remaining recovery/load/policy acceptance and the feature freeze.",
+      "next_action": "Use PR26 combined-candidate verification and preserve latest production billing plus the backup maintenance pin. Obtain the existing operating freeze/two-owner release record and designated owned call/connector/media destinations; measure fresh four-counter drain after freeze. Execute the coherent backend/schema/gateway deployment, promote matching Admin UI and repeat the failing hosted contracts and actual business/provider journeys. Complete supplier formats/account allocation only from designated real account-period exports and reviewed finance inputs. Retain remaining recovery/load/policy acceptance and the feature freeze.",
       "target_date": null
     },
     {
@@ -2202,7 +2206,7 @@
       "title": "Make operational alerts reach an accountable person",
       "owner_role": "Reliability and on-call lead",
       "assigned_person": "Codex implementation team; designated operating acceptance owner pending",
-      "reviewer": null,
+      "reviewer": "Root source review and independent release integration review",
       "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
@@ -2219,10 +2223,14 @@
           "path": "docs/sessions/2026-10-05-operating-acceptance-baseline.md",
           "kind": "existing_offline_control_validation_and_remaining_acceptance",
           "candidate": "e5cfff12773b259db516ab76ad53d417c3f5edc0"
+        },
+        {
+          "path": "docs/sessions/2026-10-28-production-deliverables-integration.md",
+          "kind": "combined_candidate_tls_migration_recovery_and_monitoring_evidence_with_operating_limits"
         }
       ],
-      "blocker": null,
-      "next_action": "Use the existing operating tools for the package acceptance once its designated profile, operator and environment prerequisites are established. Local baseline is not deployed outcome proof.",
+      "blocker": "Measured worker, bounded queue and atomic backup-status signals plus native Prometheus fault scenarios are verified locally. The approved receiver, coordinated deployed configuration, actual delivery, accountable acknowledgement, recovery and outage/restart drill remain required.",
+      "next_action": "Qualify and deploy the combined PR26 candidate, bind the correct backup status directory for its existing database profile, configure the designated receiver and demonstrate actual alert/acknowledgement/recovery and failure behavior. Local metrics/rule checks do not close OP09.",
       "target_date": null
     },
     {
@@ -2260,10 +2268,14 @@
           "path": "docs/sessions/2026-10-28-local-ubuntu-runtime.md",
           "kind": "local_postgresql_tls_role_and_bootstrap_verification_not_restore_acceptance",
           "candidate": "8f45d12eadb3de02de6696b0bf6e7a90b644c3f1"
+        },
+        {
+          "path": "docs/sessions/2026-10-28-production-deliverables-integration.md",
+          "kind": "combined_candidate_tls_migration_recovery_and_monitoring_evidence_with_operating_limits"
         }
       ],
-      "blocker": "Production-shaped external database, backup/restore identities, off-host storage and designated recovery objectives/operator are still required for operating restore acceptance.",
-      "next_action": "Run the existing recovery tools against the designated isolated production-shaped database and off-host archive; prove TLS, runtime restrictions, application-server loss recovery and declared recovery objectives. Ubuntu CI recovery control tests are mocked and do not establish restore acceptance.",
+      "blocker": "A real Ubuntu rehearsal on two TLS PostgreSQL containers passed for head 0075, preserving all 111 public-table records and 5 sequence states; the combined 0082 candidate has its own CI gate. Both containers share one runner. The observed production database remains on the application server without TLS; a designated external database, off-host archive/restore target, retention/PITR policy, recovery objectives and operator are still required.",
+      "next_action": "Retain the exact-candidate canonical TLS recovery evidence, then execute the documented migration and recovery workflow on the designated external production-shaped targets. Prove runtime restrictions, application-server loss recovery, off-host durability and declared recovery objectives; synthetic two-container recovery is a separate evidence layer.",
       "target_date": null
     },
     {
@@ -2355,10 +2367,14 @@
           "path": "docs/sessions/2026-10-28-local-ubuntu-runtime.md",
           "kind": "local_ubuntu_runtime_and_frontend_artifacts_not_release_acceptance",
           "candidate": "8f45d12eadb3de02de6696b0bf6e7a90b644c3f1"
+        },
+        {
+          "path": "docs/sessions/2026-10-28-production-deliverables-integration.md",
+          "kind": "combined_candidate_tls_migration_recovery_and_monitoring_evidence_with_operating_limits"
         }
       ],
-      "blocker": "Exact release artifact/host, supported Linux CI/runtime privileges, previous compatible artifact and backup/recovery operating acceptance remain unverified. Local builds/current-head migration and browser fixtures are not deployed recovery proof. Designated clean Ubuntu host and completed external database, DNS/TLS, network, provider and carrier inputs are still required for full installation and operating acceptance.",
-      "next_action": "Use the published pinned Ubuntu test candidate, populate protected inputs, execute validate/apply, retain health/reboot/controlled-call evidence, and qualify update/rollback plus independent-operator handover. Preparation and builds do not close this package.",
+      "blocker": "PR26 combines billing, Admin and Ubuntu work at schema 0082. Restricted-owner TLS upgrades and 55 incident-adoption cases passed; final Linux CI is tracked on the exact PR candidate. Privileged deployment access, a designated clean Ubuntu host and external database, required traffic-freeze/drain/operator attestations, coordinated activation and actual reboot/call/update/rollback/handover acceptance remain outstanding.",
+      "next_action": "Finish exact-candidate Linux CI, then use the known deployment and fresh-host installation procedures with the designated resources. Retain real operating, recovery and independent-operator demonstration evidence, including the requested videos. Current local builds and previews do not close the release gate.",
       "target_date": null
     },
     {

@@ -1,5 +1,7 @@
 # production ready
 
+**Production deliverables integration — 28 October 2026:** [The combined checkpoint](sessions/2026-10-28-production-deliverables-integration.md) joins current billing, Admin and Ubuntu installation work at schema 0082, records restricted-owner TLS migration and incident-history preservation, adds real two-cluster TLS recovery validation, and exposes measured worker/queue/backup faults. Exact-candidate Linux CI is tracked on [PR 26](https://github.com/talkyai-source/Talky.ai-complete-/pull/26). The observed production database is still on the application server without TLS, Stripe uses test credentials, and coordinated activation plus the documented operating and handover demonstrations remain outstanding. CP09 and OP09/OP10/OP12 stay in progress; no final acceptance gate or feature-freeze status changes.
+
 **Release preparation — 8 October 2026:** [The release checkpoint](sessions/2026-10-08-release-preparation.md) integrates newer main changes, preserves both database histories, patches available vulnerable dependencies, and records 2,158 affected backend tests plus 74 dashboard tests. Git/preview results are distinct from server activation. Production activation remains pending operator sudo access, the required measured drain record, backup verification and final release checks; the unpatched frontend tooling audit remains explicit. No acceptance gate or feature-freeze status changes.
 
 
