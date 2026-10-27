@@ -9,19 +9,23 @@ import ForgotPasswordPage from "./forgot-password/page";
 import CallbackPage from "./callback/page";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { api, type MeResponse } from "@/lib/api";
+import { ApiClientError, clearFreshLoginGrace } from "@/lib/http-client";
 
 const router = { back() {}, forward() {}, refresh() {}, push() {}, replace() {}, prefetch() {}, bfcacheId: "test" } satisfies AppRouterInstance;
 const startResponse = { email: "person@example.test", message: "Verification code sent!", expires_in_minutes: 10 };
 const originalBearerFallback = process.env.NEXT_PUBLIC_BEARER_FALLBACK;
+const anonymousSession = new ApiClientError({ status: 401, code: "unauthorized", message: "No browser session.", url: "/auth/me", method: "GET" });
 
 beforeEach(() => {
     localStorage.clear();
+    clearFreshLoginGrace();
     process.env.NEXT_PUBLIC_BEARER_FALLBACK = "true";
     window.history.replaceState({}, "", "/auth/register");
     mock.method(globalThis, "fetch", async () => { throw new Error("Unexpected network request in auth journey test"); });
 });
 afterEach(() => {
     cleanup(); mock.restoreAll(); localStorage.clear();
+    clearFreshLoginGrace();
     if (originalBearerFallback === undefined) delete process.env.NEXT_PUBLIC_BEARER_FALLBACK;
     else process.env.NEXT_PUBLIC_BEARER_FALLBACK = originalBearerFallback;
 });
@@ -135,22 +139,27 @@ test("recovery request failure stays on email form with a retry", async () => {
 
 test("callback type alone cannot confirm an account or create a profile", async () => {
     window.history.replaceState({}, "", "/auth/callback?type=signup");
-    const me = mock.method(api, "getMe", async () => { throw new Error("Unexpected verification"); });
+    const me = mock.method(api, "getMe", async () => { throw anonymousSession; });
     const request = mock.method(api, "request", async () => { throw new Error("Unexpected profile creation"); });
     renderPage(<CallbackPage />);
     await screen.findByText(/This link could not confirm your account/);
-    assert.equal(me.mock.callCount(), 0);
+    // The provider checks the existing cookie session; the link verifies no token.
+    assert.deepEqual(me.mock.calls.map(call => call.arguments), [[]]);
     assert.equal(request.mock.callCount(), 0);
+    assert.equal(localStorage.getItem("talklee.auth.token"), null);
     assert.equal(window.location.search, "");
 });
 
 test("callback rejection verifies exact token without persisting it or claiming success", async () => {
     window.history.replaceState({}, "", "/auth/callback#access_token=invalid-token");
-    const me = mock.method(api, "getMe", async () => { throw new Error("This token is expired."); });
+    const me = mock.method(api, "getMe", async (token?: string) => {
+        if (token === undefined) throw anonymousSession;
+        throw new Error("This token is expired.");
+    });
     const setToken = mock.method(api, "setToken", () => {});
     renderPage(<CallbackPage />);
     await screen.findByText("This token is expired.");
-    assert.deepEqual(me.mock.calls[0]?.arguments, ["invalid-token"]);
+    assert.deepEqual(me.mock.calls.map(call => call.arguments), [[], ["invalid-token"]]);
     assert.equal(setToken.mock.callCount(), 0);
     assert.equal(localStorage.getItem("talklee.auth.token"), null);
     assert.equal(window.location.hash, "");
@@ -159,13 +168,17 @@ test("callback rejection verifies exact token without persisting it or claiming 
 test("callback result cannot replace an identity established while verification was pending", async () => {
     window.history.replaceState({}, "", "/auth/callback#access_token=old-link");
     let resolve!: (value: MeResponse) => void;
-    const me = mock.method(api, "getMe", () => new Promise<MeResponse>((done) => { resolve = done; }));
+    const me = mock.method(api, "getMe", async (token?: string) => {
+        if (token === undefined) throw anonymousSession;
+        assert.equal(token, "old-link");
+        return new Promise<MeResponse>((done) => { resolve = done; });
+    });
     function OtherSignIn() {
         const auth = useAuth();
         return <><button onClick={() => auth.applyLoginResult({ user_id: "new-user", email: "new@example.test", role: "user", access_token: "new-session" })}>Other sign in</button><output>{auth.user?.id}</output></>;
     }
     renderPage(<><CallbackPage /><OtherSignIn /></>);
-    await waitFor(() => assert.equal(me.mock.callCount(), 1));
+    await waitFor(() => assert.deepEqual(me.mock.calls.map(call => call.arguments), [[], ["old-link"]]));
     fireEvent.click(screen.getByRole("button", { name: "Other sign in" }));
     await act(async () => resolve({ id: "old-user", email: "old@example.test", role: "user", minutes_remaining: 0 } as MeResponse));
     await screen.findByText(/Your sign-in changed/);
