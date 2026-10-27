@@ -27,6 +27,7 @@ async def crud_db(journey_db, monkeypatch):  # noqa: F811
     db.owned_emails = []
     db.created_tenants = []
     db.owned_tenant_names = []
+    db.owned_plan_ids = []
     db.client_ip = "127.0.1." + str(1 + uuid4().int % 250)
     db.report["database_errors"] = []
     for method in ("execute", "fetch", "fetchrow", "fetchval"):
@@ -56,6 +57,10 @@ async def crud_db(journey_db, monkeypatch):  # noqa: F811
                 db.created_tenants.append(row["id"])
         await db.owner.execute("DELETE FROM login_attempts WHERE email=ANY($1::text[])", db.owned_emails)
         await db.owner.execute("DELETE FROM tenant_quotas WHERE tenant_id=ANY($1::uuid[])", db.created_tenants)
+        if db.owned_plan_ids:
+            await db.owner.execute("UPDATE tenants SET plan_id=NULL WHERE id=ANY($1::uuid[]) AND plan_id=ANY($2::text[])",
+                                   db.tenants, db.owned_plan_ids)
+            await db.owner.execute("DELETE FROM plans WHERE id=ANY($1::text[])", db.owned_plan_ids)
 
 
 async def call(db, client, method, path, **kwargs):
@@ -349,17 +354,21 @@ async def test_tenant_default_is_planless_zero_with_explicit_quota_authority(cru
 async def test_default_create_replay_preserves_existing_legacy_tenant(crud_db):
     db = crud_db
     target = db.tenants[2]
-    assert await db.owner.fetchval("SELECT id FROM plans WHERE id='free'") == "free"
+    legacy_plan = "legacy_" + uuid4().hex
+    db.owned_plan_ids.append(legacy_plan)
+    await db.owner.execute("""INSERT INTO plans(id,name,price,minutes)
+        VALUES($1,'Synthetic retained legacy allowance',0,30)""", legacy_plan)
     await db.owner.execute(
-        "UPDATE tenants SET plan_id='free',minutes_allocated=30,minutes_used=7 WHERE id=$1", target)
+        "UPDATE tenants SET plan_id=$2,minutes_allocated=30,minutes_used=7 WHERE id=$1", target, legacy_plan)
     before = await db.owner.fetchval("SELECT to_jsonb(t)::text FROM tenants t WHERE id=$1", target)
+    audits_before = await db.owner.fetchval("SELECT count(*) FROM audit_logs WHERE tenant_id=$1", target)
     name = await db.owner.fetchval("SELECT business_name FROM tenants WHERE id=$1", target)
     async with signed_in(db) as admin:
         replay = await call(db, admin, "POST", "/admin/tenants", json={"business_name": name})
         assert replay.status_code == 200 and replay.json()["created"] is False
-        assert replay.json()["id"] == str(target) and replay.json()["plan_id"] == "free"
+        assert replay.json()["id"] == str(target) and replay.json()["plan_id"] == legacy_plan
         assert replay.json()["minutes_allocated"] == 30 and replay.json()["minutes_used"] == 7
         assert await db.owner.fetchval("SELECT to_jsonb(t)::text FROM tenants t WHERE id=$1", target) == before
-        assert await db.owner.fetchval("SELECT count(*) FROM audit_logs WHERE tenant_id=$1", target) == 0
+        assert await db.owner.fetchval("SELECT count(*) FROM audit_logs WHERE tenant_id=$1", target) == audits_before
         RUN_EVIDENCE.append({"case": "existing_legacy_tenant_replay", "row_unchanged": True,
                              "created_audits": 0})
