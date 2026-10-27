@@ -249,7 +249,8 @@ Its required boundaries are:
    captured baseline. Keep populated receipt/decision roundtrips separate from
    empty-table observations; representative counts are not full-content proof.
 5. For candidate migration validation, use an immutable matching checkout and
-   explicit clone-only `DATABASE_URL` **and** `READ_DATABASE_URL`. Prove the
+   explicit clone-only `DATABASE_URL`, `READ_DATABASE_URL` and
+   `MIGRATION_DATABASE_URL` bound to that same owned database. Prove the
    actual Unix-socket database, role and NOSUPERUSER/NOBYPASSRLS state with each
    client before any migration; do not load a production `.env`. Upgrade and
    repeat only in that clone, then run the candidate runtime privilege and

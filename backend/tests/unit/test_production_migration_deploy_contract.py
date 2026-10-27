@@ -195,11 +195,15 @@ def test_restore_runbook_uses_new_isolated_cluster_and_validates_evidence():
     validate_at = prose.index("For candidate migration validation")
     cleanup_at = prose.index("Close owned connections and remove only")
     assert capture_at < isolate_at < restore_at < restrict_at < validate_at < cleanup_at
+    validation = prose[validate_at:cleanup_at]
+    assert "explicit clone-only" in validation
+    assert "bound to that same owned database" in validation
+    for variable in ("DATABASE_URL", "READ_DATABASE_URL", "MIGRATION_DATABASE_URL"):
+        assert f"`{variable}`" in validation
     for contract in (
         "exact production image ID", "no network or published ports",
         "never the production data volume", "schema heads, role flags, memberships",
         "`--exit-on-error` and a transaction", "verify_restore_compatibility.py",
-        "explicit clone-only `DATABASE_URL` **and** `READ_DATABASE_URL`",
         "NOSUPERUSER/NOBYPASSRLS", "tenant/billing/receipt hashes",
         "exact owned volume after identity checks",
     ):
