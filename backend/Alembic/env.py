@@ -1,7 +1,7 @@
 """
 Alembic migration environment — async PostgreSQL via asyncpg.
 
-Reads DATABASE_URL from environment (same as the app).
+Reads MIGRATION_DATABASE_URL when supplied, otherwise DATABASE_URL.
 Supports both:
   - offline mode: generates SQL without a live DB connection
   - online mode:  runs migrations against a live asyncpg pool
@@ -9,9 +9,8 @@ Supports both:
 import asyncio
 import os
 from logging.config import fileConfig
-from pathlib import Path
 
-from sqlalchemy import pool, text
+from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -27,22 +26,22 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # ---------------------------------------------------------------------------
-# Inject DATABASE_URL from environment so we never hard-code credentials
+# Migration credentials may be supplied separately from application credentials.
 # ---------------------------------------------------------------------------
-_db_url = os.getenv("DATABASE_URL")
+_db_url = os.getenv("MIGRATION_DATABASE_URL", os.getenv("DATABASE_URL"))
 if not _db_url:
     raise RuntimeError(
-        "DATABASE_URL environment variable is required for Alembic migrations.\n"
-        "Export it before running: export DATABASE_URL=postgresql://user:pass@host/db"
+        "MIGRATION_DATABASE_URL or DATABASE_URL is required for Alembic migrations."
     )
 
-# asyncpg driver uses postgresql+asyncpg:// scheme
-if _db_url.startswith("postgresql://"):
-    _db_url = _db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-elif _db_url.startswith("postgres://"):
-    _db_url = _db_url.replace("postgres://", "postgresql+asyncpg://", 1)
+# Feed the DSN directly to asyncpg, as the application does. SQLAlchemy otherwise
+# turns URI query fields such as sslmode/sslrootcert into unsupported connect()
+# keyword arguments. Keeping the DSN out of ConfigParser also preserves percent-
+# encoded credentials without interpolation or accidental credential logging.
+if _db_url.startswith("postgresql+asyncpg://"):
+    _db_url = _db_url.replace("postgresql+asyncpg://", "postgresql://", 1)
 
-config.set_main_option("sqlalchemy.url", _db_url)
+config.set_main_option("sqlalchemy.url", "postgresql+asyncpg://")
 
 # ---------------------------------------------------------------------------
 # target_metadata: set this if you use SQLAlchemy ORM models for autogenerate.
@@ -98,6 +97,7 @@ async def run_async_migrations() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,  # No pooling for migration runs
+        connect_args={"dsn": _db_url},
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

@@ -1,0 +1,23 @@
+[Unit]
+Description=Talklee checked PostgreSQL logical backup
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=talklee-backup
+Group=talklee-backup
+UMask=0077
+Environment=PGPASSFILE=/etc/talklee/secrets/pgpass
+ExecStart=/usr/bin/python3 /opt/talky/scripts/database/scheduled_backup.py --service-file /etc/talklee/secrets/pg_service.conf --service talklee_backup --backup-root /var/backups/talklee
+TimeoutStartSec=2h
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/talklee
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+# Installing/enabling this unit is an operator action after service, password,
+# CA, user, directory and off-host/retention policy configuration is verified.
+# Connect unit failure and backup-age checks to the approved alert receiver.

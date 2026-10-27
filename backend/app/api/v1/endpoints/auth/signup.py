@@ -195,20 +195,31 @@ async def signup_start(
 
     redis = _get_redis_or_503()
     await _claim_signup_send(redis, email)
-    await redis.setex(
-        _signup_redis_key(email),
-        _SIGNUP_CODE_TTL_SECONDS,
-        json.dumps(pending_payload),
-    )
+    try:
+        await redis.setex(
+            _signup_redis_key(email),
+            _SIGNUP_CODE_TTL_SECONDS,
+            json.dumps(pending_payload),
+        )
+    except Exception as exc:
+        logger.warning("signup_pending_write_failed err=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Signup service temporarily unavailable.",
+        ) from exc
 
-    # A stored code is not evidence that the mailbox provider accepted it.
-    email_service = get_email_service()
-    sent = await email_service.send_signup_code_email(
-        recipient_email=email,
-        recipient_name=body.name,
-        code=code,
-        expires_in_minutes=_SIGNUP_CODE_TTL_SECONDS // 60,
-    )
+    # A stored code is not evidence that the mailbox provider accepted it, and
+    # a mail-service exception is the same outcome as a refused send.
+    try:
+        sent = await get_email_service().send_signup_code_email(
+            recipient_email=email,
+            recipient_name=body.name,
+            code=code,
+            expires_in_minutes=_SIGNUP_CODE_TTL_SECONDS // 60,
+        )
+    except Exception as exc:
+        logger.warning("signup_start_email_send_error err=%s", type(exc).__name__)
+        sent = False
     if not sent:
         logger.warning("signup_start_email_send_unconfirmed")
         raise HTTPException(
@@ -459,21 +470,26 @@ async def signup_complete(
     except Exception:
         logger.warning("signup_pending_cleanup_failed")
 
-    await audit_logger.log(
-        event_type=AuditEvent.USER_CREATED,
-        actor_id=user_id,
-        actor_type="user",
-        tenant_id=str(tenant["id"]),
-        action="user_registered_two_step",
-        description=f"New user registered (two-step): {email}",
-        metadata={
-            "plan_id": None,
-            "business_name": pending["business_name"],
-            "flow": "signup/start+complete",
-        },
-        ip_address=ip,
-        user_agent=ua,
-    )
+    # The account is committed; an audit outage must not report a failed
+    # signup (the customer would retry and be told the email is taken).
+    try:
+        await audit_logger.log(
+            event_type=AuditEvent.USER_CREATED,
+            actor_id=user_id,
+            actor_type="user",
+            tenant_id=str(tenant["id"]),
+            action="user_registered_two_step",
+            description=f"New user registered (two-step): {email}",
+            metadata={
+                "plan_id": None,
+                "business_name": pending["business_name"],
+                "flow": "signup/start+complete",
+            },
+            ip_address=ip,
+            user_agent=ua,
+        )
+    except Exception:
+        logger.warning("signup_completed_audit_failed")
 
     from app.services.scripts.tenant_minutes import compute_tenant_minutes_status
     meter = await compute_tenant_minutes_status(db_client.pool, str(tenant["id"]))

@@ -1,0 +1,81 @@
+{
+  "status": "local_verification_passed",
+  "verified_at": "2026-10-26T21:53:44.537538+00:00",
+  "source_base": "a0706b6f037aee1d24160867060a23c7b9eee720",
+  "source_is_uncommitted_working_tree": true,
+  "checks": [
+    {
+      "name": "installer",
+      "exit_code": 0,
+      "test_count": 28,
+      "log": "docs/sessions/artifacts/local-infrastructure-20261027/installer.txt"
+    },
+    {
+      "name": "database-recovery",
+      "exit_code": 0,
+      "test_count": 23,
+      "log": "docs/sessions/artifacts/local-infrastructure-20261027/database-recovery.txt"
+    },
+    {
+      "name": "migration-connection",
+      "exit_code": 0,
+      "test_count": 7,
+      "log": "docs/sessions/artifacts/local-infrastructure-20261027/migration-connection.txt"
+    },
+    {
+      "name": "installer-plan",
+      "exit_code": 0,
+      "test_count": null,
+      "log": "docs/sessions/artifacts/local-infrastructure-20261027/installer-plan.txt"
+    },
+    {
+      "name": "bash-syntax",
+      "exit_code": 0,
+      "test_count": null,
+      "log": "docs/sessions/artifacts/local-infrastructure-20261027/bash-syntax.txt"
+    },
+    {
+      "name": "documentation-links-json-and-open-readiness-status",
+      "exit_code": 0
+    },
+    {
+      "name": "real-postgresql-synthetic-rehearsal",
+      "exit_code": 0,
+      "receipt": "docs/sessions/artifacts/local-infrastructure-20261027/postgres-rehearsal.json"
+    }
+  ],
+  "source_sha256": {
+    ".env.example": "3309368bb800e51ad28114507bff36f4da09360698417c303f417b84f7eb4435",
+    "backend/.env.example": "8dc05f09e4c3923c7efac572fe21b77402e26d9db771f49d3c83d05a3ca57867",
+    "backend/Alembic/env.py": "5ffbe5af528a14bbdaa2507ac284d6761dcdff1493fbee5f7dbe70c3e2a174e6",
+    "backend/tests/unit/test_alembic_database_connection.py": "a5c90a4f7cc2d55b5d08170706b88c1a5d2d00a2d9eb1314aae77c5eda702370",
+    "docs/production-readiness/database-recovery.md": "47fd08abf430457dd8d563e66cd25c109cd46a73c8ab57565f88074e16f7dd9f",
+    "docs/production-readiness/infrastructure-handover.example.json": "5aa163c7f72e88c618a4696774d1bf6ad324fed507434bd2b8d8e5962a887a88",
+    "install_talklee.sh": "737c446c3716212ec96d073962bb0092b041206659f7c7deaae889bdd274604f",
+    "INSTALLATION.md": "897ecb952c2cb7ded80de82b3e655275d6ed662d29bb7b41c046f19c72790afa",
+    "scripts/database/pg_service.conf.example": "00fe518c30f0b8001e882160b956a23110beef856bc95fc6c33ec2ce997a7985",
+    "scripts/database/README.md": "dcc68f4f49c28ad5749e49406c47b7e27e5af09bde165d35d1cc5846ec7052cc",
+    "scripts/database/recovery.py": "aeb005b96754ea3a53306eb7029df7fbfd20a08afdf6d2b80145c7af3e1cf323",
+    "scripts/database/scheduled_backup.py": "585449d0285f23854a0babf7e6f97dbe5269bd34ad53af96f92a4aeea630c702",
+    "scripts/database/systemd/talklee-db-backup-health.service": "aa31735f37fa069db5299fb39dfd2cb08c08872ccaa9e3cf0e3811a825c96a03",
+    "scripts/database/systemd/talklee-db-backup-health.timer": "a76448337835942e44b70d9d5c57722757863b4e9bd3364f8e3ebb6f78dc56b9",
+    "scripts/database/systemd/talklee-db-backup.service": "d800644caec9b8d1d4f4239221837cd6624c55f9ccbf52abc455cc3ca147f038",
+    "scripts/database/systemd/talklee-db-backup.timer": "b76811ba80ecf4fa40b2c07ba23a79410187cca67e227c3d2439aef181decb38",
+    "scripts/database/tests/local_postgres_rehearsal.py": "07f71457a65ae55b66e52e6ebe44615d630c9634542921a371297a41e23e5416",
+    "scripts/database/tests/test_recovery.py": "33729030031402099b0ec8661b0fb1e83524c2921c7442136dad5663f601bd53",
+    "scripts/installation/admin.env.example": "062bd67a8022219e58d406da3a2337c950b4f341ac7a38655095bd8ed4f387df",
+    "scripts/installation/backend.env.example": "73df6088966c80f9b2b76b4499fcd5150e646690d77e1f0930f6b40a6e6fe84d",
+    "scripts/installation/dashboard.env.example": "50a2ed1916be070c9438de344387188c0f4191745ea884f3bf95b69ef56f7b21",
+    "scripts/installation/install.example.json": "089df454b4333916733e86b7b4c907a1ac08a9b92032b3d497633f7821f498d5",
+    "scripts/installation/install.py": "81930b42ba6947e9ac8d3f3ca2d41e7e747a43e4b7351b70e412eb0d9665ad7c",
+    "scripts/installation/README.md": "bac5d4488d9d5e10c90fa6a6ffad88ed8ea33cd0ffca7d827fdfad7331c1e867",
+    "scripts/installation/test_install.py": "8945618489a2ceb0a2a12e5e83184904e0ddf321270a2f5b30c99d6483d5bc57"
+  },
+  "production_accessed": false,
+  "limitations": [
+    "No clean Ubuntu apply/systemd/nginx/Asterisk/frontend acceptance",
+    "No production-shaped restore, off-host storage, alert delivery or measured full recovery",
+    "No production deployment, migration, controlled call or walkthrough videos",
+    "Target dependency lock, grants, topology and release update procedure need qualification"
+  ]
+}

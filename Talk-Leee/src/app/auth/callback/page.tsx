@@ -1,10 +1,11 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { flushSync } from "react-dom";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { isBearerFallbackEnabled } from "@/lib/auth-token";
 import { markFreshLogin } from "@/lib/http-client";
 import { captureException } from "@/lib/monitoring";
 import { postAuthDashboard } from "@/lib/post-auth-navigation";
@@ -12,118 +13,76 @@ import { Loader2 } from "lucide-react";
 
 function AuthCallbackInner() {
     const router = useRouter();
-    const searchParams = useSearchParams();
-    const { applyLoginResult } = useAuth();
+    const { applyLoginResult, accessToken } = useAuth();
+    const identityRef = useRef(accessToken);
+    useEffect(() => { identityRef.current = accessToken; }, [accessToken]);
     const [status, setStatus] = useState("Processing authentication...");
     const [error, setError] = useState("");
 
-    const handleCallback = useCallback(async () => {
-        try {
-            // Supabase magic link tokens come in URL hash (#) or query params
-            // Check for access_token in hash fragment first
-            let accessToken: string | null = null;
-            let refreshToken: string | null = null;
+    useEffect(() => {
+        let cancelled = false;
+        const previousIdentity = identityRef.current;
+        const id = window.setTimeout(async () => {
+            try {
+                const hash = new URLSearchParams(window.location.hash.substring(1));
+                const query = new URLSearchParams(window.location.search);
+                const token = hash.get("access_token") || query.get("access_token");
+                const errorCode = hash.get("error") || query.get("error");
+                const description = hash.get("error_description") || query.get("error_description");
 
-            if (typeof window !== "undefined") {
-                // Parse hash fragment
-                const hashParams = new URLSearchParams(window.location.hash.substring(1));
-                accessToken = hashParams.get("access_token");
-                refreshToken = hashParams.get("refresh_token");
-
-                // Also check query params as fallback
-                if (!accessToken) {
-                    const urlParams = new URLSearchParams(window.location.search);
-                    accessToken = urlParams.get("access_token");
-                    refreshToken = urlParams.get("refresh_token");
-                }
-
-                // Check for error in params
-                const errorCode = hashParams.get("error") || searchParams.get("error");
-                const errorDescription = hashParams.get("error_description") || searchParams.get("error_description");
-
+                // Tokens and provider errors must not remain in browser history.
+                window.history.replaceState(window.history.state, "", window.location.pathname);
                 if (errorCode) {
-                    setError(errorDescription || `Authentication error: ${errorCode}`);
+                    setError(description || `Authentication error: ${errorCode}`);
                     return;
                 }
-            }
-
-            if (accessToken) {
-                setStatus("Authenticated! Redirecting...");
-
-                // Store the token
-                api.setToken(accessToken);
-                markFreshLogin();
-
-                // Phase 7 universal-auth-state: dropped the
-                // `localStorage.setItem("refresh_token", refreshToken)`
-                // write. Nothing reads that key — the canonical refresh
-                // path uses the backend's HttpOnly `talky_rt` cookie via
-                // credentials: 'include'. Supabase magic-link callbacks
-                // surface the refreshToken in the URL hash but we no
-                // longer mirror it into localStorage.
-                void refreshToken;
-
-                // Try to create profile if this is first login (registration).
-                // Phase 8: routed through shared client. api.setToken above
-                // primed the token provider so this picks it up automatically.
-                try {
-                    await api.request<unknown>({ path: "/auth/create-profile", method: "POST" });
-                } catch {
-                    // Ignore - profile creation is optional
+                if (!token) {
+                    setError("This link could not confirm your account. Please sign in or request a new verification code.");
+                    return;
+                }
+                if (!isBearerFallbackEnabled()) {
+                    // A URL token cannot establish the HttpOnly cookie session
+                    // required in this mode. A reload would lose it or restore
+                    // an older cookie identity, so require the normal login.
+                    setError("Please sign in with your email and password to continue. This link cannot establish your browser session.");
+                    return;
                 }
 
-                let role: string | null = null;
-                try {
-                    const me = await api.getMe();
-                    role = me.role;
-                    flushSync(() => {
-                        applyLoginResult({
-                            user_id: me.id,
-                            tenant_id: me.tenant_id,
-                            email: me.email,
-                            role: me.role,
-                            business_name: me.business_name,
-                            minutes_remaining: me.minutes_remaining,
+                setStatus("Verifying your account...");
+                // Check this exact token at the canonical authority before
+                // replacing an existing login. Never create a profile or fall
+                // back to the previous account's refresh cookie here.
+                const me = await api.getMe(token);
+                if (cancelled) return;
+                if (identityRef.current !== previousIdentity) {
+                    setError("Your sign-in changed while this link was being checked. Please sign in again.");
+                    return;
+                }
+                flushSync(() => {
+                    applyLoginResult({
+                        user_id: me.id,
+                        tenant_id: me.tenant_id,
+                        email: me.email,
+                        role: me.role,
+                        business_name: me.business_name,
+                        minutes_remaining: me.minutes_remaining,
                         minutes_state: me.minutes_state,
-                            access_token: accessToken,
-                        });
+                        access_token: token,
                     });
-                } catch {
-                    // The token is still persisted. The dashboard bootstrap can
-                    // retry /auth/me after the hard navigation.
-                }
-
-                const destination = postAuthDashboard(role);
-                if (typeof window !== "undefined") {
-                    window.location.assign(destination);
-                } else {
-                    router.push(destination);
-                }
-            } else {
-                // No token found - might be a different callback type
-                // Check if this is a Supabase email confirmation
-                const type = searchParams.get("type");
-
-                if (type === "signup" || type === "recovery" || type === "invite") {
-                    setStatus("Email confirmed! Redirecting to login...");
-                    setTimeout(() => router.push("/auth/login"), 2000);
-                } else {
-                    setError("No authentication token found. Please try logging in again.");
-                }
+                });
+                markFreshLogin();
+                window.location.assign(postAuthDashboard(me.role));
+            } catch (err) {
+                if (cancelled) return;
+                captureException(err, { area: "auth-callback" });
+                setError(err instanceof Error ? err.message : "Authentication failed. Please sign in again.");
             }
-        } catch (err) {
-            captureException(err, { area: "auth-callback" });
-            setError(err instanceof Error ? err.message : "Authentication failed");
-        }
-    }, [applyLoginResult, router, searchParams]);
-
-    useEffect(() => {
-        const id = window.setTimeout(() => {
-            void handleCallback();
         }, 0);
-
-        return () => window.clearTimeout(id);
-    }, [handleCallback]);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(id);
+        };
+    }, [applyLoginResult]);
 
     return (
         <div className="min-h-screen bg-neutral-50 flex items-center justify-center p-4">
