@@ -2274,7 +2274,7 @@
           "kind": "combined_candidate_tls_migration_recovery_and_monitoring_evidence_with_operating_limits"
         }
       ],
-      "blocker": "A real Ubuntu rehearsal on two TLS PostgreSQL containers passed for head 0075, preserving all 111 public-table records and 5 sequence states; the combined 0082 candidate has its own CI gate. Both containers share one runner. The observed production database remains on the application server without TLS; a designated external database, off-host archive/restore target, retention/PITR policy, recovery objectives and operator are still required.",
+      "blocker": "Real Ubuntu rehearsals on two TLS PostgreSQL containers passed for both the earlier 0075 source and combined 0082 candidate. The latter preserved all 113 public-table records and five sequence states, verified restricted runtime access, source invariance and cleanup. Both containers share one runner. The observed production database remains on the application server without TLS; a designated external database, off-host archive/restore target, retention/PITR policy, recovery objectives and operator are still required.",
       "next_action": "Retain the exact-candidate canonical TLS recovery evidence, then execute the documented migration and recovery workflow on the designated external production-shaped targets. Prove runtime restrictions, application-server loss recovery, off-host durability and declared recovery objectives; synthetic two-container recovery is a separate evidence layer.",
       "target_date": null
     },

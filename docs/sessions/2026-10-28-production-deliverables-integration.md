@@ -107,11 +107,17 @@ restore. All three hashes are retained; the parsed reference and restored
 schema hashes match. No broad regex normalization or omitted constraint hides
 a mismatch.
 
-The [receipt](artifacts/production-integration-20261028/tls-recovery-0075.json)
-binds this result to the **0075** source. The combined **0082** candidate's
-corresponding CI result is separate and must pass on PR26. Two containers
-sharing one runner do not demonstrate off-host disaster
-recovery, production RPO/RTO, retention or PITR.
+The [first receipt](artifacts/production-integration-20261028/tls-recovery-0075.json)
+binds that result to the **0075** source. The combined **0082** candidate then
+passed independently in [run 40595808251](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40595808251):
+**113 public tables' records and five sequence states**, parsed schema,
+restricted runtime/TLS/tenant checks, unchanged source and exact cleanup passed.
+Its [receipt](artifacts/production-integration-20261028/tls-recovery-0082.json)
+records tested PR merge `5a5d3aaeaf77000c909410898525a936b2cf1208` for candidate
+`f2950ad558df54ed262f0be414c4bc56a9437a9d`, with 95 relevant source hashes.
+Later changes require their own CI result or explicit unchanged-source binding.
+Two containers sharing one runner do not demonstrate off-host disaster recovery,
+production RPO/RTO, retention or PITR.
 
 ## Coordinated candidate and outstanding inputs
 
