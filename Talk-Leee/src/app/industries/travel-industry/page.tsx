@@ -371,16 +371,16 @@ export default function TravelIndustryIndustryPage() {
             a fast, accurate, and personalized response.
           </p>
           <div className={centeredCtaClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Book a Demo
-              </Button>
-            </Link>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+              </Link>
+            </Button>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 See How It Works
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
           <p className="mt-6 text-sm sm:text-base md:text-lg font-semibold text-primary dark:text-foreground">
             Go live with AI that handles bookings and guest inquiries in days.
@@ -605,17 +605,19 @@ export default function TravelIndustryIndustryPage() {
                   ))}
                 </ul>
                 <div className="mt-8 flex flex-1 items-end justify-center">
-                  <Link href={plan.ctaHref}>
-                    {plan.ctaVariant === "primary" ? (
-                      <Button size="lg" className={primaryButtonClassName}>
+                  {plan.ctaVariant === "primary" ? (
+                    <Button asChild size="lg" className={primaryButtonClassName}>
+                      <Link href={plan.ctaHref}>
                         {plan.ctaLabel}
-                      </Button>
-                    ) : (
-                      <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                      <Link href={plan.ctaHref}>
                         {plan.ctaLabel}
-                      </Button>
-                    )}
-                  </Link>
+                      </Link>
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
@@ -641,16 +643,16 @@ export default function TravelIndustryIndustryPage() {
               Turn every guest inquiry into a booking with AI-powered reservations, support, and concierge services.
             </p>
             <div className={centeredCtaClassName}>
-              <Link href="/auth/register">
-                <Button size="lg" className={primaryButtonClassName}>
+              <Button asChild size="lg" className={primaryButtonClassName}>
+                <Link href="/auth/register">
                   Book a Demo
-                </Button>
-              </Link>
-              <Link href="/#contact">
-                <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                </Link>
+              </Button>
+              <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                <Link href="/#contact">
                   Explore Hospitality Plans
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </div>
         </section>

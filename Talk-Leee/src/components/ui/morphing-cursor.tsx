@@ -23,10 +23,22 @@ export function MagneticText({
     const circleRef = useRef<HTMLDivElement>(null)
     const innerTextRef = useRef<HTMLDivElement>(null)
     const [isHovered, setIsHovered] = useState(false)
+    // prefers-reduced-motion: the magnetic hover effect is skipped entirely, so
+    // the heading stays a static block of text at the same size and position.
+    const [reducedMotion, setReducedMotion] = useState(false)
 
     const mousePos = useRef({ x: 0, y: 0 })
     const currentPos = useRef({ x: 0, y: 0 })
     const animationFrameRef = useRef<number | undefined>(undefined)
+
+    useEffect(() => {
+        if (typeof window.matchMedia !== "function") return
+        const query = window.matchMedia("(prefers-reduced-motion: reduce)")
+        const sync = () => setReducedMotion(query.matches)
+        sync()
+        query.addEventListener("change", sync)
+        return () => query.removeEventListener("change", sync)
+    }, [])
 
     useEffect(() => {
         const el = containerRef.current
@@ -102,14 +114,14 @@ export function MagneticText({
     }, [])
 
     const handleMouseEnter = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-        if (!containerRef.current) return
+        if (!containerRef.current || reducedMotion) return
         const rect = containerRef.current.getBoundingClientRect()
         const x = e.clientX - rect.left
         const y = e.clientY - rect.top
         mousePos.current = { x, y }
         currentPos.current = { x, y }
         setIsHovered(true)
-    }, [])
+    }, [reducedMotion])
 
     const handleMouseLeave = useCallback(() => {
         setIsHovered(false)
@@ -132,8 +144,11 @@ export function MagneticText({
                 {text}
             </span>
 
+            {/* Decorative hover copy of the same text: hidden from assistive
+                technology so a heading built from this is read once. */}
             <div
                 ref={circleRef}
+                aria-hidden="true"
                 className="absolute top-0 left-0 pointer-events-none rounded-full bg-primary dark:bg-foreground overflow-hidden"
                 style={{
                     width: 180,
@@ -141,7 +156,7 @@ export function MagneticText({
                     // Initial (never-hovered) placement only; the effect above
                     // owns every subsequent transform write.
                     transform: "translate(0px, 0px) translate(-50%, -50%) scale(0)",
-                    transition: "transform 0.5s cubic-bezier(0.33, 1, 0.68, 1)",
+                    transition: reducedMotion ? "none" : "transform 0.5s cubic-bezier(0.33, 1, 0.68, 1)",
                 }}
             >
                 <div

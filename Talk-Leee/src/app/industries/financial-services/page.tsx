@@ -362,16 +362,16 @@ export default function FinancialServicesIndustryPage() {
             routine enquiries using approved information and collect requests for your team to review.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Book a Demo
-              </Button>
-            </Link>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+              </Link>
+            </Button>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 See How It Works
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
           <p className="mt-8 text-sm sm:text-base md:text-lg font-semibold text-primary dark:text-foreground">
             Go live with AI voice agents built for financial services in days.
@@ -589,17 +589,19 @@ export default function FinancialServicesIndustryPage() {
                   ))}
                 </ul>
                 <div className="mt-auto pt-8 flex justify-center">
-                  <Link href={plan.href}>
-                    {plan.primary ? (
-                      <Button size="lg" className={primaryButtonClassName}>
+                  {plan.primary ? (
+                    <Button asChild size="lg" className={primaryButtonClassName}>
+                      <Link href={plan.href}>
                         {plan.cta}
-                      </Button>
-                    ) : (
-                      <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                      <Link href={plan.href}>
                         {plan.cta}
-                      </Button>
-                    )}
-                  </Link>
+                      </Link>
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
@@ -625,16 +627,16 @@ export default function FinancialServicesIndustryPage() {
               Use approved answers for routine enquiries and collect requests for your team to review.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-              <Link href="/auth/register">
-                <Button size="lg" className={primaryButtonClassName}>
+              <Button asChild size="lg" className={primaryButtonClassName}>
+                <Link href="/auth/register">
                   Book a Demo
-                </Button>
-              </Link>
-              <Link href="/#contact">
-                <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                </Link>
+              </Button>
+              <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                <Link href="/#contact">
                   See Plans
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </div>
         </section>

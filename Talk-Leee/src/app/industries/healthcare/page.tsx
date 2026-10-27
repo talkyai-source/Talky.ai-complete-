@@ -303,16 +303,16 @@ export default function HealthcareIndustryPage() {
             Confirm the workflow and data handling requirements before use.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Explore Setup
-              </Button>
-            </Link>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+              </Link>
+            </Button>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 See How It Works
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
           <p className="mt-6 text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground">
             Phone configuration and workflow review are required before calling.
@@ -494,11 +494,11 @@ export default function HealthcareIndustryPage() {
             ))}
           </div>
           <div className={centeredCtaClassName}>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 Discuss Your Workflow
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -522,17 +522,19 @@ export default function HealthcareIndustryPage() {
                   ))}
                 </ul>
                 <div className="mt-8 flex flex-1 items-end justify-center">
-                  <Link href={plan.ctaHref}>
-                    {plan.ctaVariant === "primary" ? (
-                      <Button size="lg" className={primaryButtonClassName}>
+                  {plan.ctaVariant === "primary" ? (
+                    <Button asChild size="lg" className={primaryButtonClassName}>
+                      <Link href={plan.ctaHref}>
                         {plan.ctaLabel}
-                      </Button>
-                    ) : (
-                      <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                      <Link href={plan.ctaHref}>
                         {plan.ctaLabel}
-                      </Button>
-                    )}
-                  </Link>
+                      </Link>
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
@@ -546,11 +548,11 @@ export default function HealthcareIndustryPage() {
               Discover how our AI solutions can streamline operations, patient satisfaction, and accelerate business growth.
             </p>
             <div className="mt-8 flex justify-center">
-              <Link href="/#contact">
-                <Button size="lg" variant="outline" className={outlineButtonClassName}>
+              <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                <Link href="/#contact">
                   Book a Consultation
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </div>
         </section>
@@ -576,16 +578,16 @@ export default function HealthcareIndustryPage() {
               slot. Give your front desk a voice that never stops working.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-              <Link href="/auth/register">
-                <Button size="lg" className={primaryButtonClassName}>
+              <Button asChild size="lg" className={primaryButtonClassName}>
+                <Link href="/auth/register">
                   Create Your Free Account
-                </Button>
-              </Link>
-              <Link href="/#contact">
-                <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                </Link>
+              </Button>
+              <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                <Link href="/#contact">
                   Book a Live Demo
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </div>
         </section>

@@ -386,16 +386,16 @@ export default function ProfessionalServicesIndustryPage() {
             professional services automate calls, appointments, client support, and everyday business communication.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 See What AI Can Do
-              </Button>
-            </Link>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+              </Link>
+            </Button>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 Book a Private Demo
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
           <p className="mt-6 text-sm sm:text-base font-semibold text-primary dark:text-foreground">
             No complicated setup. Get your AI assistant working with your business in days.
@@ -601,17 +601,19 @@ export default function ProfessionalServicesIndustryPage() {
                   ))}
                 </ul>
                 <div className="mt-8 flex flex-1 items-end justify-center">
-                  <Link href={plan.ctaHref}>
-                    {plan.ctaVariant === "primary" ? (
-                      <Button size="lg" className={primaryButtonClassName}>
+                  {plan.ctaVariant === "primary" ? (
+                    <Button asChild size="lg" className={primaryButtonClassName}>
+                      <Link href={plan.ctaHref}>
                         {plan.ctaLabel}
-                      </Button>
-                    ) : (
-                      <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                      <Link href={plan.ctaHref}>
                         {plan.ctaLabel}
-                      </Button>
-                    )}
-                  </Link>
+                      </Link>
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
@@ -637,11 +639,11 @@ export default function ProfessionalServicesIndustryPage() {
               Stop losing opportunities to missed calls and slow responses. Give every client faster, smarter support.
             </p>
             <div className={centeredCtaClassName}>
-              <Link href="/#contact">
-                <Button size="lg" variant="outline" className={outlineButtonClassName}>
+              <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                <Link href="/#contact">
                   Book a Demo
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </div>
         </section>

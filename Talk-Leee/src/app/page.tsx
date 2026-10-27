@@ -19,7 +19,8 @@ const orbitron = Orbitron({
 });
 
 export const metadata: Metadata = {
-  title: "Talk-Lee",
+  // Brand plus the hero's own product wording; nothing the page does not say.
+  title: "Talk-Lee AI | AI Voice Agent Platform for Call Automation",
   description:
     "Configure inbound and outbound calling with Talk-Lee AI. Manage voice agents, campaign knowledge and call records.",
 };

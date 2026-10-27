@@ -350,16 +350,16 @@ export default function RetailEcommerceIndustryPage() {
             inquiries, and support conversations 24/7.
           </p>
           <div className={centeredCtaPairClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 See AI Handle a Retail Call
-              </Button>
-            </Link>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+              </Link>
+            </Button>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 Book a Demo
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
           <p className="mt-8 text-base sm:text-lg font-semibold text-primary dark:text-foreground">
             Give every customer a faster way to get answers and take action.
@@ -607,11 +607,11 @@ export default function RetailEcommerceIndustryPage() {
             customers around the clock, and keep more opportunities moving toward action.
           </p>
           <div className={centeredCtaClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Start Automating Customer Calls
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -635,16 +635,16 @@ export default function RetailEcommerceIndustryPage() {
               qualify, schedule, and keep customer conversations moving.
             </p>
             <div className={centeredCtaPairClassName}>
-              <Link href="/auth/register">
-                <Button size="lg" className={primaryButtonClassName}>
+              <Button asChild size="lg" className={primaryButtonClassName}>
+                <Link href="/auth/register">
                   Book a Demo
-                </Button>
-              </Link>
-              <Link href="/#contact">
-                <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                </Link>
+              </Button>
+              <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                <Link href="/#contact">
                   See AI in Action
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </div>
         </section>

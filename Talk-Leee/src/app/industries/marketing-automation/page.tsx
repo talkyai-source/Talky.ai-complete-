@@ -288,16 +288,16 @@ export default function MarketingAutomationIndustryPage() {
             account, so your agency can scale without hiring more people.
           </p>
           <div className={ctaPairClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Book a Demo
-              </Button>
-            </Link>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+              </Link>
+            </Button>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 See How It Works
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
           <p className="mt-8 text-base sm:text-lg md:text-xl text-gray-700 dark:text-muted-foreground font-semibold">
             Launch AI voice agents for your clients in days, not months.
@@ -481,17 +481,19 @@ export default function MarketingAutomationIndustryPage() {
                   ))}
                 </ul>
                 <div className="mt-auto pt-6 flex justify-center">
-                  <Link href={plan.href}>
-                    {plan.primary ? (
-                      <Button size="lg" className={primaryButtonClassName}>
+                  {plan.primary ? (
+                    <Button asChild size="lg" className={primaryButtonClassName}>
+                      <Link href={plan.href}>
                         {plan.cta}
-                      </Button>
-                    ) : (
-                      <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                      <Link href={plan.href}>
                         {plan.cta}
-                      </Button>
-                    )}
-                  </Link>
+                      </Link>
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
@@ -518,16 +520,16 @@ export default function MarketingAutomationIndustryPage() {
               marketing agencies.
             </p>
             <div className={ctaPairClassName}>
-              <Link href="/auth/register">
-                <Button size="lg" className={primaryButtonClassName}>
+              <Button asChild size="lg" className={primaryButtonClassName}>
+                <Link href="/auth/register">
                   Book a Demo
-                </Button>
-              </Link>
-              <Link href="/#contact">
-                <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                </Link>
+              </Button>
+              <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                <Link href="/#contact">
                   See Agency Pricing
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </div>
         </section>
