@@ -189,8 +189,9 @@ and [pg_restore behavior](https://www.postgresql.org/docs/current/app-pgrestore.
 ### Canonical schema with TLS
 
 The opt-in Linux fixture below creates two PostgreSQL16 Docker containers on a
-private internal network, with random loopback-only client ports, generated
-passwords and a temporary certificate authority. It accepts no existing database
+private internal network, with assigned private bridge addresses, generated
+passwords and a temporary certificate authority. No database ports are published
+on host interfaces. It accepts no existing database
 endpoint. Use a local Linux Docker daemon, OpenSSL, PostgreSQL16 client binaries,
 and the Python dependencies from the installer's qualified lock.
 

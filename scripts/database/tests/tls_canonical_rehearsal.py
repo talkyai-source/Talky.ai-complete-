@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -88,18 +89,23 @@ class Fixture:
         self.image_digests = observed["RepoDigests"]
         self.network = self.docker("network", "create", "--internal", "--label", f"{LABEL}={self.token}",
                                    self.network_name)
-        self.create_certificates()
+        network = json.loads(self.docker("network", "inspect", self.network))[0]
+        subnet = ipaddress.ip_network(network["IPAM"]["Config"][0]["Subnet"])
+        require(network["Internal"] and subnet.version == 4 and subnet.is_private and subnet.num_addresses >= 8,
+                "Fixture requires its own private internal IPv4 bridge")
+        addresses = [str(subnet.network_address + offset) for offset in (2, 3)]
+        self.create_certificates(addresses)
         write_private(self.work / "bootstrap-password", self.passwords["fixture_admin"])
         # No plaintext TCP fallback, including inside the Docker bridge.
         write_private(self.work / "pg_hba.conf", "local all all trust\nhostssl all all all scram-sha-256\nhostnossl all all all reject\n")
-        for label in ("source", "target"):
+        for label, host in zip(("source", "target"), addresses):
             name = f"talklee-recovery-{label}-{self.token}"
             # Register the unique name before create: a timeout can occur after
             # Docker creates an object but before it returns its ID.
             self.container_names.add(name)
             container = self.docker(
                 "create", "--name", name, "--label", f"{LABEL}={self.token}",
-                "--network", self.network, "--publish", "127.0.0.1::5432", "--memory", "768m",
+                "--network", self.network, "--ip", host, "--memory", "768m",
                 "--tmpfs", "/var/lib/postgresql/data:rw,nosuid,nodev,size=536870912",
                 "--mount", f"type=bind,source={self.work},target=/fixture,readonly",
                 "--env", "POSTGRES_USER=fixture_admin", "--env", "POSTGRES_DB=postgres",
@@ -113,19 +119,19 @@ class Fixture:
                 "-c ssl_cert_file=/tmp/server.crt -c ssl_key_file=/tmp/server.key -c hba_file=/tmp/pg_hba.conf")
             self.containers.append(container)
             self.docker("start", container)
-            ports = json.loads(self.docker("inspect", "--format", "{{json .NetworkSettings.Ports}}", container))
-            bindings = ports["5432/tcp"]
-            require(len(bindings) == 1 and bindings[0]["HostIp"] == "127.0.0.1", "Fixture port must be loopback-only")
-            port = bindings[0]["HostPort"]
-            self.add_service(f"{label}_admin", port, "postgres", "fixture_admin")
-            self.add_service(f"{label}_migration", port, SOURCE_DB if label == "source" else RESTORED_DB, "fixture_migration")
-            self.add_service(f"{label}_runtime", port, SOURCE_DB if label == "source" else RESTORED_DB, "fixture_runtime")
-            self.add_service(f"{label}_backup", port, SOURCE_DB if label == "source" else RESTORED_DB, "fixture_backup")
-            self.add_service(f"{label}_restore", port, "postgres", "fixture_restore")
+            observed = json.loads(self.docker("inspect", container))[0]
+            require(not observed["HostConfig"]["PortBindings"] and
+                    observed["NetworkSettings"]["Networks"][self.network_name]["IPAddress"] == host,
+                    "Fixture must use only its assigned unpublished bridge address")
+            self.add_service(f"{label}_admin", host, "postgres", "fixture_admin")
+            self.add_service(f"{label}_migration", host, SOURCE_DB if label == "source" else RESTORED_DB, "fixture_migration")
+            self.add_service(f"{label}_runtime", host, SOURCE_DB if label == "source" else RESTORED_DB, "fixture_runtime")
+            self.add_service(f"{label}_backup", host, SOURCE_DB if label == "source" else RESTORED_DB, "fixture_backup")
+            self.add_service(f"{label}_restore", host, "postgres", "fixture_restore")
         write_private(self.services, "\n".join(self.service_rows))
         write_private(self.passfile, "\n".join(self.pass_rows) + "\n")
 
-    def create_certificates(self):
+    def create_certificates(self, addresses):
         for name in ("ca", "untrusted-ca"):
             run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2",
                  "-subj", f"/CN=Talklee synthetic {name}", "-keyout", str(self.work / f"{name}.key"),
@@ -134,16 +140,17 @@ class Fixture:
         run(["openssl", "req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=127.0.0.1",
              "-keyout", str(self.work / "server.key"), "-out", str(self.work / "server.csr")])
         (self.work / "server.key").chmod(0o600)
-        write_private(self.work / "server.ext", "subjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth\n")
+        write_private(self.work / "server.ext", "subjectAltName=" + ",".join("IP:" + host for host in addresses)
+                      + "\nextendedKeyUsage=serverAuth\n")
         run(["openssl", "x509", "-req", "-in", str(self.work / "server.csr"), "-CA", str(self.work / "ca.crt"),
              "-CAkey", str(self.work / "ca.key"), "-CAcreateserial", "-days", "2", "-extfile", str(self.work / "server.ext"),
              "-out", str(self.work / "server.crt")])
 
-    def add_service(self, name, port, database, user):
-        self.service_rows.append(f"[{name}]\nhost=127.0.0.1\nport={port}\ndbname={database}\nuser={user}\n"
+    def add_service(self, name, host, database, user):
+        self.service_rows.append(f"[{name}]\nhost={host}\nport=5432\ndbname={database}\nuser={user}\n"
                                  f"sslmode=verify-full\nsslrootcert={self.work / 'ca.crt'}\npassfile={self.passfile}\n")
         # A wildcard database is needed only because restore creates a new DB.
-        self.pass_rows.append(f"127.0.0.1:{port}:*:{user}:{self.passwords[user]}")
+        self.pass_rows.append(f"{host}:5432:*:{user}:{self.passwords[user]}")
 
     def service(self, name):
         return recovery.Service(self.services, name)
@@ -208,7 +215,7 @@ def bootstrap(pg, fixture):
     query = urlencode({"sslmode": "verify-full", "sslrootcert": str(fixture.work / "ca.crt")})
     # No credential on argv or in the Alembic config/logging URL.
     env = dict(os.environ, MIGRATION_DATABASE_URL=
-               f"postgresql://fixture_migration:{fixture.passwords['fixture_migration']}@127.0.0.1:"
+               f"postgresql://fixture_migration:{fixture.passwords['fixture_migration']}@{migration.values['host']}:"
                f"{migration.values['port']}/{SOURCE_DB}?{query}", PYTHON_DOTENV_DISABLED="1")
     for arguments in (("stamp", "0008_tenant_voice_tuning"), ("upgrade", "heads")):
         run([sys.executable, "-m", "alembic", *arguments], env=env, cwd=ROOT / "backend", timeout=180)
@@ -331,7 +338,7 @@ def tls_negative_checks(pg, fixture):
     service = fixture.service("source_runtime")
     for overrides, expected_error in (
             ({"PGSSLROOTCERT": str(fixture.work / "untrusted-ca.crt")}, "certificate verify failed"),
-            ({"PGHOST": "wrong-name.invalid", "PGHOSTADDR": "127.0.0.1", "PGPASSWORD": fixture.passwords["fixture_runtime"]}, "does not match host name"),
+            ({"PGHOST": "wrong-name.invalid", "PGHOSTADDR": service.values["host"], "PGPASSWORD": fixture.passwords["fixture_runtime"]}, "does not match host name"),
             ({"PGSSLMODE": "disable"}, "pg_hba.conf rejects connection")):
         result = subprocess.run([pg.executable("psql"), "-X", "-qAt", "--no-password", "--dbname", service.connection(), "-c", "SELECT 1"],
                                 env={**service.env(), **overrides}, text=True, capture_output=True, timeout=15)
