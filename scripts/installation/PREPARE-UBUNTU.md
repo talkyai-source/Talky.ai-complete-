@@ -92,6 +92,11 @@ approved protected process.
 
 Populate the runtime environment for the actual selected providers and match
 its URLs, CORS origins, Asterisk ARI identity and ports to the configuration.
+The production API requires `DEEPGRAM_API_KEY`, `CARTESIA_API_KEY` and
+`GROQ_API_KEY`. Preflight rejects missing, blank or unchanged template values
+before installation; it does not contact the providers or verify that their
+credentials work. Supply approved credentials for the designated environment
+and retain real provider/call acceptance separately.
 The runtime file must not contain `MIGRATION_DATABASE_URL`. The frontend files
 contain public build settings only; never put service credentials in
 `NEXT_PUBLIC_*` or `VITE_*` variables. Paid-use acceptance requires the approved

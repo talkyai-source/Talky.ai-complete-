@@ -27,6 +27,13 @@ production_gate = importlib.util.module_from_spec(GATE_SPEC)
 sys.modules[GATE_SPEC.name] = production_gate
 with patch.dict(sys.modules, {BILLING_SPEC.name: billing_mode}):
     GATE_SPEC.loader.exec_module(production_gate)
+# This module only inspects configuration; importing it does not initialize
+# providers or connect to any service. Keep parity with the API startup check.
+PROVIDER_SPEC = importlib.util.spec_from_file_location('installer_actual_provider_validation',
+    Path(__file__).resolve().parents[2] / 'backend/app/core/validation.py')
+provider_validation = importlib.util.module_from_spec(PROVIDER_SPEC)
+sys.modules[PROVIDER_SPEC.name] = provider_validation
+PROVIDER_SPEC.loader.exec_module(provider_validation)
 
 
 class InstallerTests(unittest.TestCase):
@@ -59,6 +66,11 @@ class InstallerTests(unittest.TestCase):
             'FRONTEND_URL': 'https://app.example.com', 'API_BASE_URL': 'https://api.example.com',
             'CORS_ORIGINS': 'https://app.example.com,https://admin.example.com',
             'TELEPHONY_PJSIP_AUTO_RELOAD': 'on',
+            # Offline validation fixtures only; never used to start an API or
+            # contact a provider, and not evidence of credential acceptance.
+            'DEEPGRAM_API_KEY': 'offline-fixture-deepgram',
+            'CARTESIA_API_KEY': 'offline-fixture-cartesia',
+            'GROQ_API_KEY': 'offline-fixture-groq',
         }
         self.write_env()
         Path(self.config['dashboard_env_file']).write_text('NEXT_PUBLIC_APP_ENV=production\nNEXT_PUBLIC_API_BASE_URL=https://api.example.com/api/v1\n')
@@ -87,6 +99,42 @@ class InstallerTests(unittest.TestCase):
     def test_valid_fixture_also_passes_actual_production_gate(self):
         with patch.dict(os.environ, self.env, clear=True):
             production_gate.enforce_production_gate()
+            valid, results = provider_validation.ProviderValidator(strict=True).validate_all()
+        self.assertTrue(valid, [result.setting for result in results if not result.is_valid])
+
+    def test_required_provider_credentials_fail_before_apply(self):
+        # Derive the required names from the real startup validator so a new
+        # mandatory provider cannot silently drift past installer preflight.
+        required = [name for group in ('stt', 'tts', 'llm')
+                    for name, _ in provider_validation.ProviderValidator.REQUIRED_ENV_VARS[group]]
+        config_path = self.path / 'config.json'
+        config_path.write_text(json.dumps(self.config))
+        for key in required:
+            original = self.env.pop(key)
+            for value in (None, '', '   ', 'REPLACE_WITH_NEVER_PRINT_THIS', 'change_me_NEVER_PRINT_THIS'):
+                with self.subTest(key=key, value=value):
+                    if value is None:
+                        self.env.pop(key, None)
+                    else:
+                        self.env[key] = value
+                    self.write_env()
+                    if value in (None, ''):
+                        with patch.dict(os.environ, self.env, clear=True):
+                            valid, results = provider_validation.ProviderValidator(strict=True).validate_all()
+                        self.assertFalse(valid)
+                        self.assertTrue(any(result.setting == key and not result.is_valid for result in results))
+                    # An operator-shell credential cannot fill a missing or
+                    # invalid value in the file copied to the installed service.
+                    with (patch.dict(os.environ, {key: 'ambient-offline-fixture'}),
+                          patch.object(installer, 'apply') as apply,
+                          contextlib.redirect_stderr(io.StringIO()) as output):
+                        self.assertEqual(installer.main(['apply', '--config', str(config_path),
+                                                         '--confirm-new-host']), 2)
+                    apply.assert_not_called()
+                    self.assertIn(key, output.getvalue())
+                    self.assertNotIn('NEVER_PRINT_THIS', output.getvalue())
+            self.env[key] = original
+        self.write_env()
 
     def test_missing_production_secrets_fail_before_apply(self):
         for key in ('SECRETS_MASTER_KEY', 'TELEPHONY_METRICS_TOKEN'):
