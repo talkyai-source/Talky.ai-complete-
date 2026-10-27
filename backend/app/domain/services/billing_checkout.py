@@ -302,7 +302,8 @@ class CheckoutAttempts:
                 datetime.fromtimestamp(expires, UTC), state,
             )
 
-    async def create(self, *, tenant_id, request_id, price_option_id, email, business_name=None):
+    async def create(self, *, tenant_id, request_id, price_option_id, email, business_name=None,
+                     allow_team_only=False):
         from app.domain.services.billing_catalog import (
             BillingCatalogUnavailable,
             resolve_checkout_option,
@@ -312,7 +313,9 @@ class CheckoutAttempts:
         row = await self._get(tenant_id, request_id)
         if row is None:
             try:
-                option = await resolve_checkout_option(self.pool, price_option_id)
+                option = await resolve_checkout_option(
+                    self.pool, price_option_id, allow_team_only=allow_team_only
+                )
             except BillingCatalogUnavailable as exc:
                 row = await self._existing_or_reject_offer(tenant_id, request_id, str(exc))
             else:
