@@ -193,16 +193,25 @@ or frontend files.
 
 ## Install and record the result
 
-Return to the root of the clean source checkout on the new application host.
-For root-readable inputs at the example location:
+On the new application host, enter a root login shell and set the required
+`0022` umask before applying. Replace the checkout path with its actual
+absolute location; root's home directory differs from the operator's home:
 
 ```bash
-sudo bash install_talklee.sh validate --config /secure/talky/install.json
-sudo bash install_talklee.sh apply \
+sudo -i
+umask 0022
+cd /absolute/path/to/talklee-install-source
+bash install_talklee.sh validate --config /secure/talky/install.json
+bash install_talklee.sh apply \
   --config /secure/talky/install.json \
   --source "$PWD" \
   --confirm-new-host
 ```
+
+The umask keeps installed source directories readable by the `talky` service
+account. Secret files still receive explicit protected modes. Git trust for
+the operator-owned checkout is scoped to the exact selected source by the
+helper/installer; no global `safe.directory=*` exception is required.
 
 `validate` reads local inputs only. `apply` installs and starts the services,
 checks the database and local readiness, and probes the configured HTTPS

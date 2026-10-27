@@ -4,7 +4,9 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -166,11 +168,34 @@ class MetadataTests(unittest.TestCase):
         source = prepare.ROOT
         with patch.object(prepare, 'run', side_effect=[str(source), '', 'a' * 40]) as command:
             self.assertEqual(prepare.checked_source(source), 'a' * 40)
-            self.assertEqual([call.args[0][:2] for call in command.call_args_list],
-                             [['git', 'rev-parse'], ['git', 'status'], ['git', 'rev-parse']])
+            self.assertEqual([call.args[0][:5] for call in command.call_args_list],
+                             [['git', '-c', 'safe.directory=', '-c', f'safe.directory={source}']] * 3)
+            self.assertEqual([call.args[0][5] for call in command.call_args_list],
+                             ['rev-parse', 'status', 'rev-parse'])
         with patch.object(prepare, 'run', side_effect=[str(source), '?? new-input.env']):
             with self.assertRaisesRegex(prepare.PreparationError, 'completely clean'):
                 prepare.checked_source(source)
+
+    @unittest.skipUnless(shutil.which('git'), 'Git is required for the ownership regression')
+    def test_operator_owned_checkout_uses_only_command_scoped_trust(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary).resolve()
+            subprocess.run(['git', 'init', '--quiet', str(source)], check=True, capture_output=True)
+            subprocess.run(['git', '-c', 'user.name=Installer fixture', '-c',
+                            'user.email=installer@example.invalid', '-c', 'commit.gpgsign=false',
+                            'commit', '--quiet', '--allow-empty', '-m', 'fixture'],
+                           cwd=source, check=True, capture_output=True)
+            git_config = (source / '.git/config').read_bytes()
+            environment = {**os.environ, 'GIT_TEST_ASSUME_DIFFERENT_OWNER': '1',
+                           'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'safe.directory',
+                           'GIT_CONFIG_VALUE_0': ''}
+            denied = subprocess.run(['git', 'status', '--porcelain'], cwd=source,
+                                    env=environment, capture_output=True, text=True)
+            self.assertNotEqual(denied.returncode, 0)
+            self.assertIn('dubious ownership', denied.stderr)
+            with patch.object(prepare, 'ROOT', source), patch.dict(os.environ, environment, clear=True):
+                self.assertRegex(prepare.checked_source(source), r'^[a-f0-9]{40}$')
+            self.assertEqual((source / '.git/config').read_bytes(), git_config)
 
 
 if __name__ == '__main__':

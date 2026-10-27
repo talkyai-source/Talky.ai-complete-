@@ -22,6 +22,7 @@ On a fresh Ubuntu 24.04 amd64 server, install the small checkout prerequisites
 if the image does not already have them, then clone outside `/opt/talky`:
 
 ```bash
+set -eu
 sudo apt-get update
 sudo apt-get install --yes git python3 ca-certificates
 git clone https://github.com/talkyai-source/Talky.ai-complete-.git talklee-install-source
@@ -168,17 +169,26 @@ provider, current records, certificate issuer and renewal owner in handover.
 
 ## Install and validate on the new host
 
-After all protected inputs are prepared, run from the reviewed clean checkout.
-The example path below contains root-readable inputs; replace it if your
-protected input directory differs:
+After all protected inputs are prepared, use a root login shell and the
+required `0022` umask so the installed source directories remain readable by
+the `talky` service account. Replace the checkout and input paths below with
+their actual absolute paths:
 
 ```bash
-sudo bash install_talklee.sh validate --config /secure/talky/install.json
-sudo bash install_talklee.sh apply \
+sudo -i
+umask 0022
+cd /absolute/path/to/talklee-install-source
+bash install_talklee.sh validate --config /secure/talky/install.json
+bash install_talklee.sh apply \
   --config /secure/talky/install.json \
   --source "$PWD" \
   --confirm-new-host
 ```
+
+Secret inputs and installed secret files retain their explicitly protected
+permissions; the source-directory umask does not make them public. The
+installer scopes Git trust to the selected source for its own commands; do
+not configure a global `safe.directory=*` exception.
 
 The installer creates services, configures restricted ingress, and verifies
 gateway protocol, API health and HTTPS. Linux mode also builds and checks the

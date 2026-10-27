@@ -49,11 +49,14 @@ def check_host() -> None:
 
 def checked_source(source: Path) -> str:
     require(source == ROOT, 'Run the preparation helper from the selected source checkout')
-    require(Path(run(['git', 'rev-parse', '--show-toplevel'], source).strip()).resolve() == source,
+    # A root shell may inspect an operator-owned clone without SUDO_UID. Trust
+    # only this explicitly selected checkout for these reads, never globally.
+    git = ['git', '-c', 'safe.directory=', '-c', f'safe.directory={source}']
+    require(Path(run([*git, 'rev-parse', '--show-toplevel'], source).strip()).resolve() == source,
             'Source must be the Git checkout root')
-    require(not run(['git', 'status', '--porcelain', '--untracked-files=all'], source).strip(),
+    require(not run([*git, 'status', '--porcelain', '--untracked-files=all'], source).strip(),
             'Source checkout must be completely clean; commit or use a clean release checkout')
-    sha = run(['git', 'rev-parse', 'HEAD'], source).strip()
+    sha = run([*git, 'rev-parse', 'HEAD'], source).strip()
     require(re.fullmatch(r'[a-f0-9]{40}', sha) is not None, 'Source HEAD must be a full Git SHA')
     return sha
 

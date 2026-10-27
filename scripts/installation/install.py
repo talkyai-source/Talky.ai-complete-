@@ -453,8 +453,40 @@ def nginx_site(config: dict) -> str:
     return body
 
 
+def source_git(source: Path, args: list[str]) -> str:
+    # The operator explicitly selected this reviewed checkout. Root may differ
+    # from its owner; grant trust for this command and this resolved path only.
+    source = source.resolve()
+    return run(['git', '-c', 'safe.directory=', '-c', f'safe.directory={source}', *args],
+               cwd=source, capture=True)
+
+
+def clone_source(source: Path, target: Path) -> None:
+    source = source.resolve()
+    git_directory = Path(source_git(source, ['rev-parse', '--absolute-git-dir']).strip()).resolve()
+    # Ubuntu's Git clears command-line config before its local upload-pack
+    # child. A private temporary config reaches that child without changing
+    # the operator's global config or trusting any other repository.
+    repo_overrides = {'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE',
+                      'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+                      'GIT_SHALLOW_FILE', 'GIT_GRAFT_FILE', 'GIT_REPLACE_REF_BASE',
+                      'GIT_PREFIX', 'GIT_NAMESPACE'}
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith('GIT_CONFIG') and key not in repo_overrides}
+    with tempfile.TemporaryDirectory(prefix='talky-source-trust-') as folder:
+        trust = Path(folder) / 'config'
+        trust.touch(mode=0o600)
+        env.update(GIT_CONFIG_GLOBAL=str(trust), GIT_CONFIG_NOSYSTEM='1')
+        for entry in ('', str(source), str(git_directory)):
+            run(['git', 'config', '--file', str(trust), '--add', 'safe.directory', entry],
+                env=env, cwd=Path(folder))
+        trust.chmod(0o600)
+        run(['git', 'clone', '--no-hardlinks', '--no-checkout', str(source), str(target)],
+            env=env, cwd=Path(folder))
+
+
 def checked_origin(source: Path) -> str:
-    origin = run(['git', 'remote', 'get-url', 'origin'], cwd=source, capture=True).strip()
+    origin = source_git(source, ['remote', 'get-url', 'origin']).strip()
     if re.fullmatch(r'git@[A-Za-z0-9.-]+:[A-Za-z0-9_./-]+', origin):
         return origin
     parsed = urlsplit(origin)
@@ -479,9 +511,11 @@ def ensure_fresh_host(config: dict, source: Path) -> None:
                  Path('/usr/sbin/policy-rc.d')):
         require(not path.exists() and not path.is_symlink(), f'Refusing existing path: {path}')
     require_install_umask()
-    require(not run(['git', 'status', '--porcelain'], cwd=source, capture=True).strip(),
+    require(Path(source_git(source, ['rev-parse', '--show-toplevel']).strip()).resolve() == source.resolve(),
+            'Source must be the reviewed repository root')
+    require(not source_git(source, ['status', '--porcelain', '--untracked-files=all']).strip(),
             'Installer source checkout must be completely clean')
-    require(run(['git', 'rev-parse', 'HEAD'], cwd=source, capture=True).strip() == config['source_sha'],
+    require(source_git(source, ['rev-parse', 'HEAD']).strip() == config['source_sha'],
             'Source checkout must equal the reviewed source_sha')
     checked_origin(source)
     # Existing runtime services are evidence that this is not an empty host.
@@ -559,7 +593,7 @@ def apply(config: dict, source: Path) -> None:
     run(['useradd', '--system', '--create-home', '--home-dir', '/var/lib/talky',
          '--shell', '/usr/sbin/nologin', '--user-group', 'talky'])
     run(['usermod', '--append', '--groups', 'asterisk', 'talky'])
-    run(['git', 'clone', '--no-hardlinks', '--no-checkout', str(source), str(TARGET)])
+    clone_source(source, TARGET)
     run(['git', 'remote', 'set-url', 'origin', checked_origin(source)], cwd=TARGET)
     run(['git', 'checkout', '--detach', config['source_sha']], cwd=TARGET)
     require(run(['git', 'rev-parse', 'HEAD'], cwd=TARGET, capture=True).strip() == config['source_sha'],

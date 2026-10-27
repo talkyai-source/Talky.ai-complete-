@@ -78,6 +78,8 @@ jobs:
           path: |
             ${{ runner.temp }}/installer-plan.json
             ${{ runner.temp }}/talklee-inputs/apt-versions.json
+            ${{ runner.temp }}/talklee-inputs/preparation.json
+            ${{ runner.temp }}/talklee-inputs/requirements-linux-py312.lock.provenance.json
           if-no-files-found: error
 
   gateway:
@@ -93,11 +95,12 @@ jobs:
     timeout-minutes: 30
     env:
       NEXT_TELEMETRY_DISABLED: "1"
-      NEXT_PUBLIC_APP_ENV: development
-      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:9/api/v1
+      NEXT_PUBLIC_APP_ENV: production
+      TALKLEE_REQUIRE_AUTH: "1"
+      NEXT_PUBLIC_API_BASE_URL: https://127.0.0.1:9/api/v1
       NEXT_PUBLIC_SENTRY_ENABLED: ""
       SENTRY_AUTH_TOKEN: ""
-      VITE_API_BASE_URL: http://127.0.0.1:9/api/v1
+      VITE_API_BASE_URL: https://127.0.0.1:9/api/v1
       VITE_USE_DUMMY_AUTH: "false"
       VITE_ADMIN_DEV_MODE: "false"
     steps:

@@ -472,6 +472,76 @@ class InstallerTests(unittest.TestCase):
                 with self.assertRaises(installer.InstallError):
                     installer.checked_origin(self.path)
 
+    def test_source_git_trust_is_per_command_and_exactly_scoped(self):
+        source = self.path.resolve()
+        with patch.object(installer, 'run', return_value='') as run:
+            installer.source_git(source, ['status', '--porcelain'])
+        self.assertEqual(run.call_args.args[0],
+                         ['git', '-c', 'safe.directory=', '-c', f'safe.directory={source}', 'status', '--porcelain'])
+        self.assertEqual(run.call_args.kwargs['cwd'], source)
+
+    def test_clone_trust_is_private_and_removed_after_failure(self):
+        original_config = self.path / 'operator-git-config'
+        original_config.write_text('operator configuration is unchanged\n')
+        observed = {}
+
+        def command(args, *, env, cwd):
+            if args[1] != 'clone':
+                return ''
+            trust = Path(env['GIT_CONFIG_GLOBAL'])
+            self.assertEqual(cwd, trust.parent)
+            observed['trust'] = trust
+            self.assertTrue(trust.is_file())
+            if os.name == 'posix':
+                self.assertEqual(trust.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(trust.parent.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(env['GIT_CONFIG_NOSYSTEM'], '1')
+            self.assertNotIn('GIT_DIR', env)
+            self.assertNotIn('GIT_CONFIG_COUNT', env)
+            self.assertNotIn('GIT_CONFIG_PARAMETERS', env)
+            self.assertNotIn('GIT_CONFIG_KEY_0', env)
+            raise installer.InstallError('fixture clone failure')
+
+        with patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': str(original_config),
+                                    'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'safe.directory',
+                                    'GIT_CONFIG_VALUE_0': '*', 'GIT_CONFIG_PARAMETERS': 'fixture',
+                                    'GIT_DIR': str(self.path / 'wrong-repository')}):
+            with patch.object(installer, 'source_git', return_value=str(self.path / '.git')):
+                with patch.object(installer, 'run', side_effect=command):
+                    with self.assertRaisesRegex(installer.InstallError, 'fixture clone failure'):
+                        installer.clone_source(self.path, self.path / 'target')
+            self.assertEqual(os.environ['GIT_CONFIG_GLOBAL'], str(original_config))
+        self.assertFalse(observed['trust'].parent.exists())
+        self.assertEqual(original_config.read_text(), 'operator configuration is unchanged\n')
+
+    @unittest.skipUnless(installer.shutil.which('git'), 'Git is needed for the local ownership regression')
+    def test_nonowner_source_and_linked_worktree_can_be_checked_and_cloned(self):
+        source = self.path / 'reviewed-source'
+        linked = self.path / 'linked-source'
+        hooks = self.path / 'empty-hooks'
+        hooks.mkdir()
+        installer.run(['git', 'init', str(source)])
+        (source / 'README').write_text('Reviewed local fixture\n')
+        installer.run(['git', 'add', 'README'], cwd=source)
+        installer.run(['git', '-c', 'user.name=Installer Test', '-c', 'user.email=installer@example.test',
+                       '-c', 'commit.gpgsign=false', '-c', f'core.hooksPath={hooks}',
+                       'commit', '-m', 'Local installer fixture'], cwd=source)
+        installer.run(['git', 'remote', 'add', 'origin', 'https://example.test/reviewed.git'], cwd=source)
+        installer.run(['git', 'worktree', 'add', '--detach', str(linked)], cwd=source)
+        with patch.dict(os.environ, {'GIT_TEST_ASSUME_DIFFERENT_OWNER': '1'}):
+            for candidate in (source, linked):
+                with self.subTest(source=candidate.name):
+                    rejected = installer.subprocess.run(['git', '-c', 'safe.directory=', 'status', '--porcelain'],
+                        cwd=candidate, text=True, capture_output=True, check=False)
+                    self.assertEqual(rejected.returncode, 128)
+                    self.assertIn('dubious ownership', rejected.stderr)
+                    self.assertEqual(installer.source_git(candidate, ['status', '--porcelain']).strip(), '')
+                    expected = installer.source_git(candidate, ['rev-parse', 'HEAD']).strip()
+                    self.assertEqual(installer.checked_origin(candidate), 'https://example.test/reviewed.git')
+                    target = self.path / (candidate.name + '-installed')
+                    installer.clone_source(candidate, target)
+                    self.assertEqual(installer.source_git(target, ['rev-parse', 'HEAD']).strip(), expected)
+
 
 if __name__ == '__main__':
     unittest.main()
