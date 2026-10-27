@@ -2,9 +2,10 @@
 
 This package prepares a new Ubuntu 24.04 amd64 VM/server using the existing
 systemd backend, workers and C++ gateway, bare-metal Asterisk, Docker Redis,
-and an external PostgreSQL database. `external` frontend mode preserves the
-documented Vercel topology. `linux` builds and serves both frontends on this
-host. Choosing a mode does not move the existing production frontends.
+and an external PostgreSQL database. The example defaults to `linux`, which
+builds and serves both the dashboard and Admin on this host. Set
+`frontend_mode` to `external` to retain the documented Vercel topology.
+Choosing a mode does not move the existing production frontends.
 
 The default command is a read-only plan. It does not install packages, read
 secret inputs, access a database, contact a server, or make calls:
@@ -36,7 +37,7 @@ Required input | Contract
 `backend_env_file` | Mode 0600 regular dotenv file; no shell commands, duplicate keys or escapes. Runtime credentials only; `MIGRATION_DATABASE_URL` is rejected.
 `database_prepared` | Set true only after separate bootstrap/restore/migration and schema acceptance; installer performs no database migration or restore.
 `database_ca_file` | Trusted CA bundle copied to `/etc/ssl/certs/talky-db-ca.pem`; runtime DSN must specify that path and `sslmode=verify-full`.
-`python_requirements_lock` | Full Linux/Python 3.12 dependency closure, exact `==` versions and SHA256 hashes. No URLs, nested requirement includes, index directives or unresolved version ranges.
+`python_requirements_lock` | Full Linux/Python 3.12 dependency closure, exact `==` versions and SHA256 hashes. Standard string environment-marker comparisons joined by `and`/`or` are accepted, including the repository's Linux/x86_64 denoiser marker. No URLs, nested includes, index directives or unresolved version ranges.
 `apt_versions_file` | JSON mapping each name from `packages` to an exact Ubuntu package version. Review against the target Ubuntu repositories and preserve the package artifacts/mirror for later reproduction.
 `redis_image` | Approved Redis image tag with `@sha256:` manifest digest. No unpinned `latest` or tag-only input.
 `asterisk_config_directory` | Reviewed `.conf` files for the real carrier/PBX topology, including `asterisk.conf`, `pjsip.conf`, `extensions.conf`, `http.conf`, `ari.conf`, `rtp.conf`, `modules.conf`. Lab defaults are rejected.
@@ -82,7 +83,9 @@ separate read database needs its own role/TLS/schema/location qualification.
 Query parameters cannot override the database hostname, identity or SSL policy.
 For Linux frontends, start from the adjacent `dashboard.env.example` and
 `admin.env.example`. The installer checks production mode, the public API URL
-and disabled Admin development authentication before any changes.
+and disabled Admin development authentication before any changes. Builds use
+these reviewed environment files; exported variables from the invoking shell
+cannot override the API URL or enable development authentication in a bundle.
 
 Use distinct strong `JWT_SECRET`, `SECRET_KEY`, `INTERNAL_SERVICE_TOKEN`,
 `VOICE_GATEWAY_AUTH_TOKEN`, `TELEPHONY_METRICS_TOKEN`, a valid
@@ -97,10 +100,14 @@ Preserve the original `SECRETS_MASTER_KEY` and connector-encryption key when
 restoring customer data; generating replacement keys makes stored credentials
 unreadable. The installer neither generates nor rotates these keys.
 
-Production startup also requires a live `STRIPE_SECRET_KEY` and the Stripe SDK
-in the hash lock, unless `STRIPE_BILLING_DISABLED=1` explicitly acknowledges a
-non-billing environment. A set test key is refused even when that flag is set.
-Disabling billing does not complete the Stripe deliverable. Development guard
+Active billing requires the Stripe SDK in the hash lock and
+`STRIPE_WEBHOOK_SECRET`, with either a live `STRIPE_SECRET_KEY` or a test key
+plus the existing explicit `STRIPE_TEST_MODE_IN_PRODUCTION=1` acknowledgement.
+The latter takes no real payment and retains the application's test-checkout
+restrictions. `STRIPE_BILLING_DISABLED=1` acknowledges a non-billing environment
+and does not need a key or Stripe SDK. Mock billing is rejected when billing
+is active. These checks match the current application's production gate;
+test/disabled billing does not complete the paid billing deliverable. Development guard
 bypasses, staging transfer proof flags/scopes, weakened caller-ID enforcement
 and disabled strict tenant routing are refused before any host mutation. The
 actual application production gate runs again after package installation.
@@ -128,10 +135,15 @@ Prepare the external database first using the separate recovery procedure.
 Preserve source, TLS material, keys and storage required by that environment.
 On the new VM, clone the reviewed repository and check out the full SHA.
 Place protected inputs outside `/opt/talky` and the source checkout. Verify DNS
-and the supplied certificate domain names before running:
+and the supplied certificate domain names before running. Enter the root shell
+with umask `0022` so the service account can read source directories; the
+installer refuses other masks before mutation and stages secrets as mode 0600:
 
 ```bash
-sudo bash install_talklee.sh apply \
+sudo -i
+umask 0022
+cd /path/to/clean/reviewed-checkout
+bash install_talklee.sh apply \
   --config /secure/talky/install.json \
   --source /path/to/clean/reviewed-checkout \
   --confirm-new-host
@@ -151,7 +163,8 @@ arguments. PostgreSQL is never installed on this application host.
 
 Before starting application services, the installer connects using the runtime
 DB identity and rejects superuser/BYPASSRLS/CREATEDB/CREATEROLE roles, non-TLS connections and
-schema revisions that do not equal the checkout's Alembic heads. This is a
+role-switched sessions. Connection `options` overrides are refused, and
+`public.alembic_version` must equal the checkout's nonempty Alembic heads. This is a
 preflight, not a substitute for cross-tenant isolation acceptance.
 
 Success records `/var/lib/talky-install/receipt.json`, `apt-installed.tsv` and

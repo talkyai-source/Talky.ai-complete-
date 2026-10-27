@@ -9,6 +9,9 @@ SCRIPTS = ScriptDirectory(str(Path(__file__).resolve().parents[2] / "Alembic"))
 HEARTBEAT = "0048_audit_skip_heartbeat"
 RECEIPTS = "0062_saved_acknowledgement"
 MERGE = "0063_release_history_merge"
+BILLING = "0073_payment_test_plan"
+BOOTSTRAP = "0074_incidents_bootstrap"
+DEPLOYMENT_MERGE = "0075_release_history_merge"
 
 
 def test_release_exposes_one_head_containing_both_existing_histories():
@@ -16,10 +19,13 @@ def test_release_exposes_one_head_containing_both_existing_histories():
     # 0065/0066 (bug hunt 2026-10-10 schema repairs), 0067/0068 (credential
     # history, API-key lookup hash), 0069 (AssemblyAI settings), 0070 (PBX
     # line soft delete), 0071 (paid-only billing terms), 0072 (allowance
-    # anchor) and 0073 (team-only $1 payment check) are linear above it,
-    # behind this single deployment head.
-    assert SCRIPTS.get_heads() == ["0073_payment_test_plan"]
-    assert SCRIPTS.get_revision("0073_payment_test_plan").down_revision == "0072_allowance_anchor"
+    # anchor) are linear above it. The separately published billing 0073 and
+    # event/incident bootstrap 0073/0074 histories meet at deployment merge 0075.
+    assert SCRIPTS.get_heads() == [DEPLOYMENT_MERGE]
+    assert set(SCRIPTS.get_revision(DEPLOYMENT_MERGE).down_revision) == {BOOTSTRAP, BILLING}
+    assert SCRIPTS.get_revision(BOOTSTRAP).down_revision == "0073_stream_events_bootstrap"
+    assert SCRIPTS.get_revision("0073_stream_events_bootstrap").down_revision == "0072_allowance_anchor"
+    assert SCRIPTS.get_revision(BILLING).down_revision == "0072_allowance_anchor"
     assert SCRIPTS.get_revision("0072_allowance_anchor").down_revision == "0071_paid_only_billing"
     assert SCRIPTS.get_revision("0071_paid_only_billing").down_revision == "0070_trunk_soft_delete"
     assert SCRIPTS.get_revision("0070_trunk_soft_delete").down_revision == "0069_assemblyai_settings"
@@ -49,6 +55,26 @@ def test_upgrade_plan_runs_only_the_missing_branch(start, required, already_pres
 
 def test_merge_has_no_schema_or_evidence_mutation_and_refuses_history_split():
     migration = import_module("Alembic.versions.0063_release_history_merge")
+    assert migration.upgrade() is None
+    with pytest.raises(RuntimeError, match="forward migration"):
+        migration.downgrade()
+
+
+@pytest.mark.parametrize("start,required,already_present", [
+    (BOOTSTRAP, {BILLING, DEPLOYMENT_MERGE}, {"0073_stream_events_bootstrap", BOOTSTRAP}),
+    (BILLING, {"0073_stream_events_bootstrap", BOOTSTRAP, DEPLOYMENT_MERGE}, {BILLING}),
+    ("0072_allowance_anchor", {BILLING, "0073_stream_events_bootstrap", BOOTSTRAP, DEPLOYMENT_MERGE},
+     {"0072_allowance_anchor"}),
+])
+def test_billing_and_bootstrap_upgrade_runs_each_missing_revision_once(start, required, already_present):
+    revisions = [r.revision for r in SCRIPTS.iterate_revisions(DEPLOYMENT_MERGE, start, implicit_base=True)]
+    assert set(revisions) == required
+    assert len(revisions) == len(set(revisions))
+    assert not set(revisions) & already_present
+
+
+def test_billing_bootstrap_merge_has_no_mutation_and_refuses_history_split():
+    migration = import_module("Alembic.versions.0075_release_history_merge")
     assert migration.upgrade() is None
     with pytest.raises(RuntimeError, match="forward migration"):
         migration.downgrade()

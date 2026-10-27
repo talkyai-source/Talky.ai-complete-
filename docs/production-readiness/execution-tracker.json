@@ -1479,10 +1479,20 @@
           "path": "docs/sessions/2026-10-05-operating-acceptance-baseline.md",
           "kind": "existing_offline_control_validation_and_remaining_acceptance",
           "candidate": "e5cfff12773b259db516ab76ad53d417c3f5edc0"
+        },
+        {
+          "path": "docs/sessions/2026-10-28-ubuntu-installer-release.md",
+          "kind": "ubuntu_installer_dependency_build_and_control_verification_not_operating_acceptance",
+          "candidate": "a152195b8b15257f33837932ee96917d7e3d3ba6"
+        },
+        {
+          "path": "docs/sessions/2026-10-28-local-ubuntu-runtime.md",
+          "kind": "local_postgresql_tls_role_and_bootstrap_verification_not_restore_acceptance",
+          "candidate": "8f45d12eadb3de02de6696b0bf6e7a90b644c3f1"
         }
       ],
-      "blocker": null,
-      "next_action": "Use the existing operating tools for the package acceptance once its designated profile, operator and environment prerequisites are established. Local baseline is not deployed outcome proof.",
+      "blocker": "Production-shaped external database, backup/restore identities, off-host storage and designated recovery objectives/operator are still required for operating restore acceptance.",
+      "next_action": "Run the existing recovery tools against the designated isolated production-shaped database and off-host archive; prove TLS, runtime restrictions, application-server loss recovery and declared recovery objectives. Ubuntu CI recovery control tests are mocked and do not establish restore acceptance.",
       "target_date": null
     },
     {
@@ -1564,10 +1574,20 @@
         {
           "path": "docs/sessions/2026-10-05-repository-regression-checkpoint.md",
           "kind": "bounded_local_followup_not_release_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-28-ubuntu-installer-release.md",
+          "kind": "ubuntu_installer_dependency_build_and_control_verification_not_operating_acceptance",
+          "candidate": "a152195b8b15257f33837932ee96917d7e3d3ba6"
+        },
+        {
+          "path": "docs/sessions/2026-10-28-local-ubuntu-runtime.md",
+          "kind": "local_ubuntu_runtime_and_frontend_artifacts_not_release_acceptance",
+          "candidate": "8f45d12eadb3de02de6696b0bf6e7a90b644c3f1"
         }
       ],
-      "blocker": null,
-      "next_action": "Use the existing operating tools for the package acceptance once its designated profile, operator and environment prerequisites are established. Local baseline is not deployed outcome proof.",
+      "blocker": "Designated clean Ubuntu host and completed external database, DNS/TLS, network, provider and carrier inputs are still required for full installation and operating acceptance.",
+      "next_action": "Use the published pinned Ubuntu test candidate, populate protected inputs, execute validate/apply, retain health/reboot/controlled-call evidence, and qualify update/rollback plus independent-operator handover. Preparation and builds do not close this package.",
       "target_date": null
     },
     {

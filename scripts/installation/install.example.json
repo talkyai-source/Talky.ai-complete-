@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "source_sha": "REPLACE_WITH_REVIEWED_FULL_COMMIT_SHA",
-  "frontend_mode": "external",
+  "frontend_mode": "linux",
   "api_domain": "api.example.com",
   "dashboard_domain": "app.example.com",
   "admin_domain": "admin.example.com",

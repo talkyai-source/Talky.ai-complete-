@@ -1,0 +1,67 @@
+name: Canonical database TLS recovery
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/database/**"
+      - "backend/database/complete_schema.sql"
+      - "backend/Alembic/**"
+      - "backend/alembic.ini"
+      - "scripts/installation/requirements-linux-py312.lock"
+      - ".github/workflows/database-recovery-acceptance.yml"
+  push:
+    branches: [main, "codex/ubuntu-installer-rehearsal-*"]
+    paths:
+      - "scripts/database/**"
+      - "backend/database/complete_schema.sql"
+      - "backend/Alembic/**"
+      - "backend/alembic.ini"
+      - "scripts/installation/requirements-linux-py312.lock"
+      - ".github/workflows/database-recovery-acceptance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: database-recovery-${{ github.ref }}
+  cancel-in-progress: true
+
+# Two generated PostgreSQL clusters on one ephemeral runner. No environment,
+# deployment/provider secrets, existing database URLs, or app workers are used.
+jobs:
+  canonical-tls-restore:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      PYTHON_DOTENV_DISABLED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      ENVIRONMENT: test
+      LC_ALL: C.UTF-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/installation/requirements-linux-py312.lock
+      - name: Install qualified Python dependencies and PostgreSQL16 clients
+        run: |
+          python -m pip install --require-hashes -r scripts/installation/requirements-linux-py312.lock
+          python -m pip check
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client-16 openssl
+      - name: Exercise full-schema TLS backup and restore with real PostgreSQL
+        run: |
+          python scripts/database/tests/tls_canonical_rehearsal.py --run \
+            --bin-dir /usr/lib/postgresql/16/bin \
+            --receipt "$RUNNER_TEMP/canonical-tls-recovery.json"
+      - name: Retain nonsecret recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-tls-recovery-${{ github.sha }}
+          path: ${{ runner.temp }}/canonical-tls-recovery.json
+          if-no-files-found: warn
+          retention-days: 14

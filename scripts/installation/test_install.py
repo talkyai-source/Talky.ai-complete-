@@ -15,13 +15,25 @@ from unittest.mock import patch
 SPEC = importlib.util.spec_from_file_location('talky_install', Path(__file__).with_name('install.py'))
 installer = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(installer)
-# prod_gate imports app.* (billing mode); make the backend package importable.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'backend'))
+# Load the actual stdlib billing helper without the services package's eager
+# imports of FastAPI and Redis: installer tests must work before dependencies.
+BILLING_SPEC = importlib.util.spec_from_file_location('app.domain.services.billing_mode',
+    Path(__file__).resolve().parents[2] / 'backend/app/domain/services/billing_mode.py')
+billing_mode = importlib.util.module_from_spec(BILLING_SPEC)
+BILLING_SPEC.loader.exec_module(billing_mode)
 GATE_SPEC = importlib.util.spec_from_file_location('installer_actual_prod_gate',
     Path(__file__).resolve().parents[2] / 'backend/app/core/prod_gate.py')
 production_gate = importlib.util.module_from_spec(GATE_SPEC)
 sys.modules[GATE_SPEC.name] = production_gate
-GATE_SPEC.loader.exec_module(production_gate)
+with patch.dict(sys.modules, {BILLING_SPEC.name: billing_mode}):
+    GATE_SPEC.loader.exec_module(production_gate)
+# This module only inspects configuration; importing it does not initialize
+# providers or connect to any service. Keep parity with the API startup check.
+PROVIDER_SPEC = importlib.util.spec_from_file_location('installer_actual_provider_validation',
+    Path(__file__).resolve().parents[2] / 'backend/app/core/validation.py')
+provider_validation = importlib.util.module_from_spec(PROVIDER_SPEC)
+sys.modules[PROVIDER_SPEC.name] = provider_validation
+PROVIDER_SPEC.loader.exec_module(provider_validation)
 
 
 class InstallerTests(unittest.TestCase):
@@ -54,6 +66,11 @@ class InstallerTests(unittest.TestCase):
             'FRONTEND_URL': 'https://app.example.com', 'API_BASE_URL': 'https://api.example.com',
             'CORS_ORIGINS': 'https://app.example.com,https://admin.example.com',
             'TELEPHONY_PJSIP_AUTO_RELOAD': 'on',
+            # Offline validation fixtures only; never used to start an API or
+            # contact a provider, and not evidence of credential acceptance.
+            'DEEPGRAM_API_KEY': 'offline-fixture-deepgram',
+            'CARTESIA_API_KEY': 'offline-fixture-cartesia',
+            'GROQ_API_KEY': 'offline-fixture-groq',
         }
         self.write_env()
         Path(self.config['dashboard_env_file']).write_text('NEXT_PUBLIC_APP_ENV=production\nNEXT_PUBLIC_API_BASE_URL=https://api.example.com/api/v1\n')
@@ -76,12 +93,48 @@ class InstallerTests(unittest.TestCase):
 
     def test_valid_inputs(self):
         installer.validate_config(self.config, inputs=True)
-        self.config['frontend_mode'] = 'linux'
+        self.config['frontend_mode'] = 'external'
         installer.validate_config(self.config, inputs=True)
 
     def test_valid_fixture_also_passes_actual_production_gate(self):
         with patch.dict(os.environ, self.env, clear=True):
             production_gate.enforce_production_gate()
+            valid, results = provider_validation.ProviderValidator(strict=True).validate_all()
+        self.assertTrue(valid, [result.setting for result in results if not result.is_valid])
+
+    def test_required_provider_credentials_fail_before_apply(self):
+        # Derive the required names from the real startup validator so a new
+        # mandatory provider cannot silently drift past installer preflight.
+        required = [name for group in ('stt', 'tts', 'llm')
+                    for name, _ in provider_validation.ProviderValidator.REQUIRED_ENV_VARS[group]]
+        config_path = self.path / 'config.json'
+        config_path.write_text(json.dumps(self.config))
+        for key in required:
+            original = self.env.pop(key)
+            for value in (None, '', '   ', 'REPLACE_WITH_NEVER_PRINT_THIS', 'change_me_NEVER_PRINT_THIS'):
+                with self.subTest(key=key, value=value):
+                    if value is None:
+                        self.env.pop(key, None)
+                    else:
+                        self.env[key] = value
+                    self.write_env()
+                    if value in (None, ''):
+                        with patch.dict(os.environ, self.env, clear=True):
+                            valid, results = provider_validation.ProviderValidator(strict=True).validate_all()
+                        self.assertFalse(valid)
+                        self.assertTrue(any(result.setting == key and not result.is_valid for result in results))
+                    # An operator-shell credential cannot fill a missing or
+                    # invalid value in the file copied to the installed service.
+                    with (patch.dict(os.environ, {key: 'ambient-offline-fixture'}),
+                          patch.object(installer, 'apply') as apply,
+                          contextlib.redirect_stderr(io.StringIO()) as output):
+                        self.assertEqual(installer.main(['apply', '--config', str(config_path),
+                                                         '--confirm-new-host']), 2)
+                    apply.assert_not_called()
+                    self.assertIn(key, output.getvalue())
+                    self.assertNotIn('NEVER_PRINT_THIS', output.getvalue())
+            self.env[key] = original
+        self.write_env()
 
     def test_missing_production_secrets_fail_before_apply(self):
         for key in ('SECRETS_MASTER_KEY', 'TELEPHONY_METRICS_TOKEN'):
@@ -125,6 +178,7 @@ class InstallerTests(unittest.TestCase):
         with self.assertRaisesRegex(installer.InstallError, 'live key'):
             installer.validate_config(self.config, inputs=True)
         self.env['STRIPE_SECRET_KEY'] = 'sk_live_synthetic_for_test_only'
+        self.env['STRIPE_WEBHOOK_SECRET'] = 'whsec_synthetic_for_test_only'
         self.write_env()
         with self.assertRaisesRegex(installer.InstallError, 'include Stripe'):
             installer.validate_config(self.config, inputs=True)
@@ -137,6 +191,69 @@ class InstallerTests(unittest.TestCase):
             effective = installer.runtime_environment(self.env)
         for key in ('PGOPTIONS', 'READ_DATABASE_URL', 'TELEPHONY_LOCAL_DEV', 'PYTHONPATH'):
             self.assertNotIn(key, effective)
+
+    def test_frontend_build_uses_reviewed_env_instead_of_operator_values(self):
+        with patch.dict(os.environ, {'NEXT_PUBLIC_API_BASE_URL': 'https://old.example.net/api/v1',
+                                     'VITE_USE_DUMMY_AUTH': 'true', 'DATABASE_URL': 'operator-secret',
+                                     'TALKLEE_ENABLE_STUB_API': 'true'}):
+            dashboard = installer.frontend_build_environment(Path(self.config['dashboard_env_file']))
+            admin = installer.frontend_build_environment(Path(self.config['admin_env_file']))
+        self.assertEqual(dashboard['NEXT_PUBLIC_API_BASE_URL'], 'https://api.example.com/api/v1')
+        self.assertEqual(admin['VITE_USE_DUMMY_AUTH'], 'false')
+        for effective in (dashboard, admin):
+            self.assertNotIn('DATABASE_URL', effective)
+            self.assertNotIn('TALKLEE_ENABLE_STUB_API', effective)
+            self.assertEqual(effective['NODE_ENV'], 'production')
+
+    def test_full_linux_stack_is_the_read_only_example_default(self):
+        self.assertEqual(self.config['frontend_mode'], 'linux')
+        self.assertIn('Build dashboard/Admin from npm lockfiles and serve on Linux', installer.steps(self.config))
+
+    def test_pip_compile_platform_markers_are_accepted_with_hashes(self):
+        requirement = ('webrtc-noise-gain==1.3.0 ; sys_platform == "linux" '
+                       'and platform_machine == "x86_64" \\\n    --hash=sha256:' + 'd' * 64 + '\n')
+        Path(self.config['python_requirements_lock']).write_text(requirement)
+        installer.validate_config(self.config, inputs=True)
+        for marker in ('sys_platform == "linux"', '(python_version >= "3.12" and os_name != "nt")',
+                       'platform_machine in "x86_64 aarch64"'):
+            self.assertTrue(installer.valid_lock_row('example==1.0 ; ' + marker + ' --hash=sha256:' + 'a' * 64))
+
+    def test_marker_support_cannot_admit_unpinned_or_executable_requirements(self):
+        for row in ('example>=1.0 ; sys_platform == "linux"',
+                    'example==1.0 ; sys_platform == "linux"',
+                    'example==1.0 ; __import__("os").system("bad") --hash=sha256:' + 'a' * 64,
+                    'example==1.0 ; unknown_variable == "linux" --hash=sha256:' + 'a' * 64,
+                    'example==1.0 ; sys_platform == "linux" --index-url https://example.net --hash=sha256:' + 'a' * 64):
+            self.assertFalse(installer.valid_lock_row(row), row)
+
+    def test_billing_modes_match_existing_production_gate(self):
+        Path(self.config['python_requirements_lock']).write_text('stripe==14.0 --hash=sha256:' + 'd' * 64 + '\n')
+        scenarios = [
+            ({'STRIPE_BILLING_DISABLED': 'on', 'STRIPE_SECRET_KEY': 'sk_test_synthetic'}, True),
+            ({'STRIPE_SECRET_KEY': 'sk_test_synthetic', 'STRIPE_TEST_MODE_IN_PRODUCTION': '1',
+              'STRIPE_WEBHOOK_SECRET': 'whsec_synthetic'}, True),
+            ({'STRIPE_SECRET_KEY': 'sk_test_synthetic', 'STRIPE_WEBHOOK_SECRET': 'whsec_synthetic'}, False),
+            ({'STRIPE_SECRET_KEY': 'sk_live_synthetic', 'STRIPE_MOCK_MODE': '1',
+              'STRIPE_WEBHOOK_SECRET': 'whsec_synthetic'}, False),
+            ({'STRIPE_SECRET_KEY': 'sk_live_synthetic'}, False),
+        ]
+        self.env.pop('STRIPE_BILLING_DISABLED')
+        for overrides, allowed in scenarios:
+            with self.subTest(overrides=overrides):
+                env = {**self.env, **overrides}
+                Path(self.config['backend_env_file']).write_text(''.join(f'{k}={v}\n' for k, v in env.items()))
+                with (patch.dict(os.environ, env, clear=True),
+                      patch.object(billing_mode.importlib.util, 'find_spec', return_value=object()),
+                      patch.object(billing_mode.importlib, 'import_module', return_value=object()),
+                      patch.object(production_gate.logger, 'error'), patch.object(production_gate.logger, 'warning')):
+                    if allowed:
+                        installer.validate_config(self.config, inputs=True)
+                        production_gate.enforce_production_gate()
+                    else:
+                        with self.assertRaises(installer.InstallError):
+                            installer.validate_config(self.config, inputs=True)
+                        with self.assertRaises(production_gate.ProductionGateError):
+                            production_gate.enforce_production_gate()
 
     def test_database_check_rejects_createdb_and_createrole_before_schema_reads(self):
         for flags in ((False, False, True, False), (False, False, False, True)):
@@ -157,6 +274,37 @@ class InstallerTests(unittest.TestCase):
                     exec(compile(installer.DATABASE_CHECK_SCRIPT, '<database-check>', 'exec', optimize=2), {})
             self.assertEqual(len(queries), 1)
             self.assertIn('rolcreatedb, rolcreaterole', queries[0])
+
+    def test_database_check_requires_login_identity_and_exact_public_schema(self):
+        for same_identity, actual, expected, error in (
+                (False, ['head'], ['head'], 'own login role'),
+                (True, ['old-head'], ['head'], 'prepare and verify schema'),
+                (True, [], [], 'prepare and verify schema'),
+                (True, ['head'], ['head'], None)):
+            with self.subTest(same_identity=same_identity, actual=actual, expected=expected):
+                queries = []
+                cursor = unittest.mock.MagicMock()
+                cursor.__enter__.return_value = cursor
+                cursor.execute.side_effect = lambda query: queries.append(query)
+                cursor.fetchone.side_effect = [(False, False, False, False), (same_identity,), (True,)]
+                cursor.fetchall.return_value = [(head,) for head in actual]
+                connection = unittest.mock.MagicMock()
+                connection.__enter__.return_value = connection
+                connection.cursor.return_value = cursor
+                scripts = types.SimpleNamespace(from_config=lambda _: types.SimpleNamespace(get_heads=lambda: expected))
+                modules = {'psycopg2': types.SimpleNamespace(connect=lambda *args, **kwargs: connection),
+                           'alembic.config': types.SimpleNamespace(Config=lambda value: value),
+                           'alembic.script': types.SimpleNamespace(ScriptDirectory=scripts)}
+                with patch.dict(sys.modules, modules), patch.dict(os.environ, self.env):
+                    if error:
+                        with self.assertRaisesRegex(RuntimeError, error):
+                            exec(compile(installer.DATABASE_CHECK_SCRIPT, '<database-check>', 'exec', optimize=2), {})
+                    else:
+                        exec(compile(installer.DATABASE_CHECK_SCRIPT, '<database-check>', 'exec', optimize=2), {})
+                if same_identity:
+                    self.assertIn('SELECT version_num FROM public.alembic_version', queries)
+                else:
+                    self.assertEqual(len(queries), 2)
     def test_linux_frontend_dummy_auth_is_rejected(self):
         self.config['frontend_mode'] = 'linux'
         Path(self.config['admin_env_file']).write_text('VITE_API_BASE_URL=https://api.example.com/api/v1\nVITE_ADMIN_DEV_MODE=true\n')
@@ -221,6 +369,7 @@ class InstallerTests(unittest.TestCase):
         original = self.env['DATABASE_URL']
         for value in (original + '&host=127.0.0.1', original + '&user=postgres',
                       original + '&sslmode=disable', original + '&service=other',
+                      original + '&options=-c%20role%3Dpostgres',
                       original.replace('db.example.net', '127.0.0.2'),
                       original.replace('/talky?', '/?')):
             self.env['DATABASE_URL'] = value
@@ -308,7 +457,36 @@ class InstallerTests(unittest.TestCase):
         with self.assertRaisesRegex(installer.InstallError, 'duplicate'):
             installer.read_env(path)
 
+    def test_secret_copy_is_private_during_copy_and_atomic_on_failure(self):
+        source = self.path / 'secret-source'
+        target = self.path / 'secret-target'
+        source.write_text('new-secret')
+        target.write_text('previous-secret')
+        original_copy = installer.shutil.copyfile
+        def checked_copy(source_path, destination):
+            if os.name == 'posix':
+                self.assertEqual(Path(destination).stat().st_mode & 0o777, 0o600)
+            return original_copy(source_path, destination)
+        with patch.object(installer.shutil, 'copyfile', side_effect=checked_copy):
+            installer.copy_secret(source, target)
+        self.assertEqual(target.read_text(), 'new-secret')
+        with patch.object(installer.shutil, 'copyfile', side_effect=OSError('copy failed')):
+            with self.assertRaises(OSError):
+                installer.copy_secret(source, target)
+        self.assertEqual(target.read_text(), 'new-secret')
+        self.assertEqual(list(self.path.glob('.talky-input-*')), [])
+
+    def test_host_umask_cannot_make_service_source_unreadable_or_world_writable(self):
+        for mask in (0o077, 0o027, 0o000):
+            with patch.object(installer.os, 'umask', return_value=mask) as umask:
+                with self.assertRaisesRegex(installer.InstallError, 'umask 0022'):
+                    installer.require_install_umask()
+                self.assertEqual(umask.call_args_list[-1].args, (mask,))
+        with patch.object(installer.os, 'umask', return_value=0o022):
+            installer.require_install_umask()
+
     def test_external_mode_does_not_host_frontends(self):
+        self.config['frontend_mode'] = 'external'
         rendered = installer.nginx_site(self.config)
         self.assertNotIn('server_name app.example.com', rendered)
         self.assertIn('http://127.0.0.1:8000', rendered)
@@ -341,6 +519,76 @@ class InstallerTests(unittest.TestCase):
             with patch.object(installer, 'run', return_value=value):
                 with self.assertRaises(installer.InstallError):
                     installer.checked_origin(self.path)
+
+    def test_source_git_trust_is_per_command_and_exactly_scoped(self):
+        source = self.path.resolve()
+        with patch.object(installer, 'run', return_value='') as run:
+            installer.source_git(source, ['status', '--porcelain'])
+        self.assertEqual(run.call_args.args[0],
+                         ['git', '-c', 'safe.directory=', '-c', f'safe.directory={source}', 'status', '--porcelain'])
+        self.assertEqual(run.call_args.kwargs['cwd'], source)
+
+    def test_clone_trust_is_private_and_removed_after_failure(self):
+        original_config = self.path / 'operator-git-config'
+        original_config.write_text('operator configuration is unchanged\n')
+        observed = {}
+
+        def command(args, *, env, cwd):
+            if args[1] != 'clone':
+                return ''
+            trust = Path(env['GIT_CONFIG_GLOBAL'])
+            self.assertEqual(cwd, trust.parent)
+            observed['trust'] = trust
+            self.assertTrue(trust.is_file())
+            if os.name == 'posix':
+                self.assertEqual(trust.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(trust.parent.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(env['GIT_CONFIG_NOSYSTEM'], '1')
+            self.assertNotIn('GIT_DIR', env)
+            self.assertNotIn('GIT_CONFIG_COUNT', env)
+            self.assertNotIn('GIT_CONFIG_PARAMETERS', env)
+            self.assertNotIn('GIT_CONFIG_KEY_0', env)
+            raise installer.InstallError('fixture clone failure')
+
+        with patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': str(original_config),
+                                    'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'safe.directory',
+                                    'GIT_CONFIG_VALUE_0': '*', 'GIT_CONFIG_PARAMETERS': 'fixture',
+                                    'GIT_DIR': str(self.path / 'wrong-repository')}):
+            with patch.object(installer, 'source_git', return_value=str(self.path / '.git')):
+                with patch.object(installer, 'run', side_effect=command):
+                    with self.assertRaisesRegex(installer.InstallError, 'fixture clone failure'):
+                        installer.clone_source(self.path, self.path / 'target')
+            self.assertEqual(os.environ['GIT_CONFIG_GLOBAL'], str(original_config))
+        self.assertFalse(observed['trust'].parent.exists())
+        self.assertEqual(original_config.read_text(), 'operator configuration is unchanged\n')
+
+    @unittest.skipUnless(installer.shutil.which('git'), 'Git is needed for the local ownership regression')
+    def test_nonowner_source_and_linked_worktree_can_be_checked_and_cloned(self):
+        source = self.path / 'reviewed-source'
+        linked = self.path / 'linked-source'
+        hooks = self.path / 'empty-hooks'
+        hooks.mkdir()
+        installer.run(['git', 'init', str(source)])
+        (source / 'README').write_text('Reviewed local fixture\n')
+        installer.run(['git', 'add', 'README'], cwd=source)
+        installer.run(['git', '-c', 'user.name=Installer Test', '-c', 'user.email=installer@example.test',
+                       '-c', 'commit.gpgsign=false', '-c', f'core.hooksPath={hooks}',
+                       'commit', '-m', 'Local installer fixture'], cwd=source)
+        installer.run(['git', 'remote', 'add', 'origin', 'https://example.test/reviewed.git'], cwd=source)
+        installer.run(['git', 'worktree', 'add', '--detach', str(linked)], cwd=source)
+        with patch.dict(os.environ, {'GIT_TEST_ASSUME_DIFFERENT_OWNER': '1'}):
+            for candidate in (source, linked):
+                with self.subTest(source=candidate.name):
+                    rejected = installer.subprocess.run(['git', '-c', 'safe.directory=', 'status', '--porcelain'],
+                        cwd=candidate, text=True, capture_output=True, check=False)
+                    self.assertEqual(rejected.returncode, 128)
+                    self.assertIn('dubious ownership', rejected.stderr)
+                    self.assertEqual(installer.source_git(candidate, ['status', '--porcelain']).strip(), '')
+                    expected = installer.source_git(candidate, ['rev-parse', 'HEAD']).strip()
+                    self.assertEqual(installer.checked_origin(candidate), 'https://example.test/reviewed.git')
+                    target = self.path / (candidate.name + '-installed')
+                    installer.clone_source(candidate, target)
+                    self.assertEqual(installer.source_git(target, ['rev-parse', 'HEAD']).strip(), expected)
 
 
 if __name__ == '__main__':

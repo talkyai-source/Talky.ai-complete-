@@ -1,0 +1,106 @@
+name: Ubuntu local authenticated frontends
+
+on:
+  push:
+    branches: ["codex/ubuntu-installer-rehearsal-*"]
+    paths:
+      - "Talk-Leee/**"
+      - "Admin/frontend/**"
+      - ".github/workflows/ubuntu-local-runtime.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ubuntu-local-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+# This artifact targets a local Ubuntu test installation with real authentication.
+# It embeds a loopback API address and development application mode. It is not a
+# public production release and does not establish billing or calling readiness.
+jobs:
+  frontends:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_APP_ENV: development
+      TALKLEE_REQUIRE_AUTH: "1"
+      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:8000/api/v1
+      NEXT_PUBLIC_SENTRY_ENABLED: ""
+      NEXT_PUBLIC_SENTRY_DSN: ""
+      SENTRY_AUTH_TOKEN: ""
+      VITE_API_BASE_URL: http://127.0.0.1:8000/api/v1
+      VITE_USE_DUMMY_AUTH: "false"
+      VITE_ADMIN_DEV_MODE: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.0"
+          cache: npm
+          cache-dependency-path: |
+            Talk-Leee/package-lock.json
+            Admin/frontend/package-lock.json
+      - name: Build customer dashboard with authentication required
+        working-directory: Talk-Leee
+        run: |
+          npm ci --include=dev --no-audit --no-fund
+          npm run build
+      - name: Build Admin with real authentication
+        working-directory: Admin/frontend
+        run: |
+          npm ci --include=dev --no-audit --no-fund
+          npm run build
+      - name: Package builds and source provenance without environments or caches
+        run: |
+          mkdir -p "$RUNNER_TEMP/local-frontends"
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          def output(*args):
+              return subprocess.check_output(args, text=True).strip()
+
+          names = (
+              "NODE_ENV", "NEXT_TELEMETRY_DISABLED", "NEXT_PUBLIC_APP_ENV",
+              "TALKLEE_REQUIRE_AUTH", "NEXT_PUBLIC_API_BASE_URL",
+              "NEXT_PUBLIC_SENTRY_ENABLED", "NEXT_PUBLIC_SENTRY_DSN",
+              "VITE_API_BASE_URL", "VITE_USE_DUMMY_AUTH", "VITE_ADMIN_DEV_MODE",
+          )
+          manifest = {
+              "schema_version": 1,
+              "purpose": "local-authenticated-ubuntu-test-runtime",
+              "source_sha": output("git", "rev-parse", "HEAD"),
+              "frontend_trees": {
+                  project: output("git", "rev-parse", f"HEAD:{project}")
+                  for project in ("Talk-Leee", "Admin/frontend")
+              },
+              "node_version": output("node", "--version"),
+              "runner_os": "ubuntu-24.04",
+              "architecture": output("uname", "-m"),
+              "build_settings": {name: os.environ[name] for name in names},
+              "archive_paths": ["Talk-Leee/.next", "Admin/frontend/dist"],
+              "excluded_paths": ["Talk-Leee/.next/cache"],
+              "requires_existing_node_modules": True,
+          }
+          destination = Path(os.environ["RUNNER_TEMP"]) / "local-frontends" / "manifest.json"
+          destination.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          PY
+          tar --exclude='Talk-Leee/.next/cache' \
+            -czf "$RUNNER_TEMP/local-frontends/frontends.tar.gz" \
+            Talk-Leee/.next Admin/frontend/dist \
+            -C "$RUNNER_TEMP/local-frontends" manifest.json
+      - name: Save local runtime frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-local-authenticated-frontends
+          path: |
+            ${{ runner.temp }}/local-frontends/frontends.tar.gz
+            ${{ runner.temp }}/local-frontends/manifest.json
+          if-no-files-found: error
+          retention-days: 7

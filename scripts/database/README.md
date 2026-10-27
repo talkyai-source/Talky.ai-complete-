@@ -185,3 +185,57 @@ The implementation follows PostgreSQL's [connection service rules](https://www.p
 [password file guidance](https://www.postgresql.org/docs/current/libpq-envars.html),
 [exported snapshot support in pg_dump](https://www.postgresql.org/docs/current/app-pgdump.html)
 and [pg_restore behavior](https://www.postgresql.org/docs/current/app-pgrestore.html).
+
+### Canonical schema with TLS
+
+The opt-in Linux fixture below creates two PostgreSQL16 Docker containers on a
+private internal network, with assigned private bridge addresses, generated
+passwords and a temporary certificate authority. No database ports are published
+on host interfaces. It accepts no existing database
+endpoint. Use a local Linux Docker daemon, OpenSSL, PostgreSQL16 client binaries,
+and the Python dependencies from the installer's qualified lock.
+
+```bash
+python scripts/database/tests/tls_canonical_rehearsal.py --run \
+  --bin-dir /usr/lib/postgresql/16/bin \
+  --receipt /tmp/canonical-tls-recovery.json
+```
+
+The fixture loads the actual `complete_schema.sql` as a restricted migration
+owner, stamps the documented 0008 floor, then upgrades to the checked-out
+release's dynamic Alembic heads. It seeds two synthetic tenants with campaigns,
+leads and calls. Separate backup and restore identities have the full-row
+access required by the existing recovery commands; migration and runtime
+identities have neither PostgreSQL superuser nor `BYPASSRLS` privileges.
+
+The actual `recovery.py backup`, `restore` and `health` commands run over
+`sslmode=verify-full`. The fixture compares every public table's records and
+sequence state. It independently exports source schema-only SQL into a new
+empty comparison database on the target fixture server and requires its exact
+re-dump to match the full restore's schema. PostgreSQL can re-render existing
+CHECK expressions during SQL replay (array casts and nested conjunctions);
+using its parser preserves every definition without regex equivalence rules.
+The original, reference and restored definition hashes remain in the receipt.
+The fixture then reapplies explicit scratch-database ownership
+and runtime grants, and checks actual restricted-login reads and writes for
+both tenants. Untrusted CA, wrong server name and plaintext connections must
+fail for the expected TLS/HBA reason. Runtime checks also reject unset tenant
+visibility, foreign-tenant inserts/updates, table ownership, truncation and
+schema/revision modification privileges. Verification writes are rolled back;
+the source schema and all public-table records must remain unchanged.
+
+Cleanup verifies the invocation's unique labels and names before removing its
+containers and network. Only a nonsecret receipt is uploaded by
+[`database-recovery-acceptance.yml`](../../.github/workflows/database-recovery-acceptance.yml);
+passwords, certificate keys and database archives are temporary and are never
+uploaded. The receipt records the actual image digest, schema heads, Git revision,
+source-file hashes, worktree state and results.
+The default image is the official `postgres:16-bookworm`; `--image
+postgres@sha256:REVIEWED_DIGEST` can replay a recorded official image digest.
+
+This is one-host CI regression coverage with synthetic data. It does not prove
+independent-host survival, production grants for every business workflow,
+recording/key recovery, retention/PITR, RPO/RTO, alert delivery, or a running
+application. Its receipt must not close those operating acceptance gates.
+TLS follows PostgreSQL16's [server configuration](https://www.postgresql.org/docs/16/ssl-tcp.html)
+and [certificate/hostname verification](https://www.postgresql.org/docs/16/libpq-ssl.html).

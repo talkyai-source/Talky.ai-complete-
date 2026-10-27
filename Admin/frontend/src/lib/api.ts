@@ -1008,8 +1008,8 @@ export interface DashboardStats {
 
 export interface SystemHealthItem {
     name: string;
-    status: 'operational' | 'degraded' | 'down';
-    latency_ms: number;
+    status: 'operational' | 'degraded' | 'down' | 'unknown';
+    latency_ms: number | null;
     latency_display: string;
 }
 

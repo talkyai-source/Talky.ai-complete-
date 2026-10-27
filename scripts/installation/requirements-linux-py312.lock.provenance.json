@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "requirements_path": "backend/requirements.txt",
+  "requirements_sha256": "8c367532927aab138854463a19d666fe923fa367713b2de293f3ec8eb91986e9",
+  "lock_sha256": "8a3be035423ac7cf46d0f3cb2646eaa7592c3fdad0feb72c46957b18e77be9cb",
+  "hash_normalization": "UTF-8 text with LF newlines",
+  "python_version": "3.12",
+  "python_platform": "x86_64-unknown-linux-gnu",
+  "resolver": "uv 0.9.17",
+  "resolved_packages": 157,
+  "command": "uv pip compile backend/requirements.txt --python-platform x86_64-unknown-linux-gnu --python-version 3.12 --generate-hashes --no-header --no-annotate --output-file scripts/installation/requirements-linux-py312.lock",
+  "qualification": "Cross-platform dependency resolution; native Ubuntu installation is recorded separately in the Ubuntu installer verification workflow."
+}

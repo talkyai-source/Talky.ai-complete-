@@ -699,6 +699,87 @@ CREATE INDEX IF NOT EXISTS idx_transcripts_full_text_search
 ON transcripts USING gin(to_tsvector('english', COALESCE(full_text, '')));
 
 -- =============================================================================
+-- User-facing event stream. The supported 0008 stamp skips its original 0003
+-- creator, so the canonical floor must include it. 0073 repairs older floors.
+-- BEGIN STREAM_EVENTS BOOTSTRAP
+DO $stream_events_bootstrap$
+BEGIN
+    IF to_regclass('public.stream_events') IS NOT NULL THEN
+        RETURN;
+    END IF;
+
+    CREATE TABLE public.stream_events (
+        id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+        tenant_id uuid NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+        category text NOT NULL CONSTRAINT stream_events_category_check
+            CHECK (category IN ('campaign', 'system', 'alert', 'user_action', 'milestone', 'call')),
+        title text NOT NULL,
+        description text,
+        severity text CONSTRAINT stream_events_severity_check
+            CHECK (severity IS NULL OR severity IN ('info', 'warning', 'critical')),
+        related_campaign_id uuid,
+        related_call_id uuid,
+        actor_user_id uuid,
+        metadata jsonb,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        expires_at timestamptz NOT NULL DEFAULT (now() + interval '90 days')
+    );
+    CREATE INDEX idx_se_tenant_recent ON public.stream_events (tenant_id, created_at DESC);
+    CREATE INDEX idx_se_tenant_category ON public.stream_events (tenant_id, category, created_at DESC);
+    CREATE INDEX idx_se_expires ON public.stream_events (expires_at);
+
+    ALTER TABLE public.stream_events ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.stream_events FORCE ROW LEVEL SECURITY;
+    CREATE POLICY stream_events_tenant_isolation ON public.stream_events FOR ALL
+        USING (
+            COALESCE(NULLIF(current_setting('app.bypass_rls', true), '')::boolean, false)
+            OR tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+        )
+        WITH CHECK (
+            COALESCE(NULLIF(current_setting('app.bypass_rls', true), '')::boolean, false)
+            OR tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+        );
+END
+$stream_events_bootstrap$;
+-- END STREAM_EVENTS BOOTSTRAP
+
+-- Persisted platform-wide operator incidents. 0074 repairs older floors.
+-- BEGIN INCIDENTS BOOTSTRAP
+DO $incidents_bootstrap$
+BEGIN
+    IF to_regclass('public.incidents') IS NOT NULL THEN
+        RETURN;
+    END IF;
+
+    CREATE TABLE public.incidents (
+        id text PRIMARY KEY,
+        title text NOT NULL,
+        severity text NOT NULL DEFAULT 'info',
+        status text NOT NULL DEFAULT 'open',
+        description text,
+        triggered_at timestamptz DEFAULT now(),
+        created_at timestamptz NOT NULL DEFAULT now(),
+        acknowledged_at timestamptz,
+        acknowledged_by text,
+        resolved_at timestamptz,
+        resolved_by text
+    );
+    CREATE INDEX idx_incidents_status ON public.incidents (status);
+    CREATE INDEX idx_incidents_severity ON public.incidents (severity);
+    CREATE INDEX idx_incidents_triggered_at ON public.incidents (triggered_at DESC);
+    COMMENT ON TABLE public.incidents IS
+        'Persisted platform-wide operator incidents; restricted to platform context.';
+
+    ALTER TABLE public.incidents ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.incidents FORCE ROW LEVEL SECURITY;
+    CREATE POLICY incidents_platform_only ON public.incidents FOR ALL
+        USING (COALESCE(NULLIF(current_setting('app.bypass_rls', true), '')::boolean, false))
+        WITH CHECK (COALESCE(NULLIF(current_setting('app.bypass_rls', true), '')::boolean, false));
+END
+$incidents_bootstrap$;
+-- END INCIDENTS BOOTSTRAP
+
+-- =============================================================================
 -- SECTION 3: VOICE CONTRACT & TRACING
 -- =============================================================================
 
