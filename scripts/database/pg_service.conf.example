@@ -1,0 +1,31 @@
+# Copy outside the checkout, replace placeholders, chmod 0600.
+# Keep passwords in PGPASSFILE (chmod 0600); never put them in this file.
+# Use direct PostgreSQL endpoints, not a transaction-pooled connection.
+[talklee_runtime]
+host=database.example.invalid
+port=5432
+dbname=talkyai
+user=talklee_app
+sslmode=verify-full
+sslrootcert=/etc/talklee/secrets/database-ca.pem
+connect_timeout=10
+
+[talklee_backup]
+host=database.example.invalid
+port=5432
+dbname=talkyai
+user=talklee_backup
+sslmode=verify-full
+sslrootcert=/etc/talklee/secrets/database-ca.pem
+connect_timeout=10
+
+# A disposable test host, with a privileged restore operator. This is not the
+# application runtime credential. Provision the restricted probe role there.
+[talklee_restore]
+host=restore-database.example.invalid
+port=5432
+dbname=postgres
+user=talklee_restore_owner
+sslmode=verify-full
+sslrootcert=/etc/talklee/secrets/restore-database-ca.pem
+connect_timeout=10

@@ -324,30 +324,33 @@ async def forgot_password(
         "code_hash": _hash_reset_code(code),
         "password_generation": _password_generation(user_row["password_hash"]),
     }
-    redis = _get_redis_or_503()
-    await redis.setex(_reset_redis_key(email), _RESET_CODE_TTL_SECONDS, json.dumps(payload))
+    # A storage or mail failure answers exactly like an unknown address. A 500
+    # here (and only for registered emails) would reveal which accounts exist.
+    try:
+        await redis.setex(_reset_redis_key(email), _RESET_CODE_TTL_SECONDS, json.dumps(payload))
+    except Exception as exc:
+        logger.warning("forgot_password_pending_write_failed err=%s", type(exc).__name__)
+        return generic_ok
 
     # Send the code.  Tolerate send failures (logged) so a misconfigured
     # SMTP setup doesn't 500 the caller — they'd just never receive a code,
     # which is the same observable failure as a typo'd email anyway.
-    email_service = get_email_service()
     try:
-        sent = await email_service.send_password_reset_email(
+        email_service = get_email_service()
+        # EmailService may not have a dedicated reset method; the generic
+        # signup-code template ("here is your code, expires in N minutes")
+        # works for both.
+        sender = getattr(email_service, "send_password_reset_email", None) \
+            or email_service.send_signup_code_email
+        sent = await sender(
             recipient_email=email,
             recipient_name=email.split("@")[0],
             code=code,
             expires_in_minutes=_RESET_CODE_TTL_SECONDS // 60,
         )
-    except AttributeError:
-        # EmailService may not have a dedicated reset method yet; fall back
-        # to the generic signup-code template — the body wording is similar
-        # ("here is your code, expires in N minutes") and works for both.
-        sent = await email_service.send_signup_code_email(
-            recipient_email=email,
-            recipient_name=email.split("@")[0],
-            code=code,
-            expires_in_minutes=_RESET_CODE_TTL_SECONDS // 60,
-        )
+    except Exception as exc:
+        logger.warning("forgot_password_email_send_error err=%s", type(exc).__name__)
+        sent = False
     if not sent:
         logger.warning(
             "forgot_password_email_send_failed email=%s — code stored in Redis "

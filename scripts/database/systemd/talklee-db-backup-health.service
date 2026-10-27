@@ -1,0 +1,14 @@
+[Unit]
+Description=Check age and integrity of the latest Talklee database backup
+
+[Service]
+Type=oneshot
+User=talklee-backup
+Group=talklee-backup
+ExecStart=/usr/bin/python3 /opt/talky/scripts/database/recovery.py health --backup-root /var/backups/talklee --maximum-age-hours 26
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+# Nonzero status must be routed to the approved operator alert receiver.

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Talklee database backup daily
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 UTC
+Persistent=true
+RandomizedDelaySec=5m
+Unit=talklee-db-backup.service
+
+[Install]
+WantedBy=timers.target

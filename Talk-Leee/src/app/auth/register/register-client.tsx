@@ -77,6 +77,8 @@ export default function RegisterClientPage() {
                 formData.businessName.trim(),
                 formData.email.trim(),
             );
+            setFormData((current) => ({ ...current, email: response.email }));
+            setOtpCode("");
             setMessage(response.message || "Verification code sent! Check your email.");
             setStep("otp");
         } catch (err) {
@@ -88,6 +90,10 @@ export default function RegisterClientPage() {
 
     async function handleOtpSubmit(e: React.FormEvent) {
         e.preventDefault();
+        if (!/^\d{6}$/.test(otpCode)) {
+            setError("Enter the 6-digit verification code from your email.");
+            return;
+        }
         setLoading(true);
         setError("");
         setMessage("");
@@ -192,6 +198,8 @@ export default function RegisterClientPage() {
                 formData.businessName.trim(),
                 formData.email.trim(),
             );
+            setFormData((current) => ({ ...current, email: response.email }));
+            setOtpCode("");
             setMessage(response.message || "New verification code sent!");
         } catch (err) {
             setError(extractError(err, "Failed to resend code. Please try again."));
@@ -349,14 +357,14 @@ export default function RegisterClientPage() {
                                             type="text"
                                             placeholder="Enter verification code"
                                             value={otpCode}
-                                            onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
+                                            onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                                             className="pl-10 text-center text-lg tracking-widest font-mono"
                                             required
                                             disabled={loading}
-                                            maxLength={8}
+                                            maxLength={6}
                                             autoComplete="one-time-code"
                                             inputMode="numeric"
-                                            pattern="[0-9]*"
+                                            pattern="[0-9]{6}"
                                             ref={otpInputRef}
                                             aria-invalid={error ? true : undefined}
                                             aria-describedby={[message ? messageId : null, error ? errorId : null, otpHelpId].filter(Boolean).join(" ")}
@@ -381,7 +389,7 @@ export default function RegisterClientPage() {
                             </CardContent>
 
                             <CardFooter className="flex flex-col gap-4">
-                                <Button type="submit" className="w-full" disabled={loading || otpCode.length < 6}>
+                                <Button type="submit" className="w-full" disabled={loading || otpCode.length !== 6}>
                                     {loading ? (
                                         <>
                                             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
