@@ -242,8 +242,14 @@ access required by the existing recovery commands; migration and runtime
 identities have neither PostgreSQL superuser nor `BYPASSRLS` privileges.
 
 The actual `recovery.py backup`, `restore` and `health` commands run over
-`sslmode=verify-full`. The fixture compares the complete dumped schema and
-every public table's records, reapplies explicit scratch-database ownership
+`sslmode=verify-full`. The fixture compares every public table's records and
+sequence state. It independently exports source schema-only SQL into a new
+empty comparison database on the target fixture server and requires its exact
+re-dump to match the full restore's schema. PostgreSQL can re-render existing
+CHECK expressions during SQL replay (array casts and nested conjunctions);
+using its parser preserves every definition without regex equivalence rules.
+The original, reference and restored definition hashes remain in the receipt.
+The fixture then reapplies explicit scratch-database ownership
 and runtime grants, and checks actual restricted-login reads and writes for
 both tenants. Untrusted CA, wrong server name and plaintext connections must
 fail for the expected TLS/HBA reason. Runtime checks also reject unset tenant

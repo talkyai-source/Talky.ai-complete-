@@ -34,6 +34,7 @@ SPEC.loader.exec_module(recovery)
 LABEL = "org.talklee.synthetic-recovery"
 SOURCE_DB = "talky_synthetic_source"
 RESTORED_DB = "talky_restore_canonical"
+REFERENCE_DB = "talky_restore_schema_reference"
 TENANTS = ("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")
 
 
@@ -273,6 +274,13 @@ def seed(pg, fixture):
     grant_runtime(pg, migration, SOURCE_DB)
 
 
+def schema_definition(pg, service, database=None):
+    schema = pg.run("pg_dump", ["--no-password", "--schema-only", "--no-owner", "--no-privileges", "--dbname", service.connection(database)], service)
+    # Headers/comments and the random psql restriction cookie are not database
+    # definitions. Preserve every statement and expression without rewriting.
+    return "\n".join(line for line in schema.splitlines() if line and not line.startswith(("--", "\\restrict ", "\\unrestrict ")))
+
+
 def fingerprint(pg, service, database=None, schema_file=None):
     tables = pg.json(service, "SELECT json_agg(tablename ORDER BY tablename) FROM pg_tables WHERE schemaname='public';", database=database)
     rows = []
@@ -287,14 +295,38 @@ def fingerprint(pg, service, database=None, schema_file=None):
     for sequence in sequences:
         sequence_values[sequence] = pg.json(service, "SELECT row_to_json(s) FROM (SELECT last_value,is_called FROM public."
                                             + recovery.identifier(sequence) + ") s;", database=database)
-    schema = pg.run("pg_dump", ["--no-password", "--schema-only", "--no-owner", "--no-privileges", "--dbname", service.connection(database)], service)
-    # Newer patched pg_dump emits a random \restrict token; it is not schema.
-    schema = "\n".join(line for line in schema.splitlines() if line and not line.startswith(("--", "\\restrict ", "\\unrestrict ")))
+    schema = schema_definition(pg, service, database)
     if schema_file:
         write_private(schema_file, schema)
     return {"table_count": len(tables), "row_counts": {name: body["count"] for name, body in data.items()},
             "records_sha256": hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest(),
             "schema_sha256": hashlib.sha256(schema.encode()).hexdigest(), "sequences": sequence_values}
+
+
+def parsed_schema_reference(pg, source, target, work):
+    """Let PostgreSQL reparse the independent source DDL, not a regex normalizer.
+
+    ALTER COLUMN can leave array-coercion nodes/nested ANDs in stored CHECK
+    expressions which PostgreSQL simplifies when any SQL dump is replayed.
+    The independent schema-only replay preserves every source definition; its
+    exact re-dump is the expected representation after that parser round trip.
+    """
+    recovery.validate_restore_target(REFERENCE_DB, SOURCE_DB)
+    require(REFERENCE_DB != RESTORED_DB and
+            not pg.sql(target, f"SELECT 1 FROM pg_database WHERE datname='{REFERENCE_DB}';"),
+            "Refusing to reuse an existing schema reference database")
+    export = work / "source-schema-export.sql"
+    pg.run("pg_dump", ["--no-password", "--schema-only", "--no-owner", "--no-privileges",
+                       "--file", str(export), "--dbname", source.connection()], source)
+    export.chmod(0o600)
+    pg.sql(target, f"CREATE DATABASE {REFERENCE_DB} TEMPLATE template0;", readonly=False)
+    pg.run("psql", ["-X", "--no-password", "--set", "ON_ERROR_STOP=1", "--single-transaction",
+                    "--dbname", target.connection(REFERENCE_DB), "--file", str(export)], target, readonly=False)
+    definition = schema_definition(pg, target, REFERENCE_DB)
+    write_private(work / "reference-schema.sql", definition)
+    return {"method": "independent source schema-only export parsed by PostgreSQL on a fresh comparison database",
+            "source_export_sha256": recovery.digest(export),
+            "reference_schema_sha256": hashlib.sha256(definition.encode()).hexdigest()}
 
 
 def runtime_checks(fixture, label, heads):
@@ -398,7 +430,8 @@ def main():
                "scope": "full canonical schema and synthetic data on two TLS containers sharing one host",
                "limits": ["not off-host survivability, retention/PITR, RPO/RTO, or alert-delivery acceptance",
                           "no application lifespan, provider, payment, call, or recording/encryption-key recovery",
-                          "runtime data-operation checks cover campaigns, leads and calls; grants are fixture-specific"]}
+                          "runtime data-operation checks cover campaigns, leads and calls; grants are fixture-specific",
+                          "schema equality compares PostgreSQL-parsed definitions, not byte-identical pre-restore expression rendering"]}
     inputs = [ROOT / name for name in ("backend/database/complete_schema.sql", "backend/Alembic/env.py",
               "backend/alembic.ini", "scripts/database/recovery.py", "scripts/database/tests/tls_canonical_rehearsal.py",
               "scripts/installation/requirements-linux-py312.lock")]
@@ -436,15 +469,22 @@ def main():
         stage = "full restored schema and record comparison"
         after = fingerprint(pg, target, RESTORED_DB, schema_file=work / "restored-schema.sql")
         receipt["restored"] = after
-        if after != before:
-            receipt["mismatched_fields"] = [key for key in before if before[key] != after[key]]
+        comparison = parsed_schema_reference(pg, source, target, work)
+        comparison.update(source_schema_sha256=before["schema_sha256"], restored_schema_sha256=after["schema_sha256"])
+        receipt["schema_comparison"] = comparison
+        mismatches = [key for key in before if key != "schema_sha256" and before[key] != after[key]]
+        if after["schema_sha256"] != comparison["reference_schema_sha256"]:
+            mismatches.append("schema_sha256")
+        if mismatches:
+            receipt["mismatched_fields"] = mismatches
             if "schema_sha256" in receipt["mismatched_fields"]:
-                differences = list(difflib.unified_diff((work / "source-schema.sql").read_text().splitlines(),
+                differences = list(difflib.unified_diff((work / "reference-schema.sql").read_text().splitlines(),
                                    (work / "restored-schema.sql").read_text().splitlines(),
-                                   fromfile="synthetic-source-schema", tofile="synthetic-restored-schema", n=2))
+                                   fromfile="independent-parsed-source-schema", tofile="synthetic-restored-schema", n=2))
                 print("\n".join(differences[:120]), file=sys.stderr)
             raise RuntimeError("Restored fingerprint differs in: " + ", ".join(receipt["mismatched_fields"]))
-        print("Full canonical schema and records matched after restore", flush=True)
+        receipt["checks"].append("all public-table records and sequences matched; schema matched the independent PostgreSQL-parsed source definitions")
+        print("Full canonical records, sequences and parsed schema matched after restore", flush=True)
         stage = "restored ownership, grants and runtime validation"
         # Reapply ownership/grants explicitly: pg_restore intentionally omits
         # original roles and ACLs. These changes affect only the scratch target.
