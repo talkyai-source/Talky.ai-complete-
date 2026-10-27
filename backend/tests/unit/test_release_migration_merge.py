@@ -15,9 +15,10 @@ def test_release_exposes_one_head_containing_both_existing_histories():
     # 0064 (DNC phone_number compatibility trigger) sits on top of the merge;
     # 0065/0066 (bug hunt 2026-10-10 schema repairs), 0067/0068 (credential
     # history, API-key lookup hash), 0069 (AssemblyAI settings), 0070 (PBX
-    # line soft delete), 0071 (paid-only billing terms) and 0072 (allowance
-    # anchor) are linear above it, behind this single deployment head.
-    assert SCRIPTS.get_heads() == ["0072_allowance_anchor"]
+    # line soft delete), 0071 (paid-only billing terms), 0072 (allowance
+    # anchor) and 0073 (event-stream bootstrap) are linear above it.
+    assert SCRIPTS.get_heads() == ["0073_stream_events_bootstrap"]
+    assert SCRIPTS.get_revision("0073_stream_events_bootstrap").down_revision == "0072_allowance_anchor"
     assert SCRIPTS.get_revision("0072_allowance_anchor").down_revision == "0071_paid_only_billing"
     assert SCRIPTS.get_revision("0071_paid_only_billing").down_revision == "0070_trunk_soft_delete"
     assert SCRIPTS.get_revision("0070_trunk_soft_delete").down_revision == "0069_assemblyai_settings"
