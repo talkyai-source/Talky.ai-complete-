@@ -1,0 +1,121 @@
+name: Ubuntu installer verification
+
+on:
+  push:
+    branches: ["codex/ubuntu-installer-rehearsal-*"]
+    paths:
+      - "scripts/installation/**"
+      - "scripts/database/**"
+      - "install_talklee.sh"
+      - "backend/requirements.txt"
+      - ".github/workflows/ubuntu-installer.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/installation/**"
+      - "scripts/database/**"
+      - "install_talklee.sh"
+      - "INSTALLATION.md"
+      - "backend/requirements.txt"
+      - ".github/workflows/ubuntu-installer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ubuntu-installer-${{ github.ref }}
+  cancel-in-progress: true
+
+# Runs on real Ubuntu runners without production credentials. This verifies
+# dependencies/builds and refusal paths, not a configured server or carrier call.
+jobs:
+  installer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      PYTHON_DOTENV_DISABLED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      ENVIRONMENT: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/installation/requirements-linux-py312.lock
+      - name: Install the exact hashed Linux dependency closure
+        run: |
+          python -m pip install --require-hashes -r scripts/installation/requirements-linux-py312.lock
+          python -m pip check
+          python -c "import fastapi, asyncpg, psycopg2, groq, cartesia, soxr"
+      - name: Verify installer, preparation and recovery boundaries
+        run: |
+          python -m unittest discover -s scripts/installation -p 'test_*.py' -v
+          python -m unittest discover -s scripts/database/tests -p 'test_*.py' -v
+          python -m unittest discover -s backend/tests/unit -p test_alembic_database_connection.py -v
+          bash -n install_talklee.sh
+          bash install_talklee.sh plan > "$RUNNER_TEMP/installer-plan.json"
+      - name: Verify Ubuntu package availability and prepare real input drafts
+        run: |
+          sudo apt-get update -qq
+          python scripts/installation/prepare.py --source . --output "$RUNNER_TEMP/talklee-inputs"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          folder = Path(os.environ['RUNNER_TEMP']) / 'talklee-inputs'
+          config = json.loads((folder / 'install.json').read_text())
+          assert config['frontend_mode'] == 'linux'
+          assert config['database_prepared'] is False
+          assert config['source_sha'] == os.environ['GITHUB_SHA']
+          assert (folder / 'requirements-linux-py312.lock').is_file()
+          assert len(json.loads((folder / 'apt-versions.json').read_text())) >= 18
+          PY
+      - name: Save nonsecret preparation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-installer-input-evidence
+          path: |
+            ${{ runner.temp }}/installer-plan.json
+            ${{ runner.temp }}/talklee-inputs/apt-versions.json
+          if-no-files-found: error
+
+  gateway:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test the actual gateway release path
+        run: bash backend/scripts/build_voice_gateway_release.sh "$RUNNER_TEMP/voice_gateway"
+
+  frontends:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_APP_ENV: development
+      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:9/api/v1
+      NEXT_PUBLIC_SENTRY_ENABLED: ""
+      SENTRY_AUTH_TOKEN: ""
+      VITE_API_BASE_URL: http://127.0.0.1:9/api/v1
+      VITE_USE_DUMMY_AUTH: "false"
+      VITE_ADMIN_DEV_MODE: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.0"
+          cache: npm
+          cache-dependency-path: |
+            Talk-Leee/package-lock.json
+            Admin/frontend/package-lock.json
+      - name: Build customer dashboard
+        working-directory: Talk-Leee
+        run: |
+          npm ci --include=dev --no-audit --no-fund
+          npm run build
+      - name: Build Admin
+        working-directory: Admin/frontend
+        run: |
+          npm ci --include=dev --no-audit --no-fund
+          npm run build

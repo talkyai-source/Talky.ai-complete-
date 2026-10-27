@@ -9,6 +9,7 @@ shell-evaluated or passed as command-line arguments.
 from __future__ import annotations
 
 import argparse
+import ast
 import configparser
 import hashlib
 import ipaddress
@@ -91,6 +92,49 @@ def secure_input(path: Path, secret: bool = False) -> None:
                 f'Secret input must be mode 0600 or stricter: {path}')
 
 
+def valid_lock_row(line: str) -> bool:
+    """Accept exact hashed requirements, including pip-compile platform markers.
+
+    Markers are parsed but never evaluated here. pip applies them on the target.
+    Restrict this profile to standard string comparisons joined by and/or;
+    requirement options, URLs and executable Python are not marker syntax.
+    """
+    match = re.fullmatch(
+        r'[A-Za-z0-9_.-]+(?:\[[A-Za-z0-9_,.-]+\])?==[A-Za-z0-9_.+!-]+'
+        r'(?:\s*;\s*(?P<marker>.+?))?(?:\s+--hash=sha256:[a-f0-9]{64})+', line)
+    if not match:
+        return False
+    marker = match.group('marker')
+    if not marker:
+        return True
+    try:
+        tree = ast.parse(marker, mode='eval')
+    except (SyntaxError, ValueError):
+        return False
+    variables = {'python_version', 'python_full_version', 'os_name', 'sys_platform',
+                 'platform_release', 'platform_system', 'platform_version',
+                 'platform_machine', 'platform_python_implementation',
+                 'implementation_name', 'implementation_version', 'extra'}
+    allowed = (ast.Expression, ast.BoolOp, ast.Compare, ast.And, ast.Or, ast.Eq,
+               ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn,
+               ast.Name, ast.Load, ast.Constant)
+    if any(not isinstance(node, allowed) for node in ast.walk(tree)):
+        return False
+    if not isinstance(tree.body, (ast.Compare, ast.BoolOp)):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id not in variables:
+            return False
+        if isinstance(node, ast.Constant) and not isinstance(node.value, str):
+            return False
+        if isinstance(node, ast.BoolOp) and any(not isinstance(item, (ast.Compare, ast.BoolOp)) for item in node.values):
+            return False
+        if isinstance(node, ast.Compare) and (len(node.ops) != 1 or
+                not all(isinstance(item, (ast.Name, ast.Constant)) for item in (node.left, *node.comparators))):
+            return False
+    return True
+
+
 def validate_config(config: dict, *, inputs: bool = False) -> dict:
     require(isinstance(config, dict), 'Configuration must be a JSON object')
     require(set(config) == KEYS, 'Configuration keys differ from install.example.json')
@@ -156,9 +200,8 @@ def validate_config(config: dict, *, inputs: bool = False) -> dict:
     lock = Path(config['python_requirements_lock']).read_text()
     logical = lock.replace('\\\n', ' ').replace('\\\r\n', ' ').splitlines()
     rows = [line.strip() for line in logical if line.strip() and not line.lstrip().startswith('#')]
-    require(rows and all(re.fullmatch(
-        r'[A-Za-z0-9_.-]+(?:\[[A-Za-z0-9_,.-]+\])?==[A-Za-z0-9_.+!-]+(?:\s+--hash=sha256:[a-f0-9]{64})+',
-        line) for line in rows), 'Python lock must contain exact versions with SHA256 hashes only')
+    require(rows and all(valid_lock_row(line) for line in rows),
+            'Python lock must contain exact versions with SHA256 hashes and supported environment markers only')
     asterisk = Path(config['asterisk_config_directory'])
     require(asterisk.is_absolute() and asterisk.is_dir() and not asterisk.is_symlink(),
             'Supply an absolute directory of reviewed production Asterisk configuration')
@@ -253,7 +296,7 @@ def validate_config(config: dict, *, inputs: bool = False) -> dict:
         require(len({key for key, _ in query_pairs}) == len(query_pairs),
                 'DATABASE_URL query options must not be duplicated')
         require(not {'host', 'hostaddr', 'port', 'user', 'password', 'dbname', 'database',
-                     'service', 'passfile', 'ssl'} & {key.lower() for key, _ in query_pairs},
+                     'service', 'passfile', 'ssl', 'options'} & {key.lower() for key, _ in query_pairs},
                 'DATABASE_URL query must not override target, identity or SSL policy')
         try:
             address = ipaddress.ip_address(db.hostname)
@@ -298,14 +341,23 @@ def validate_production_gate_inputs(env: dict[str, str], lock_rows: list[str]) -
         require(env.get(key, '').strip().lower() not in ('0', 'false', 'no', 'off', 'disabled'),
                 f'{key} cannot disable production tenant routing')
     stripe_key = env.get('STRIPE_SECRET_KEY', '').strip()
-    billing_disabled = env.get('STRIPE_BILLING_DISABLED', '').strip().lower() in ('1', 'true', 'yes')
+    true_values = ('1', 'true', 'yes', 'on')
+    billing_disabled = env.get('STRIPE_BILLING_DISABLED', '').strip().lower() in true_values
+    if billing_disabled:
+        return
+    require(env.get('STRIPE_MOCK_MODE', '').strip().lower() not in true_values,
+            'STRIPE_MOCK_MODE is prohibited in production')
     require(stripe_key or billing_disabled,
             'STRIPE_SECRET_KEY is required unless STRIPE_BILLING_DISABLED is explicitly acknowledged')
-    require(not stripe_key or stripe_key.startswith('sk_live_'),
-            'Production STRIPE_SECRET_KEY must be a live key; test keys are refused')
+    acknowledged_test = env.get('STRIPE_TEST_MODE_IN_PRODUCTION', '').strip().lower() in true_values
+    require((stripe_key.startswith('sk_live_') and len(stripe_key) > len('sk_live_')) or
+            (acknowledged_test and stripe_key.startswith('sk_test_') and len(stripe_key) > len('sk_test_')),
+            'Use a live key or explicitly acknowledge STRIPE_TEST_MODE_IN_PRODUCTION with a test key')
     if stripe_key:
         packages = {line.split('==', 1)[0].split('[', 1)[0].lower().replace('_', '-') for line in lock_rows}
         require('stripe' in packages, 'The qualified Python lock must include Stripe when billing is configured')
+    require(bool(env.get('STRIPE_WEBHOOK_SECRET', '').strip()),
+            'STRIPE_WEBHOOK_SECRET is required when billing is configured')
 
 
 def steps(config: dict) -> list[str]:
@@ -344,8 +396,24 @@ def write(path: Path, content: str, mode: int = 0o644) -> None:
 
 def copy_secret(source: str | Path, target: Path, mode: int = 0o600) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, target)
-    target.chmod(mode)
+    # NamedTemporaryFile creates mode 0600 regardless of the host umask. Never
+    # expose a new backend .env as 0644 between copyfile and chmod.
+    with tempfile.NamedTemporaryFile(dir=target.parent, prefix='.talky-input-', delete=False) as handle:
+        staged = Path(handle.name)
+    try:
+        shutil.copyfile(source, staged)
+        staged.chmod(mode)
+        staged.replace(target)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+def require_install_umask() -> None:
+    current = os.umask(0o022)
+    os.umask(current)
+    require(current == 0o022,
+            'Apply requires umask 0022 inside the root shell so services can read the installed source; '
+            'secret files are created separately with protected modes')
 
 
 def unit_dropin(*, asterisk: bool = False) -> str:
@@ -410,6 +478,7 @@ def ensure_fresh_host(config: dict, source: Path) -> None:
                  Path('/etc/nginx'), Path('/etc/asterisk'), Path('/var/lib/docker'),
                  Path('/usr/sbin/policy-rc.d')):
         require(not path.exists() and not path.is_symlink(), f'Refusing existing path: {path}')
+    require_install_umask()
     require(not run(['git', 'status', '--porcelain'], cwd=source, capture=True).strip(),
             'Installer source checkout must be completely clean')
     require(run(['git', 'rev-parse', 'HEAD'], cwd=source, capture=True).strip() == config['source_sha'],
@@ -440,9 +509,11 @@ with psycopg2.connect(os.environ["DATABASE_URL"], connect_timeout=10) as c:
         q.execute("SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname=current_user")
         role=q.fetchone()
         check(role and not any(role), "runtime role cannot be superuser/BYPASSRLS/CREATEDB/CREATEROLE")
+        q.execute("SELECT current_user=session_user")
+        check(q.fetchone()==(True,), "runtime connection must use its own login role")
         q.execute("SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()")
         check(q.fetchone()==(True,), "TLS required")
-        q.execute("SELECT version_num FROM alembic_version")
+        q.execute("SELECT version_num FROM public.alembic_version")
         actual={r[0] for r in q.fetchall()}
         expected=set(ScriptDirectory.from_config(Config("alembic.ini")).get_heads())
         check(expected and actual==expected, "prepare and verify schema before install")
@@ -459,6 +530,12 @@ def runtime_environment(env: dict[str, str]) -> dict[str, str]:
 def database_check(env: dict, backend: Path) -> None:
     run([str(backend / 'venv/bin/python'), '-c', DATABASE_CHECK_SCRIPT], cwd=backend,
         env=runtime_environment(env))
+
+
+def frontend_build_environment(env_file: Path) -> dict[str, str]:
+    # Next and Vite give exported variables precedence over dotenv files. Only
+    # reviewed values may select API/auth settings in the resulting bundles.
+    return {**runtime_environment(read_env(env_file)), 'NODE_ENV': 'production'}
 
 
 def apply(config: dict, source: Path) -> None:
@@ -656,7 +733,7 @@ def install_frontends(config: dict) -> None:
         require((directory / 'package-lock.json').is_file(), f'Missing {relative} lockfile')
         copy_secret(config[key], directory / '.env.production', 0o600)
         run(['chown', '-R', 'talky:talky', str(directory)])
-        build_env = {**os.environ, 'NODE_ENV': 'production'}
+        build_env = frontend_build_environment(Path(config[key]))
         run(['runuser', '-u', 'talky', '--', '/usr/local/bin/npm', 'ci', '--include=dev'], cwd=directory, env=build_env)
         run(['runuser', '-u', 'talky', '--', '/usr/local/bin/npm', 'run', 'build'], cwd=directory, env=build_env)
         run(['chown', '-R', 'root:talky', str(directory)])

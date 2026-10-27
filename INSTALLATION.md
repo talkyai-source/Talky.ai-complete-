@@ -7,9 +7,56 @@ establish that production has been migrated or that a clean Linux server has
 passed acceptance; those outcomes require the recorded rehearsals below.
 
 The installer uses the existing Python API/workers, C++ voice gateway and
-Asterisk architecture. It supports `frontend_mode=external` for the documented
-Vercel frontends and `frontend_mode=linux` to install both frontends on the new
-host. Select the intended mode in the deployment record before applying it.
+Asterisk architecture. Use **`frontend_mode=linux` for the complete Ubuntu
+installation**: customer dashboard, Admin, backend, gateway and telephony on
+the new application host. `frontend_mode=external` intentionally leaves the
+frontends on their separately managed hosting; it does not install them.
+
+## Clone the full release on Ubuntu first
+
+Use the reviewed full commit supplied with the release. The script-only ZIP is
+an inspection kit; applying it requires the complete Git repository. Git access
+must be configured without embedding access tokens in the repository URL.
+
+On a fresh Ubuntu 24.04 amd64 server, install the small checkout prerequisites
+if the image does not already have them, then clone outside `/opt/talky`:
+
+```bash
+sudo apt-get update
+sudo apt-get install --yes git python3 ca-certificates
+git clone https://github.com/talkyai-source/Talky.ai-complete-.git talklee-install-source
+cd talklee-install-source
+TALKLEE_RELEASE_SHA='REPLACE_WITH_REVIEWED_40_CHARACTER_RELEASE_COMMIT'
+git checkout --detach "$TALKLEE_RELEASE_SHA"
+test "$(git rev-parse HEAD)" = "$TALKLEE_RELEASE_SHA"
+test -z "$(git status --porcelain)"
+bash install_talklee.sh plan
+```
+
+Keep this checkout clean. Put populated configuration, credentials and prepared
+dependency files outside it. The installer clones this exact source into
+`/opt/talky`; it refuses an existing installation. Downloaded archives without
+Git metadata and a repository origin are not a replacement for this checkout.
+
+Next generate the protected input directory from the release:
+
+```bash
+sudo python3 scripts/installation/prepare.py --source "$PWD" --output /secure/talky
+```
+
+The helper checks the bundled Python lock/provenance, records the source SHA,
+collects exact Ubuntu package candidates and immutable Node/Redis download
+identities, and writes Linux-mode configuration templates. It refuses an
+existing output directory and does not install packages or start services.
+Follow [Prepare Ubuntu inputs](scripts/installation/PREPARE-UBUNTU.md) to fill
+the environment-specific database, accounts, DNS, certificate and telephony
+values. A successful `plan` or preparation run does not bring a service online.
+
+The launcher runs Python. Python installs the pinned Ubuntu and Python
+packages, builds/tests the C++ gateway, and configures nginx, Asterisk, Redis,
+the firewall and systemd services. In Linux frontend mode it also runs
+`npm ci --include=dev` and `npm run build` in both frontend projects. npm is
+the frontend dependency/build step, not the installer for the whole platform.
 
 ## Start locally
 
@@ -56,13 +103,17 @@ actually live, and prove recovery after loss of the application server.
    nginx, Asterisk or Docker installation. It is not an in-place upgrade tool.
 2. Prepare the external database with the reviewed schema and restricted runtime
    role. Restore and rehearse migrations on an isolated copy first. Follow the
-   existing [bootstrap history](backend/database/MIGRATIONS.md); never stamp an
-   old snapshot at the current head. Read actual heads from the selected commit.
-3. Prepare exact Ubuntu package versions, a complete hash-locked Linux/Python
-   3.12 requirements file, and a Redis image digest. Linux frontend mode also
-   needs the approved Node 22 archive version and checksum. The installer
-   consumes these reviewed pins and records installed versions. Preparing a
-   lock is not the same as qualifying its dependency closure.
+   [fresh-database preparation](scripts/installation/PREPARE-UBUNTU.md#prepare-the-external-database)
+   and existing [bootstrap history](backend/database/MIGRATIONS.md); never
+   stamp an old snapshot at the current head. Read actual heads from the
+   selected commit; historical prose can name an older head. Separate
+   migration and runtime roles also need reviewed grants and runtime access
+   checks, not just matching revision numbers.
+3. Use the preparation helper to copy the matching release's Linux/Python 3.12
+   hash lock and collect exact Ubuntu package versions, a Redis image digest
+   and the Node 22 archive version/checksum. Review its provenance and qualify
+   the artifacts on Ubuntu. The installer consumes these pins and records
+   installed versions; collecting them is not dependency acceptance.
 4. Supply reviewed Asterisk configuration for the actual carrier/PBX, public
    TLS certificates, database CA, runtime environment and network allow-lists.
    Existing lab telephony configurations are not production inputs.
@@ -117,13 +168,15 @@ provider, current records, certificate issuer and renewal owner in handover.
 
 ## Install and validate on the new host
 
-After all protected inputs are prepared, run from the reviewed clean checkout:
+After all protected inputs are prepared, run from the reviewed clean checkout.
+The example path below contains root-readable inputs; replace it if your
+protected input directory differs:
 
 ```bash
-bash install_talklee.sh validate --config /secure/talky/install.json
+sudo bash install_talklee.sh validate --config /secure/talky/install.json
 sudo bash install_talklee.sh apply \
   --config /secure/talky/install.json \
-  --source /path/to/clean/reviewed-checkout \
+  --source "$PWD" \
   --confirm-new-host
 ```
 
@@ -133,6 +186,12 @@ frontends. The receipt and installed versions go to `/var/lib/talky-install`.
 Application schema preparation is deliberately separate from starting workers:
 do not point this full installer at a recovery-test database and accidentally
 allow restored pending jobs to run.
+
+`validate` checks input structure without connecting to services. `apply`
+installs and starts the application, including workers, and verifies runtime
+database identity/TLS/revision plus local service health and HTTPS. Neither
+command provisions an external database, purchases a phone number, registers
+provider accounts, issues a TLS certificate or establishes call permission.
 
 If installation fails, preserve its state and diagnostic logs, repair the
 input, and repeat on a new empty VM. Automatic cleanup does not destroy or
