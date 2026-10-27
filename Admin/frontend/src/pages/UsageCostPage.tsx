@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Sidebar } from '../components/Sidebar';
 import { Header } from '../components/Header';
 import { UsageBreakdownCard } from '../components/UsageBreakdownCard';
+import { SupplierEvidenceCard } from '../components/SupplierEvidenceCard';
 import { DollarSign, RefreshCw, Info, Building2 } from 'lucide-react';
 import { api } from '../lib/api';
 import type { LegacyOutboundEstimate } from '../lib/api';
@@ -45,6 +46,7 @@ function UsageCostContent({ generation }: { generation: number }) {
     );
     // Bumped on Refresh / date change to force the summary card to refetch.
     const [reloadKey, setReloadKey] = useState(0);
+    const [supplierLocked, setSupplierLocked] = useState(false);
     const [resolvedQuery, setResolvedQuery] = useState<string | null>(null);
     const requestGeneration = useRef(0);
     const queryKey = `${fromDate}|${toDate}|${reloadKey}`;
@@ -96,7 +98,7 @@ function UsageCostContent({ generation }: { generation: number }) {
         return () => { requestGeneration.current += 1; };
     }, [fetchTenantBreakdown, reloadKey]);
 
-    const refresh = () => setReloadKey((k) => k + 1);
+    const refresh = () => { if (!supplierLocked) setReloadKey((k) => k + 1); };
 
     const tenantTotalSeconds = sumRecordedValues(tenantRows.map((r) => r.total_seconds));
     const tenantTotalMinutes = tenantTotalSeconds === null ? null : Math.floor(tenantTotalSeconds / 60);
@@ -117,7 +119,7 @@ function UsageCostContent({ generation }: { generation: number }) {
                         </div>
                         <div>
                             <h1 className="page-title">Usage &amp; Cost</h1>
-                            <p className="page-description">Review recorded usage and incomplete legacy estimates</p>
+                            <p className="page-description">Review recorded usage and retained supplier evidence</p>
                         </div>
                         <div className="page-header-actions">
                             <div className="date-range-filter">
@@ -127,7 +129,8 @@ function UsageCostContent({ generation }: { generation: number }) {
                                         type="date"
                                         value={fromDate}
                                         max={toDate}
-                                        onChange={(e) => setFromDate(e.target.value)}
+                                        disabled={supplierLocked}
+                                        onChange={(e) => { if (!supplierLocked) setFromDate(e.target.value); }}
                                     />
                                 </label>
                                 <label>
@@ -137,11 +140,12 @@ function UsageCostContent({ generation }: { generation: number }) {
                                         value={toDate}
                                         min={fromDate}
                                         max={today()}
-                                        onChange={(e) => setToDate(e.target.value)}
+                                        disabled={supplierLocked}
+                                        onChange={(e) => { if (!supplierLocked) setToDate(e.target.value); }}
                                     />
                                 </label>
                             </div>
-                            <button className="btn btn-secondary" onClick={refresh} disabled={loading}>
+                            <button className="btn btn-secondary" onClick={refresh} disabled={loading || supplierLocked}>
                                 <RefreshCw size={16} className={loading ? 'spinning' : ''} />
                                 Refresh
                             </button>
@@ -152,7 +156,7 @@ function UsageCostContent({ generation }: { generation: number }) {
                         <Info size={15} />
                         <span>
                             Recorded duration and call counts include inbound and outbound activity.
-                            Supplier costs and provider attribution are unavailable. {monetaryNote}
+                            Complete supplier spending and call-level provider attribution are unavailable. {monetaryNote}
                         </span>
                     </div>
 
@@ -169,6 +173,9 @@ function UsageCostContent({ generation }: { generation: number }) {
                         fromDate={fromDate}
                         toDate={toDate}
                     />
+
+                    <SupplierEvidenceCard fromDate={fromDate} toDate={toDate} generation={generation}
+                        refreshVersion={reloadKey} onLockedChange={setSupplierLocked} />
 
                     {/* Per-tenant breakdown */}
                     <div className="card">

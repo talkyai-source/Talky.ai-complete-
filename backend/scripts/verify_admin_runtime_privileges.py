@@ -29,6 +29,9 @@ OPERATIONS = {"S": "SELECT", "I": "INSERT", "U": "UPDATE", "D": "DELETE"}
 # DELETE, generic action retry, provider workers or unrelated billing rollout.
 # Sources are backend-relative; FOR UPDATE also requires UPDATE permission.
 GROUPS = (
+    ("app/api/v1/endpoints/admin/supplier_evidence.py", {
+        "supplier_statement_evidence": "SI", "supplier_statement_reviews": "SI",
+    }),
     ("app/api/v1/endpoints/admin/actions.py", {
         "assistant_actions": "SU", "assistant_action_resolutions": "SI",
         "calls": "S", "campaigns": "S", "dialer_jobs": "S", "leads": "S", "tenants": "S",
@@ -98,6 +101,7 @@ SIP_GROUP = ("app/services/scripts/seed_platform_sip_trunk.py", {
 # table has tenant RLS. 0013 canonicalizes existing protected tenant tables;
 # 0038 backfills its named tables; later feature migrations own special policies.
 RLS_TABLES = frozenset("""
+supplier_statement_evidence supplier_statement_reviews
 assistant_actions assistant_action_resolutions audit_logs calls call_legs call_events campaigns
 leads dialer_jobs recordings_s3 call_feedback crm_deliveries admin_media_deletion_intents
 admin_media_deletion_request_keys connectors connector_accounts meetings reminders user_profiles

@@ -265,6 +265,8 @@ _RLS_TABLES = (
     "security_events",
     "stream_events",
     "subscriptions",
+    "supplier_statement_evidence",
+    "supplier_statement_reviews",
     "tenant_ai_configs",
     "tenant_ai_credentials",
     "tenant_call_limits",

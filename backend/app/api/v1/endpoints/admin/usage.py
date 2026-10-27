@@ -11,8 +11,10 @@ from math import isfinite
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, require_platform_admin, CurrentUser
+from .supplier_evidence import router as supplier_evidence_router
 
 router = APIRouter()
+router.include_router(supplier_evidence_router)
 
 _COST_CURRENCY = "USD"
 _INBOUND_MONETARY_SOURCE = "inbound_usage_transactions"

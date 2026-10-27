@@ -140,6 +140,9 @@ def test_contract_does_not_require_fixture_cleanup_or_unsupported_retry():
     assert manifest["tables"]["incidents"]["operations"] == ["INSERT", "SELECT", "UPDATE"]
     assert manifest["tables"]["connectors"]["operations"] == ["INSERT", "SELECT", "UPDATE"]
     assert manifest["tables"]["assistant_action_resolutions"]["operations"] == ["INSERT", "SELECT"]
+    for table in ("supplier_statement_evidence", "supplier_statement_reviews"):
+        assert manifest["tables"][table]["operations"] == ["INSERT", "SELECT"]
+        assert manifest["tables"][table]["force_rls"] is True
     assert manifest["tables"]["crm_deliveries"]["operations"] == ["INSERT", "SELECT", "UPDATE"]
     assert "Alembic/versions/0066_crm_skip_test_calls.py" in manifest["tables"]["crm_deliveries"]["sources"]
     assert "tenant_policy_audit_log" not in manifest["tables"]

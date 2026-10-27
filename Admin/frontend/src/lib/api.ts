@@ -2401,6 +2401,31 @@ class ApiClient {
         return this.request<UsageBreakdownResponse>(`/admin/usage/breakdown${query}`);
     }
 
+    async getSupplierStatements(fromDate: string, toDate: string, offset = 0) {
+        const query = new URLSearchParams({ from_date: fromDate, to_date: toDate, offset: String(offset) });
+        return this.request<unknown>(`/admin/usage/statements?${query}`);
+    }
+
+    async importSupplierStatement(body: Record<string, unknown>) {
+        return this.request<unknown>('/admin/usage/statements', { method: 'POST', body });
+    }
+
+    async getSupplierImport(requestId: string) {
+        return this.request<unknown>(`/admin/usage/statements/imports/${encodeURIComponent(requestId)}`);
+    }
+
+    async getSupplierStatement(statementId: string) {
+        return this.request<unknown>(`/admin/usage/statements/${encodeURIComponent(statementId)}`);
+    }
+
+    async reviewSupplierStatement(statementId: string, body: Record<string, unknown>) {
+        return this.request<unknown>(`/admin/usage/statements/${encodeURIComponent(statementId)}/reviews`, { method: 'POST', body });
+    }
+
+    async getSupplierSource(statementId: string) {
+        return this.requestBlob(`/admin/usage/statements/${encodeURIComponent(statementId)}/source`);
+    }
+
     // =========================================================================
     // Day 8: Enhanced System Health API
     // =========================================================================
