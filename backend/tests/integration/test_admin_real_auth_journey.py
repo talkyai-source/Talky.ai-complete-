@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -31,10 +32,29 @@ API_ORIGIN = "http://127.0.0.1:58202"
 RUN_EVIDENCE = []
 
 
-def reviewed_database(configured, github_actions):
+def reviewed_database(configured, github_actions, owned_supplier_clone=None):
     if configured == DSN or (github_actions == "true" and configured == CI_DSN):
         return configured
+    if (owned_supplier_clone and re.fullmatch(r"supplier_[0-9a-f]{32}_test", owned_supplier_clone)
+            and configured == f"postgresql://talky@127.0.0.1:55434/{owned_supplier_clone}"):
+        return configured
     raise ValueError("Refuse database outside the exact reviewed disposable targets")
+
+
+@pytest.mark.parametrize("suffix,declared,accepted", [
+    ("", True, True),
+    ("?host=production.invalid", True, False),
+    ("#other", True, False),
+    ("", False, False),
+])
+def test_owned_supplier_clone_requires_exact_explicit_local_target(suffix, declared, accepted):
+    name = "supplier_" + "a" * 32 + "_test"
+    dsn = f"postgresql://talky@127.0.0.1:55434/{name}" + suffix
+    if accepted:
+        assert reviewed_database(dsn, "", name if declared else None) == dsn
+    else:
+        with pytest.raises(ValueError):
+            reviewed_database(dsn, "", name if declared else None)
 
 
 @pytest.mark.parametrize("configured,ci,accepted", [
@@ -106,7 +126,8 @@ async def journey_db(monkeypatch):
     configured = os.getenv("TEST_ADMIN_DATABASE_URL")
     if not configured:
         pytest.skip("Explicit reviewed disposable TEST_ADMIN_DATABASE_URL required")
-    configured = reviewed_database(configured, os.getenv("GITHUB_ACTIONS", ""))
+    configured = reviewed_database(configured, os.getenv("GITHUB_ACTIONS", ""),
+                                   os.getenv("TALKY_SUPPLIER_TEST_OWNED_CLONE"))
     assert not (ROOT / "backend/.env").exists()
     assert not (ROOT / "backend/app/.env").exists()
     monkeypatch.setenv("ENVIRONMENT", "test")

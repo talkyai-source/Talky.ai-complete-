@@ -298,6 +298,11 @@ jobs:
           target = urlparse(dsn)
           assert target.hostname in {"localhost", "127.0.0.1"} and target.path.endswith("_test"), "Admin contracts require a disposable local test database"
           PY
+          command -v pg_config >/dev/null
+          export TALKY_BACKUP_PG_BIN="$(pg_config --bindir)"
+          for pg_client in psql pg_dump pg_restore; do
+            test -x "$TALKY_BACKUP_PG_BIN/$pg_client"
+          done
           pytest -o addopts='' \
             tests/integration/test_admin_authority_invariant.py \
             tests/integration/test_admin_mutation_guard.py \
@@ -349,6 +354,8 @@ jobs:
             tests/integration/test_admin_usage_owned_reads.py \
             tests/integration/test_admin_parent_expiry_composition.py \
             tests/integration/test_admin_original_account_inspection.py \
+            tests/integration/test_backup_snapshot_restore.py \
+            tests/integration/test_supplier_evidence.py \
             -q --junitxml=admin-postgres-results.xml
           python - <<'PY'
           import xml.etree.ElementTree as ET
@@ -358,6 +365,7 @@ jobs:
           PY
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
+          TALKY_BACKUP_TEST_ADMIN_DSN: postgresql://talky:testpassword@127.0.0.1:5432/talky_alembic_test
           TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
           PYTEST_ADDOPTS: ""
           JWT_SECRET: ci-test-secret-key-not-for-production-32chars
