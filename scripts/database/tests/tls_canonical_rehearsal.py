@@ -10,6 +10,7 @@ off-host disaster recovery, a production permissions review, or an RPO/RTO test.
 from __future__ import annotations
 
 import argparse
+import difflib
 import hashlib
 import importlib.util
 import ipaddress
@@ -272,7 +273,7 @@ def seed(pg, fixture):
     grant_runtime(pg, migration, SOURCE_DB)
 
 
-def fingerprint(pg, service, database=None):
+def fingerprint(pg, service, database=None, schema_file=None):
     tables = pg.json(service, "SELECT json_agg(tablename ORDER BY tablename) FROM pg_tables WHERE schemaname='public';", database=database)
     rows = []
     for table in tables:
@@ -289,6 +290,8 @@ def fingerprint(pg, service, database=None):
     schema = pg.run("pg_dump", ["--no-password", "--schema-only", "--no-owner", "--no-privileges", "--dbname", service.connection(database)], service)
     # Newer patched pg_dump emits a random \restrict token; it is not schema.
     schema = "\n".join(line for line in schema.splitlines() if line and not line.startswith(("--", "\\restrict ", "\\unrestrict ")))
+    if schema_file:
+        write_private(schema_file, schema)
     return {"table_count": len(tables), "row_counts": {name: body["count"] for name, body in data.items()},
             "records_sha256": hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest(),
             "schema_sha256": hashlib.sha256(schema.encode()).hexdigest(), "sequences": sequence_values}
@@ -416,7 +419,7 @@ def main():
         tls_negative_checks(pg, fixture)
         receipt["checks"].append("restricted runtime TLS, grants, populated tenant read/write isolation and three TLS refusal cases")
         source = fixture.service("source_backup")
-        before = fingerprint(pg, source)
+        before = fingerprint(pg, source, schema_file=work / "source-schema.sql")
         receipt["source"] = before
         stage = "backup and restore CLI"
         bundle = work / "backups" / "canonical"
@@ -431,9 +434,16 @@ def main():
         receipt["checks"].append("existing snapshot backup/restore CLI passed on distinct TLS cluster IDs and TCP endpoints")
         target = fixture.service("target_restore")
         stage = "full restored schema and record comparison"
-        after = fingerprint(pg, target, RESTORED_DB)
-        require(after == before, "Restored full-schema/data fingerprint differs from source")
+        after = fingerprint(pg, target, RESTORED_DB, schema_file=work / "restored-schema.sql")
         receipt["restored"] = after
+        if after != before:
+            receipt["mismatched_fields"] = [key for key in before if before[key] != after[key]]
+            if "schema_sha256" in receipt["mismatched_fields"]:
+                differences = list(difflib.unified_diff((work / "source-schema.sql").read_text().splitlines(),
+                                   (work / "restored-schema.sql").read_text().splitlines(),
+                                   fromfile="synthetic-source-schema", tofile="synthetic-restored-schema", n=2))
+                print("\n".join(differences[:120]), file=sys.stderr)
+            raise RuntimeError("Restored fingerprint differs in: " + ", ".join(receipt["mismatched_fields"]))
         print("Full canonical schema and records matched after restore", flush=True)
         stage = "restored ownership, grants and runtime validation"
         # Reapply ownership/grants explicitly: pg_restore intentionally omits
