@@ -183,7 +183,21 @@ def database_pair(monkeypatch, tmp_path):
         try:
             for name, key in ((restored, "restore_created"), (source, "source_created")):
                 if state[key]:
-                    assert await owner.fetchval("SELECT count(*) FROM pg_stat_activity WHERE datname=$1", name) == 0
+                    # The client has exited, but its server backend can remain
+                    # briefly visible. Observe completion; never terminate it
+                    # or force a drop to conceal a persistent connection leak.
+                    observed = {"database_kind": key}
+                    state.setdefault("cleanup_sessions", []).append(observed)
+                    for attempt in range(101):
+                        remaining = await owner.fetchval(
+                            "SELECT count(*) FROM pg_stat_activity WHERE datname=$1", name)
+                        if attempt == 0:
+                            observed["on_entry"] = remaining
+                        observed.update(before_drop=remaining, observations=attempt + 1)
+                        if remaining == 0 or attempt == 100:
+                            break
+                        await asyncio.sleep(0.05)
+                    assert remaining == 0, "Owned backup connections did not close within bounded wait"
                     await owner.execute(f'DROP DATABASE "{name}"')
             if state["role_created"]:
                 await owner.execute(f'DROP ROLE "{role}"')
