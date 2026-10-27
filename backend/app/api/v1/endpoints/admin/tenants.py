@@ -122,6 +122,8 @@ class TenantVersionRequest(BaseModel):
 
 class QuotaUpdateRequest(TenantVersionRequest):
     """Request model for updating tenant quota"""
+    # The plan's monthly minutes; a negative value would read as an unknown
+    # allowance and 0 is the unlimited sentinel only on a 0-minute plan.
     minutes_allocated: Optional[int] = Field(None, ge=0, le=2147483647)
     max_concurrent_calls: Optional[int] = Field(None, ge=1, le=1000)
 

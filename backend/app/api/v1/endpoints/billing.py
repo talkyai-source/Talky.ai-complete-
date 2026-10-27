@@ -126,6 +126,26 @@ def get_billing_service(db_client: Client = Depends(get_db_client)) -> BillingSe
 # ============================================
 
 
+def _require_checkout_permitted_in_test_mode(current_user) -> None:
+    """Stripe TEST mode in production sells only to the team (billing_mode)."""
+    from app.core.security.rbac import UserRole, normalize_role
+    from app.domain.services.billing_mode import checkout_permitted_in_test_mode
+
+    try:
+        is_platform_admin = normalize_role(current_user.role) == UserRole.PLATFORM_ADMIN
+    except Exception:
+        is_platform_admin = False
+    if not checkout_permitted_in_test_mode(is_platform_admin=is_platform_admin, email=current_user.email):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "test_billing_team_only",
+                "message": "Payments are not open yet. Billing is in test mode for the Talk-Lee team.",
+                "request_not_started": True,
+            },
+        )
+
+
 @router.post(
     "/create-checkout-session",
     response_model=CreateCheckoutResponse,
@@ -141,6 +161,7 @@ async def create_checkout_session(
     """
     Create a Stripe Checkout Session for subscribing to a plan.
     """
+    _require_checkout_permitted_in_test_mode(current_user)
     try:
         result = await billing.create_checkout_session(
             tenant_id=current_user.tenant_id,
@@ -344,17 +365,19 @@ async def get_subscription(
         from app.domain.services.minutes_quota import MeteringUnavailable
         if isinstance(e, MeteringUnavailable):
             raise HTTPException(status_code=503, detail={"code": "usage_unavailable", "message": "Minute allowance is temporarily unavailable."}) from e
-        logger.error(f"Failed to get subscription: {e}")
+        logger.error("Failed to get subscription: %s", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get subscription: {str(e)}",
+            detail="Subscription details are temporarily unavailable.",
         )
 
 
 @router.post(
     "/portal",
     response_model=PortalResponse,
-    dependencies=[Depends(require_permission(Permission.BILLING_UPDATE))],
+    # The portal can cancel the subscription, so it needs the same permission
+    # as /cancel (owner-only), not the billing_user BILLING_UPDATE grant.
+    dependencies=[Depends(require_permission(Permission.BILLING_ADMIN))],
 )
 async def create_portal_session(
     body: PortalRequest,
@@ -392,10 +415,10 @@ async def create_portal_session(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to create portal session: {e}")
+        logger.error("Failed to create portal session: %s", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create portal session: {str(e)}",
+            detail="The billing portal could not be opened. Please try again.",
         )
 
 
@@ -436,10 +459,10 @@ async def cancel_subscription(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to cancel subscription: {e}")
+        logger.error("Failed to cancel subscription: %s", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to cancel subscription: {str(e)}",
+            detail="The subscription could not be cancelled. Please try again.",
         )
 
 

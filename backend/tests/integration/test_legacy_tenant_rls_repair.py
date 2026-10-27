@@ -46,7 +46,7 @@ async def repair_db():
             r"admin_rls_[0-9a-f]{32}_test", database
         ), "This DDL regression must run only in its owned clone or explicit CI fixture"
         before = await protected_snapshot(conn)
-        assert before["head"] == "0078_admin_billing_merge"
+        assert before["head"] == "0080_supplier_allowance_merge"
         tx = conn.transaction()
         await tx.start()
         await conn.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER NOBYPASSRLS')

@@ -200,7 +200,8 @@ _PERMISSION_ROUTES = [
     (connectors_router, "DELETE", "/connectors/{connector_id}", Permission.CONNECTORS_DELETE),
     (connectors_router, "POST", "/connectors/{connector_id}/refresh", Permission.CONNECTORS_UPDATE),
     (billing_router, "POST", "/billing/create-checkout-session", Permission.BILLING_UPDATE),
-    (billing_router, "POST", "/billing/portal", Permission.BILLING_UPDATE),
+    # The portal can cancel the subscription, so it needs /cancel's permission.
+    (billing_router, "POST", "/billing/portal", Permission.BILLING_ADMIN),
     (billing_router, "POST", "/billing/cancel", Permission.BILLING_ADMIN),
 ]
 

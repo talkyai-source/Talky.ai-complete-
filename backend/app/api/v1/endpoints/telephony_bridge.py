@@ -2061,6 +2061,8 @@ async def make_call(request: Request, body: MakeCallRequest):
         # would get the tenant DNC-list check alone and dial a contact the
         # customer explicitly flagged do-not-call.
         lead_id=body.lead_id,
+        # This call's own pending row must not reserve minutes against itself.
+        call_id=body.durable_call_id or body.talklee_call_id,
     )
 
     failed_reasons = [

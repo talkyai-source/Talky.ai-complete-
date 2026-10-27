@@ -19,6 +19,7 @@ from app.domain.services.subscription_status import (
     CANCELLED,
     INCOMPLETE_EXPIRED,
     KNOWN_STATUSES,
+    SUSPENDED,
     canonical,
 )
 
@@ -159,7 +160,12 @@ async def _apply_subscription(conn, billing, subscription, binding, *, session=N
             tenant_id, subscription_id, customer_id, subscription["status"],
         )
         return _result("ignored", tenant_id, reason="subscription_replaced")
-    if binding["attempt"]:
+    # Purchase validation (exact item, price and first payment) only decides the
+    # FIRST activation. After it, every lifecycle change (renewal, past_due,
+    # unpaid, cancel, delete) must reach the tenant even if the provider-side
+    # item or price has since changed: rejecting it would leave a cancelled or
+    # unpaid tenant active. Later events use the status path below.
+    if binding["attempt"] and binding["attempt"]["status"] != "completed":
         if (binding["attempt"]["status"] != "completed"
                 and canonical(subscription["status"]) in {CANCELLED, INCOMPLETE_EXPIRED}):
             await conn.execute(
@@ -178,6 +184,19 @@ async def _apply_subscription(conn, billing, subscription, binding, *, session=N
                 and not ((session is not None or invoice is not None) and subscription["status"] == "active")):
             return _result("deferred", tenant_id, reason="initial_payment_unconfirmed")
     else:
+        attempt = binding["attempt"]
+        if attempt and session is not None and attempt.get("stripe_session_id") is None:
+            # A paid invoice may have activated the purchase before the
+            # checkout response arrived: learn the verified session, no reset.
+            try:
+                CheckoutAttempts.check_session(session, attempt)
+            except CheckoutError as exc:
+                raise BillingStateReviewRequired(exc.code) from exc
+            await conn.execute(
+                """UPDATE billing_checkout_attempts SET stripe_session_id=$3,updated_at=NOW()
+                   WHERE id=$1::uuid AND tenant_id=$2::uuid AND stripe_session_id IS NULL""",
+                str(attempt["id"]), tenant_id, session["id"],
+            )
         start, end = subscription_period(subscription)
         recorded = binding["recorded"] or {}
         plan_id = recorded.get("plan_id") or binding["tenant"]["plan_id"]
@@ -194,10 +213,13 @@ async def _apply_subscription(conn, billing, subscription, binding, *, session=N
         )
         if written != "INSERT 0 1":
             raise BillingStateReviewRequired("subscription_binding_conflict")
+        status = canonical(subscription["status"])
+        if _dispute_open(recorded) and status != CANCELLED:
+            status = SUSPENDED  # an open chargeback keeps calls off (_apply_dispute)
         await conn.execute(
             """UPDATE tenants SET subscription_status=$4 WHERE id=$1::uuid
                AND stripe_subscription_id=$2 AND stripe_customer_id=$3""",
-            tenant_id, subscription_id, customer_id, canonical(subscription["status"]),
+            tenant_id, subscription_id, customer_id, status,
         )
     if canonical(subscription["status"]) == CANCELLED:
         await conn.execute(
@@ -446,12 +468,92 @@ async def refresh_invoice_details(conn, billing, event_type, data, source_refere
                                 source_reference=source_reference, details_only=True)
 
 
+DISPUTE_EVENTS = {"charge.dispute.created", "charge.dispute.closed"}
+
+
+def _dispute_open(recorded):
+    dispute = _object(_object(recorded).get("metadata")).get("dispute") if recorded else None
+    return bool(dispute) and _object(dispute).get("status") == "open"
+
+
+async def _apply_dispute(conn, billing, event_type, data, source_reference):
+    """A chargeback on a plan suspends calls; a won dispute restores them.
+
+    Without this a customer could pay for a yearly plan, take the money back
+    by chargeback and keep 12 months of minutes. Top-up disputes are reversed
+    by the top-up handler first; a won one gets its minutes back here.
+    """
+    dispute = await _current(billing, "Dispute", data.get("id"))
+    charge_id = _id(dispute.get("charge"))
+    if not charge_id:
+        raise BillingStateReviewRequired("dispute_charge_missing")
+    charge = await _current(billing, "Charge", charge_id)
+    if event_type == "charge.dispute.closed":
+        if dispute.get("status") != "won":
+            return _result("ignored", reason="dispute_not_won")
+        payment_id = _id(charge.get("payment_intent"))
+        if payment_id:
+            from app.domain.services.topup_service import TopupService
+            if await TopupService(None).reinstate_dispute(
+                conn, payment_id=payment_id, dispute_id=dispute["id"], event_id=source_reference,
+            ):
+                return _result("handled", reason="topup_dispute_won")
+    identity = await _invoice_for_adjustment(conn, billing, "charge.refunded", {"id": charge_id})
+    if not identity:
+        return _result("ignored", reason="not_subscription_charge")
+    invoice = await conn.fetchrow(
+        "SELECT tenant_id, stripe_subscription_id FROM invoices WHERE stripe_invoice_id=$1", identity,
+    )
+    if not invoice or not invoice["stripe_subscription_id"]:
+        return _result("ignored", reason="not_subscription_charge")
+    subscription_id, tenant_id = invoice["stripe_subscription_id"], str(invoice["tenant_id"])
+    await _lock(conn, billing, "subscription", subscription_id)
+    recorded = await conn.fetchrow(
+        "SELECT metadata FROM subscriptions WHERE stripe_subscription_id=$1 AND tenant_id=$2::uuid FOR UPDATE",
+        subscription_id, tenant_id,
+    )
+    if recorded is None:
+        raise BillingStateReviewRequired("disputed_subscription_unrecorded")
+    if event_type == "charge.dispute.created":
+        await conn.execute(
+            """UPDATE subscriptions SET metadata=COALESCE(metadata,'{}'::jsonb)
+                     || jsonb_build_object('dispute', jsonb_build_object('id',$3::text,'status','open')),
+                   updated_at=NOW()
+               WHERE stripe_subscription_id=$1 AND tenant_id=$2::uuid""",
+            subscription_id, tenant_id, dispute["id"],
+        )
+        await conn.execute(
+            """UPDATE tenants SET subscription_status=$3 WHERE id=$1::uuid AND stripe_subscription_id=$2""",
+            tenant_id, subscription_id, SUSPENDED,
+        )
+        return _result("handled", tenant_id, reason="subscription_dispute_suspended")
+    current = _object(_object(recorded["metadata"]).get("dispute"))
+    if current.get("id") != dispute["id"] or current.get("status") != "open":
+        return _result("ignored", tenant_id, reason="dispute_not_recorded")
+    subscription = await _current(billing, "Subscription", subscription_id)
+    await conn.execute(
+        """UPDATE subscriptions SET metadata=COALESCE(metadata,'{}'::jsonb)
+                 || jsonb_build_object('dispute', jsonb_build_object('id',$3::text,'status','won')),
+               updated_at=NOW()
+           WHERE stripe_subscription_id=$1 AND tenant_id=$2::uuid""",
+        subscription_id, tenant_id, dispute["id"],
+    )
+    await conn.execute(
+        """UPDATE tenants SET subscription_status=$3
+           WHERE id=$1::uuid AND stripe_subscription_id=$2 AND subscription_status=$4""",
+        tenant_id, subscription_id, canonical(subscription.get("status")), SUSPENDED,
+    )
+    return _result("handled", tenant_id, reason="subscription_dispute_won")
+
+
 async def apply_billing_event(conn, billing, event_type, data, *, source_reference=None):
     """Apply one event under the caller's transaction and durable receipt lock."""
     if event_type in INVOICE_EVENTS:
         return await _apply_invoice(conn, billing, event_type, data, source_reference=source_reference)
     if event_type in CREDIT_NOTE_EVENTS | REFUND_EVENTS:
         return await refresh_invoice_details(conn, billing, event_type, data, source_reference or f"observation:{uuid4()}")
+    if event_type in DISPUTE_EVENTS:
+        return await _apply_dispute(conn, billing, event_type, data, source_reference)
     if event_type in {"checkout.session.completed", "checkout.session.async_payment_succeeded",
                       "checkout.session.expired", "checkout.session.async_payment_failed"}:
         return await _apply_checkout(conn, billing, event_type, data)

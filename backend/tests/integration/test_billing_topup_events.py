@@ -117,7 +117,15 @@ async def process(fixture, envelope):
 async def state(fixture):
     async with acquire_with_tenant(fixture.db.admin, None) as conn:
         return {
+            # What the meter grants: the plan's minutes plus the bought balance.
+            # Bought minutes live only in the ledger since 2026-10-27.
             "allocated": await conn.fetchval(
+                """SELECT t.minutes_allocated + COALESCE((SELECT SUM(l.minutes_delta)
+                     FROM billing_ledger l WHERE l.tenant_id=t.id), 0)
+                     FROM tenants t WHERE t.id=$1""",
+                fixture.db.tenant,
+            ),
+            "plan_minutes": await conn.fetchval(
                 "SELECT minutes_allocated FROM tenants WHERE id=$1", fixture.db.tenant
             ),
             "enforced": await conn.fetchval(
@@ -288,14 +296,16 @@ async def test_finite_reversal_cannot_become_unlimited_and_existing_unlimited_is
                 fixture.db.tenant,
             )
     fixture.data.charge.update(amount_refunded=2500, refunded=True)
-    if unlimited:
-        await process(fixture, event(fixture, "refund", "charge.refunded"))
-    else:
-        with pytest.raises(BillingWebhookReviewRequired, match="unlimited_semantics"):
-            await process(fixture, event(fixture, "refund", "charge.refunded"))
+    # A refund is never refused (it used to need review when the allowance was
+    # at or below the pack size, leaving the customer refunded AND credited).
+    # It is a ledger row only: the plan's minutes, and an unlimited allowance,
+    # are untouched; the legacy ceiling stays finite.
+    await process(fixture, event(fixture, "refund", "charge.refunded"))
     result = await state(fixture)
-    assert result["allocated"] == result["enforced"] == (0 if unlimited else 50)
-    assert len(result["ledger"]) == (2 if unlimited else 1)
+    assert result["plan_minutes"] == (0 if unlimited else 50)
+    assert result["enforced"] == (0 if unlimited else 1)
+    assert [row["minutes_delta"] for row in result["ledger"]] == [250, -250]
+    assert result["order"] == "refunded"
 
 
 async def test_different_events_for_same_payment_serialize_before_provider_read(topup_db):

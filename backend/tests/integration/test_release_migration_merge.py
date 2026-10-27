@@ -26,11 +26,15 @@ RECEIPTS = "0062_saved_acknowledgement"
 MERGE = "0063_release_history_merge"
 ADMIN = "0077_legacy_tenant_rls_repair"
 PAID = "0071_paid_only_billing"
-HEAD = "0078_admin_billing_merge"
+PREVIOUS_HEAD = "0078_admin_billing_merge"
+SUPPLIER = "0079_supplier_evidence"
+ALLOWANCE = "0072_allowance_anchor"
+HEAD = "0080_supplier_allowance_merge"
 CURRENT_ADMIN_REVISIONS = {
     "0070_trunk_soft_delete", "0071_connector_lifecycle",
     "0072_admin_incidents", "0073_alertmanager_incidents", "0074_contact_enquiry_revision",
-    "0075_admin_user_review", "0076_admin_user_operations", ADMIN, PAID, HEAD,
+    "0075_admin_user_review", "0076_admin_user_operations", ADMIN, PAID,
+    PREVIOUS_HEAD, SUPPLIER, ALLOWANCE, HEAD,
 }
 RUN_EVIDENCE = []
 pytestmark = pytest.mark.integration
@@ -116,9 +120,10 @@ async def verify_merged(dsn, tenant, trunk, report):
         # merely accept a changed version marker after the historical merge.
         columns = await conn.fetch("""SELECT table_name,column_name FROM information_schema.columns
             WHERE table_schema='public' AND table_name=ANY($1::text[])""",
-            ["tenant_sip_trunks", "connector_accounts", "connectors", "incidents", "public_contact_enquiries", "user_profiles", "tenant_users"])
+            ["tenants", "tenant_sip_trunks", "connector_accounts", "connectors", "incidents", "public_contact_enquiries", "user_profiles", "tenant_users"])
         present = {(row["table_name"],row["column_name"]) for row in columns}
         required = {
+            ("tenants", "allowance_anchor_at"),
             ("tenant_sip_trunks","deleted_at"),
             ("connectors","provider_revocation_status"),
             ("public_contact_enquiries", "revision"),
@@ -174,6 +179,11 @@ async def verify_merged(dsn, tenant, trunk, report):
         assert await conn.fetchval("SELECT to_regclass('public.audit_user_operation_actor_prepared') IS NOT NULL")
         report["user_operation_terminal_uniqueness_and_discovery_indexes"] = True
         report["current_admin_contract"] = True
+        for table in ("supplier_statement_evidence", "supplier_statement_reviews"):
+            posture = await conn.fetchrow(
+                "SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE oid=$1::regclass", "public." + table)
+            assert posture["relrowsecurity"] and posture["relforcerowsecurity"]
+        report["supplier_tables_forced_rls"] = True
 
 
 @pytest.mark.parametrize("start", [HEARTBEAT, RECEIPTS, BASELINE])
@@ -223,14 +233,19 @@ async def billing_state(dsn, tenant):
     async with connection(dsn) as conn:
         return {
             "heads": sorted(row["version_num"] for row in await conn.fetch("SELECT version_num FROM alembic_version")),
-            "tenant": await conn.fetchval("SELECT to_jsonb(t)::text FROM tenants t WHERE id=$1", tenant),
+            # The additive anchor is absent before paid0072. Compare every old
+            # field exactly, and assert the new/persisted anchor separately.
+            "tenant": await conn.fetchval("SELECT (to_jsonb(t)-'allowance_anchor_at')::text FROM tenants t WHERE id=$1", tenant),
+            "allowance_anchor_at": await conn.fetchval("SELECT to_jsonb(t)->>'allowance_anchor_at' FROM tenants t WHERE id=$1", tenant),
+            "allowance_column": await conn.fetchval("""SELECT EXISTS(SELECT 1 FROM information_schema.columns
+                WHERE table_schema='public' AND table_name='tenants' AND column_name='allowance_anchor_at')"""),
             "catalog": {table: [row["value"] for row in await conn.fetch(
                 f'SELECT to_jsonb(t)::text AS value FROM public."{table}" t ORDER BY to_jsonb(t)::text')]
                 for table in ("plans", "plan_price_options", "topup_packages")},
         }
 
 
-@pytest.mark.parametrize("start_heads", [(PAID,), (ADMIN,), (ADMIN, PAID)])
+@pytest.mark.parametrize("start_heads", [(PAID,), (ADMIN,), (ADMIN, PAID), (ALLOWANCE,), (SUPPLIER,), (SUPPLIER, ALLOWANCE)])
 def test_actual_admin_billing_merge_preserves_applied_terms_and_allowances(monkeypatch, start_heads):
     admin_dsn = os.getenv("TALKY_RELEASE_MERGE_ADMIN_DSN", "")
     if not admin_dsn:
@@ -246,6 +261,8 @@ def test_actual_admin_billing_merge_preserves_applied_terms_and_allowances(monke
     config.set_main_option("script_location", str(BACKEND / "Alembic"))
     scripts = ScriptDirectory.from_config(config)
     assert scripts.get_heads() == [HEAD]
+    paid_applied = any(PAID in {r.revision for r in scripts.iterate_revisions(start, "base")}
+                       for start in start_heads)
     report = {"start_heads": list(start_heads), "database": name, "steps": []}
     RUN_EVIDENCE.append(report)
     tenant = uuid4()
@@ -254,11 +271,13 @@ def test_actual_admin_billing_merge_preserves_applied_terms_and_allowances(monke
         async with connection(dsn) as conn:
             await conn.execute("""INSERT INTO tenants(id,business_name,plan_id,minutes_allocated,minutes_used)
                 VALUES($1,'Synthetic branch merge','basic',321,9)""", tenant)
-            if PAID in start_heads:
+            if paid_applied:
                 # An already-released catalog can have subsequent reviewed terms.
                 # Replaying paid0071 would erase this marker, even though its SQL
                 # uses UPSERT and superficially appears idempotent.
                 await conn.execute("UPDATE plans SET description='Synthetic post-release catalog marker' WHERE id='basic'")
+            if ALLOWANCE in start_heads:
+                await conn.execute("UPDATE tenants SET allowance_anchor_at='2026-10-25T12:34:56Z' WHERE id=$1", tenant)
 
     try:
         asyncio.run(provision(admin_dsn, name, report))
@@ -273,7 +292,13 @@ def test_actual_admin_billing_merge_preserves_applied_terms_and_allowances(monke
         after = asyncio.run(billing_state(dsn, tenant))
         assert after["heads"] == [HEAD]
         assert after["tenant"] == before["tenant"]
-        if PAID in start_heads:
+        assert after["allowance_column"] is True
+        assert after["allowance_anchor_at"] == before["allowance_anchor_at"]
+        if ALLOWANCE in start_heads:
+            assert before["allowance_column"] and before["allowance_anchor_at"] is not None
+        else:
+            assert before["allowance_anchor_at"] is None
+        if paid_applied:
             assert after["catalog"] == before["catalog"]
             report["existing_paid_catalog_unchanged"] = True
         else:
@@ -282,6 +307,8 @@ def test_actual_admin_billing_merge_preserves_applied_terms_and_allowances(monke
         command.upgrade(config, "head")
         assert asyncio.run(billing_state(dsn, tenant)) == after
         report["tenant_allowance_retained"] = True
+        report["existing_allowance_anchor_retained"] = before["allowance_anchor_at"] is not None
+        report["new_allowance_anchor_null"] = before["allowance_anchor_at"] is None
         report["repeat_upgrade_unchanged"] = True
     finally:
         asyncio.run(cleanup(admin_dsn, name, report))

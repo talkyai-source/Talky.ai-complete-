@@ -234,6 +234,9 @@ async def create_topup_checkout(
             detail="Minute top-ups are not available yet",
         )
 
+    from app.api.v1.endpoints.billing import _require_checkout_permitted_in_test_mode
+    _require_checkout_permitted_in_test_mode(current_user)
+
     svc = _service()
 
     # Paid-only billing (owner decision 2026-10-27): top-ups add to a paid
@@ -448,7 +451,9 @@ async def reconciliation(
     # returned sample. A reversal is not evidence of cash reaching a bank.
     currencies = {}
     for record in records:
-        currency = record["currency"].lower() or None
+        if record["kind"] == "adjustment" and not record["amount_cents"]:
+            continue  # usage rows move minutes, not money
+        currency = (record["currency"] or "").lower() or None
         totals = currencies.setdefault(currency, {
             "currency": currency, "currency_exponent": _EXPONENTS.get(currency),
             "gross_cents": 0, "reversed_cents": 0, "net_cents": 0,
@@ -465,9 +470,12 @@ async def reconciliation(
             "scope": "returned_rows",
             "rows": len(records),
             "minutes_sold": sum(r["minutes_delta"] for r in records
-                                if r["minutes_delta"] > 0),
+                                if r["kind"] == "topup" and r["minutes_delta"] > 0),
+            # Refunds and disputes only; monthly usage rows are not reversals.
             "minutes_reversed": sum(-r["minutes_delta"] for r in records
-                                    if r["minutes_delta"] < 0),
+                                    if r["kind"] in ("refund", "dispute")),
+            "minutes_used": sum(-r["minutes_delta"] for r in records
+                                if r["kind"] == "adjustment" and r["minutes_delta"] < 0),
             "by_currency": list(currencies.values()),
         },
     }

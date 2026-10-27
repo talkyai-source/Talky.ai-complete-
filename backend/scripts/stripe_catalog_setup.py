@@ -23,7 +23,10 @@ Two steps, both idempotent. Neither ever prints a secret.
 
 Restart the services afterwards so they read the new environment. Switching
 to live keys later is step 1 with the live key (and without
-``STRIPE_TEST_MODE_IN_PRODUCTION``), then step 2 again.
+``STRIPE_TEST_MODE_IN_PRODUCTION``), then step 2 again. In live mode step 2
+lists accounts still holding a plan bought with a TEST card: no money was
+taken for those, so end them (set subscription_status to 'cancelled') before
+opening checkout to customers.
 """
 from __future__ import annotations
 
@@ -62,6 +65,7 @@ WEBHOOK_EVENTS = [
     "credit_note.voided",
     "charge.refunded",
     "charge.dispute.created",
+    "charge.dispute.closed",
     "charge.refund.updated",
     "refund.created",
     "refund.updated",
@@ -215,6 +219,31 @@ async def save_options(options: list[dict], apply: bool) -> None:
         await conn.close()
 
 
+async def report_test_mode_plans() -> None:
+    """Accounts whose active plan was bought with a test card (no money)."""
+    import asyncpg
+
+    from app.core.config import get_settings
+
+    conn = await asyncpg.connect(get_settings().database_url.replace("+asyncpg", ""))
+    try:
+        async with conn.transaction(readonly=True):
+            await conn.execute("SELECT set_config('app.bypass_rls','true',true)")
+            rows = await conn.fetch(
+                """SELECT t.id FROM tenants t JOIN subscriptions s
+                     ON s.stripe_subscription_id = t.stripe_subscription_id AND s.tenant_id = t.id
+                    WHERE s.metadata->'purchase'->>'stripe_price_id' IN
+                          (SELECT stripe_price_id FROM plan_price_options WHERE provider_mode = 'test')"""
+            )
+    finally:
+        await conn.close()
+    if rows:
+        print(f"WARNING: {len(rows)} account(s) hold a plan bought with a TEST card: "
+              + ", ".join(str(r["id"])[:8] for r in rows) + ". End them before opening checkout.")
+    else:
+        print("no account holds a test-mode plan")
+
+
 def ensure_webhook(client, url: str, env_file: Path, apply: bool) -> None:
     import stripe
 
@@ -300,6 +329,8 @@ def main() -> None:
     asyncio.run(save_options(options, args.apply))
     ensure_webhook(client, args.webhook_url, args.env_file, args.apply)
     ensure_portal(client, args.return_url, args.env_file, args.apply)
+    if mode == "live":
+        asyncio.run(report_test_mode_plans())
     print("done" if args.apply else "dry run complete; nothing changed")
 
 

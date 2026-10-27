@@ -10,7 +10,7 @@ being re-derived (and drifting) in each:
   * the frontend — shows remaining minutes + disables the Start button
     (via ``GET /campaigns/minutes/status``).
 
-Definition (mirrors the dashboard's live figure): this month's parent-call
+Definition (mirrors the dashboard's live figure): this allowance month's parent-call
 durations plus only ``finalized`` transfer-leg actual durations, divided by
 60, versus ``tenants.minutes_allocated``. Live child reservations are enforced
 by inbound admission but are not presented as already-used customer minutes.
@@ -29,6 +29,30 @@ from typing import Any, Literal
 from decimal import Decimal, InvalidOperation
 
 logger = logging.getLogger(__name__)
+
+
+def allowance_window_index_sql(anchor: str, ts: str) -> str:
+    """SQL: whole months from ``anchor`` to ``ts`` (``ts >= anchor``).
+
+    ``age()`` borrows days field by field, so the estimate can be one month off
+    around month ends (Jan 31 + 1 month = Feb 28); both corrections keep
+    ``anchor + idx months <= ts < anchor + (idx + 1) months``.
+    """
+    est = f"((EXTRACT(YEAR FROM age({ts}, {anchor})) * 12 + EXTRACT(MONTH FROM age({ts}, {anchor})))::int)"
+    return (f"(CASE WHEN {anchor} + make_interval(months => {est} + 1) <= {ts} THEN {est} + 1 "
+            f"WHEN {anchor} + make_interval(months => {est}) > {ts} THEN {est} - 1 ELSE {est} END)")
+
+
+def allowance_window_start_sql(anchor: str, ts: str) -> str:
+    """SQL: start of the allowance month containing ``ts``.
+
+    A paid plan's minutes renew monthly from the purchase (``anchor``), as the
+    pricing page says ("next monthly renewal"); a calendar month would give a
+    customer who subscribes on the 25th a second full allowance on the 1st.
+    Accounts without a paid plan (no anchor) keep calendar months.
+    """
+    return (f"(CASE WHEN {anchor} IS NULL OR {ts} < {anchor} THEN date_trunc('month', {ts}) "
+            f"ELSE {anchor} + make_interval(months => {allowance_window_index_sql(anchor, ts)}) END)")
 
 
 class MeteringUnavailable(RuntimeError):
@@ -84,21 +108,10 @@ async def _compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
     # An absent/default tenant allocation cannot prove an unlimited product.
     # The existing bound plan must explicitly carry the zero-minute sentinel.
     row = await conn.fetchrow(
-        """SELECT t.minutes_allocated,p.minutes AS plan_minutes,
+        f"""SELECT t.minutes_allocated,p.minutes AS plan_minutes,
                   t.plan_id IS NULL AS no_plan,
                   EXISTS(SELECT 1 FROM billing_ledger b WHERE b.tenant_id=t.id) AS has_ledger,
-                  -- Purchased minutes whose package carries an expiry that has
-                  -- passed. They stay in minutes_allocated (and are re-added by
-                  -- every plan re-allocation), so the meter removes them here;
-                  -- otherwise a one-time top-up renews every calendar month.
-                  COALESCE((SELECT SUM(l.minutes_delta)
-                              FROM billing_ledger l
-                              JOIN topup_orders o ON o.id=l.order_id
-                              JOIN topup_packages k ON k.code=o.package_code
-                             WHERE l.tenant_id=t.id AND l.kind='topup'
-                               AND k.expires_days IS NOT NULL
-                               AND l.created_at + make_interval(days => k.expires_days) <= NOW()
-                         ),0) AS expired_topup_minutes
+                  {allowance_window_start_sql('t.allowance_anchor_at', 'NOW()')} AS window_start
              FROM tenants t LEFT JOIN plans p ON p.id=t.plan_id
             WHERE t.id=$1
               AND (COALESCE(NULLIF(current_setting('app.bypass_rls',true),'')::boolean,false)
@@ -106,20 +119,20 @@ async def _compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
     )
     if row is None or type(row["minutes_allocated"]) is not int or row["minutes_allocated"] < 0:
         return unavailable_minutes("allowance_unavailable")
-    allocated = raw_allocated = row["minutes_allocated"]
+    # minutes_allocated is the plan's monthly minutes; bought minutes live
+    # only in billing_ledger (topup_service, topup_usage).
+    base = allocated = row["minutes_allocated"]
     plan_minutes = row["plan_minutes"]
-    if allocated > 0 and row.get("has_ledger"):
-        # Top-up minutes that closed months used up, not yet recorded by the
-        # reminder worker, would otherwise be granted again this month.
-        from app.domain.services.topup_usage import pending_topup_usage
-        allocated = max(0, allocated - await pending_topup_usage(conn, tenant_id, allocated))
-    expired = row.get("expired_topup_minutes") or 0
-    if allocated > 0 and type(expired) is int and expired > 0:
-        allocated = max(0, allocated - expired)
+    unlimited = base == 0 and plan_minutes == 0
     # No plan bound (new accounts since paid-only billing): zero minutes, a
     # known and exhausted allowance rather than an unknown one.
-    if allocated == 0 and not row.get("no_plan") and (type(plan_minutes) is not int or plan_minutes < 0):
+    if base == 0 and not unlimited and not row.get("no_plan") and (type(plan_minutes) is not int or plan_minutes < 0):
         return unavailable_minutes("unlimited_entitlement_unverified")
+    if not unlimited and row.get("has_ledger"):
+        # Bought minutes still unused (negative after a refund of used ones),
+        # less closed months the reminder worker has not recorded yet.
+        from app.domain.services.topup_usage import topup_balance
+        allocated = max(0, base + await topup_balance(conn, tenant_id, base))
     used_seconds = await conn.fetchval(
         """
         SELECT
@@ -127,7 +140,7 @@ async def _compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
                 SELECT SUM(duration_seconds)
                 FROM calls c
                 WHERE c.tenant_id=$1
-                  AND c.created_at >= date_trunc('month',NOW())
+                  AND c.created_at >= COALESCE($2::timestamptz, date_trunc('month',NOW()))
                   -- Campaign test sessions are real rows so they can be
                   -- reviewed, but are never customer traffic (Alembic 0017).
                   AND NOT c.is_test
@@ -145,7 +158,7 @@ async def _compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
                 FROM call_legs leg
                 JOIN calls parent ON parent.id=leg.call_id
                 WHERE parent.tenant_id=$1
-                  AND parent.created_at >= date_trunc('month',NOW())
+                  AND parent.created_at >= COALESCE($2::timestamptz, date_trunc('month',NOW()))
                   AND NOT parent.is_test
                   AND leg.leg_type='transfer'
                   -- A live reservation protects admission capacity, but the
@@ -154,9 +167,43 @@ async def _compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
             ),0)
         """,
         tenant_id,
+        row.get("window_start"),
     )
     # Unlimited is the stored sentinel, never a balance reduced to zero.
-    return _status_from(allocated, used_seconds, unlimited=raw_allocated == 0 and plan_minutes == 0)
+    return _status_from(allocated, used_seconds, unlimited=unlimited)
+
+
+async def inflight_outbound_minutes(conn: Any, tenant_id: str, exclude_call_id: str | None = None) -> tuple[int, int]:
+    """(count, minutes to reserve) for outbound calls placed but not settled.
+
+    A live call keeps using minutes the meter cannot see yet, so each one
+    reserves the whole minutes it has run since answer plus the minute in
+    progress (1 while still ringing). A flat one minute per call let ten long
+    calls overrun the allowance. ``exclude_call_id`` is the call being admitted
+    when its own row already exists (the bridge re-check).
+    """
+    from app.domain.services.call_status import TERMINAL_CALL_STATUSES
+
+    row = await conn.fetchrow(
+        """SELECT COUNT(*) AS calls,
+                  COALESCE(SUM(CASE WHEN c.answered_at IS NULL THEN 1
+                      ELSE GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - c.answered_at)) / 60))::int + 1
+                  END), 0)::int AS minutes
+             FROM calls c
+            WHERE c.tenant_id=$1 AND NOT c.is_test
+              AND c.direction IS DISTINCT FROM 'inbound'
+              AND c.duration_seconds IS NULL
+              AND c.created_at > NOW() - INTERVAL '6 hours'
+              AND COALESCE(c.status,'') <> ALL($2::text[])
+              AND ($3::text IS NULL OR c.id::text <> $3::text)""",
+        tenant_id,
+        list(TERMINAL_CALL_STATUSES),
+        exclude_call_id,
+    )
+    calls, minutes = (row["calls"], row["minutes"]) if row else (None, None)
+    if type(calls) is not int or calls < 0 or type(minutes) is not int or minutes < 0:
+        raise MeteringUnavailable("inflight_unavailable")
+    return calls, minutes
 
 
 async def count_inflight_outbound_calls(conn: Any, tenant_id: str) -> int:

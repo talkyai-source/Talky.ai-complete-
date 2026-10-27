@@ -168,6 +168,9 @@ async def checkout_db(billing_db, monkeypatch):  # noqa: F811 - imported pytest 
             f'GRANT SELECT,INSERT,UPDATE,DELETE ON tenants,subscriptions TO "{fixture.role}"'
         )
         await conn.execute(f'GRANT SELECT ON plans,billing_ledger TO "{fixture.role}"')
+        # A plan activation closes the running allowance window, which reads
+        # call usage when the tenant has top-up ledger rows.
+        await conn.execute(f'GRANT SELECT ON calls,call_legs TO "{fixture.role}"')
         fixture.free = await conn.fetchval(
             """INSERT INTO plan_price_options
             (plan_id,kind,interval,amount_minor,currency,currency_exponent,provider_mode,active,verified_at)
@@ -184,7 +187,9 @@ async def checkout_db(billing_db, monkeypatch):  # noqa: F811 - imported pytest 
             "prod_" + uuid4().hex,
         )
         await conn.execute(
-            """UPDATE tenants SET minutes_allocated=163,minutes_used=17,
+            # The plan's 120 minutes; the 43 bought minutes below live only in
+            # the ledger (2026-10-27) and the meter adds them.
+            """UPDATE tenants SET minutes_allocated=120,minutes_used=17,
             subscription_status='active' WHERE id=ANY($1::uuid[])""",
             fixture.tenants,
         )
@@ -319,8 +324,8 @@ async def test_paid_receipt_uses_frozen_terms_and_duplicate_completion_preserves
     await fixture.service.sync_subscription(subscription, checkout_session=session)
     state = await _tenant(fixture)
     assert (
-        state["minutes_allocated"] == 163
-    )  # Annual payment never multiplies monthly allowance by 12.
+        state["minutes_allocated"] == 120
+    )  # Annual payment never multiplies monthly allowance by 12; bought minutes stay in the ledger.
     assert state["minutes_used"] == 0 and state["subscription_status"] == "active"
     async with acquire_with_tenant(fixture.pool, None) as conn:
         await conn.execute("UPDATE tenants SET minutes_used=29 WHERE id=$1", fixture.tenants[0])

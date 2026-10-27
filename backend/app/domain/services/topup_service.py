@@ -25,13 +25,15 @@ connection explicitly (a webhook has no user session to derive a tenant from —
 the tenant is read *from the order*) and the tenant-facing reads take the
 tenant-scoped one.
 
-UNLIMITED TENANTS ARE SKIPPED, NOT TOPPED UP
----------------------------------------------
-``minutes_allocated <= 0`` is the existing sentinel for unlimited. Adding 500 to
-0 would turn an uncapped account into one capped at 500 — a top-up that leaves
-the customer worse off than before they paid. Those tenants get a ledger entry
-for the money and no change to the allocation, and the mismatch is logged loudly
-because it means something was sold that should not have been sellable.
+WHERE BOUGHT MINUTES LIVE (2026-10-27)
+-------------------------------------
+``tenants.minutes_allocated`` is the plan's monthly minutes only. Bought minutes
+live ONLY in ``billing_ledger``: a credit, a refund, a dispute and each closed
+month's usage (``topup_usage``) are rows there, and the meter adds the balance
+to the plan's minutes. A credit or reversal therefore never touches the
+allocation, so a refund can never be blocked, floored or pushed into the
+``<= 0`` unlimited sentinel, and a plan change cannot lose or duplicate minutes.
+Top-ups never expire (owner decision): they carry over until used.
 """
 
 from __future__ import annotations
@@ -122,12 +124,15 @@ class TopupService:
 
     async def _package(self, conn, code: str) -> dict:
         row = await conn.fetchrow(
-            "SELECT code, name, minutes, price_cents, currency FROM topup_packages "
+            "SELECT code, name, minutes, price_cents, currency, expires_days FROM topup_packages "
             " WHERE code = $1 AND is_active",
             code,
         )
         if not row:
             raise TopupError(f"Unknown or inactive top-up package {code!r}")
+        if row.get("expires_days") is not None:
+            # Bought minutes carry over until used; the meter has no expiry.
+            raise TopupError(f"Top-up package {code!r} expires, which is not supported")
         return dict(row)
 
     # ── order ───────────────────────────────────────────────────────────────
@@ -151,8 +156,8 @@ class TopupService:
         async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
             pkg = await self._package(conn, package_code)
 
-            # minutes_allocated <= 0 is the UNLIMITED sentinel, and the credit
-            # path leaves it untouched. Selling minutes to such a tenant takes
+            # minutes_allocated <= 0 is the UNLIMITED sentinel; the meter
+            # ignores the ledger there. Selling minutes to such a tenant takes
             # money for nothing, so refuse before any order or Stripe session.
             allocated = await conn.fetchval(
                 "SELECT minutes_allocated FROM tenants WHERE id = $1::uuid",
@@ -300,33 +305,25 @@ class TopupService:
                 )
                 return False
 
+            # The ledger row IS the credit: the meter adds the ledger balance
+            # to the plan's minutes. The allocation is never changed here.
             allocated = await conn.fetchval(
-                "SELECT minutes_allocated FROM tenants WHERE id = $1 FOR UPDATE",
-                order["tenant_id"],
+                "SELECT minutes_allocated FROM tenants WHERE id = $1", order["tenant_id"],
             )
-            if allocated is not None and allocated > 0:
-                await conn.execute(
-                    "UPDATE tenants SET minutes_allocated = minutes_allocated + $2 "
-                    " WHERE id = $1",
-                    order["tenant_id"],
-                    order["minutes"],
-                )
-            else:
-                # <= 0 means UNLIMITED. Adding to it would CAP an uncapped
-                # account — a top-up that leaves the customer worse off.
+            if allocated is not None and allocated <= 0:
                 logger.warning(
                     "topup_on_unlimited_tenant tenant=%s order=%s minutes=%d — "
-                    "money recorded, allocation untouched. This tenant should not "
-                    "have been offered a top-up.",
+                    "money recorded; an unlimited allowance does not use it. This "
+                    "tenant should not have been offered a top-up.",
                     str(order["tenant_id"])[:8],
                     str(order["id"])[:8],
                     order["minutes"],
                 )
 
-            # THE CEILING THAT ACTUALLY BLOCKS THE CALL.
+            # A LEGACY CEILING KEPT IN STEP.
             #
-            # `tenants.minutes_allocated` (above) is what the dialer gate and
-            # every screen read. The call guard's minutes check reads a
+            # The ledger row (above) is what the meter, the dialer gate and
+            # every screen read. An older minutes check read a
             # DIFFERENT column in a DIFFERENT table —
             # `tenant_call_limits.monthly_minutes_allocated`, read by
             # ``call_guard._check_minutes_quota`` — and nothing syncs the two. A
@@ -399,9 +396,10 @@ class TopupService:
         what the customer was charged; rewriting it to represent a refund
         destroys the only evidence of what actually happened.
 
-        A finite allocation must not reach zero: ``<= 0`` is the existing
-        unlimited sentinel. That conflict requires reconciliation rather than
-        inventing a new allowance or silently allowing unlimited calls.
+        The reversal is the ledger row alone; the allocation (plan minutes)
+        is untouched, so it can never be blocked or reach the unlimited
+        sentinel. Minutes already used from a refunded top-up leave a negative
+        balance that the meter takes from the next allowance.
         """
         if kind not in ("refund", "dispute"):
             raise TopupError(f"{kind!r} is not a reversal")
@@ -435,21 +433,6 @@ class TopupService:
             ):
                 return False
 
-            allocated = await conn.fetchval(
-                "SELECT minutes_allocated FROM tenants WHERE id=$1 FOR UPDATE", order["tenant_id"]
-            )
-            enforced = await conn.fetchval(
-                "SELECT monthly_minutes_allocated FROM tenant_call_limits WHERE tenant_id=$1 FOR UPDATE",
-                order["tenant_id"],
-            )
-            if allocated is None or any(
-                value is not None and 0 < value <= order["minutes"]
-                for value in (allocated, enforced)
-            ):
-                raise BillingTopupReviewRequired(
-                    "reversal_would_change_unlimited_semantics", order["tenant_id"]
-                )
-
             entry = await conn.fetchrow(
                 """
                 INSERT INTO billing_ledger
@@ -471,21 +454,12 @@ class TopupService:
             if entry is None:
                 return False
 
-            await conn.execute(
-                "UPDATE tenants "
-                "   SET minutes_allocated = GREATEST(0, minutes_allocated - $2) "
-                " WHERE id = $1 AND minutes_allocated > 0",
-                order["tenant_id"],
-                order["minutes"],
-            )
-            # The enforced ceiling moves back with it. Leaving it raised after a
-            # refund hands the tenant minutes they no longer own and lets the
-            # two tables drift apart again. The locked preflight above refuses
-            # any finite ceiling that would reach the unlimited sentinel.
+            # The legacy ceiling moves back with the credit that raised it, but
+            # never to 0 ("no quota configured" there).
             await conn.execute(
                 "UPDATE tenant_call_limits "
                 "   SET monthly_minutes_allocated = "
-                "           GREATEST(0, monthly_minutes_allocated - $2), "
+                "           GREATEST(1, monthly_minutes_allocated - $2), "
                 "       updated_at = NOW() "
                 " WHERE tenant_id = $1 AND monthly_minutes_allocated > 0",
                 order["tenant_id"],
@@ -503,6 +477,38 @@ class TopupService:
             kind,
             order["minutes"],
         )
+        return True
+
+    async def reinstate_dispute(self, conn, *, payment_id: str, dispute_id: str, event_id: str) -> bool:
+        """A dispute the business won returns the reversed minutes, once.
+
+        Caller owns the transaction (the signed webhook receipt). True when this
+        payment belongs to a disputed top-up order, whether or not it moved now.
+        """
+        order = await conn.fetchrow(
+            "SELECT id, tenant_id, minutes, status FROM topup_orders WHERE provider_payment_id=$1 FOR UPDATE",
+            payment_id,
+        )
+        if not order:
+            return False
+        if order["status"] != "disputed" or not await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM billing_ledger WHERE order_id=$1 AND kind='dispute')", order["id"],
+        ):
+            return True
+        inserted = await conn.fetchval(
+            """INSERT INTO billing_ledger
+                   (tenant_id, order_id, kind, minutes_delta, amount_cents, provider_event_id, note)
+               VALUES ($1, $2, 'adjustment', $3, 0, $4, $5)
+               ON CONFLICT (provider_event_id) DO NOTHING RETURNING id""",
+            order["tenant_id"], order["id"], order["minutes"], f"dispute-won:{dispute_id}",
+            "dispute won: {} minutes restored".format(order["minutes"]),
+        )
+        if inserted:
+            await conn.execute(
+                "UPDATE topup_orders SET status='paid', updated_at=NOW() WHERE id=$1", order["id"],
+            )
+            logger.info("topup_dispute_won order=%s minutes=%d event=%s",
+                        str(order["id"])[:8], order["minutes"], str(event_id)[:24])
         return True
 
     # ── read ────────────────────────────────────────────────────────────────
@@ -588,15 +594,15 @@ class TopupService:
         return [dict(r) for r in rows]
 
     async def purchased_total(self, tenant_id: str) -> int:
-        """Net minutes this tenant has bought — the sum of the ledger.
+        """Net minutes this tenant has bought: credits less refunds/disputes.
 
-        Reported alongside the quota so "you have 340 minutes left" can be
-        explained as plan allocation plus what was topped up.
+        Monthly usage rows (``topup_usage``) are not purchases; the unused
+        balance is reported separately as ``topup_minutes_left``.
         """
         async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
             total = await conn.fetchval(
                 "SELECT COALESCE(SUM(minutes_delta), 0) FROM billing_ledger "
-                " WHERE tenant_id = $1::uuid",
+                " WHERE tenant_id = $1::uuid AND kind IN ('topup', 'refund', 'dispute')",
                 str(tenant_id),
             )
         return int(total or 0)

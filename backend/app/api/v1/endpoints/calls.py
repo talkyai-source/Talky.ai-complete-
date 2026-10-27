@@ -762,7 +762,7 @@ async def hangup_live_call(
                                     0,
                                     EXTRACT(EPOCH FROM (NOW() - answered_at))::int
                                 )
-                                ELSE 0
+                                ELSE NULL
                            END
                        ),
                        updated_at = NOW()

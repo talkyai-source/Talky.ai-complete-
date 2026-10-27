@@ -113,6 +113,7 @@ tenant_telephony_concurrency_policies tenant_telephony_concurrency_leases
 tenant_telephony_concurrency_events inbound_billing_hold_finalize_approvals inbound_usage_transactions
 """.split())
 NEW_COLUMNS = {
+    "tenants": ("allowance_anchor_at",),
     "user_profiles": ("admin_revision",),
     "tenant_users": ("admin_revision",),
     "public_contact_enquiries": ("revision",),

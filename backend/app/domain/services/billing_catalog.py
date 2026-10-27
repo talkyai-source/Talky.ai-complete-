@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from uuid import UUID
 
 from app.core.db_utils import acquire_with_tenant
@@ -74,6 +75,13 @@ _PUBLIC_FIELDS = (
 
 class BillingCatalogUnavailable(ValueError):
     pass
+
+
+# The catalog is public: without a cache every anonymous page view made one
+# Stripe request per price and could exhaust the account's rate limit, which
+# checkout and webhooks share. Checkout itself always re-reads the price.
+_PRICE_CACHE_SECONDS = 300.0
+_price_cache: dict[str, tuple[float, object]] = {}
 
 
 def validate_option(option: dict, mode: str) -> None:
@@ -187,21 +195,28 @@ async def list_plan_catalog(pool) -> list[dict]:
             if option["kind"] == "stripe":
                 import stripe
 
-                async with semaphore:
-                    http_client = stripe.HTTPXClient(timeout=5)
-                    try:
-                        client = stripe.StripeClient(
-                            os.environ["STRIPE_SECRET_KEY"],
-                            max_network_retries=0,
-                            http_client=http_client,
-                        )
-                        price = await asyncio.wait_for(
-                            client.v1.prices.retrieve_async(option["stripe_price_id"]), timeout=6
-                        )
-                    finally:
-                        await http_client.close_async()
-                        http_client.close()
+                cached = _price_cache.get(option["stripe_price_id"])
+                fresh = not (cached and cached[0] > time.monotonic())
+                if not fresh:
+                    price = cached[1]
+                else:
+                    async with semaphore:
+                        http_client = stripe.HTTPXClient(timeout=5)
+                        try:
+                            client = stripe.StripeClient(
+                                os.environ["STRIPE_SECRET_KEY"],
+                                max_network_retries=0,
+                                http_client=http_client,
+                            )
+                            price = await asyncio.wait_for(
+                                client.v1.prices.retrieve_async(option["stripe_price_id"]), timeout=6
+                            )
+                        finally:
+                            await http_client.close_async()
+                            http_client.close()
                 validate_provider_price(option, price)
+                if fresh:  # never extend an entry by re-reading the cache
+                    _price_cache[option["stripe_price_id"]] = (time.monotonic() + _PRICE_CACHE_SECONDS, price)
         except BillingCatalogUnavailable as exc:
             reason = str(exc)
         except Exception:
