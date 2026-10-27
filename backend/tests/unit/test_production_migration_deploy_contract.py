@@ -184,15 +184,27 @@ def test_cluster_soak_runner_cleans_up_and_never_claims_release_acceptance():
     assert "./venv/bin/python backend/scripts/loadtest_calls.py" not in source
 
 
-def test_restore_runbook_uses_new_isolated_database_and_validates_evidence():
+def test_restore_runbook_uses_new_isolated_cluster_and_validates_evidence():
     runbook = (ROOT / "docs" / "RUNBOOK.md").read_text(encoding="utf-8")
+    prose = " ".join(runbook.split())
 
-    assert "createdb -U talky -O talky --template=template0" in runbook
-    assert 'pg_restore -U talky -d "${restore_db}" --exit-on-error' in runbook
-    assert "sha256sum --check" in runbook
-    assert "SELECT version_num FROM alembic_version" in runbook
-    assert "application compatibility smoke test" in runbook
-    assert "never use the production `talky`" in runbook
+    capture_at = prose.index("Bind the private archive to its exact path, size and SHA-256")
+    isolate_at = prose.index("Create one uniquely owned container and volume")
+    restore_at = prose.index("Restore the **full** custom archive with ownership and ACLs retained")
+    restrict_at = prose.index("Demote the isolated application role to the captured source flags")
+    validate_at = prose.index("For candidate migration validation")
+    cleanup_at = prose.index("Close owned connections and remove only")
+    assert capture_at < isolate_at < restore_at < restrict_at < validate_at < cleanup_at
+    for contract in (
+        "exact production image ID", "no network or published ports",
+        "never the production data volume", "schema heads, role flags, memberships",
+        "`--exit-on-error` and a transaction", "verify_restore_compatibility.py",
+        "explicit clone-only `DATABASE_URL` **and** `READ_DATABASE_URL`",
+        "NOSUPERUSER/NOBYPASSRLS", "tenant/billing/receipt hashes",
+        "exact owned volume after identity checks",
+    ):
+        assert contract in prose
+    assert "createdb -U talky -O talky --template=template0" not in runbook
 
 
 def test_inbound_release_soak_disables_transfer_scenarios_and_is_not_overclaimed():
