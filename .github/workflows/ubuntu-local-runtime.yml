@@ -32,7 +32,9 @@ jobs:
       NEXT_PUBLIC_SENTRY_ENABLED: ""
       NEXT_PUBLIC_SENTRY_DSN: ""
       SENTRY_AUTH_TOKEN: ""
-      VITE_API_BASE_URL: http://127.0.0.1:8000/api/v1
+      # The release Admin build uses its supported same-origin API contract.
+      # The local Ubuntu nginx listener must proxy /api/ to 127.0.0.1:8000.
+      VITE_API_BASE_URL: /api/v1
       VITE_USE_DUMMY_AUTH: "false"
       VITE_ADMIN_DEV_MODE: "false"
     steps:
