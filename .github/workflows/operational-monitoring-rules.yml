@@ -1,0 +1,71 @@
+name: Operational monitoring rules
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/operational-monitoring-rules.yml"
+      - "backend/app/api/operational.py"
+      - "backend/app/api/v1/endpoints/health.py"
+      - "backend/app/infrastructure/metrics/**"
+      - "backend/app/domain/services/queue_service.py"
+      - "backend/app/domain/services/streams_queue_service.py"
+      - "backend/app/domain/services/queue_factory.py"
+      - "backend/app/workers/**"
+      - "backend/deploy/db-backup.sh"
+      - "backend/deploy/backup_snapshot.py"
+      - "backend/systemd/talky-db-backup.*"
+      - "backend/tests/unit/test_operational_signals.py"
+      - "backend/tests/unit/test_inbound_alerting_contract.py"
+      - "scripts/database/**"
+      - "scripts/installation/backend.env.example"
+      - "telephony/observability/**"
+      - "telephony/scripts/verify_ws_k.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: operational-monitoring-rules-${{ github.ref }}
+  cancel-in-progress: true
+
+# Native rule evaluation only: no application, Prometheus server, Alertmanager,
+# receiver, provider credentials or runtime environment is started or supplied.
+jobs:
+  prometheus-rules:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PROMETHEUS_VERSION: "2.54.1"
+      # Official v2.54.1 sha256sums.txt, prometheus-2.54.1.linux-amd64.tar.gz:
+      # https://github.com/prometheus/prometheus/releases/download/v2.54.1/sha256sums.txt
+      PROMETHEUS_LINUX_AMD64_SHA256: "31715ef65e8a898d0f97c8c08c03b6b9afe485ac84e1698bcfec90fc6e62924f"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and extract the pinned official Linux promtool
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+          tool_dir="$RUNNER_TEMP/prometheus-${PROMETHEUS_VERSION}"
+          mkdir -p "$tool_dir"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz" \
+            --output "$archive"
+          printf '%s  %s\n' "$PROMETHEUS_LINUX_AMD64_SHA256" "$archive" | sha256sum --check --strict
+          tar --extract --gzip --file "$archive" --directory "$tool_dir" \
+            --strip-components=1 "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+          "$tool_dir/promtool" --version
+      - name: Validate syntax and evaluate operational fault scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir="$GITHUB_WORKSPACE/telephony/observability/prometheus"
+          tool="$RUNNER_TEMP/prometheus-${PROMETHEUS_VERSION}/promtool"
+          export TMPDIR="$RUNNER_TEMP/promtool-evaluation"
+          mkdir -p "$TMPDIR"
+          chmod -R a-w "$source_dir"
+          cd "$source_dir"
+          "$tool" check rules rules/telephony_ws_k_rules.yml
+          "$tool" test rules operational_signals_test.yml

@@ -90,3 +90,24 @@ Follow-up verification:
 Rule names and PromQL are unchanged by this follow-up; the recorded native
 rule validation remains applicable. Deployed service permissions, filesystem
 mounts, fault delivery and restore acceptance remain separate operating gates.
+
+## Native Linux rule CI coverage
+
+Final review found that the native scenarios were reachable only through the
+optional WS-K verifier. The dedicated
+[operational monitoring workflow](../../.github/workflows/operational-monitoring-rules.yml)
+now selects relevant metric, heartbeat, queue, rule and backup changes on pull
+requests, with manual dispatch available. It verifies the official Prometheus
+2.54.1 Linux amd64 archive before extracting only `promtool`, then checks rule
+syntax and runs `operational_signals_test.yml` against a read-only source
+directory. Temporary evaluation data goes to the runner's temporary directory.
+It starts no service and configures no receiver or runtime credentials.
+
+The pinned archive SHA-256 is
+`31715ef65e8a898d0f97c8c08c03b6b9afe485ac84e1698bcfec90fc6e62924f`,
+recorded from the official
+[v2.54.1 checksums](https://github.com/prometheus/prometheus/releases/download/v2.54.1/sha256sums.txt)
+for `prometheus-2.54.1.linux-amd64.tar.gz` in the
+[Prometheus release](https://github.com/prometheus/prometheus/releases/tag/v2.54.1).
+Workflow structure and embedded Bash syntax were reviewed locally; the new
+workflow's actual Ubuntu execution remains pending until this commit is pushed.
