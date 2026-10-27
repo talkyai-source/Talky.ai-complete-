@@ -68,7 +68,9 @@ export TALKY_DEPLOY_DRAIN_MANIFEST_SHA256='<64-lowercase-hex-sha256-of-exact-fil
    `reconcile_asterisk_release.sh --check-only` to reject ambiguous
    account-to-DID inventory, and validates the mandatory carrier-hairpin
    synthetic configuration
-5. only after those candidate proofs, checks out the frozen SHA with
+5. only after those candidate proofs and the zero-session check, saves the exact
+   `/etc/systemd/system/talky-api-web.service` file or symlink using `cp -a` in a
+   root-private directory under `/var/backups/talky/deploy-unit-recovery`, then checks out the frozen SHA with
    `git checkout --detach <full-sha>` and verifies `HEAD` and the clean tree; it
    never deploys a moving branch tip
 6. proves the existing gateway has zero sessions, atomically publishes the
@@ -84,18 +86,34 @@ export TALKY_DEPLOY_DRAIN_MANIFEST_SHA256='<64-lowercase-hex-sha256-of-exact-fil
    and `BACKEND_INTERNAL_URL` origin from `backend/.env`; it refuses startup if
    secrets are absent, short, or reused, and refuses any callback whose scheme,
    host, port, or caller-audio path falls outside that pinned origin
-8. starts `talky-migrate.service` and verifies `alembic current == heads`;
-   migration errors fail closed. It then applies the repository-owned Asterisk
+8. starts `talky-migrate.service`, verifies `alembic current == heads`, and runs
+   the Admin runtime database privilege gate against the application's configured
+   connection. Both checks run with sudo because the production environment file
+   is root-owned mode `0600`; inherited database URL overrides are cleared.
+   Failures block the backend restart. It then applies the repository-owned Asterisk
    configuration through `reconcile_asterisk_release.sh`, which requires zero
    active Asterisk channels and atomically applies, reloads, verifies, or rolls
    back the managed configuration
-9. restarts the API and three Python workers only after the matching gateway,
-   schema, and Asterisk configuration are proven; it then restarts the
-   trunk-status timer and restarts `talky-inbound-synthetic.timer`, while the
-   trunk-status one-shot remains non-fatal because its timer retries
+9. atomically sets only `APP_VERSION` in `backend/.env` to the full candidate SHA,
+   preserving the other bindings, file ownership and permissions. It restarts both
+   APIs and three Python workers only after the matching gateway, schema, runtime
+   privileges and Asterisk configuration are proven. It then restarts
+   `talky-inbound-synthetic.timer` and the long-running trunk-status service;
+   trunk-status restart failure remains non-fatal because that unit retries
 10. requires every listed unit to be active, then requires liveness, capacity
     readiness, and dependency-aware deep readiness to return successful HTTP
-    responses; any failure keeps the deploy command non-zero
+    responses. It reads each API unit's current `MainPID` and verifies that process's
+    exact `APP_VERSION` without printing its environment; any failure keeps the
+    deploy command non-zero
+
+An abort before a successful migration restores the previous checkout and runs
+its unit installer, then restores the saved API-web file or symlink with
+`cp -a --remove-destination` and reloads systemd. This preserves an independently
+pinned maintenance web unit that the old installer alone would overwrite. The
+rollback does not restart services, and retains the private unit backup for
+recovery. Once migration succeeds, failures require code-forward recovery or a
+separately approved compatible restore; the deploy does not roll code backward
+under the migrated schema.
 
 Asterisk configuration is generated and reconciled from the repository:
 `setup-asterisk.sh` provisions the managed includes, and deploys use
@@ -203,12 +221,15 @@ has a separate runtime connection. Do not print or copy connection strings.
 
 ```bash
 cd /opt/talky/backend
-venv/bin/python scripts/verify_admin_runtime_privileges.py > admin-runtime-privileges.json
+sudo env -u DATABASE_URL -u READ_DATABASE_URL venv/bin/python scripts/verify_admin_runtime_privileges.py > admin-runtime-privileges.json
 ```
 
 Require exit code zero before accepting the database capability portion of an
-Admin release. This is a documented gate; `deploy_to_server.sh` does not yet
-invoke it automatically. It opens bounded, read-only transactions and reads
+Admin release. `deploy_to_server.sh` invokes this gate automatically after the
+successful migration and exact-head check, before publishing `APP_VERSION` or
+restarting backend services. The supported units run as root and read their
+connections from `backend/.env`; the command clears inherited database URL
+overrides so it observes that file's actual runtime role. It opens bounded, read-only transactions and reads
 catalogs plus the Alembic version metadata. It never grants privileges, changes
 roles, changes application RLS settings, or reads customer records. The role
 must be able to read `public.alembic_version` for the head check. Reports omit
@@ -240,6 +261,13 @@ inventory offline without loading environment files or connecting. Contract
 drift, hosted execution and a successful report remain release requirements;
 synthetic unit tests do not establish the host's grants. Optional platform SIP
 seeding is included only when its existing configuration enables that hook.
+
+`backend/scripts/set_release_version.py --env-file /opt/talky/backend/.env
+--candidate-sha <full-sha>` changes only the release identity and refuses an
+invalid file or detected concurrent file change. The deploy runs it with sudo, then checks
+both started API processes using `--check-pid <MainPID>`. A public health response
+alone is not evidence that both processes loaded the intended version. These
+checks read process environments internally and never print credentials.
 
 ## Rollback
 

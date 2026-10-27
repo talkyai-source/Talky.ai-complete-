@@ -8,6 +8,7 @@ import importlib.util
 from importlib import import_module
 import os
 from pathlib import Path
+import re
 import secrets
 import subprocess
 from types import SimpleNamespace
@@ -39,6 +40,43 @@ def reviewed_provisioner(value, github_actions):
           and parsed.path == "/talky_alembic_test")
     assert local or ci, "Only the explicitly configured local or real CI provisioner is allowed"
     return parsed
+
+
+def reviewed_client_versions(versions, server_version_num):
+    assert set(versions) == {"psql", "pg_dump", "pg_restore"}
+    majors = []
+    for value in versions.values():
+        match = re.search(r"\(PostgreSQL\)\s+(\d+)\.", value)
+        assert match, "PostgreSQL client version could not be established"
+        majors.append(int(match.group(1)))
+    assert len(set(majors)) == 1, "Use one consistent PostgreSQL client toolchain"
+    assert majors[0] >= int(server_version_num) // 10000, "pg_dump cannot read a newer server"
+    # A newer client can read an older server, but its output is not guaranteed
+    # to restore there. The unmodified real restore below is that final gate.
+    return majors[0]
+
+
+@pytest.mark.parametrize("majors,server,accepted", [
+    ((15, 15, 15), 150017, True),
+    ((16, 16, 16), 150017, True),
+    ((16, 16, 16), 160014, True),
+    ((15, 15, 15), 160014, False),
+    ((15, 16, 16), 150017, False),
+    ((17, 16, 17), 150017, False),
+])
+def test_client_version_guard(majors, server, accepted):
+    versions = {tool: f"{tool} (PostgreSQL) {major}.14" for tool, major in zip(
+        ("psql", "pg_dump", "pg_restore"), majors)}
+    if accepted:
+        assert reviewed_client_versions(versions, server) == majors[0]
+    else:
+        with pytest.raises(AssertionError):
+            reviewed_client_versions(versions, server)
+
+
+def test_client_version_guard_rejects_unknown_output():
+    with pytest.raises(AssertionError):
+        reviewed_client_versions({tool: "unrecognized" for tool in ("psql", "pg_dump", "pg_restore")}, 150017)
 
 
 @pytest.mark.parametrize("dsn,ci,accepted", [
@@ -78,7 +116,9 @@ def database_pair(monkeypatch, tmp_path):
     pg_bin = Path(os.environ["TALKY_BACKUP_PG_BIN"])
     suffix = ".exe" if os.name == "nt" else ""
     tools = {name: pg_bin / (name + suffix) for name in ("psql", "pg_dump", "pg_restore")}
-    assert all(path.is_file() for path in tools.values())
+    assert all(path.is_file() and os.access(path, os.X_OK) for path in tools.values())
+    versions = {name: subprocess.run([str(path), "--version"], check=True, capture_output=True,
+        text=True, timeout=5).stdout for name, path in tools.items()}
     token = uuid4().hex
     source, restored, role = ("backup_" + token + value for value in ("_source_test", "_restored_test", "_role"))
     password = secrets.token_urlsafe(32)
@@ -91,6 +131,8 @@ def database_pair(monkeypatch, tmp_path):
     async def prepare():
         owner = await asyncpg.connect(configured, timeout=5, command_timeout=60)
         try:
+            state["server_version_num"] = int(await owner.fetchval("SHOW server_version_num"))
+            state["client_major"] = reviewed_client_versions(versions, state["server_version_num"])
             flags = await owner.fetchrow("SELECT rolcreatedb,rolcreaterole FROM pg_roles WHERE rolname=current_user")
             assert flags["rolcreatedb"] and flags["rolcreaterole"]
             assert not await owner.fetchval("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=$1)", role)
