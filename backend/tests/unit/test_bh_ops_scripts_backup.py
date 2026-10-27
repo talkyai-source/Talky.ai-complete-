@@ -17,6 +17,7 @@ BACKEND = Path(__file__).resolve().parents[2]
 SCRIPT = BACKEND / "deploy" / "db-backup.sh"
 
 FAKE_DOCKER = """#!/usr/bin/env bash
+if [ -n "${FAKE_DOCKER_LOG:-}" ]; then echo "$*" >> "$FAKE_DOCKER_LOG"; fi
 case "$*" in
   *pg_dump*) head -c "${FAKE_DUMP_BYTES}" /dev/zero ;;
   *pg_restore*)
@@ -46,7 +47,7 @@ def _real_bash() -> str | None:
 pytestmark = pytest.mark.skipif(_real_bash() is None, reason="no POSIX bash available")
 
 
-def _run_backup(tmp_path: Path, dump_bytes: int, table_data: int = 60):
+def _run_backup(tmp_path: Path, dump_bytes: int, table_data: int = 60, extra_env: dict | None = None):
     shim = tmp_path / "shim"
     shim.mkdir(exist_ok=True)
     docker = shim / "docker"
@@ -65,6 +66,8 @@ def _run_backup(tmp_path: Path, dump_bytes: int, table_data: int = 60):
         FAKE_DUMP_BYTES=str(dump_bytes),
         FAKE_TABLE_DATA=str(table_data),
     )
+    env.pop("TALKY_BACKUP_PLATFORM_ADMIN_ID", None)
+    env.update(extra_env or {})
     # Git Bash re-prepends /usr/bin to PATH at startup, which would shadow shims
     # for ``install``; put the shim dir first from inside the shell instead.
     launcher = (
@@ -147,3 +150,36 @@ def test_a_healthy_dump_publishes_and_exits_zero(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert "db-backup: ok" in result.stdout
+
+
+# --- platform-admin-only tables (0062): app.bypass_rls alone dumps them empty --
+
+def _dump_args(log: Path) -> str:
+    return next(line for line in log.read_text(encoding="utf-8").splitlines() if "pg_dump" in line)
+
+
+def test_a_named_platform_admin_is_added_to_the_dump_session(tmp_path):
+    log = tmp_path / "docker.log"
+    admin = "44444444-4444-4444-8444-444444444444"
+    result = _run_backup(tmp_path, dump_bytes=9_000, extra_env={
+        "FAKE_DOCKER_LOG": str(log), "TALKY_BACKUP_PLATFORM_ADMIN_ID": admin})
+    assert result.returncode == 0, result.stderr
+    assert f"PGOPTIONS=-c app.bypass_rls=true -c app.current_user_id={admin}" in _dump_args(log)
+    assert "WARNING" not in result.stderr
+
+
+def test_without_a_platform_admin_the_gap_is_announced_not_silent(tmp_path):
+    log = tmp_path / "docker.log"
+    result = _run_backup(tmp_path, dump_bytes=9_000, extra_env={"FAKE_DOCKER_LOG": str(log)})
+    assert result.returncode == 0, result.stderr
+    assert "assistant_action_resolutions" in result.stderr and "EMPTY" in result.stderr
+    assert "PGOPTIONS=-c app.bypass_rls=true " in _dump_args(log) + " "
+    assert "app.current_user_id" not in _dump_args(log)
+
+
+def test_a_malformed_platform_admin_id_stops_before_dumping(tmp_path):
+    log = tmp_path / "docker.log"
+    result = _run_backup(tmp_path, dump_bytes=9_000, extra_env={
+        "FAKE_DOCKER_LOG": str(log), "TALKY_BACKUP_PLATFORM_ADMIN_ID": "x -c search_path=evil"})
+    assert result.returncode == 1 and "not a UUID" in result.stderr
+    assert not log.exists()

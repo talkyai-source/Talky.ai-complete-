@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Run one checked backup with a process lock and comparison to the last bundle."""
+"""Run one checked backup with a process lock and comparison to the last bundle,
+then copy it to the off-host replica root and apply the retention policy.
+
+Retention runs only after a successful backup, and the replica is written
+before pruning, so a failing schedule never deletes the last good archive."""
 from __future__ import annotations
 
 import argparse
@@ -19,6 +23,11 @@ def main() -> int:
     parser.add_argument("--backup-root", type=Path, required=True)
     parser.add_argument("--minimum-bytes", type=int, default=1048576)
     parser.add_argument("--minimum-ratio", type=float, default=.5)
+    parser.add_argument("--rls-bypass-guc", action="store_true")
+    parser.add_argument("--rls-setting", action="append", default=[], metavar="app.NAME=VALUE")
+    parser.add_argument("--replica-root", type=Path, help="off-host mount that receives a verified copy")
+    parser.add_argument("--keep-days", type=float, default=30)
+    parser.add_argument("--keep-minimum", type=int, default=7)
     args = parser.parse_args()
     lock = None
     try:
@@ -35,8 +44,14 @@ def main() -> int:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         service = recovery.Service(args.service_file, args.service)
         receipt = recovery.backup(recovery.Postgres(), service, args.backup_root / stamp,
-                                  args.minimum_bytes, previous, args.minimum_ratio)
-        print(json.dumps(receipt, indent=2, sort_keys=True))
+                                  args.minimum_bytes, previous, args.minimum_ratio, args.rls_bypass_guc,
+                                  recovery.parse_rls_settings(args.rls_setting))
+        result = {"backup": receipt}
+        if args.replica_root:
+            result["replica"] = recovery.replicate(args.backup_root / stamp, args.replica_root)
+            result["replica_retention"] = recovery.prune(args.replica_root, args.keep_days, args.keep_minimum, False)
+        result["retention"] = recovery.prune(args.backup_root, args.keep_days, args.keep_minimum, False)
+        print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     except (OSError, recovery.RecoveryError):
         print("Scheduled backup failed; verify lock, configuration, prior archive and size checks privately.", file=sys.stderr)

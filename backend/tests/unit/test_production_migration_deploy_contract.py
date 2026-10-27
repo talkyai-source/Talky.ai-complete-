@@ -288,3 +288,15 @@ def test_inbound_foundation_downgrade_locks_every_guarded_writer():
     ):
         assert table in downgrade[lock_at:guard_at]
     assert "IN ACCESS EXCLUSIVE MODE" in downgrade[lock_at:guard_at]
+
+
+def test_migrations_can_run_as_the_schema_owner_after_the_database_moves():
+    # After the cut-over DATABASE_URL is the restricted runtime role, which has
+    # no DDL; Alembic reads MIGRATION_DATABASE_URL first (Alembic/env.py), so the
+    # unit loads it from an optional operator-only file layered after .env.
+    unit = (BACKEND / "systemd" / "talky-migrate.service").read_text(encoding="utf-8")
+    env_files = [line for line in unit.splitlines() if line.startswith("EnvironmentFile=")]
+    assert env_files == ["EnvironmentFile=/opt/talky/backend/.env",
+                         "EnvironmentFile=-/etc/talklee/secrets/migration.env"]
+    alembic_env = (BACKEND / "Alembic" / "env.py").read_text(encoding="utf-8")
+    assert 'os.getenv("MIGRATION_DATABASE_URL", os.getenv("DATABASE_URL"))' in alembic_env

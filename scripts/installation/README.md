@@ -65,7 +65,7 @@ installer verifies these additional deployment constraints:
 ```dotenv
 ENVIRONMENT=production
 TELEPHONY_ADAPTER=asterisk
-DATABASE_URL=postgresql://talky_runtime:URL_ENCODED_PASSWORD@db.example.net/talky?sslmode=verify-full&sslrootcert=/etc/ssl/certs/talky-db-ca.pem
+DATABASE_URL=postgresql://talklee_app:URL_ENCODED_PASSWORD@db.example.net/talky?sslmode=verify-full&sslrootcert=/etc/ssl/certs/talky-db-ca.pem
 REDIS_URL=redis://:AT_LEAST_32_URL_SAFE_CHARACTERS@127.0.0.1:6379/0
 FRONTEND_URL=https://app.example.com
 API_BASE_URL=https://api.example.com

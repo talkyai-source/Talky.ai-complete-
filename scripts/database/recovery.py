@@ -132,6 +132,15 @@ class Service:
         else:
             self.passfile = None
         self.name = name
+        # Set only for a backup/verification without a BYPASSRLS role: the
+        # application's own RLS escape (app.bypass_rls) and named settings
+        # such as a platform-admin app.current_user_id.
+        self.rls_bypass_guc = False
+        self.rls_settings: dict[str, str] = {}
+
+    @property
+    def rls_session(self) -> bool:
+        return self.rls_bypass_guc or bool(self.rls_settings)
 
     def env(self, *, database: str | None = None, readonly: bool = True) -> dict[str, str]:
         env = {key: value for key, value in os.environ.items()
@@ -142,7 +151,9 @@ class Service:
         env.update({SERVICE_ENV[key]: value for key, value in self.values.items() if key in SERVICE_ENV})
         env.update(PGCONNECT_TIMEOUT="10", PGAPPNAME="talklee-recovery",
                    PGOPTIONS="-c lock_timeout=5000 -c statement_timeout=3600000"
-                             + (" -c default_transaction_read_only=on" if readonly else ""))
+                             + (" -c default_transaction_read_only=on" if readonly else "")
+                             + (" -c app.bypass_rls=true" if self.rls_bypass_guc else "")
+                             + "".join(f" -c {name}={value}" for name, value in self.rls_settings.items()))
         if self.passfile:
             env["PGPASSFILE"] = str(self.passfile)
         return env
@@ -168,8 +179,10 @@ class Postgres:
             *, sql: str | None = None, readonly: bool = True) -> str:
         kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
         try:
+            # errors="replace": client notices arrive in the console code page
+            # on Windows; a decode failure must not kill the output reader.
             result = subprocess.run([self.executable(name), *args], input=sql, text=True,
-                                    encoding="utf-8", capture_output=True, timeout=self.timeout,
+                                    encoding="utf-8", errors="replace", capture_output=True, timeout=self.timeout,
                                     env=service.env(readonly=readonly) if service else None, **kwargs)
         except (subprocess.TimeoutExpired, OSError) as exc:
             raise RecoveryError(f"{name} could not complete; verify client/access and timeout") from exc
@@ -206,11 +219,77 @@ ROLLBACK;
 """
 
 
+TABLE_COUNTS_SQL = (
+    "(SELECT COALESCE(json_object_agg(c.relname, (xpath('/row/n/text()', query_to_xml("
+    "format('SELECT count(*) AS n FROM public.%I', c.relname), false, true, '')))[1]::text::bigint "
+    "ORDER BY c.relname), '{}'::json) FROM pg_class c JOIN pg_namespace s ON s.oid=c.relnamespace "
+    "WHERE s.nspname='public' AND c.relkind IN ('r','p'))")
+
+
 def inventory_sql() -> str:
     counts = ", ".join(f"'{table}', (SELECT count(*) FROM public.{table})" for table in TABLES)
+    # table_counts covers every application table; cut-over and restore
+    # compare it exactly. counts keeps the four critical tables for receipts.
     return ("SELECT json_build_object('heads', (SELECT COALESCE(json_agg(version_num ORDER BY version_num), '[]'::json) "
             "FROM public.alembic_version), 'counts', json_build_object(" + counts + "), "
-            "'snapshot_time', transaction_timestamp());")
+            "'table_counts', " + TABLE_COUNTS_SQL + ", 'snapshot_time', transaction_timestamp());")
+
+
+# Without a BYPASSRLS role, a backup reads row-level-security tables through
+# session settings (app.bypass_rls, optionally app.current_user_id). Every
+# policy that can filter a SELECT must then provably admit every row, or
+# pg_dump would silently write a filtered table. A policy admits every row if
+# it follows the canonical bypass shape, or if its expression references no
+# column of its own table (pg_depend) and evaluates true in this session.
+RLS_POLICIES_SQL = """
+SELECT COALESCE(json_agg(json_build_object(
+         'table', c.relname, 'policy', p.polname, 'permissive', p.polpermissive,
+         'qual', pg_get_expr(p.polqual, p.polrelid),
+         'row_dependent', EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_policy'::regclass
+                                    AND d.objid = p.oid AND d.refobjid = p.polrelid AND d.refobjsubid > 0))
+         ORDER BY c.relname, p.polname), '[]'::json)
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+  LEFT JOIN pg_policy p ON p.polrelid = c.oid AND p.polcmd IN ('r', '*')
+ WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relrowsecurity;
+"""
+RLS_SETTING = re.compile(r"(app\.[a-z_]{1,40})=([A-Za-z0-9_.:-]{1,100})\Z")
+
+
+def parse_rls_settings(values: list[str]) -> dict[str, str]:
+    settings = {}
+    for value in values or []:
+        match = RLS_SETTING.fullmatch(value)
+        if not match or match.group(1) == "app.bypass_rls":
+            raise RecoveryError("--rls-setting must be app.<name>=<simple value> (bypass has its own flag)")
+        settings[match.group(1)] = match.group(2)
+    return settings
+
+
+def rls_uncovered(pg: Postgres, service: Service, database: str | None = None) -> list[str]:
+    """Tables a session-settings backup would read filtered; [] means complete."""
+    tables: dict[str, list[dict]] = {}
+    for policy in pg.json(service, RLS_POLICIES_SQL, database=database):
+        tables.setdefault(policy["table"], [])
+        if policy["policy"] is not None:
+            tables[policy["table"]].append(policy)
+    candidates = [p for items in tables.values() for p in items
+                  if p["qual"] and not p["row_dependent"] and not (service.rls_bypass_guc and "app.bypass_rls" in p["qual"])]
+    evaluated = {}
+    if candidates:
+        # Expressions come from the catalog (written by migrations), not input.
+        sql = "SELECT json_build_object(" + ", ".join(
+            f"'{index}', COALESCE(({p['qual']})::boolean, false)" for index, p in enumerate(candidates)) + ");"
+        result = pg.json(service, "BEGIN READ ONLY; " + sql + " ROLLBACK;", database=database)
+        evaluated = {id(p): result[str(index)] for index, p in enumerate(candidates)}
+    def admits_all(policy: dict) -> bool:
+        if not policy["qual"]:
+            return False
+        if service.rls_bypass_guc and "app.bypass_rls" in policy["qual"]:
+            return True
+        return evaluated.get(id(policy), False) is True
+    return sorted(table for table, items in tables.items()
+                  if not any(admits_all(p) for p in items if p["permissive"])
+                  or not all(admits_all(p) for p in items if not p["permissive"]))
 
 
 def endpoint_fingerprint(pg: Postgres, service: Service) -> str:
@@ -251,8 +330,11 @@ class Snapshot:
                 self.lines.put(None)
             self.reader = threading.Thread(target=read_lines, daemon=True)
             self.reader.start()
-            self.process.stdin.write("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;\n"
-                                     "SET LOCAL row_security=off;\n"
+            # row_security=off makes a filtered read an error (BYPASSRLS
+            # role). The bypass-setting mode keeps policies on instead and
+            # relies on the coverage check made before the snapshot.
+            row_security = "" if self.service.rls_session else "SET LOCAL row_security=off;\n"
+            self.process.stdin.write("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;\n" + row_security +
                                      "SELECT pg_export_snapshot();\n" + inventory_sql() + "\n")
             self.process.stdin.flush()
             self.snapshot = self.read()
@@ -341,8 +423,10 @@ def verify_bundle(bundle: Path) -> dict:
             raise RecoveryError("backup checksum file does not match receipt")
         if set(receipt["inventory"]["counts"]) != set(TABLES):
             raise RecoveryError("backup inventory is incomplete")
-        if not all(isinstance(value, int) and not isinstance(value, bool) and value >= 0
-                   for value in receipt["inventory"]["counts"].values()):
+        table_counts = receipt["inventory"].get("table_counts", {})
+        if not isinstance(table_counts, dict) or not all(
+                isinstance(value, int) and not isinstance(value, bool) and value >= 0
+                for value in [*receipt["inventory"]["counts"].values(), *table_counts.values()]):
             raise RecoveryError("backup counts are invalid")
         if not re.fullmatch(r"[0-9]{1,20}", receipt["source_cluster_id"]):
             raise RecoveryError("backup cluster identity is invalid")
@@ -357,7 +441,8 @@ def verify_bundle(bundle: Path) -> dict:
 
 
 def backup(pg: Postgres, service: Service, destination: Path, minimum_bytes: int,
-           previous: Path | None, minimum_ratio: float) -> dict:
+           previous: Path | None, minimum_ratio: float, rls_bypass_guc: bool = False,
+           rls_settings: dict[str, str] | None = None) -> dict:
     if destination.exists() or destination.is_symlink():
         raise RecoveryError("refusing to replace an existing backup bundle")
     if minimum_bytes < 1024 or not 0 < minimum_ratio <= 1:
@@ -366,12 +451,20 @@ def backup(pg: Postgres, service: Service, destination: Path, minimum_bytes: int
     destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     staging = Path(tempfile.mkdtemp(prefix=".talklee-backup-", dir=destination.parent))
     started = time.monotonic()
+    service.rls_bypass_guc, service.rls_settings = rls_bypass_guc, dict(rls_settings or {})
     try:
         archive = staging / "database.dump"
         source_fingerprint = endpoint_fingerprint(pg, service)
         source_cluster = cluster_identifier(pg, service)
+        if service.rls_session:
+            uncovered = rls_uncovered(pg, service)
+            if uncovered:
+                raise RecoveryError("row-level security on these tables would filter this backup session "
+                                    "(use a BYPASSRLS backup role or name the needed --rls-setting): "
+                                    + ", ".join(map(str, uncovered[:20])))
+        dump_options = ["--enable-row-security"] if service.rls_session else []
         with Snapshot(pg, service) as snapshot:
-            pg.run("pg_dump", ["--no-password", "--format=custom", "--no-owner", "--no-privileges",
+            pg.run("pg_dump", ["--no-password", "--format=custom", "--no-owner", "--no-privileges", *dump_options,
                                "--snapshot", snapshot.snapshot, "--file", str(archive),
                                "--dbname", service.connection()], service)
             inventory = snapshot.inventory
@@ -387,6 +480,8 @@ def backup(pg: Postgres, service: Service, destination: Path, minimum_bytes: int
                    "source_cluster_id": source_cluster,
                    "duration_seconds": round(time.monotonic() - started, 3),
                    "client": pg.run("pg_dump", ["--version"]),
+                   "rls_mode": "session_settings" if service.rls_session else "bypassrls_role",
+                   "rls_settings": (["app.bypass_rls"] if rls_bypass_guc else []) + sorted(service.rls_settings),
                    "retention_applied": False, "off_host_verified": False, "restored": False}
         write_json_new(staging / "receipt.json", receipt)
         (staging / "database.dump.sha256").write_text(checksum + "  database.dump\n", encoding="ascii")
@@ -399,6 +494,7 @@ def backup(pg: Postgres, service: Service, destination: Path, minimum_bytes: int
         staging.rename(destination)
         return receipt
     finally:
+        service.rls_bypass_guc, service.rls_settings = False, {}
         if staging.exists():
             if staging.resolve().parent != destination.parent.resolve() or not staging.name.startswith(".talklee-backup-"):
                 raise RecoveryError("refusing cleanup outside the owned backup staging directory")
@@ -483,7 +579,9 @@ def restore(pg: Postgres, service: Service, bundle: Path, database: str, runtime
         pg.run("pg_restore", ["--no-password", "--exit-on-error", "--single-transaction", "--no-owner", "--no-privileges",
                                "--dbname", service.connection(database), str(bundle / "database.dump")], service, readonly=False)
         restored = pg.json(service, "BEGIN READ ONLY; SET LOCAL row_security=off; " + inventory_sql() + " ROLLBACK;", database=database)
-        if restored["counts"] != receipt["inventory"]["counts"] or restored["heads"] != receipt["inventory"]["heads"]:
+        if (restored["counts"] != receipt["inventory"]["counts"] or restored["heads"] != receipt["inventory"]["heads"]
+                or ("table_counts" in receipt["inventory"]
+                    and restored["table_counts"] != receipt["inventory"]["table_counts"])):
             raise RecoveryError("restored schema/counts do not match the exact backup snapshot")
         result["inventory"] = restored
         result["tenant_isolation"] = rls_probe(pg, service, database, runtime_role)
@@ -520,6 +618,72 @@ def health(root: Path, maximum_age_hours: float) -> dict:
             "limits": ["local archive age/checksum only; no off-host or restore assertion"]}
 
 
+def _bundles_by_snapshot(root: Path) -> list[tuple[datetime, Path]]:
+    """Published bundles, newest first. Unknown directories are never touched."""
+    found = []
+    for path in root.iterdir():
+        if path.name.startswith(".") or path.is_symlink() or not path.is_dir():
+            continue
+        try:
+            receipt = json.loads((path / "receipt.json").read_text(encoding="utf-8"))
+            if receipt.get("operation") == "backup" and receipt.get("status") == "archive_verified":
+                found.append((datetime.fromisoformat(receipt["inventory"]["snapshot_time"]), path))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return sorted(found, key=lambda item: item[0], reverse=True)
+
+
+def prune(root: Path, keep_days: float, keep_minimum: int, dry_run: bool) -> dict:
+    """Retention: delete bundles older than keep_days, but always keep the
+    newest keep_minimum, and delete nothing unless the newest one verifies
+    (a failing backup schedule must never age out the last good archives)."""
+    if keep_days < 1 or keep_minimum < 1:
+        raise RecoveryError("retention requires keep-days >= 1 and keep-minimum >= 1")
+    root = root.resolve(strict=True)
+    bundles = _bundles_by_snapshot(root)
+    if not bundles:
+        raise RecoveryError("no published backup bundles exist")
+    verify_bundle(bundles[0][1])
+    cutoff = datetime.now(timezone.utc).timestamp() - keep_days * 86400
+    expired = [path for index, (snapshot, path) in enumerate(bundles)
+               if index >= keep_minimum and snapshot.timestamp() < cutoff]
+    for path in expired:
+        if path.resolve().parent != root:
+            raise RecoveryError("refusing to delete outside the backup root")
+        if not dry_run:
+            shutil.rmtree(path)
+    return {"operation": "prune", "status": "passed", "checked_at": utcnow(), "dry_run": dry_run,
+            "keep_days": keep_days, "keep_minimum": keep_minimum,
+            "kept": [path.name for _, path in bundles if path not in expired],
+            "deleted" if not dry_run else "would_delete": [path.name for path in expired]}
+
+
+def replicate(bundle: Path, destination_root: Path) -> dict:
+    """Copy one verified bundle to a second location (an off-host mount) and
+    verify the copy byte-for-byte before publishing it there."""
+    receipt = verify_bundle(bundle)
+    destination_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    target = destination_root / bundle.name
+    if target.exists() or target.is_symlink():
+        raise RecoveryError("replica already exists; replicas are never overwritten")
+    staging = Path(tempfile.mkdtemp(prefix=".talklee-replica-", dir=destination_root))
+    try:
+        for name in ("database.dump", "database.dump.sha256", "receipt.json"):
+            shutil.copyfile(bundle / name, staging / name)
+            sync_file(staging / name)
+        copied = verify_bundle(staging)
+        if copied["sha256"] != receipt["sha256"]:
+            raise RecoveryError("replica checksum differs from the source bundle")
+        staging.rename(target)
+    finally:
+        if staging.exists():
+            if staging.resolve().parent != destination_root.resolve() or not staging.name.startswith(".talklee-replica-"):
+                raise RecoveryError("refusing cleanup outside the owned replica staging directory")
+            shutil.rmtree(staging)
+    return {"operation": "replicate", "status": "replica_verified", "replicated_at": utcnow(),
+            "bundle": bundle.name, "sha256": receipt["sha256"], "bytes": receipt["bytes"]}
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--service-file", type=Path, default=os.environ.get("PGSERVICEFILE"))
@@ -536,6 +700,18 @@ def parser() -> argparse.ArgumentParser:
     dump.add_argument("--minimum-bytes", type=int, default=1048576)
     dump.add_argument("--previous", type=Path)
     dump.add_argument("--minimum-ratio", type=float, default=0.5)
+    dump.add_argument("--rls-bypass-guc", action="store_true",
+                      help="read row-level-security tables through app.bypass_rls (no BYPASSRLS role)")
+    dump.add_argument("--rls-setting", action="append", default=[], metavar="app.NAME=VALUE",
+                      help="extra session setting, e.g. app.current_user_id=<verified platform admin id>")
+    retain = commands.add_parser("prune", help="apply the retention policy to published bundles")
+    retain.add_argument("--backup-root", type=Path, required=True)
+    retain.add_argument("--keep-days", type=float, default=30)
+    retain.add_argument("--keep-minimum", type=int, default=7)
+    retain.add_argument("--dry-run", action="store_true")
+    copy = commands.add_parser("replicate", help="copy a verified bundle to an off-host location and verify it")
+    copy.add_argument("--bundle", type=Path, required=True)
+    copy.add_argument("--destination-root", type=Path, required=True)
     replay = commands.add_parser("restore", help="restore only into a newly created scratch database")
     replay.add_argument("--service", required=True, help="isolated-server maintenance service (dbname=postgres)")
     replay.add_argument("--bundle", type=Path, required=True)
@@ -555,6 +731,10 @@ def main(argv: list[str] | None = None) -> int:
         pg = Postgres(args.bin_dir)
         if args.command == "health":
             payload = health(args.backup_root, args.maximum_age_hours)
+        elif args.command == "prune":
+            payload = prune(args.backup_root, args.keep_days, args.keep_minimum, args.dry_run)
+        elif args.command == "replicate":
+            payload = replicate(args.bundle, args.destination_root)
         else:
             if args.service_file is None:
                 raise RecoveryError("--service-file or PGSERVICEFILE is required")
@@ -563,7 +743,8 @@ def main(argv: list[str] | None = None) -> int:
                 payload = audit(pg, service, args.app_address)
                 write_json_new(args.receipt, payload)
             elif args.command == "backup":
-                payload = backup(pg, service, args.destination, args.minimum_bytes, args.previous, args.minimum_ratio)
+                payload = backup(pg, service, args.destination, args.minimum_bytes, args.previous, args.minimum_ratio,
+                                 args.rls_bypass_guc, parse_rls_settings(args.rls_setting))
             else:
                 payload = restore(pg, service, args.bundle, args.database, args.runtime_role, args.expected_head, args.receipt)
         print(json.dumps(payload, indent=2, sort_keys=True))

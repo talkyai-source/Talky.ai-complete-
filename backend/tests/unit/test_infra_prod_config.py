@@ -86,3 +86,49 @@ def test_wait_for_deps_checks_both_containers_with_a_deadline():
     assert "talky-postgres-1" in text and "talky-redis-1" in text
     assert "WAIT_SECONDS" in text and "exit 1" in text
     assert "\r" not in text  # runs under /bin/sh on Linux
+
+
+# --- deliverable 4: the database may live on a separate server -------------
+import os as _os
+import shutil as _shutil
+import subprocess as _subprocess
+
+import pytest as _pytest
+
+
+def _run_wait_for_deps(tmp_path, database_url, postgres_health="healthy", redis_health="healthy"):
+    """Run the real script under sh with a stub `docker` that reports health."""
+    sh, python3 = _shutil.which("sh"), _shutil.which("python3")
+    if not sh or not python3:
+        _pytest.skip("needs sh and python3 on PATH")
+    stub = tmp_path / "bin"
+    stub.mkdir(parents=True)
+    docker = stub / "docker"
+    docker.write_text(
+        "#!/bin/sh\n"
+        f'case "$*" in *talky-postgres-1*) echo {postgres_health};; *talky-redis-1*) echo {redis_health};; esac\n',
+        encoding="utf-8", newline="\n")
+    docker.chmod(0o755)
+    env = dict(_os.environ, PATH=str(stub) + _os.pathsep + _os.environ.get("PATH", ""),
+               DATABASE_URL=database_url, WAIT_SECONDS="1")
+    script = tmp_path / "wait-for-deps"
+    script.write_bytes((INFRA / "wait-for-deps").read_bytes())
+    return _subprocess.run([sh, str(script)], env=env, capture_output=True, text=True, timeout=60)
+
+
+def test_wait_for_deps_uses_the_local_container_for_a_loopback_database(tmp_path):
+    ok = _run_wait_for_deps(tmp_path, "postgresql://talkyai:x@127.0.0.1:5432/talkyai")
+    assert ok.returncode == 0, ok.stderr
+    down = _run_wait_for_deps(tmp_path / "b", "postgresql://talkyai:x@localhost/talkyai", postgres_health="starting")
+    assert down.returncode == 1 and "postgres=starting" in down.stderr
+
+
+def test_wait_for_deps_waits_for_a_separate_database_server_not_a_container(tmp_path):
+    # The local container is irrelevant (even unhealthy) once the database is
+    # remote; an unreachable server is reported by host and port, password-free.
+    result = _run_wait_for_deps(
+        tmp_path, "postgresql://talklee_app:s3cret@db.invalid:6543/talkyai?sslmode=verify-full",
+        postgres_health="unhealthy")
+    assert result.returncode == 1
+    assert "database db.invalid:6543 not accepting connections" in result.stderr
+    assert "postgres=" not in result.stderr and "s3cret" not in result.stderr

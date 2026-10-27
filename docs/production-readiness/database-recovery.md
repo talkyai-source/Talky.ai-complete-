@@ -1,8 +1,14 @@
 # Database separation and recovery
 
+The cut-over runbook, role model, backup layers, monitoring and recovery
+procedures are in [database separation](database-separation.md). This page keeps
+the restore-rehearsal background.
+
 The local tools in [scripts/database](../../scripts/database/README.md) support
 read-only auditing, consistent logical backups, isolated restore rehearsal and
-backup health checks. They use direct PostgreSQL services with verified TLS
+backup health checks, plus least-privilege roles (`roles.py`), the cut-over load
+(`cutover.py`), off-host copies and retention (`recovery.py replicate|prune`),
+monitoring (`monitor.py`) and PITR for a self-managed server (`pitr.py`). They use direct PostgreSQL services with verified TLS
 and separate identities. They do not automatically provision a provider,
 switch production endpoints or certify recoverability of the complete product.
 
@@ -88,6 +94,7 @@ target. Agree RTO, RPO and retention with the owner before claiming success.
 
 ## Prepare the production move
 
+The step-by-step version is the [cut-over runbook](database-separation.md#cut-over-runbook).
 Produce a reviewable cutover record containing source and destination identity,
 verified archive/restore evidence, exact code/schema compatibility, approved
 grants, maintenance window, freeze/drain procedure, final synchronization,

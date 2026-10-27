@@ -18,6 +18,7 @@ import os
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+from app.core.database_policy import database_url_problems
 from app.domain.services.billing_mode import get_billing_mode
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,7 @@ def enforce_production_gate() -> None:
     violations.extend(_check_required_secrets())
     violations.extend(_check_caller_id_enforcement())
     violations.extend(_check_inbound_strict_routing())
+    violations.extend(_check_database_policy())
 
     if not violations:
         logger.info("prod_gate_passed — all production-mandatory checks ok")
@@ -106,6 +108,15 @@ def _check_guard_bypass_flags() -> list[GateViolation]:
                 )
             )
     return violations
+
+
+def _check_database_policy() -> list[GateViolation]:
+    """Deliverable 4 — a database off this host must be reached over
+    verified TLS, and DATABASE_URL must be set (the pool otherwise falls
+    back to the development default). The role check needs a connection and
+    runs at pool start (app.core.database_policy.enforce_runtime_posture)."""
+    return [GateViolation(rule="database_policy", detail=problem)
+            for problem in database_url_problems()]
 
 
 def _check_caller_id_enforcement() -> list[GateViolation]:

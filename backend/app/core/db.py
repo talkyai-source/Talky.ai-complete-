@@ -18,6 +18,12 @@ import asyncpg
 from typing import Optional, Any, List, Dict
 from contextlib import asynccontextmanager
 
+from app.core.database_policy import (
+    DatabasePolicyError,
+    enforce_database_url_policy,
+    enforce_runtime_posture,
+)
+
 logger = logging.getLogger(__name__)
 
 # Sentinel used for `app.current_tenant_id` when there's no real tenant in
@@ -166,6 +172,9 @@ async def init_db_pool() -> asyncpg.Pool:
     callers don't branch on availability.
     """
     global _pool, _read_pool
+    # Workers never run the production gate, so the off-host TLS rule is
+    # enforced here, before any connection is attempted.
+    enforce_database_url_policy()
     dsn = os.getenv(
         "DATABASE_URL",
         "postgresql://talkyai:talkyai_secret@localhost:5432/talkyai"
@@ -184,6 +193,12 @@ async def init_db_pool() -> asyncpg.Pool:
     logger.info(
         "PostgreSQL primary pool initialized min=%d max=%d", min_size, max_size,
     )
+    try:
+        await enforce_runtime_posture(_pool, pool_name="primary")
+    except DatabasePolicyError:
+        await _pool.close()
+        _pool = None
+        raise
 
     read_dsn = os.getenv("READ_DATABASE_URL")
     if read_dsn:
@@ -201,6 +216,13 @@ async def init_db_pool() -> asyncpg.Pool:
         logger.info(
             "PostgreSQL read-replica pool initialized min=%d max=%d", ro_min, ro_max,
         )
+        try:
+            await enforce_runtime_posture(_read_pool, pool_name="read")
+        except DatabasePolicyError:
+            await _read_pool.close()
+            await _pool.close()
+            _pool = _read_pool = None
+            raise
     else:
         # Aliasing the primary keeps `get_read_pool()` always-callable;
         # callers never need a None-check.

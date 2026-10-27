@@ -1,5 +1,5 @@
 [Unit]
-Description=Talklee checked PostgreSQL logical backup
+Description=Talklee checked PostgreSQL logical backup, off-host copy and retention
 Wants=network-online.target
 After=network-online.target
 
@@ -9,15 +9,19 @@ User=talklee-backup
 Group=talklee-backup
 UMask=0077
 Environment=PGPASSFILE=/etc/talklee/secrets/pgpass
-ExecStart=/usr/bin/python3 /opt/talky/scripts/database/scheduled_backup.py --service-file /etc/talklee/secrets/pg_service.conf --service talklee_backup --backup-root /var/backups/talklee
+# backup.env sets TALKLEE_BACKUP_RLS_OPTIONS: empty for a BYPASSRLS backup role,
+# otherwise "--rls-bypass-guc --rls-setting app.current_user_id=<platform admin id>"
+# (scripts/database/README.md, "Row-level security and complete backups").
+EnvironmentFile=/etc/talklee/secrets/backup.env
+ExecStart=/usr/bin/python3 /opt/talky/scripts/database/scheduled_backup.py --service-file /etc/talklee/secrets/pg_service.conf --service talklee_backup --backup-root /var/backups/talklee --replica-root /mnt/talklee-offhost/backups --keep-days 30 --keep-minimum 7 $TALKLEE_BACKUP_RLS_OPTIONS
 TimeoutStartSec=2h
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/backups/talklee
+ReadWritePaths=/var/backups/talklee /mnt/talklee-offhost/backups
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 # Installing/enabling this unit is an operator action after service, password,
-# CA, user, directory and off-host/retention policy configuration is verified.
-# Connect unit failure and backup-age checks to the approved alert receiver.
+# CA, user, directory, off-host mount and retention policy configuration is
+# verified. Connect unit failure and backup-age checks to the alert receiver.

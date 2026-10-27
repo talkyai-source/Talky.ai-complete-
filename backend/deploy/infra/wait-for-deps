@@ -1,20 +1,59 @@
 #!/bin/sh
-# Block until the production Postgres and Redis containers report healthy.
+# Block until the production database and Redis are ready.
 #
 # Installed to /opt/talky-infra/bin/wait-for-deps and run as ExecStartPre by
 # talky-api and the workers (systemd/talky-deps.conf), so after a reboot or a
 # database restart the Python services start against a ready database instead
 # of racing it. Exits non-zero after WAIT_SECONDS so systemd retries later.
+#
+# Postgres: while DATABASE_URL (from the unit's EnvironmentFile) points at this
+# host, the talky-postgres-1 container's health check is the signal. Once it
+# points at the separate database server (production deliverable 4) there is
+# no local container, so the script waits until that server accepts TCP
+# connections. Redis stays a local container.
 WAIT_SECONDS="${WAIT_SECONDS:-180}"
 deadline=$(( $(date +%s) + WAIT_SECONDS ))
+
+# "host port" when DATABASE_URL leaves this host; empty for loopback/socket.
+remote_db=$(python3 - <<'EOF' 2>/dev/null
+import ipaddress, os
+from urllib.parse import parse_qsl, urlsplit
+parsed = urlsplit(os.environ.get("DATABASE_URL", "").strip())
+query = dict(parse_qsl(parsed.query))
+first = urlsplit("//" + parsed.netloc.rpartition("@")[2].split(",")[0])
+host = query.get("host", "").split(",")[0] or first.hostname or ""
+port = query.get("port") or first.port or 5432
+try:
+    local = not host or host.startswith("/") or host == "localhost" or ipaddress.ip_address(host).is_loopback
+except ValueError:
+    local = False
+if not local:
+    print(host, port)
+EOF
+)
+
+db_ready() {
+    if [ -n "$remote_db" ]; then
+        # shellcheck disable=SC2086 # "host port" splits into two arguments
+        python3 -c 'import socket, sys; socket.create_connection((sys.argv[1], int(sys.argv[2])), 3).close()' \
+            $remote_db 2>/dev/null
+    else
+        [ "$(docker inspect -f '{{.State.Health.Status}}' talky-postgres-1 2>/dev/null)" = "healthy" ]
+    fi
+}
+
 while :; do
-    pg=$(docker inspect -f '{{.State.Health.Status}}' talky-postgres-1 2>/dev/null)
     rd=$(docker inspect -f '{{.State.Health.Status}}' talky-redis-1 2>/dev/null)
-    if [ "$pg" = "healthy" ] && [ "$rd" = "healthy" ]; then
+    if db_ready && [ "$rd" = "healthy" ]; then
         exit 0
     fi
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        echo "talky deps not healthy after ${WAIT_SECONDS}s (postgres=${pg:-missing} redis=${rd:-missing})" >&2
+        if [ -n "$remote_db" ]; then
+            db_state="database ${remote_db% *}:${remote_db#* } not accepting connections"
+        else
+            db_state="postgres=$(docker inspect -f '{{.State.Health.Status}}' talky-postgres-1 2>/dev/null || echo missing)"
+        fi
+        echo "talky deps not ready after ${WAIT_SECONDS}s (${db_state} redis=${rd:-missing})" >&2
         exit 1
     fi
     sleep 2

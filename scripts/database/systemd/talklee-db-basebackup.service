@@ -1,0 +1,19 @@
+[Unit]
+Description=Take a verified Talklee PostgreSQL base backup for point-in-time recovery
+
+[Service]
+Type=oneshot
+User=talklee-backup
+Group=talklee-backup
+# The role in the named service needs REPLICATION and a replication pg_hba entry.
+# $$ and %% are systemd escapes for the shell's $ and date's %.
+ExecStart=/bin/sh -c 'exec /usr/bin/python3 /opt/talky/scripts/database/pitr.py base-backup --service-file /etc/talklee/pg_service.conf --service talklee_replication --destination /var/backups/talklee-pitr/base/"$$(date -u +%%Y%%m%%dT%%H%%M%%SZ)"'
+# WAL archiving must also be healthy, otherwise the base backup is not restorable to a time.
+ExecStartPost=/usr/bin/python3 /opt/talky/scripts/database/pitr.py archive-health --archive-dir /var/backups/talklee-pitr/wal --max-age-minutes 30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/talklee-pitr
+
+# Nonzero status must be routed to the approved operator alert receiver.

@@ -7,6 +7,11 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=/opt/talky/backend
 EnvironmentFile=/opt/talky/backend/.env
+# Operator-only MIGRATION_DATABASE_URL (the schema owner role). Absent while the
+# database is the local container; required once DATABASE_URL is the restricted
+# runtime role on the separate server, which cannot run DDL
+# (docs/production-readiness/database-separation.md).
+EnvironmentFile=-/etc/talklee/secrets/migration.env
 ExecStart=/opt/talky/backend/venv/bin/alembic -c /opt/talky/backend/alembic.ini upgrade head
 TimeoutStartSec=180
 

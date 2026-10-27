@@ -55,6 +55,8 @@ def _clean_env(monkeypatch):
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
     monkeypatch.setenv("ASTERISK_ARI_PASSWORD", "a-strong-ari-password")
     monkeypatch.setenv("FREESWITCH_ESL_PASSWORD", "a-strong-esl-password")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://talky:fixture@127.0.0.1:5432/talky")
+    monkeypatch.delenv("READ_DATABASE_URL", raising=False)
     monkeypatch.delenv("TELEPHONY_DEV_BYPASS_GUARD_ERRORS", raising=False)
     monkeypatch.delenv("TELEPHONY_LOCAL_DEV", raising=False)
     monkeypatch.delenv("CALLER_ID_ENFORCEMENT_MODE", raising=False)

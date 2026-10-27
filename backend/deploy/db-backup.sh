@@ -34,6 +34,24 @@ backup_dir="${TALKY_BACKUP_DIR:-/var/backups/talky}"
 keep_days="${TALKY_BACKUP_KEEP_DAYS:-30}"
 min_table_data="${TALKY_BACKUP_MIN_TABLE_DATA:-50}"
 
+# Lesson 3: app.bypass_rls is deliberately NOT enough for every table: migration 0062
+#    lets only a verified platform admin read assistant_action_resolutions
+#    ("worker bypass is deliberately insufficient"), so a bypass-only dump
+#    writes that table EMPTY without any error. Naming a verified platform
+#    admin's user id adds app.current_user_id to the dump session and includes
+#    it (proven in scripts/database/tests/local_separation_rehearsal.py).
+principal_option=""
+admin_id="${TALKY_BACKUP_PLATFORM_ADMIN_ID:-}"
+if [[ -n "$admin_id" ]]; then
+    if [[ ! "$admin_id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+        echo "DB-BACKUP CRITICAL: TALKY_BACKUP_PLATFORM_ADMIN_ID is not a UUID" >&2
+        exit 1
+    fi
+    principal_option=" -c app.current_user_id=${admin_id}"
+else
+    echo "DB-BACKUP WARNING: TALKY_BACKUP_PLATFORM_ADMIN_ID unset — platform-admin-only tables (assistant_action_resolutions) are dumped EMPTY" >&2
+fi
+
 install -d -m 0700 "${backup_dir}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 dump="${backup_dir}/talky-${stamp}.dump"
@@ -58,7 +76,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 # --- dump (bypass RLS on the dump connection; see header) --------------------
-docker exec -e PGOPTIONS='-c app.bypass_rls=true' "$CONTAINER" \
+docker exec -e PGOPTIONS='-c app.bypass_rls=true'"${principal_option}" "$CONTAINER" \
     pg_dump -U "$DB_USER" -d "$DB_NAME" --no-owner --format=custom --compress=6 --enable-row-security \
     > "${partial}"
 test -s "${partial}"

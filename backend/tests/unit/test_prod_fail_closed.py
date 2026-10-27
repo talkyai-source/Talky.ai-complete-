@@ -62,6 +62,11 @@ def _prod_env_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_fixture")
     monkeypatch.delenv("STRIPE_MOCK_MODE", raising=False)
     monkeypatch.delenv("STRIPE_BILLING_DISABLED", raising=False)
+    # Required since the database policy rule: production must name its
+    # database (a loopback one needs no TLS).
+    monkeypatch.setenv("DATABASE_URL", "postgresql://talky:fixture@127.0.0.1:5432/talky")
+    monkeypatch.delenv("READ_DATABASE_URL", raising=False)
+    monkeypatch.delenv("PGSSLMODE", raising=False)
 
 
 # ────────────────────────────────────────────────────────────────────────────

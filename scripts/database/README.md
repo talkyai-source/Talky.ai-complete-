@@ -77,11 +77,36 @@ python3 scripts/database/recovery.py backup \
 ```
 
 For the first baseline only, omit `--previous`. The tool keeps a repeatable-read
-transaction open, exports its snapshot, counts tenants/campaigns/calls/leads and
-records Alembic heads, then runs `pg_dump` against that same snapshot. Commits
-after the snapshot cannot create false count mismatches. A custom archive must
-pass `pg_restore --list`, size checks and SHA-256 validation before its complete
-directory is published. Receipts contain counts and metadata, not row contents.
+transaction open, exports its snapshot, counts every table (`table_counts`, with
+tenants/campaigns/calls/leads repeated in `counts`) and records Alembic heads,
+then runs `pg_dump` against that same snapshot. Commits after the snapshot cannot
+create false count mismatches. A custom archive must pass `pg_restore --list`,
+size checks and SHA-256 validation before its complete directory is published.
+Receipts contain counts and metadata, not row contents.
+
+### Row-level security and complete backups
+
+Every tenant table has FORCE row-level security, so a role without BYPASSRLS
+sees only what the policies allow. Two ways to take a complete backup:
+
+1. **A BYPASSRLS backup role** (needs a superuser to create; possible on a
+   self-managed server). Default mode: the dump runs with `row_security=off`,
+   so any table it could not read in full is an error, never a filtered dump.
+2. **Session settings** when no BYPASSRLS role can exist (today's cluster has no
+   superuser; most managed providers): `--rls-bypass-guc` reads through the
+   application's `app.bypass_rls`. Migration 0062 deliberately keeps
+   `assistant_action_resolutions` out of that bypass (platform admins only), so
+   also name a verified, active platform admin:
+   `--rls-setting app.current_user_id=<platform admin user id>`.
+   Before the snapshot the tool proves every policy admits every row in this
+   session: canonical bypass policies, or row-independent policies (no column
+   of their own table, per `pg_depend`) that evaluate true. Otherwise it refuses
+   and names the tables. Nothing is written to the database.
+
+The nightly `backend/deploy/db-backup.sh` on today's server uses `app.bypass_rls`
+only, so it dumps `assistant_action_resolutions` **empty**. Set
+`TALKY_BACKUP_PLATFORM_ADMIN_ID` for that unit to include it; until then it
+prints a warning every night.
 
 A successful bundle contains `database.dump`, `database.dump.sha256` and
 `receipt.json`. It is a database logical dump, not a cluster backup: role
@@ -89,11 +114,28 @@ definitions, original object ownership/ACLs, configuration, encryption keys and
 recording objects require their own approved recovery procedure. Ownership and
 privilege grants are deliberately reapplied on the isolated destination.
 
-Copy complete bundles through the approved encrypted off-host storage process,
-then verify the copied checksum. This CLI does not choose a storage provider,
-upload customer data, prune archives or assert that PITR is enabled. Record
-retention, expiry, capacity, PITR capability and recoverable key ownership in
-the operating handover before enabling a production schedule.
+### Off-host copy and retention
+
+`replicate` copies one verified bundle to a second root (a mounted off-host
+store, e.g. a Hetzner Storage Box or an object-store mount) through a staging
+directory, verifies the copy byte-for-byte, then publishes it; replicas are
+never overwritten. `prune` applies the retention policy: bundles older than
+`--keep-days` (default 30) are deleted, the newest `--keep-minimum` (default 7)
+are always kept, unknown directories are never touched, and nothing is deleted
+unless the newest bundle verifies (a failing schedule never ages out the last
+good archive). `--dry-run` lists what would go.
+
+```bash
+python3 scripts/database/recovery.py replicate --bundle /var/backups/talklee/20261028T020000Z \
+  --destination-root /mnt/offhost/talklee
+python3 scripts/database/recovery.py prune --backup-root /var/backups/talklee --keep-days 30 --keep-minimum 7
+```
+
+`scheduled_backup.py` (the systemd timer's entry point) runs backup, then
+`replicate` + `prune` on `--replica-root`, then `prune` locally; it accepts the
+same `--rls-bypass-guc` / `--rls-setting` options. It does not choose a storage
+provider or assert that PITR is enabled; record retention, expiry, capacity,
+PITR capability and recoverable key ownership in the operating handover.
 
 ## Isolated restore rehearsal
 
@@ -166,20 +208,94 @@ Failures return nonzero. Connect both failed backup jobs and stale/corrupt
 archive checks to the existing approved alert receiver, and demonstrate actual
 delivery. Systemd failure state alone is not an operator notification.
 
+## Least-privilege roles (`roles.py`)
+
+Three roles, one job each. **owner** (`talklee_owner`) owns the schema and every
+object and is used only for migrations (`MIGRATION_DATABASE_URL`). **runtime**
+(`talklee_app`, the application's `DATABASE_URL`) gets CONNECT/TEMP, schema
+USAGE, row DML, sequence use and function EXECUTE: no DDL, no TRUNCATE, owns
+nothing, so FORCE row-level security applies to it. **backup**
+(`talklee_backup`) gets SELECT on everything. Default privileges grant the
+runtime and backup roles every object a later migration creates.
+
+```bash
+python3 scripts/database/roles.py generate-password --output /etc/talklee/secrets/talklee_app.password
+python3 scripts/database/roles.py --service talklee_admin_db apply --database talkyai   --owner-password-file ... --runtime-password-file ... --backup-password-file ...   --receipt /secure/evidence/roles-apply.json
+python3 scripts/database/roles.py --service talklee_admin_db verify --database talkyai   --receipt /secure/evidence/roles-verify.json
+python3 scripts/database/roles.py plan --database talkyai     # print the SQL, no connection
+```
+
+The administrator service may be a superuser or a CREATEROLE/CREATEDB
+administrator (a managed provider's admin). Passwords are read from protected
+files and sent as client-side SCRAM-SHA-256 verifiers, never in clear. `apply`
+runs in one transaction and ends with `verify`; `--from-owner OLD` moves an
+existing non-superuser owner's objects (in-place split; refuses superusers).
+`--backup-bypassrls` creates the backup role with BYPASSRLS where the
+administrator may grant it. The application logs this posture on every pool
+start and, with `DATABASE_REQUIRE_RESTRICTED_ROLE=true`, refuses to boot as a
+role that is a superuser, bypasses RLS, can create roles/databases or owns
+relations.
+
+## Cut-over to the separate server (`cutover.py`)
+
+`load` restores a verified backup bundle into a database that does not exist
+yet on a **different** cluster (cluster identity and endpoint are checked, so
+the source can never be the target), as the owner role (`pg_restore --role`),
+then requires every table's row count and the Alembic heads to match the
+snapshot exactly, applies the least-privilege grants and verifies them. The
+source database is never contacted; the bundle was taken read-only.
+
+```bash
+python3 scripts/database/cutover.py --service talklee_admin load   --bundle /var/backups/talklee/cutover --database talkyai   --expected-head 0073_payment_test_plan   --rls-setting app.current_user_id=<platform admin user id>   --receipt /secure/evidence/cutover.json
+```
+
+Then set the role passwords with `roles.py apply` and configure the printed
+`DATABASE_URL` / `MIGRATION_DATABASE_URL` templates. The full runbook is in
+[database separation](../../docs/production-readiness/database-separation.md).
+
+## Monitoring (`monitor.py`)
+
+One read-only round trip checks connection and latency, TLS, the restricted
+runtime role, database size against the provisioned capacity, connection use,
+long transactions, transaction-ID wraparound, WAL archiving and (with
+`--backup-root`) backup freshness. Exit 0/1/2 = ok/warning/critical. It writes
+an optional Prometheus textfile and posts Slack-compatible alerts to
+`--alert-webhook-url` (or `TALKLEE_ALERT_WEBHOOK_URL`) on a new or worse
+problem, every `--realert-minutes` while it persists, and once on recovery.
+`systemd/talklee-db-monitor.*` runs it every five minutes.
+
+## Point-in-time recovery for a self-managed server (`pitr.py`)
+
+Managed providers include PITR; for a dedicated server, `archive-settings`
+prints the WAL archiving lines, `base-backup` publishes a checksummed
+`pg_basebackup` (replication role, verified TLS), `restore` rebuilds a NEW data
+directory to `--target-time` (or the latest WAL) on its own loopback port with
+archiving off, and `archive-health` alerts on a stale archive.
+
+## Dedicated database server (`db_server/`)
+
+`render_config.py` renders `talklee.conf` (private listen address, TLS 1.2+,
+SCRAM, tuning, optional archiving) and a `pg_hba.conf` that rejects every
+non-TLS connection and admits only the allow-listed application CIDRs (plus
+`--admin-role` into the maintenance database and `--allow-replication` for
+base backups). `install_db_server.sh` applies it on Ubuntu 24.04 with a `ufw`
+allow-list; it has been syntax-checked, not run.
+
 ## Local verification
 
 ```bash
 python -m unittest discover -s scripts/database/tests -v
-python scripts/database/tests/local_postgres_rehearsal.py \
-  --bin-dir /usr/lib/postgresql/16/bin --run \
-  --receipt test-output/database-recovery/local-rehearsal.json
+python scripts/database/tests/local_postgres_rehearsal.py   --bin-dir /usr/lib/postgresql/16/bin --run   --receipt test-output/database-recovery/local-rehearsal.json
+# End to end with the real schema and application code (backend Python):
+backend/.venv/bin/python scripts/database/tests/local_separation_rehearsal.py   --bin-dir /usr/lib/postgresql/16/bin --run   --receipt test-output/database-separation/receipt.json
 ```
 
-The explicit integration command creates two disposable clusters under the
+The explicit integration commands create disposable clusters under the
 repository's ignored `test-output` directory, bound only to loopback, with
-synthetic data. It uses no existing server credentials and stops/removes only
-its owned clusters. `--allow-local-plaintext` exists solely for that synthetic
-loopback fixture; it cannot authorize plaintext to a remote host.
+synthetic data. They use no existing server credentials and stop only their
+owned clusters. `--allow-local-plaintext` admits plaintext only to a loopback
+address (a synthetic fixture, or a source database on the same host such as
+today's Docker database); it cannot authorize plaintext to a remote host.
 
 The implementation follows PostgreSQL's [connection service rules](https://www.postgresql.org/docs/current/libpq-pgservice.html),
 [password file guidance](https://www.postgresql.org/docs/current/libpq-envars.html),

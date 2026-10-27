@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Talklee database health check every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=talklee-db-monitor.service
+
+[Install]
+WantedBy=timers.target
