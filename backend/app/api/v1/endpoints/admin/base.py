@@ -44,8 +44,8 @@ class DashboardStatsResponse(BaseModel):
 class SystemHealthItem(BaseModel):
     """Single provider health status"""
     name: str
-    status: str  # 'operational', 'degraded', 'down'
-    latency_ms: int
+    status: str  # 'operational', 'degraded', 'down', 'unknown'
+    latency_ms: Optional[int]
     latency_display: str
 
 
@@ -163,33 +163,19 @@ async def get_system_health(
     admin_user: CurrentUser = Depends(require_admin)
 ):
     """
-    Get system health status for all providers.
-    
-    Returns health status for:
-        - Telephony (Vonage)
-        - STT (Speech-to-Text)
-        - LLM (Language Model)
-        - TTS (Text-to-Speech)
+    Report whether provider health has been measured.
+
+    There is no authoritative STT/LLM/TTS health probe behind this endpoint.
+    Configured credentials alone cannot establish availability or latency.
     """
     providers = [
         SystemHealthItem(
-            name="STT",
-            status="operational",
-            latency_ms=120,
-            latency_display="120ms Avg"
-        ),
-        SystemHealthItem(
-            name="LLM",
-            status="operational",
-            latency_ms=250,
-            latency_display="<300ms"
-        ),
-        SystemHealthItem(
-            name="TTS",
-            status="operational",
-            latency_ms=180,
-            latency_display="<200ms"
+            name=name,
+            status="unknown",
+            latency_ms=None,
+            latency_display="Not measured"
         )
+        for name in ("STT", "LLM", "TTS")
     ]
     
     return SystemHealthResponse(providers=providers)

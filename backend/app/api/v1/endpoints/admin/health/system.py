@@ -38,7 +38,7 @@ async def get_detailed_health(
         cpu_percent = psutil.cpu_percent(interval=0.1)
         disk = psutil.disk_usage('/')
 
-        # Check provider health (real checks)
+        # Only the database has a measured check here.
         providers = []
 
         # Check PostgreSQL/Database
@@ -57,37 +57,22 @@ async def get_detailed_health(
             providers.append(SystemHealthItem(
                 name="Database",
                 status="down",
-                latency_ms=0,
+                latency_ms=None,
                 latency_display="N/A",
                 last_check=datetime.utcnow().isoformat() + "Z"
             ))
 
-        # Check STT service (Deepgram)
-        providers.append(SystemHealthItem(
-            name="STT",
-            status="operational",
-            latency_ms=120,
-            latency_display="120ms Avg",
-            last_check=datetime.utcnow().isoformat() + "Z"
-        ))
-
-        # Check LLM service (Groq)
-        providers.append(SystemHealthItem(
-            name="LLM",
-            status="operational",
-            latency_ms=250,
-            latency_display="<300ms",
-            last_check=datetime.utcnow().isoformat() + "Z"
-        ))
-
-        # Check TTS service (Deepgram)
-        providers.append(SystemHealthItem(
-            name="TTS",
-            status="operational",
-            latency_ms=180,
-            latency_display="<200ms",
-            last_check=datetime.utcnow().isoformat() + "Z"
-        ))
+        # No authoritative provider probe is wired here. Never substitute
+        # fixed latency figures or a fresh timestamp for an actual observation.
+        providers.extend(
+            SystemHealthItem(
+                name=name,
+                status="unknown",
+                latency_ms=None,
+                latency_display="Not measured",
+            )
+            for name in ("STT", "LLM", "TTS")
+        )
 
         return DetailedHealthResponse(
             uptime_seconds=uptime_seconds,

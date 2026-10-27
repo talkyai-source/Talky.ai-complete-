@@ -13,8 +13,8 @@ from pydantic import BaseModel
 class SystemHealthItem(BaseModel):
     """Single provider health status"""
     name: str
-    status: str  # 'operational', 'degraded', 'down'
-    latency_ms: int
+    status: str  # 'operational', 'degraded', 'down', 'unknown'
+    latency_ms: Optional[int]
     latency_display: str
     last_check: Optional[str] = None
 
