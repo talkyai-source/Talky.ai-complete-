@@ -372,6 +372,11 @@ class InboundReassignmentApproveRequest(_StrictModel):
     reason: str = Field(min_length=3, max_length=2000)
 
 
+class InboundReassignmentCancelRequest(_StrictModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
 class InboundReassignmentResponse(BaseModel):
     id: str
     assignment_id: str
@@ -390,4 +395,5 @@ class InboundReassignmentResponse(BaseModel):
 
 class InboundReassignmentListResponse(BaseModel):
     items: list[InboundReassignmentResponse]
-    total: int
+    has_more: bool
+    next_cursor: Optional[str] = None

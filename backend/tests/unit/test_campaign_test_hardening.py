@@ -41,14 +41,17 @@ async def test_login_session_database_failure_is_retryable_and_closed():
 
 @pytest.mark.asyncio
 async def test_login_session_query_uses_revocable_user_bound_lookup():
-    uid, sid = str(uuid.uuid4()), str(uuid.uuid4())
+    uid, sid, tid = (str(uuid.uuid4()) for _ in range(3))
     conn = SimpleNamespace(fetchrow=AsyncMock(side_effect=[
         {"id": sid, "user_id": uid},
-        {"id":uid,"email":"synthetic@example.com","name":None,"tenant_id":str(uuid.uuid4()),
+        {"id":uid,"email":"synthetic@example.com","name":None,"tenant_id":tid,
          "profile_role":"tenant_admin","is_active":True,"is_verified":True,
          "membership_status":"active","membership_role":"tenant_admin",
          "business_name":None,"minutes_allocated":0,"minutes_used":0},
-    ]))
+        {"id":tid,"status":"active","subscription_status":"active","suspended_at":None,
+         "suspended_by":None,"suspension_reason":None,"white_label_partner_id":None,
+         "formal_partner_id":None,"formal_partner_status":None,"active_holds":[],"authority_scope_ok":True},
+    ]), fetchval=AsyncMock(return_value="on"))
     with patch("app.core.db_utils.acquire_with_tenant", return_value=_FakeAcquire(conn)):
         assert await ep._session_is_active(object(), uid, sid)
     sql, *params = conn.fetchrow.await_args_list[0].args

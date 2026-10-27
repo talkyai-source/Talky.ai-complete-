@@ -86,9 +86,10 @@ class _FakePool:
 
 def _guard(status: str):
     from app.domain.services.call_guard import CallGuard
+    from tests.unit.test_call_guard_formal_authority import authority_row
 
     return CallGuard(
-        db_pool=_FakePool(_FakeConn(_FakeRow(id=TENANT_ID, subscription_status=status))),
+        db_pool=_FakePool(_FakeConn(_FakeRow(authority_row(id=TENANT_ID, subscription_status=status)))),
         redis_client=None,
     )
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -23,6 +24,7 @@ from app.api.v1.endpoints.telephony_sip import trunks
 from app.api.v1.endpoints.telephony_sip.trunks import CampaignTrunkBody
 from app.domain.services.call_guard import GuardDecision
 from app.infrastructure.telephony.asterisk_adapter import AsteriskAdapter
+from tests.unit.pbx_identity_helpers import BINDING, bind_test_adapter
 
 
 TENANT_ID = "11111111-1111-4111-8111-111111111111"
@@ -335,6 +337,7 @@ class _Adapter:
         self.originated_call_id = originated_call_id
         self.hangup_is_confirmed = hangup_confirmed
         self.hangups = []
+        bind_test_adapter(self)
 
     async def originate_call(self, **kwargs):
         self.events.append("originate")
@@ -498,6 +501,9 @@ def _install_call_path(
     monkeypatch.setattr(telephony_bridge, "get_state_backend", lambda: state)
     monkeypatch.setattr(telephony_bridge, "_adapter", adapter)
     monkeypatch.setattr(telephony_bridge, "CallGuard", AllowGuard)
+    # Account-policy races are exercised by test_account_hold_telephony; these
+    # fixtures isolate campaign/idempotency and provider persistence contracts.
+    monkeypatch.setattr(telephony_bridge, "_require_call_authority", AsyncMock())
     monkeypatch.setattr(telephony_bridge, "prepare_prewarmed_session", prewarm)
     monkeypatch.setattr(telephony_bridge, "_get_orchestrator", lambda: Orchestrator())
     monkeypatch.setattr(telephony_bridge, "AbuseDetectionService", lambda **_kwargs: object())
@@ -885,6 +891,7 @@ async def test_same_internal_attempt_claim_is_atomic_and_replay_observes_winner(
                 intent=intent,
                 provider="asterisk",
                 planned_provider_call_id=f"talky-out-{row['id']}",
+                control_backend=BINDING,
             )
 
     first, second = await asyncio.gather(claim_once(), claim_once())
@@ -1240,7 +1247,7 @@ async def test_repeated_cancellation_cannot_interrupt_provider_cleanup(monkeypat
         bind_started.set()
         await asyncio.Event().wait()
 
-    async def blocked_confirmed_hangup(_adapter, _provider_call_id, *, expected_provider):
+    async def blocked_confirmed_hangup(_adapter, _provider_call_id, *, expected_provider, expected_backend, require_backend_identity):
         assert expected_provider == _adapter.name
         cleanup_started.set()
         await release_cleanup.wait()

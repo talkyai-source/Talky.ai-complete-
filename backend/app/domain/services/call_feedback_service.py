@@ -12,7 +12,7 @@ import hashlib
 import logging
 import os
 from collections.abc import Mapping
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
@@ -20,6 +20,7 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from app.core.db_utils import acquire_with_tenant
+from app.core.security.platform_admin_guard import require_platform_admin_mutation
 from app.domain.interfaces.prerecorded_transcription_provider import (
     PrerecordedTranscript,
     PrerecordedTranscriptionProvider,
@@ -488,14 +489,31 @@ class CallFeedbackRepository:
             )
         return dict(row) if row else None
 
+    @asynccontextmanager
+    async def _retry_transaction(self, tenant_id: str, admin_actor_id: str | None):
+        """Admit an Admin retry before its durable attempt, without storage I/O."""
+        try:
+            async with asyncio.timeout(5 if admin_actor_id is not None else None):
+                async with acquire_with_tenant(self._pool, tenant_id) as conn:
+                    if admin_actor_id is not None:
+                        await require_platform_admin_mutation(conn, admin_actor_id)
+                    yield conn
+        except (TimeoutError, asyncpg.PostgresError, asyncpg.InterfaceError, OSError) as exc:
+            if admin_actor_id is None:
+                raise
+            raise FeedbackStorageError(
+                "Transcription admission could not be confirmed. Refresh the feedback note before retrying."
+            ) from exc
+
     async def begin_retry_attempt(
         self,
         tenant_id: str,
         feedback_id: str,
         *,
         stale_after_seconds: int,
+        admin_actor_id: str | None = None,
     ) -> dict[str, Any] | None:
-        async with acquire_with_tenant(self._pool, tenant_id) as conn:
+        async with self._retry_transaction(tenant_id, admin_actor_id) as conn:
             row = await conn.fetchrow(
                 f"""
                 UPDATE call_feedback
@@ -504,7 +522,7 @@ class CallFeedbackRepository:
                        transcription_started_at = NOW(),
                        transcript_error = NULL,
                        updated_at = NOW()
-                 WHERE id = $1
+                 WHERE id = $1 AND tenant_id = $3
                    AND (
                        transcript_status = 'failed'
                        OR (
@@ -520,6 +538,7 @@ class CallFeedbackRepository:
                 """,
                 self._uuid(feedback_id),
                 stale_after_seconds,
+                self._uuid(tenant_id),
             )
         return dict(row) if row else None
 
@@ -528,6 +547,8 @@ class CallFeedbackRepository:
         tenant_id: str,
         feedback_id: str,
         result: PrerecordedTranscript,
+        *,
+        attempt: int,
     ) -> dict[str, Any] | None:
         async with acquire_with_tenant(self._pool, tenant_id) as conn:
             row = await conn.fetchrow(
@@ -540,13 +561,17 @@ class CallFeedbackRepository:
                        duration_seconds = COALESCE(duration_seconds, $4),
                        transcribed_at = NOW(),
                        updated_at = NOW()
-                 WHERE id = $1
+                 WHERE id = $1 AND tenant_id = $6
+                   AND transcript_status = 'pending' AND transcription_attempts = $5
+                   AND transcription_attempts > 0
                 RETURNING {_FEEDBACK_COLUMNS}
                 """,
                 self._uuid(feedback_id),
                 result.text,
                 result.provider_request_id,
                 result.duration_seconds,
+                attempt,
+                self._uuid(tenant_id),
             )
         return dict(row) if row else None
 
@@ -555,6 +580,8 @@ class CallFeedbackRepository:
         tenant_id: str,
         feedback_id: str,
         error: str,
+        *,
+        attempt: int,
     ) -> dict[str, Any] | None:
         async with acquire_with_tenant(self._pool, tenant_id) as conn:
             row = await conn.fetchrow(
@@ -563,11 +590,15 @@ class CallFeedbackRepository:
                    SET transcript_status = 'failed',
                        transcript_error = $2,
                        updated_at = NOW()
-                 WHERE id = $1
+                 WHERE id = $1 AND tenant_id = $4
+                   AND transcript_status = 'pending' AND transcription_attempts = $3
+                   AND transcription_attempts > 0
                 RETURNING {_FEEDBACK_COLUMNS}
                 """,
                 self._uuid(feedback_id),
                 error[:1000],
+                attempt,
+                self._uuid(tenant_id),
             )
         return dict(row) if row else None
 
@@ -755,11 +786,15 @@ class CallFeedbackService:
         *,
         tenant_id: str,
         call_id: str,
+        admin_actor_id: str | None = None,
+        expected_feedback_id: str | None = None,
     ) -> dict[str, Any]:
         await self._require_call(tenant_id, call_id)
         feedback = await self._repository.get_for_call(tenant_id, call_id)
         if not feedback:
             raise FeedbackNotFoundError("Feedback not found")
+        if expected_feedback_id is not None and str(feedback["id"]) != str(expected_feedback_id):
+            raise FeedbackNotFoundError("The selected feedback note changed. Refresh before retrying.")
         if feedback["transcript_status"] == "done":
             return feedback
 
@@ -769,13 +804,20 @@ class CallFeedbackService:
             stale_after = 30
         stale_after = max(1, stale_after)
 
+        claim_options: dict[str, Any] = {"stale_after_seconds": stale_after}
+        if admin_actor_id is not None:
+            # Only the Admin route supplies this server-owned identity. Tenant
+            # retry keeps its existing permission and repository contract.
+            claim_options["admin_actor_id"] = admin_actor_id
         claimed = await self._repository.begin_retry_attempt(
             tenant_id,
             str(feedback["id"]),
-            stale_after_seconds=stale_after,
+            **claim_options,
         )
         if not claimed:
             latest = await self._repository.get_for_call(tenant_id, call_id)
+            if latest and expected_feedback_id is not None and str(latest["id"]) != str(expected_feedback_id):
+                raise FeedbackNotFoundError("The selected feedback note changed. Refresh before retrying.")
             if latest and latest["transcript_status"] == "done":
                 return latest
             raise FeedbackTranscriptionInProgressError(
@@ -840,6 +882,7 @@ class CallFeedbackService:
                         tenant_id,
                         feedback_id,
                         "Transcription request was cancelled",
+                        attempt=int(feedback["transcription_attempts"]),
                     )
                 )
             except Exception:
@@ -858,14 +901,17 @@ class CallFeedbackService:
             return await self._mark_failed_or_latest(tenant_id, feedback, exc)
 
         try:
-            updated = await self._repository.mark_done(tenant_id, feedback_id, result)
+            updated = await self._repository.mark_done(
+                tenant_id, feedback_id, result,
+                attempt=int(feedback["transcription_attempts"]),
+            )
         except Exception:
             logger.exception(
                 "feedback_transcription_result_persist_failed feedback=%s",
                 feedback_id,
             )
             return await self._latest_or_original(tenant_id, feedback)
-        return updated or dict(feedback)
+        return updated if updated is not None else await self._current_after_attempt(tenant_id, feedback)
 
     async def _mark_failed_or_latest(
         self,
@@ -882,6 +928,7 @@ class CallFeedbackService:
                 tenant_id,
                 str(feedback["id"]),
                 message,
+                attempt=int(feedback["transcription_attempts"]),
             )
         except Exception:
             logger.exception(
@@ -889,7 +936,17 @@ class CallFeedbackService:
                 feedback["id"],
             )
             return await self._latest_or_original(tenant_id, feedback)
-        return updated or dict(feedback)
+        return updated if updated is not None else await self._current_after_attempt(tenant_id, feedback)
+
+    async def _current_after_attempt(
+        self, tenant_id: str, feedback: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        # A retry, replacement or deletion retired this attempt. Do not publish
+        # its old snapshot as the result of a write that did not happen.
+        current = await self._repository.get_by_id(tenant_id, str(feedback["id"]))
+        if current is None:
+            raise FeedbackNotFoundError("Feedback was replaced or deleted during transcription")
+        return current
 
     async def _latest_or_original(
         self,

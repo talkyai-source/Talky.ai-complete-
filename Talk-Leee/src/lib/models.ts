@@ -42,7 +42,7 @@ export const ConnectorSchema = z.object({
     id: z.string(),
     name: z.string(),
     type: z.string(),
-    config: z.record(z.unknown()),
+    config: z.record(z.string(), z.unknown()),
     createdAt: z.string(),
 });
 
@@ -55,7 +55,7 @@ export const ConnectorResponseSchema = z.union([
             id: z.string(),
             name: z.string(),
             type: z.string(),
-            config: z.record(z.unknown()),
+            config: z.record(z.string(), z.unknown()),
             created_at: z.string(),
         })
         .transform((v) => ({ ...v, createdAt: v.created_at })),
@@ -64,8 +64,8 @@ export const ConnectorResponseSchema = z.union([
 export const ConnectorAccountSchema = z.object({
     id: z.string(),
     connector_id: z.string(),
-    credentials: z.record(z.unknown()),
-    metadata: z.record(z.unknown()),
+    credentials: z.record(z.string(), z.unknown()),
+    metadata: z.record(z.string(), z.unknown()),
 });
 
 export type ConnectorAccount = z.infer<typeof ConnectorAccountSchema>;
@@ -138,7 +138,7 @@ export const SalesforceImportResultSchema = z.object({
     revived: z.number(),
     duplicates_skipped: z.number(),
     invalid: z.number(),
-    errors: z.array(z.record(z.unknown())).optional(),
+    errors: z.array(z.record(z.string(), z.unknown())).optional(),
 });
 
 export type SalesforceImportResult = z.infer<typeof SalesforceImportResultSchema>;
@@ -518,180 +518,75 @@ export const ListResponseSchema = <T extends z.ZodTypeAny>(item: T) =>
 
 export type ListResponse<T> = { items: T[] };
 
-export const AuditSeveritySchema = z.enum(["low", "medium", "high"]);
-
+export const AuditSeveritySchema = z.enum(["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]);
 export type AuditSeverity = z.infer<typeof AuditSeveritySchema>;
+export const SecurityEventStatusSchema = z.enum(["open", "investigating", "resolved", "false_positive", "escalated"]);
+export type SecurityEventStatus = z.infer<typeof SecurityEventStatusSchema>;
 
 export const SuspensionStatusSchema = z.enum(["active", "suspended"]);
-
 export type SuspensionStatus = z.infer<typeof SuspensionStatusSchema>;
 
-const AuditActorSchema = z
-    .object({
-        id: z.string().optional().nullable(),
-        name: z.string().optional().nullable(),
-        email: z.string().optional().nullable(),
-    })
-    .passthrough()
-    .transform((v) => ({
-        id: v.id ?? undefined,
-        name: v.name ?? undefined,
-        email: v.email ?? undefined,
-    }));
+// Keep the original microseconds for tuple pagination; never replace this with
+// a Date/toISOString conversion or a fabricated epoch fallback.
+const EventTimeSchema = z.string().datetime({ offset: true });
+export const EventBoundarySchema = z.object({ time: EventTimeSchema, id: z.guid() });
+export type EventBoundary = z.infer<typeof EventBoundarySchema>;
 
-const AuditTargetSchema = z
-    .object({
-        type: z.string(),
-        id: z.string().optional().nullable(),
-        name: z.string().optional().nullable(),
-    })
-    .passthrough()
-    .transform((v) => ({
-        type: v.type,
-        id: v.id ?? undefined,
-        name: v.name ?? undefined,
-    }));
-
-const AuditMetadataSchema = z.record(z.unknown());
-
-export const AuditLogEventSchema = z.union([
-    z
-        .object({
-            id: z.string(),
-            timestamp: z.string(),
-            actionType: z.string(),
-            actor: AuditActorSchema.optional(),
-            target: AuditTargetSchema.optional(),
-            eventType: z.string().optional(),
-            tenantId: z.string().optional().nullable(),
-            partnerId: z.string().optional().nullable(),
-            metadata: AuditMetadataSchema.optional().nullable(),
-        })
-        .passthrough()
-        .transform((v) => ({
-            id: v.id,
-            timestamp: v.timestamp,
-            actionType: v.actionType,
-            actor: v.actor,
-            target: v.target,
-            eventType: v.eventType ?? v.actionType,
-            tenantId: v.tenantId ?? undefined,
-            partnerId: v.partnerId ?? undefined,
-            metadata: v.metadata ?? undefined,
-        })),
-    z
-        .object({
-            id: z.string(),
-            created_at: z.string().optional(),
-            timestamp: z.string().optional(),
-            action_type: z.string(),
-            actor_id: z.string().optional().nullable(),
-            actor_name: z.string().optional().nullable(),
-            actor_email: z.string().optional().nullable(),
-            actor: AuditActorSchema.optional(),
-            target_type: z.string().optional(),
-            target_id: z.string().optional().nullable(),
-            target_name: z.string().optional().nullable(),
-            target: AuditTargetSchema.optional(),
-            event_type: z.string().optional(),
-            tenant_id: z.string().optional().nullable(),
-            partner_id: z.string().optional().nullable(),
-            metadata: AuditMetadataSchema.optional().nullable(),
-        })
-        .passthrough()
-        .transform((v) => ({
-            id: v.id,
-            timestamp: v.timestamp ?? v.created_at ?? new Date(0).toISOString(),
-            actionType: v.action_type,
-            actor: v.actor ?? (v.actor_id || v.actor_name || v.actor_email ? { id: v.actor_id ?? undefined, name: v.actor_name ?? undefined, email: v.actor_email ?? undefined } : undefined),
-            target: v.target ?? (v.target_type ? { type: v.target_type, id: v.target_id ?? undefined, name: v.target_name ?? undefined } : undefined),
-            eventType: v.event_type ?? v.action_type,
-            tenantId: v.tenant_id ?? undefined,
-            partnerId: v.partner_id ?? undefined,
-            metadata: v.metadata ?? undefined,
-        })),
-]);
-
+export const CanonicalAuditLogSchema = z.object({
+    event_id: z.guid(), event_time: EventTimeSchema,
+    event_type: z.string().min(1), event_category: z.string().min(1), severity: AuditSeveritySchema,
+    actor_id: z.guid().nullable(), actor_type: z.string().min(1), tenant_id: z.guid().nullable(),
+    resource_type: z.string().nullable(), resource_id: z.guid().nullable(),
+    action: z.string(), description: z.string().nullable(), ip_address: z.string().nullable(),
+    metadata: z.record(z.string(), z.unknown()).nullable(),
+});
+export const AuditLogEventSchema = CanonicalAuditLogSchema.transform(value => ({
+    id: value.event_id, timestamp: value.event_time, eventType: value.event_type,
+    eventCategory: value.event_category, severity: value.severity, actionType: value.action,
+    actor: { id: value.actor_id ?? undefined, type: value.actor_type },
+    target: value.resource_type ? { type: value.resource_type, id: value.resource_id ?? undefined } : undefined,
+    tenantId: value.tenant_id ?? undefined, description: value.description, ipAddress: value.ip_address,
+    metadata: value.metadata ?? undefined,
+}));
 export type AuditLogEvent = z.infer<typeof AuditLogEventSchema>;
 
-export const SecurityEventSchema = z.union([
-    z
-        .object({
-            id: z.string(),
-            timestamp: z.string(),
-            eventType: z.string(),
-            severity: AuditSeveritySchema,
-            actor: AuditActorSchema.optional(),
-            target: AuditTargetSchema.optional(),
-            tenantId: z.string().optional().nullable(),
-            partnerId: z.string().optional().nullable(),
-            metadata: AuditMetadataSchema.optional().nullable(),
-        })
-        .passthrough()
-        .transform((v) => ({
-            id: v.id,
-            timestamp: v.timestamp,
-            eventType: v.eventType,
-            severity: v.severity,
-            actor: v.actor,
-            target: v.target,
-            tenantId: v.tenantId ?? undefined,
-            partnerId: v.partnerId ?? undefined,
-            metadata: v.metadata ?? undefined,
-        })),
-    z
-        .object({
-            id: z.string(),
-            created_at: z.string().optional(),
-            timestamp: z.string().optional(),
-            event_type: z.string(),
-            severity: AuditSeveritySchema,
-            actor_id: z.string().optional().nullable(),
-            actor_name: z.string().optional().nullable(),
-            actor_email: z.string().optional().nullable(),
-            actor: AuditActorSchema.optional(),
-            target_type: z.string().optional(),
-            target_id: z.string().optional().nullable(),
-            target_name: z.string().optional().nullable(),
-            target: AuditTargetSchema.optional(),
-            tenant_id: z.string().optional().nullable(),
-            partner_id: z.string().optional().nullable(),
-            metadata: AuditMetadataSchema.optional().nullable(),
-        })
-        .passthrough()
-        .transform((v) => ({
-            id: v.id,
-            timestamp: v.timestamp ?? v.created_at ?? new Date(0).toISOString(),
-            eventType: v.event_type,
-            severity: v.severity,
-            actor: v.actor ?? (v.actor_id || v.actor_name || v.actor_email ? { id: v.actor_id ?? undefined, name: v.actor_name ?? undefined, email: v.actor_email ?? undefined } : undefined),
-            target: v.target ?? (v.target_type ? { type: v.target_type, id: v.target_id ?? undefined, name: v.target_name ?? undefined } : undefined),
-            tenantId: v.tenant_id ?? undefined,
-            partnerId: v.partner_id ?? undefined,
-            metadata: v.metadata ?? undefined,
-        })),
-]);
-
+export const SecurityEventSchema = z.object({
+    event_id: z.guid(), created_at: EventTimeSchema, event_type: z.string().min(1),
+    severity: AuditSeveritySchema, status: SecurityEventStatusSchema,
+    tenant_id: z.guid().nullable(), user_id: z.guid().nullable(),
+    title: z.string(), description: z.string().nullable(), detection_source: z.string(),
+    evidence: z.record(z.string(), z.unknown()).nullable(),
+}).transform(value => ({
+    id: value.event_id, timestamp: value.created_at, eventType: value.event_type,
+    severity: value.severity, status: value.status, tenantId: value.tenant_id ?? undefined,
+    subjectId: value.user_id ?? undefined, title: value.title, description: value.description,
+    detectionSource: value.detection_source, metadata: value.evidence ?? undefined,
+}));
 export type SecurityEvent = z.infer<typeof SecurityEventSchema>;
+
+const PartnerDirectoryStatusSchema = z.enum(["active", "suspended", "pending_deletion", "unknown"]);
 
 export const PartnerSummarySchema = z.union([
     z
         .object({
             id: z.string(),
             name: z.string(),
-            status: SuspensionStatusSchema,
+            status: PartnerDirectoryStatusSchema,
             suspendedAt: z.string().optional().nullable(),
             tenantCount: z.number().optional(),
             updatedAt: z.string().optional().nullable(),
+            suspended_at: z.string().optional().nullable(),
+            tenant_count: z.number().optional(),
+            updated_at: z.string().optional().nullable(),
         })
         .passthrough()
         .transform((v) => ({
             id: v.id,
             name: v.name,
             status: v.status,
-            suspendedAt: v.suspendedAt ?? undefined,
-            tenantCount: v.tenantCount,
-            updatedAt: v.updatedAt ?? undefined,
+            suspendedAt: (v.suspendedAt !== undefined ? v.suspendedAt : v.suspended_at) ?? undefined,
+            tenantCount: v.tenantCount ?? v.tenant_count,
+            updatedAt: (v.updatedAt !== undefined ? v.updatedAt : v.updated_at) ?? undefined,
         })),
     z
         .object({
@@ -699,7 +594,7 @@ export const PartnerSummarySchema = z.union([
             partner_id: z.string().optional(),
             name: z.string().optional(),
             display_name: z.string().optional(),
-            status: SuspensionStatusSchema,
+            status: PartnerDirectoryStatusSchema,
             suspended_at: z.string().optional().nullable(),
             tenant_count: z.number().optional(),
             updated_at: z.string().optional().nullable(),
@@ -717,13 +612,26 @@ export const PartnerSummarySchema = z.union([
 
 export type PartnerSummary = z.infer<typeof PartnerSummarySchema>;
 
+const TenantSubscriptionStatusSchema = z.enum(["active", "trialing", "inactive", "past_due", "suspended", "cancelled"]);
+
+export const TenantMutationReceiptSchema = z.object({
+    id: z.string(),
+    status: z.enum(["active", "suspended"]),
+    updated_at: z.string().nullable(),
+    changed: z.boolean(),
+    audit_event_id: z.guid().nullable(),
+}).refine((value) => !value.changed || value.audit_event_id !== null, "Changed tenant has no durable audit receipt")
+    .transform((value) => ({ id: value.id, status: value.status, updatedAt: value.updated_at,
+        changed: value.changed, auditEventId: value.audit_event_id }));
+export type TenantMutationReceipt = z.infer<typeof TenantMutationReceiptSchema>;
+
 export const TenantSummarySchema = z.union([
     z
         .object({
             id: z.string(),
             name: z.string(),
             partnerId: z.string().optional().nullable(),
-            status: SuspensionStatusSchema,
+            status: TenantSubscriptionStatusSchema,
             suspendedAt: z.string().optional().nullable(),
             updatedAt: z.string().optional().nullable(),
         })
@@ -734,26 +642,27 @@ export const TenantSummarySchema = z.union([
             partnerId: v.partnerId ?? undefined,
             status: v.status,
             suspendedAt: v.suspendedAt ?? undefined,
-            updatedAt: v.updatedAt ?? undefined,
+            updatedAt: v.updatedAt,
         })),
     z
         .object({
             id: z.string(),
             name: z.string().optional(),
             tenant_name: z.string().optional(),
+            business_name: z.string().optional(),
             partner_id: z.string().optional().nullable(),
-            status: SuspensionStatusSchema,
+            status: TenantSubscriptionStatusSchema,
             suspended_at: z.string().optional().nullable(),
             updated_at: z.string().optional().nullable(),
         })
         .passthrough()
         .transform((v) => ({
             id: v.id,
-            name: v.name ?? v.tenant_name ?? v.id,
+            name: v.name ?? v.business_name ?? v.tenant_name ?? v.id,
             partnerId: v.partner_id ?? undefined,
             status: v.status,
             suspendedAt: v.suspended_at ?? undefined,
-            updatedAt: v.updated_at ?? undefined,
+            updatedAt: v.updated_at,
         })),
 ]);
 

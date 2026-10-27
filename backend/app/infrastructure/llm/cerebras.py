@@ -36,6 +36,7 @@ from app.domain.models.conversation import Message
 from app.infrastructure.providers.provider_concurrency import get_provider_guard
 from app.utils.resilience import CircuitBreaker
 from app.infrastructure.llm.request_profile import record_traditional_request
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
 
 from app.infrastructure.llm.streaming import (
     LLMStreamStalled, stream_with_timeout, stream_tool_turn, close_stream, execute_tool_call,
@@ -142,6 +143,8 @@ class CerebrasLLMProvider(LLMProvider):
                 "environment or pass api_key in config."
             )
 
+        self._api_key = api_key
+        self._observation_context = dict(config.get("observation_context") or {})
         self._model = config.get("model") or DEFAULT_CEREBRAS_MODEL
         self._temperature = config.get("temperature", 0.6)
         self._max_tokens = config.get("max_tokens", 150)
@@ -317,48 +320,67 @@ class CerebrasLLMProvider(LLMProvider):
                             configured_temperature=self._temperature if temperature is None else temperature,
                             configured_max_tokens=self._max_tokens if max_tokens is None else max_tokens,
                         )
-                        stream = await self._client.chat.completions.create(**request)
-                        tc_acc: Dict[int, dict] = {}
-                        terminal_seen = False
+                        observation = None
                         try:
-                            async for chunk in stream:
-                                # The usage block rides the FINAL frame, which has
-                                # an empty `choices` list — so it has to be read
-                                # before the skip below, or cache stats are silently
-                                # thrown away on every call.
-                                _usage = getattr(chunk, "usage", None)
-                                if _usage is not None:
-                                    _log_cache_stats(_usage, model, cache_key)
-                                choices = getattr(chunk, "choices", None)
-                                if not choices:
-                                    continue
-                                reason = getattr(choices[0], "finish_reason", None)
-                                if reason is not None:
-                                    if reason not in {"stop", "tool_calls"}:
-                                        raise LLMStreamStalled(
-                                            f"Cerebras response incomplete: {reason}"
-                                        )
-                                    terminal_seen = True
-                                delta = choices[0].delta
-                                content = getattr(delta, "content", None)
-                                if content:
-                                    tokens_yielded += 1
-                                    yield content
-                                if tool_calls_sink is not None:
+                            if not getattr(self, "_observes_http_attempts", False):
+                                observation = ProviderAttempt("llm", self.name, getattr(self, "_api_key", None), getattr(self, "_observation_context", None))
+                            stream = await self._client.chat.completions.create(**request)
+                            if getattr(self, "_observes_http_attempts", False):
+                                observation = stream.provider_attempt
+                            observation.accepted()
+                            tc_acc: Dict[int, dict] = {}
+                            terminal_seen = False
+                            try:
+                                async for chunk in stream:
+                                    # The usage block rides the FINAL frame, which has
+                                    # an empty `choices` list — so it has to be read
+                                    # before the skip below, or cache stats are silently
+                                    # thrown away on every call.
+                                    _usage = getattr(chunk, "usage", None)
+                                    if _usage is not None:
+                                        _log_cache_stats(_usage, model, cache_key)
+                                    choices = getattr(chunk, "choices", None)
+                                    if not choices:
+                                        continue
+                                    reason = getattr(choices[0], "finish_reason", None)
+                                    if reason is not None:
+                                        if reason not in {"stop", "tool_calls"}:
+                                            raise LLMStreamStalled(
+                                                f"Cerebras response incomplete: {reason}"
+                                            )
+                                        terminal_seen = True
+                                    delta = choices[0].delta
+                                    content = getattr(delta, "content", None)
+                                    if content:
+                                        tokens_yielded += 1
+                                        if isinstance(content, str) and content.strip():
+                                            observation.first_output()
+                                        yield content
                                     frags = getattr(delta, "tool_calls", None)
                                     if frags:
+                                        observation.first_output()
                                         _accumulate_tool_call_frags(tc_acc, frags)
-                            if not terminal_seen:
-                                raise LLMStreamStalled(
-                                    "Cerebras stream ended without a terminal reason"
-                                )
+                                if not terminal_seen:
+                                    raise LLMStreamStalled(
+                                        "Cerebras stream ended without a terminal reason"
+                                    )
+                            finally:
+                                await close_stream(stream)
+                            finalized_calls = _finalize_tool_calls(tc_acc)
+                            if tool_calls_sink is not None and tc_acc:
+                                if isinstance(tool_calls_sink, list):
+                                    tool_calls_sink.extend(finalized_calls)
+                                else:  # compatibility for direct SDK callers
+                                    tool_calls_sink.update(tc_acc)
+                            if len(finalized_calls) == len(tc_acc) and all(call["arguments_valid"] for call in finalized_calls):
+                                observation.complete()
+                        except BaseException as error:
+                            if observation is not None:
+                                observation.finish(error)
+                            raise
                         finally:
-                            await close_stream(stream)
-                        if tool_calls_sink is not None and tc_acc:
-                            if isinstance(tool_calls_sink, list):
-                                tool_calls_sink.extend(_finalize_tool_calls(tc_acc))
-                            else:  # compatibility for direct SDK callers
-                                tool_calls_sink.update(tc_acc)
+                            if observation is not None:
+                                observation.finish()
                     return
                 except LLMStreamStalled:
                     # An incomplete decision is neither success nor permission

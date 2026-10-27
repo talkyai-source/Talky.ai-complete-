@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from tests.unit.pbx_identity_helpers import BINDING, bind_test_adapter
 
 from app.domain.services.global_concurrency import LeaseResult
 from app.domain.services.telephony import lifecycle
@@ -331,11 +332,13 @@ async def test_lease_loss_fence_persists_recovery_and_requires_all_leg_proof(
         provider_leg_ids=("linked-transfer-leg",),
         provider="asterisk",
         provider_legs=(("linked-transfer-leg", "asterisk"),),
+        control_backend=BINDING,
     )
     mark_pending = AsyncMock(return_value=context)
 
     confirm_all = AsyncMock(return_value=False)
     adapter = SimpleNamespace(name="asterisk", hangup_many_confirmed=confirm_all)
+    bind_test_adapter(adapter)
     monkeypatch.setattr(lifecycle, "get_adapter", lambda: adapter)
     monkeypatch.setattr(lifecycle, "_state", lambda: state)
     monkeypatch.setattr(lifecycle, "_orphan_recovery_in_flight", set())

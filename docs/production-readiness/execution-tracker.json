@@ -432,16 +432,16 @@
         }
       ],
       "blocker": "Designated inbox/device/browser recovery, cross-tab cookie behavior, deployed compatibility, first authorized call and operator reconciliation remain unverified. The advertised staff invitation/acceptance journey is absent; assisted setup does not close F05.",
-      "next_action": "Complete designated recovery/first-call acceptance and obtain explicit disposition of absent invitation journey. Preserve the freeze, uncertainty warnings and legacy-route containment; continue eligible AG07 and operating repairs without reopening CP05/CP06/CP09.",
+      "next_action": "Complete designated recovery/first-call acceptance and obtain explicit disposition of absent invitation journey. Preserve the freeze, uncertainty warnings and legacy-route containment; continue eligible AG07 and operating repairs while keeping CP05/CP06 deferred; the user explicitly resumed the Admin portion of CP09.",
       "target_date": null
     },
     {
       "id": "CP09",
       "title": "Supportability and decisive customer UX acceptance",
       "owner_role": "Support operations product lead",
-      "assigned_person": null,
-      "reviewer": null,
-      "status": "planned",
+      "assigned_person": "Codex implementation team; designated operating acceptance owner pending",
+      "reviewer": "Independent agent reviews and root integration verification",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -456,9 +456,780 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "cp09-supportability-and-decisive-customer-ux-acceptance",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Deferred at the user’s request on 5 October 2026. Preserve findings and acceptance requirements; do not resume. CP08 and eligible agent/operating packages remain in progress.",
+      "evidence": [
+        "docs/production-readiness/admin-premortem-2026-10-21.md",
+        "docs/sessions/artifacts/admin-remediation-20261021/verification.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/ad03-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/ad04-formal-hold-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/ad10-control-backend-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/ad01-observation-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/ad01-speech-provider-instrumentation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/llm-provider-observations-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/ad01-realtime-observations-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/ad08-native-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/ad04-tenant-partner-propagation-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/ad04-account-control-checkpoint.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/ad04-account-holds-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/tp4-call-authority-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/tp4-formal-suspension-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/tp3-telephony-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/tp3-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/tp-suspension-expiry-invocation-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/ad04-account-workflow-checkpoint.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/ad04-appeal-submission-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/ad04-expiry-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/ad04-expiry-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/formal-hold-followup-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/formal-hold-propagation-proof-design.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/ad04-formal-workflow-checkpoint.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/assistant-runtime-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/ad04-enforcement-projection-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/termination-receipt-outcome-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/formal-workflow-openapi.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-formal-intent-final-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/partner-formal-independent-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/cp08-runtime-fixture-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/formal-hold-live-acceptance-plan.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-release-browser-checkpoint.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/release-migration-current-head.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/release-migration-unit.xml",
+        "docs/sessions/artifacts/admin-remediation-20261021/local-font-build-result.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/local-font-production-build.log",
+        "docs/sessions/artifacts/admin-remediation-20261021/local-font-network-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/talk-leee-local-font-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/talk-leee-local-font-browser-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-mobile-shell-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-rendered-browser-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-deeper-checkpoint.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/inbound-tenant-selection-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-browser-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-selection-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-deeper-final-tests.log",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-layout-focused-tests.log",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-deeper-layout-lint.log",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-deeper-layout-build.log",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-deeper-final-build.log",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-actions-availability-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-call-indicators-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-list-indicators-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/configured-middleware-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/configured-middleware-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-real-auth-journey-ci-ready.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-real-auth-journey-ci-readiness.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-deeper-openapi.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-deeper-backend-static.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-acceptance-matrix-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-deeper-final-whitespace.log",
+        "docs/sessions/artifacts/admin-remediation-20261021/record-admin-deeper-checkpoint.py",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-runtime-browser-checkpoint.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-real-browser-auth-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-real-browser-network-classification.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-real-browser-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-tenant-status-labels-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-logout-recovery-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/runtime-privilege-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/runtime-privilege-independent-review-final-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-auth-concurrency-checkpoint.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-auth-races-browser-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-cookie-race-browser-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-cookie-coordination-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/mfa-cookie-policy-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/auth-lock-order-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-auth-regressions-final.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-auth-fixture-cleanup-recovery.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-auth-final-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-role-expiry-checkpoint.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-forbidden-authority-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-role-expiry-browser-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-role-expiry-browser-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-acceptance-matrix-current-review-v2.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-role-expiry-process-cleanup.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-role-expiry-secret-scan.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-name-audit-finding-v2.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-name-audit-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-role-whitespace-classification.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-capability-baseline-review-v2.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-capability-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-capability-independent-review.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-capability-browser-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-capability-process-cleanup.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-capability-secret-scan.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-cross-app-session-review-v2.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-auth-races-backend-capability-baseline-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-capability-baseline-barrier-snapshot.jsonl",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-capability-baseline-requests-snapshot.jsonl",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-capability-checkpoint.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-shared-session-checkpoint.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-cross-app-marker-validation-v2.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-cross-app-marker-customer-fence-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-cross-app-transport-independent-review-v2.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-passkey-owner-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-mfa-password-owner-investigation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-shared-session-customer-full-result.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-customer-logout-fence-independent-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-query-client-exit-diagnosis.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-session-ownership-checkpoint.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-mfa-password-owner-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-cross-app-volatile-logout-validation-v2.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-cookie-bootstrap-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-cookie-bootstrap-independent-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-cookie-bootstrap-auth-regression-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-test-gc-cleanup-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-session-ownership-independent-delta-review.json",
+        "output/playwright/admin-shared-session-local/browser-validation-v1.json",
+        "output/playwright/admin-shared-session-cookie-final/browser-validation-v2.json",
+        "output/playwright/admin-shared-session-cookie-final/next-final-v5-build-result.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-operator-checkpoint-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-operator-frontend-v2.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-operator-migration-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-users-tenants-crud-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-directory-contract-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-tenant-saved-receipt-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-validation-envelope-validation.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-enquiries-workflow-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-users-tenants-remaining-contract-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-operator-independent-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-operator-browser-independent-review-v1.json",
+        "output/playwright/admin-operator-local/browser-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-recovery-frontend-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-recovery-migration-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-users-recovery-ui-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-operation-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-tenant-status-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-recovery-browser-independent-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-recovery-checkpoint-v1.json",
+        "output/playwright/admin-user-recovery-local/browser-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-users-reload-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-primary-membership-core-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-operations-unit-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-operations-migration-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-operations-migration-verification-v2.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-operations-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-prepared-user-compatibility-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-users-server-ui-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-users-prepared-flow-independent-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-operations-frontend-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-operations-static-preflight-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-operations-browser-independent-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-incident-authority-next-plan-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-media-authority-next-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-user-operations-checkpoint-v1.json",
+        "output/playwright/admin-user-operations-local/browser-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-guard-fixed-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-inbound-fixed-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-media-fixed-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-feedback-fixed-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-incident-fixed-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-incident-compat-fixed-v2.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-feedback-compat-fixed-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-inbound-hold-compat-fixed-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-inbound-history-compat-fixed-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-authority-units-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-media-units-v2.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-incident-units-v2.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-feedback-units-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-static-v2.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-current-authority-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-media-current-authority-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-incident-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-peer-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-media-independent-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-legacy-fixture-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-next-operator-acceptance-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-checkpoint-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-current-authority-checkpoint-v2.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-operator-baseline-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-reassignment-read-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-recovery-ui-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-recovery-frontend-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-recovery-independent-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-recovery-independent-gate-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-recovery-browser-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-usability-ui-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-usability-frontend-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-usability-independent-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-recovery-browser-v2.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-recovery-checkpoint-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-matrix-browser-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-cancellation-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-cancellation-ui-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-cancellation-independent-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-cancellation-browser-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-inline-keyboard-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-inline-keyboard-independent-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-inbound-inline-keyboard-browser-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-incidents-operator-baseline-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-incidents-recovery-ui-validation-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-incidents-recovery-independent-review-v1.json",
+        "docs/sessions/artifacts/admin-remediation-20261021/admin-incidents-recovery-browser-v1.json",
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-media-operator-baseline-analysis-v1.json",
+          "kind": "expected_defect_baseline_8_failures_5_controls_not_repaired"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-media-operator-browser-baseline-v1.json",
+          "kind": "native_41_request_media_baseline_with_explicit_failed_fixture_cleanup"
+        },
+        {
+          "path": "output/playwright/admin-media-operator-local/cleanup-readonly-diagnosis-v1.json",
+          "kind": "readonly_durable_media_outcomes_and_fixture_cleanup_root_cause"
+        },
+        {
+          "path": "output/playwright/admin-media-operator-local/a-cookie-call-context-v1.log",
+          "kind": "actual_cookie_only_cross_tenant_call_detail_404_safe_header_presence"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-cookie-canonical-context-review-v1.json",
+          "kind": "independent_14_route_2_helper_canonical_scope_inventory_and_acceptance"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-media-cleanup-and-recovery-proposal-v1.json",
+          "kind": "confirmed_fixture_cause_and_minimal_media_recovery_contract_proposal"
+        },
+        {
+          "path": "output/playwright/admin-media-operator-local/owned-fixture-recovery-v1.json",
+          "kind": "separate_reviewed_exact_owned_fixture_recovery_exit0_full_protected_equality"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-canonical-scope-unit-validation-v1.json",
+          "kind": "bounded_canonical_scope_and_call_timestamp_repair_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-call-detail-native-validation-v1.json",
+          "kind": "bounded_canonical_scope_and_call_timestamp_repair_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-canonical-context-transports-fixed-v1.json",
+          "kind": "bounded_canonical_scope_and_call_timestamp_repair_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-canonical-context-authority-fixed-v1.json",
+          "kind": "bounded_canonical_scope_and_call_timestamp_repair_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-canonical-context-browser-v1.json",
+          "kind": "bounded_canonical_scope_and_call_timestamp_repair_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-canonical-context-checkpoint-v1.json",
+          "kind": "bounded_canonical_scope_and_call_timestamp_repair_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-media-recovery-validation-v1.json",
+          "kind": "bounded_media_recovery_backend_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-media-recovery-ui-validation-v1.json",
+          "kind": "bounded_media_recovery_ui_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-media-recovery-browser-v1.json",
+          "kind": "bounded_native_media_recovery_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-media-last-page-baseline-analysis-v1.json",
+          "kind": "three_reproduced_last_page_failures_still_open"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-media-recovery-checkpoint-v3.json",
+          "kind": "media_recovery_checkpoint_last_page_and_admin_goal_open"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-media-last-page-browser-v1.json",
+          "kind": "bounded_media_formal_recovery_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-media-last-page-browser-independent-review-v1.json",
+          "kind": "bounded_media_formal_recovery_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-media-formal-recovery-frontend-v1.json",
+          "kind": "bounded_media_formal_recovery_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-media-formal-recovery-independent-review-v1.json",
+          "kind": "bounded_media_formal_recovery_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-media-last-page-focus-browser-v1.json",
+          "kind": "bounded_media_formal_recovery_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-media-last-page-focus-browser-independent-review-v1.json",
+          "kind": "bounded_media_formal_recovery_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-media-last-page-focus-failed-attempt-review-v1.json",
+          "kind": "bounded_media_formal_recovery_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-formal-recovery-historical-baseline-v1.json",
+          "kind": "bounded_media_formal_recovery_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-formal-recovery-fixed-v1.json",
+          "kind": "bounded_media_formal_recovery_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-formal-recovery-independent-review-v2.json",
+          "kind": "bounded_media_formal_recovery_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/partner-historical-recovery-validation-v1.json",
+          "kind": "bounded_media_formal_recovery_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/partner-historical-recovery-root-review-v1.json",
+          "kind": "bounded_media_formal_recovery_not_full_admin_closure"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-media-formal-checkpoint-v1.json",
+          "kind": "media_formal_checkpoint_goal_and_release_open"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-formal-journey-browser-baseline-v1.json",
+          "kind": "bounded_formal_acceptance_partner_prerequisites_open"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-formal-focus-recovery-frontend-v1.json",
+          "kind": "bounded_formal_acceptance_partner_prerequisites_open"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-formal-focus-mixed-state-independent-review-v1.json",
+          "kind": "bounded_formal_acceptance_partner_prerequisites_open"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-formal-focus-browser-v1.json",
+          "kind": "bounded_formal_acceptance_partner_prerequisites_open"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-formal-focus-helper-correction-review-v1.json",
+          "kind": "bounded_formal_acceptance_partner_prerequisites_open"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-user-hold-block-validation-v1.json",
+          "kind": "bounded_formal_acceptance_partner_prerequisites_open"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/partner-historical-final-build-validation-v1.json",
+          "kind": "bounded_formal_acceptance_partner_prerequisites_open"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/partner-historical-final-build-integrity-v1.json",
+          "kind": "bounded_formal_acceptance_partner_prerequisites_open"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-partner-native-prerequisites-v1.json",
+          "kind": "bounded_formal_acceptance_partner_prerequisites_open"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-partner-directory-baseline-analysis-v1.json",
+          "kind": "bounded_formal_acceptance_partner_prerequisites_open"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-formal-account-checkpoint-v1.json",
+          "kind": "bounded_formal_acceptance_partner_prerequisites_open"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-partner-directory-validation-v1.json",
+          "kind": "bounded_partner_repair_deeper_admin_plan"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-partner-directory-client-validation-v1.json",
+          "kind": "bounded_partner_repair_deeper_admin_plan"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-partner-directory-independent-review-v1.json",
+          "kind": "bounded_partner_repair_deeper_admin_plan"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-partner-directory-final-validation-v2.json",
+          "kind": "bounded_partner_repair_deeper_admin_plan"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-partner-directory-final-independent-review-v1.json",
+          "kind": "bounded_partner_repair_deeper_admin_plan"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-next-audit-security-partner-contract-review-v1.json",
+          "kind": "bounded_partner_repair_deeper_admin_plan"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-paid-use-acceptance-independent-review-v1.json",
+          "kind": "bounded_partner_repair_deeper_admin_plan"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-deeper-causes-checkpoint-v1.json",
+          "kind": "bounded_partner_repair_deeper_admin_plan"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-audit-security-backend-validation-v1.json",
+          "kind": "bounded_audit_security_repair"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-audit-security-final-validation-v1.json",
+          "kind": "bounded_audit_security_repair"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-audit-security-independent-review-v1.json",
+          "kind": "bounded_audit_security_repair"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-audit-security-native-preparation-v2.json",
+          "kind": "bounded_audit_security_repair"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-audit-security-checkpoint-v1.json",
+          "kind": "bounded_audit_security_repair"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-audit-security-browser-v1.json",
+          "kind": "bounded_native_admin_read_acceptance"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-audit-security-browser-independent-review-v1.json",
+          "kind": "bounded_native_admin_read_acceptance"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-partner-controls-next-plan-v1.json",
+          "kind": "bounded_native_admin_read_acceptance"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-audit-security-postnative-v1.json",
+          "kind": "bounded_native_admin_read_acceptance"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-native-read-checkpoint-v1.json",
+          "kind": "bounded_native_admin_read_acceptance"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-partner-controls-checkpoint-v1.json",
+          "kind": "bounded_local_partner_controls_remediation"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-partner-controls-independent-review-v1.json",
+          "kind": "bounded_local_partner_controls_remediation"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-partner-controls-independent-review-supplement-v1.json",
+          "kind": "bounded_local_partner_controls_remediation"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-partner-controls-docs-final-v1.json",
+          "kind": "checkpoint_document_formatting_only"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-partner-controls-native-independent-review-v1.json",
+          "kind": "bounded_native_partner_investigation"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-deeper-completion-plan-v1.json",
+          "kind": "deeper_admin_completion_plan"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-state-ownership-checkpoint-v1.json",
+          "kind": "bounded_state_ownership_repair"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-state-ownership-independent-review-v1.json",
+          "kind": "independent_state_ownership_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-state-ownership-final-gates-review-v1.json",
+          "kind": "independent_final_gate_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-state-ownership-native-next-plan-v1.json",
+          "kind": "prepared_matching_native_acceptance"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-state-ownership-baseline-review-v1.json",
+          "kind": "corrected_baseline_attribution"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-state-ownership-native-checkpoint-v1.json",
+          "kind": "bounded_matching_build_native_acceptance"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-state-ownership-native-independent-review-v1.json",
+          "kind": "independent_native_reconciliation"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-action-cancel-authority-checkpoint-v1.json",
+          "kind": "bounded_action_cancellation_authority_repair"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-action-cancel-authority-independent-review-v1.json",
+          "kind": "independent_action_cancellation_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-connector-session-authority-checkpoint-v1.json",
+          "kind": "bounded_connector_session_authority_repair"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-connector-session-authority-independent-review-v1.json",
+          "kind": "connector_session_product_and_http_review_with_disclosed_test_authorship"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-connector-permission-expiry-checkpoint-v1.json",
+          "kind": "bounded_natural_direct_permission_expiry_repair"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-connector-permission-expiry-independent-review-v1.json",
+          "kind": "independent_permission_expiry_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-actions-confirmed-recovery-frontend-v1.json",
+          "kind": "confirmed_recovery_frontend_regressions_build_and_scoped_lint"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-actions-confirmed-recovery-native-v1.json",
+          "kind": "confirmed_recovery_normal_mfa_native_reconciliation"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-actions-confirmed-recovery-independent-review-v1.json",
+          "kind": "independent_confirmed_recovery_product_and_evidence_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-actions-confirmed-recovery-checkpoint-v1.json",
+          "kind": "bounded_confirmed_recovery_root_checkpoint"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-connector-authorize-checkpoint-v1.json",
+          "kind": "checkpoint"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-connector-authorize-independent-review-v1.json",
+          "kind": "independent_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-connector-authorize-static-final-v1.json",
+          "kind": "static_validation"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-remaining-current-inventory-v1.json",
+          "kind": "remaining_scope_inventory"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-ui-recovery-checkpoint-v1.json",
+          "kind": "bounded_ui_recovery_checkpoint"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-ui-recovery-build-final-v2.json",
+          "kind": "focused_ui_recovery_build"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-ui-recovery-independent-review-v2.json",
+          "kind": "independent_ui_source_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-ui-recovery-native-baseline-independent-review-v1.json",
+          "kind": "original_native_defect_reconciliation"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-ui-recovery-native-final-independent-review-v1.json",
+          "kind": "independent_final_native_recovery_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-enquiries-refresh-controls-checkpoint-v1.json",
+          "kind": "bounded_enquiry_recovery_and_pending_control_checkpoint"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-enquiries-refresh-controls-build-v2.json",
+          "kind": "focused_enquiries_and_refresh_controls_build"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-enquiries-native-baseline-independent-review-v1.json",
+          "kind": "original_enquiry_native_focus_reconciliation"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-enquiries-native-final-independent-review-v1.json",
+          "kind": "independent_final_enquiry_native_recovery_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-connector-refresh-control-checkpoint-v1.json",
+          "kind": "focused_pending_connector_refresh_control"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-connector-refresh-control-independent-review-v1.json",
+          "kind": "independent_pending_connector_refresh_source_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-connector-pending-control-native-independent-review-v1.json",
+          "kind": "independent_pending_connector_control_native_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-dashboard-surface-checkpoint-v1.json",
+          "kind": "bounded_dashboard_count_and_drawer_surface_checkpoint"
+        },
+        {
+          "path": "output/playwright/admin-monitoring-observations-local/checkpoint-dashboard-count-v1.json",
+          "kind": "normal_auth_postgresql_dashboard_tenant_count"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-dashboard-count-independent-review-v1.json",
+          "kind": "independent_dashboard_count_source_and_evidence_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-surface-build-v1.json",
+          "kind": "shared_card_token_surface_build"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-surface-native-independent-review-v1.json",
+          "kind": "independent_opaque_connector_drawer_native_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-calls-composition-checkpoint-v1.json",
+          "kind": "bounded_calls_cross_row_termination_source_build_native_checkpoint"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-calls-composition-build-v1.json",
+          "kind": "calls_matching_production_build_119_selected_checks"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-calls-composition-code-independent-review-v1.json",
+          "kind": "independent_calls_one_line_delta_and_regression_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-calls-native-final-comparison-review-v1.json",
+          "kind": "reconciled_original_fixed_normal_auth_calls_native_comparison"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-calls-native-independent-review-v1.json",
+          "kind": "independent_calls_native_original_fixed_final_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-monitoring-usage-checkpoint-v1.json",
+          "kind": "bounded_native_monitoring_and_owned_usage_query_checkpoint"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-monitoring-native-independent-review-v1.json",
+          "kind": "independent_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-monitoring-queue-label-build-v1.json",
+          "kind": "bounded_build_or_query_evidence"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-usage-owned-read-checkpoint-v1.json",
+          "kind": "bounded_build_or_query_evidence"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-usage-owned-reads-independent-review-v1.json",
+          "kind": "independent_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-enquiries-parent-checkpoint-v1.json",
+          "kind": "bounded_enquiries_narrow_and_parent_expiry_checkpoint"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-enquiries-narrow-native-independent-review-v1.json",
+          "kind": "independent_actual_narrow_interaction_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-parent-expiry-composition-checkpoint-v1.json",
+          "kind": "normal_auth_parent_expiry_checkpoint"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-parent-expiry-composition-independent-review-v1.json",
+          "kind": "independent_parent_expiry_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-finite-closeout-checklist-v1.json",
+          "kind": "authoritative_finite16_area_closeout_queue"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-original-account-inspection-checkpoint-v1.json",
+          "kind": "normal_auth_original_account_read_checkpoint"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-original-account-inspection-independent-review-v1.json",
+          "kind": "independent_original_account_runtime_review"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-finite-closeout-checklist-v2.json",
+          "kind": "finite_local_acceptance_or_current_gate"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-loaded-media-authority-independent-review-v1.json",
+          "kind": "finite_local_acceptance_or_current_gate"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-loaded-media-authority-checkpoint-v1.json",
+          "kind": "finite_local_acceptance_or_current_gate"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-command-center-layout-checkpoint-v1.json",
+          "kind": "finite_local_acceptance_or_current_gate"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-frontend-consolidation-final-v2.json",
+          "kind": "finite_local_acceptance_or_current_gate"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-command-center-layout-build-v1.json",
+          "kind": "finite_local_acceptance_or_current_gate"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-command-center-layout-static-independent-review-v1.json",
+          "kind": "finite_local_acceptance_or_current_gate"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-finite-closeout-checklist-v3.json",
+          "kind": "final_local_acceptance_with_external_limits"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-consolidated-candidate-independent-review-v1.json",
+          "kind": "final_local_acceptance_with_external_limits"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-consolidated-candidate-checkpoint-v1.json",
+          "kind": "final_local_acceptance_with_external_limits"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-ci-fixture-repair-independent-review-v1.json",
+          "kind": "final_local_acceptance_with_external_limits"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-next-compatibility-binding-v1.json",
+          "kind": "final_local_acceptance_with_external_limits"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-compatible-restore-checkpoint-v1.json",
+          "kind": "final_local_acceptance_with_external_limits"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-compatible-restore-runtime-independent-review-v1.json",
+          "kind": "final_local_acceptance_with_external_limits"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-compatible-restore-checkpoint-v2.json",
+          "kind": "final_local_acceptance_with_external_limits"
+        },
+        {
+          "path": "docs/sessions/artifacts/admin-remediation-20261021/admin-populated-restore-runtime-independent-review-v1.json",
+          "kind": "final_local_acceptance_with_external_limits"
+        },
+        {
+          "path": "docs/sessions/2026-10-26-admin-release.md",
+          "kind": "release_candidate_qa_and_activation_limits"
+        },
+        {
+          "path": "docs/sessions/2026-10-27-admin-monitoring-live.md",
+          "kind": "bounded_live_monitoring_api_browser_and_responsive_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-27-admin-remaining-limitations.md",
+          "kind": "live_pbx_mobile_read_compatibility_and_non_atomic_release_observation"
+        },
+        {
+          "path": "docs/sessions/2026-10-27-admin-billing-release-compatibility.md",
+          "kind": "preserved_deployed_billing_single_head_and_fresh_paid_database_restore"
+        },
+        "docs/sessions/2026-10-27-admin-remaining-remediation.md"
+      ],
+      "blocker": "Prior candidate8df88718 passed all14 CI checks, including701 Admin PostgreSQL and943 Admin frontend cases. Runtime614 passed isolated production-backup0072-to0080 migration, restricted-role checks and exact cleanup; historical failures are retained in the preceding session. Backup repair eae0465e is live. A fresh read-only observation found independent production advancement to5c4c908e/schema0073_payment_test_plan/API-web92c943e2 with all eight observed services active and backup pin/timer retained. Merge50dda882 preserves current billing/frontend changes and adds metadata-only0081 joining published0080 and0073;68 focused and9 tenant checks pass. Expanded branch, current-production restore and combined CI receipts are tracked on PR22 and the new compatibility session, not inferred from prior runtime results. Full activation still lacks actual ingress/outbound freeze, fresh four-counter drain, topology/change references and two distinct operator attestations. The four live Admin contract failures await coherent activation; no newer hosted business-flow success is claimed. Designated MFA/call/connector/media/provider effects, real supplier account-period source formats and finance review, allocation, off-host recovery/RTO/RPO, load and policy/customer acceptance remain unfinished. CP09 stays in_progress, CP05/CP06 deferred and feature freeze active.",
+      "next_action": "Use PR22 current-candidate verification and preserve latest production billing plus the backup maintenance pin. Obtain the existing operating freeze/two-owner release record and designated owned call/connector/media destinations; measure fresh four-counter drain after freeze. Execute the coherent backend/schema/gateway deployment, promote matching Admin UI and repeat the failing hosted contracts and actual business/provider journeys. Complete supplier formats/account allocation only from designated real account-period exports and reviewed finance inputs. Retain remaining recovery/load/policy acceptance and the feature freeze.",
       "target_date": null
     },
     {
@@ -1586,7 +2357,7 @@
           "candidate": "8f45d12eadb3de02de6696b0bf6e7a90b644c3f1"
         }
       ],
-      "blocker": "Designated clean Ubuntu host and completed external database, DNS/TLS, network, provider and carrier inputs are still required for full installation and operating acceptance.",
+      "blocker": "Exact release artifact/host, supported Linux CI/runtime privileges, previous compatible artifact and backup/recovery operating acceptance remain unverified. Local builds/current-head migration and browser fixtures are not deployed recovery proof. Designated clean Ubuntu host and completed external database, DNS/TLS, network, provider and carrier inputs are still required for full installation and operating acceptance.",
       "next_action": "Use the published pinned Ubuntu test candidate, populate protected inputs, execute validate/apply, retain health/reboot/controlled-call evidence, and qualify update/rollback plus independent-operator handover. Preparation and builds do not close this package.",
       "target_date": null
     },

@@ -6,8 +6,6 @@ from typing import Optional
 
 from fastapi import Request, Response
 
-from app.core.security.sessions import SESSION_COOKIE_NAME, SESSION_LIFETIME_HOURS
-
 # MFA challenge token lifetime (5 minutes — short window for step-2 login)
 MFA_CHALLENGE_TTL_MINUTES: int = 5
 
@@ -32,13 +30,7 @@ def _get_user_agent(request: Request) -> Optional[str]:
 
 
 def _set_session_cookie(response: Response, raw_token: str) -> None:
-    """Write the session token into an httpOnly Secure SameSite=Strict cookie."""
-    response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=raw_token,
-        httponly=True,
-        secure=True,
-        samesite="strict",
-        max_age=SESSION_LIFETIME_HOURS * 3600,
-        path="/",
-    )
+    """Use the same configured legacy-cookie policy as ordinary sign-in."""
+    from app.api.v1.endpoints.auth._shared import set_session_cookie
+
+    set_session_cookie(response, raw_token)

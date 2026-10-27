@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useIsPresent } from "framer-motion";
 import { ArrowRight, Loader2, KeyRound, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, type LoginResponse } from "@/lib/api";
 import { validateTotpCode } from "@/lib/mfa-utils";
+import { ApiClientError, getRequestIdentityGeneration, subscribeRequestIdentityGeneration } from "@/lib/http-client";
 
 interface MFAVerificationProps {
   // Issued by POST /auth/login when mfa_required=true. The verify call
@@ -25,6 +27,62 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
   const [timeRemaining, setTimeRemaining] = useState(30);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const errorId = useId();
+  const isPresent = useIsPresent();
+  const mounted = useRef(false);
+  const available = useRef(false);
+  const currentChallenge = useRef(challengeToken);
+  const currentCode = useRef(totpCode);
+  const callbacks = useRef({ onSuccess, onBackClick, onError });
+  const active = useRef<{ controller: AbortController; identity: number; challenge: string } | null>(null);
+  const restart = useRef(false);
+  const completed = useRef(false);
+  const [restartRequired, setRestartRequired] = useState(false);
+  const [finished, setFinished] = useState(false);
+
+  const retire = useCallback(() => {
+    const previous = active.current;
+    active.current = null;
+    previous?.controller.abort();
+  }, []);
+
+  useLayoutEffect(() => { callbacks.current = { onSuccess, onBackClick, onError }; }, [onSuccess, onBackClick, onError]);
+  useLayoutEffect(() => { currentCode.current = totpCode; }, [totpCode]);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    const unsubscribe = subscribeRequestIdentityGeneration(() => {
+      retire();
+      setLoading(false);
+      // Our accepted callback intentionally replaces identity. Its completed
+      // challenge is already unavailable; do not turn success into an error.
+      if (completed.current) return;
+      restart.current = true;
+      setRestartRequired(true);
+      setTotpCode("");
+      setError("Your sign-in changed. Return to login to start again.");
+    });
+    return () => { mounted.current = false; retire(); unsubscribe(); };
+  }, [retire]);
+  useLayoutEffect(() => {
+    available.current = isPresent;
+    if (currentChallenge.current !== challengeToken) {
+      retire();
+      currentChallenge.current = challengeToken;
+      restart.current = false;
+      completed.current = false;
+      setRestartRequired(false);
+      setFinished(false);
+      setTotpCode("");
+      setError("");
+      setLoading(false);
+    }
+    if (!isPresent) {
+      retire();
+      // Keep React's loading display aligned with the canceled external
+      // ceremony, including an exit animation that is later reversed.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLoading(false);
+    }
+  }, [challengeToken, isPresent, retire]);
 
   // Auto-focus input
   useEffect(() => {
@@ -47,6 +105,8 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!mounted.current || !available.current || active.current || restart.current || completed.current
+        || challengeToken !== currentChallenge.current || totpCode !== currentCode.current) return;
     setError("");
 
     if (!challengeToken) {
@@ -67,17 +127,54 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
     }
 
     setLoading(true);
+    const operation = { controller: new AbortController(), identity: getRequestIdentityGeneration(), challenge: challengeToken };
+    active.current = operation;
+    const ownsOperation = () => mounted.current && available.current && active.current === operation
+      && !operation.controller.signal.aborted && getRequestIdentityGeneration() === operation.identity
+      && currentChallenge.current === operation.challenge;
 
     try {
-      const response = await api.verifyMfaChallenge(challengeToken, totpCode);
-      onSuccess(response);
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "MFA verification failed. Please try again.";
-      setError(errorMsg);
-      onError?.(errorMsg);
-    } finally {
+      const response = await api.verifyMfaChallenge(challengeToken, totpCode, undefined, {
+        signal: operation.controller.signal, ownsOperation,
+      });
+      if (!ownsOperation()) return;
+      if (!response.access_token.trim() || response.mfa_required) {
+        throw new Error("Verification response did not confirm sign-in.");
+      }
+      active.current = null;
+      completed.current = true;
+      setFinished(true);
       setLoading(false);
+      callbacks.current.onSuccess(response);
+    } catch (err) {
+      if (!ownsOperation()) return;
+      // Bad-code/expired challenges intentionally share a generic 401. A
+      // confirmed refusal can be retried; an admitted timeout, 5xx or malformed
+      // success may have consumed this one-use challenge and must not replay.
+      const refused = err instanceof ApiClientError && typeof err.status === "number"
+        && err.status >= 400 && err.status < 500 && err.status !== 408;
+      const notSent = err instanceof ApiClientError && err.sessionRequestNotSent === true;
+      const unknown = !refused && !notSent;
+      if (unknown) {
+        restart.current = true;
+        setRestartRequired(true);
+        setTotpCode("");
+      }
+      const errorMsg = unknown
+        ? "We could not confirm whether verification completed. This code request will not be sent again. Return to login to start a new sign-in."
+        : err instanceof Error ? err.message : "MFA verification was refused. Check your code or return to login.";
+      setError(errorMsg);
+      callbacks.current.onError?.(errorMsg);
+    } finally {
+      if (ownsOperation()) { active.current = null; setLoading(false); }
     }
+  }
+
+  function handleBack() {
+    if (!mounted.current || !available.current || active.current || completed.current) return;
+    available.current = false;
+    retire();
+    callbacks.current.onBackClick();
   }
 
   return (
@@ -110,7 +207,7 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
                 pattern="[0-9]*"
                 autoComplete="one-time-code"
                 required
-                disabled={loading}
+                disabled={loading || restartRequired || finished || !isPresent}
                 ref={inputRef}
                 aria-invalid={error ? true : undefined}
                 aria-describedby={error ? errorId : undefined}
@@ -140,7 +237,7 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
         </CardContent>
 
         <CardFooter className="flex flex-col gap-3">
-          <Button type="submit" className="w-full" disabled={loading || totpCode.length < 6}>
+          <Button type="submit" className="w-full" disabled={loading || restartRequired || finished || !isPresent || totpCode.length < 6}>
             {loading ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden />
@@ -156,9 +253,9 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
 
           <button
             type="button"
-            onClick={onBackClick}
+            onClick={handleBack}
             className="text-sm text-muted-foreground hover:text-foreground flex items-center justify-center gap-1 w-full py-2"
-            disabled={loading}
+            disabled={loading || finished || !isPresent}
           >
             <ArrowLeft className="h-3 w-3" aria-hidden />
             Back to login

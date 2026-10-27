@@ -189,7 +189,7 @@ async def test_tool_continuation_waits_for_playback_without_blocking_events():
 async def test_setup_exception_releases_connected_provider_and_gateway(monkeypatch):
     from app.realtime import runtime, openai
     from app.domain.services import credential_resolver
-    resolver = SimpleNamespace(resolve=AsyncMock(return_value="test"))
+    resolver = SimpleNamespace(resolve_with_metadata=AsyncMock(return_value=SimpleNamespace(secret="test", observation_context={})))
     monkeypatch.setattr(credential_resolver, "get_credential_resolver", lambda: resolver)
     provider = SimpleNamespace(connect=AsyncMock(return_value=True), close=AsyncMock())
     monkeypatch.setattr(openai, "OpenAIRealtimeSession", lambda **kw: provider)

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type RefObject } from 'react';
 import {
     Building2,
     Search,
@@ -12,31 +12,52 @@ import {
     ChevronUp,
     ChevronDown
 } from 'lucide-react';
-import type { TenantListItem, QuotaUpdateRequest } from '../lib/api';
+import type { TenantListItem, QuotaUpdateRequest, TenantMutationReceipt } from '../lib/api';
 import { api } from '../lib/api';
+import { useAuthGeneration } from '../lib/use-auth-generation';
+import { useDialogFocus } from '../lib/use-dialog-focus';
+import { ConfirmationModal } from './ConfirmationModal';
 
 interface TenantsTableProps {
     tenants: TenantListItem[];
     loading: boolean;
-    onRefresh: () => void;
+    onRefresh: () => void | Promise<void>;
     searchTerm: string;
     onSearchChange: (term: string) => void;
     statusFilter: string;
     onStatusFilterChange: (status: string) => void;
+    readError?: string | null;
+    onFormalHolds?: (tenant: TenantListItem) => void;
+    searchInputRef?: RefObject<HTMLInputElement | null>;
 }
 
 type SortField = 'business_name' | 'status' | 'minutes_used' | 'user_count';
 type SortDirection = 'asc' | 'desc';
 
-export function TenantsTable({
+function savedTenantReceipt(receipt: TenantMutationReceipt | undefined, id: string): receipt is TenantMutationReceipt {
+    return Boolean(receipt && receipt.id === id && typeof receipt.changed === 'boolean'
+        && (receipt.updated_at === null || (typeof receipt.updated_at === 'string' && Number.isFinite(Date.parse(receipt.updated_at))))
+        && (!receipt.changed || (receipt.updated_at !== null && typeof receipt.audit_event_id === 'string' && receipt.audit_event_id.length > 0)));
+}
+
+export function TenantsTable(props: TenantsTableProps) {
+    const generation = useAuthGeneration();
+    return <OwnedTenantsTable key={generation} {...props} generation={generation} />;
+}
+
+function OwnedTenantsTable({
     tenants,
     loading,
     onRefresh,
     searchTerm,
     onSearchChange,
     statusFilter,
-    onStatusFilterChange
-}: TenantsTableProps) {
+    onStatusFilterChange, readError, generation, onFormalHolds, searchInputRef
+}: TenantsTableProps & { generation: number }) {
+    const subscriptionHelpId = useId();
+    const mounted = useRef(false), pending = useRef(false);
+    useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+    const owns = useCallback(() => mounted.current && generation === api.getAuthGeneration(), [generation]);
     const [sortField, setSortField] = useState<SortField>('business_name');
     const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
     const [activeMenu, setActiveMenu] = useState<string | null>(null);
@@ -53,8 +74,26 @@ export function TenantsTable({
     // The API client never throws: a 403/500/network failure comes back as
     // { error }. Keep the modal open and show it rather than looking like success.
     const [actionError, setActionError] = useState<string | null>(null);
+    const [savedChange, setSavedChange] = useState<{
+        tenantId: string; tenantName: string; summary: string;
+        version: string | null; auditId: string | null;
+    } | null>(null);
+    const [savedRefreshError, setSavedRefreshError] = useState(false);
+    const savedSequence = useRef(0);
 
-    // Sort tenants
+    const acknowledgeSave = (tenant: TenantListItem, receipt: TenantMutationReceipt, summary: string) => {
+        const sequence = ++savedSequence.current;
+        setSavedChange({ tenantId: tenant.id, tenantName: tenant.business_name, summary,
+            version: receipt.updated_at, auditId: typeof receipt.audit_event_id === 'string' ? receipt.audit_event_id : null });
+        setSavedRefreshError(false);
+        // A failed follow-up read cannot undo the already confirmed write.
+        void (async () => {
+            try { await onRefresh(); }
+            catch { if (owns() && savedSequence.current === sequence) setSavedRefreshError(true); }
+        })();
+    };
+
+    // Only the current server page is present in this component.
     const sortedTenants = [...tenants].sort((a, b) => {
         let aVal: string | number;
         let bVal: string | number;
@@ -114,59 +153,81 @@ export function TenantsTable({
     };
 
     const closeConfirm = () => {
+        if (pending.current) return;
         setActionError(null);
         setConfirmAction({ open: false, tenant: null, action: 'suspend' });
     };
 
     const closeQuota = () => {
+        if (pending.current) return;
         setActionError(null);
         setQuotaModal({ open: false, tenant: null });
     };
 
     const handleSuspendResume = async () => {
-        if (!confirmAction.tenant) return;
+        if (!confirmAction.tenant || !owns() || pending.current) return;
+        if (confirmAction.tenant.updated_at === undefined) { setActionError('The tenant version is missing. Close this dialog and refresh the list.'); return; }
+        pending.current = true;
         setActionLoading(true);
         setActionError(null);
         try {
             const res = confirmAction.action === 'suspend'
-                ? await api.suspendTenant(confirmAction.tenant.id)
-                : await api.resumeTenant(confirmAction.tenant.id);
-            if (res.error) {
-                setActionError(res.error.message || 'The tenant status was not changed.');
+                ? await api.suspendTenant(confirmAction.tenant.id, confirmAction.tenant.updated_at)
+                : await api.resumeTenant(confirmAction.tenant.id, confirmAction.tenant.updated_at);
+            if (!owns()) return;
+            if (res.error || !savedTenantReceipt(res.data, confirmAction.tenant.id) || res.data.status !== (confirmAction.action === 'suspend' ? 'suspended' : 'active')) {
+                setActionError(res.error?.message || 'The saved tenant status could not be confirmed. Close this dialog and refresh the list.');
                 return;
             }
-            onRefresh();
+            acknowledgeSave(confirmAction.tenant, res.data, `Subscription ${res.data.status}.`);
+            pending.current = false;
             closeConfirm();
         } catch (error) {
-            console.error('Failed to update tenant status:', error);
-            setActionError(error instanceof Error ? error.message : 'The tenant status was not changed.');
+            if (owns()) setActionError(error instanceof Error ? error.message : 'The tenant status could not be confirmed.');
         } finally {
-            setActionLoading(false);
+            if (owns()) { pending.current = false; setActionLoading(false); }
         }
     };
 
     const handleQuotaUpdate = async (quota: QuotaUpdateRequest) => {
-        if (!quotaModal.tenant) return;
+        if (!quotaModal.tenant || !owns() || pending.current) return;
+        if (quotaModal.tenant.updated_at === undefined) { setActionError('The tenant version is missing. Close this dialog and refresh the list.'); return; }
+        pending.current = true;
         setActionLoading(true);
         setActionError(null);
         try {
             const res = await api.updateTenantQuota(quotaModal.tenant.id, quota);
-            if (res.error) {
-                setActionError(res.error.message || 'The quota was not saved.');
+            if (!owns()) return;
+            if (res.error || !savedTenantReceipt(res.data, quotaModal.tenant.id) || (quota.minutes_allocated !== undefined && res.data.minutes_allocated !== quota.minutes_allocated)
+                || (quota.max_concurrent_calls !== undefined && res.data.max_concurrent_calls !== quota.max_concurrent_calls)) {
+                setActionError(res.error?.message || 'The saved quota could not be confirmed. Close this dialog and refresh the list.');
                 return;
             }
-            onRefresh();
+            const fields: string[] = [];
+            if (quota.minutes_allocated !== undefined) fields.push(`Minutes allocated: ${res.data.minutes_allocated}`);
+            if (quota.max_concurrent_calls !== undefined) fields.push(`Maximum concurrent calls: ${res.data.max_concurrent_calls}`);
+            acknowledgeSave(quotaModal.tenant, res.data, `${fields.join('; ')}.`);
+            pending.current = false;
             closeQuota();
         } catch (error) {
-            console.error('Failed to update quota:', error);
-            setActionError(error instanceof Error ? error.message : 'The quota was not saved.');
+            if (owns()) setActionError(error instanceof Error ? error.message : 'The saved quota could not be confirmed.');
         } finally {
-            setActionLoading(false);
+            if (owns()) { pending.current = false; setActionLoading(false); }
         }
     };
 
     return (
         <>
+            {savedChange && <div className="success-banner" role="status" aria-label="Saved tenant change">
+                <div>
+                    <p>Saved change confirmed for {savedChange.tenantName} ({savedChange.tenantId}). {savedChange.summary}</p>
+                    <p>This is a saved result, not a current-state check.</p>
+                    {savedChange.version && <p>Saved version: {savedChange.version}</p>}
+                    <p>{savedChange.auditId ? `Audit reference: ${savedChange.auditId}` : 'The requested state already existed; no new mutation audit was created.'}</p>
+                    {savedRefreshError && <p role="alert">Saved change confirmed, but the directory reload failed. Use Refresh to check current state.</p>}
+                </div>
+                <button type="button" onClick={() => { savedSequence.current += 1; setSavedChange(null); setSavedRefreshError(false); }}>Dismiss saved tenant change</button>
+            </div>}
             {/* Search and Filter Bar */}
             <div className="table-toolbar">
                 <div className="search-box">
@@ -174,6 +235,8 @@ export function TenantsTable({
                     <input
                         type="text"
                         placeholder="Search tenants..."
+                        aria-label="Search tenants"
+                        ref={searchInputRef}
                         value={searchTerm}
                         onChange={(e) => onSearchChange(e.target.value)}
                         className="search-input"
@@ -182,17 +245,26 @@ export function TenantsTable({
                 <div className="filter-group">
                     <Filter size={16} />
                     <select
+                        aria-label="Tenant subscription status"
+                        aria-describedby={subscriptionHelpId}
                         value={statusFilter}
                         onChange={(e) => onStatusFilterChange(e.target.value)}
                         className="filter-select"
                     >
-                        <option value="">All Statuses</option>
+                        <option value="">All subscription statuses</option>
                         <option value="active">Active</option>
                         <option value="suspended">Suspended</option>
                         <option value="inactive">Inactive</option>
+                        <option value="trialing">Trialing</option>
+                        <option value="past_due">Past due</option>
+                        <option value="cancelled">Cancelled</option>
                     </select>
                 </div>
             </div>
+
+            <p id={subscriptionHelpId} className="section-help" style={{ margin: '12px 20px' }}>
+                Subscription status does not include formal holds. Use Formal holds to inspect account access and enforcement evidence.
+            </p>
 
             {/* Tenants Table */}
             <div className="table-container">
@@ -201,7 +273,7 @@ export function TenantsTable({
                         <div className="loading-spinner"></div>
                         <p>Loading tenants...</p>
                     </div>
-                ) : sortedTenants.length === 0 ? (
+                ) : readError ? <p>Tenant list unavailable. Use Retry to reload.</p> : sortedTenants.length === 0 ? (
                     <div className="empty-state">
                         <Building2 size={48} />
                         <h3>No tenants found</h3>
@@ -209,20 +281,23 @@ export function TenantsTable({
                     </div>
                 ) : (
                     <table className="data-table">
+                        <caption className="section-help" style={{ textAlign: 'left', padding: '8px 20px' }}>
+                            Sorting applies to tenants on this page. Search and subscription filters apply across all pages.
+                        </caption>
                         <thead>
                             <tr>
-                                <th onClick={() => handleSort('business_name')} className="sortable">
-                                    Tenant Name {renderSortIcon('business_name')}
+                                <th aria-sort={sortField === 'business_name' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                                    <button onClick={() => handleSort('business_name')}>Tenant Name {renderSortIcon('business_name')}</button>
                                 </th>
                                 <th>Plan</th>
-                                <th onClick={() => handleSort('status')} className="sortable">
-                                    Status {renderSortIcon('status')}
+                                <th aria-sort={sortField === 'status' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                                    <button onClick={() => handleSort('status')}>Subscription status {renderSortIcon('status')}</button>
                                 </th>
-                                <th onClick={() => handleSort('minutes_used')} className="sortable">
-                                    Usage {renderSortIcon('minutes_used')}
+                                <th aria-sort={sortField === 'minutes_used' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                                    <button onClick={() => handleSort('minutes_used')}>Usage {renderSortIcon('minutes_used')}</button>
                                 </th>
-                                <th onClick={() => handleSort('user_count')} className="sortable">
-                                    Users {renderSortIcon('user_count')}
+                                <th aria-sort={sortField === 'user_count' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                                    <button onClick={() => handleSort('user_count')}>Users {renderSortIcon('user_count')}</button>
                                 </th>
                                 <th>Campaigns</th>
                                 <th>Actions</th>
@@ -281,16 +356,23 @@ export function TenantsTable({
                                         <div className="actions-cell">
                                             <button
                                                 className="action-menu-btn"
+                                                aria-label={`Actions for ${tenant.business_name}`}
+                                                aria-expanded={activeMenu === tenant.id}
                                                 onClick={() => setActiveMenu(activeMenu === tenant.id ? null : tenant.id)}
                                             >
                                                 <MoreVertical size={16} />
                                             </button>
                                             {activeMenu === tenant.id && (
                                                 <div className="action-menu">
-                                                    {tenant.status === 'active' ? (
+                                                    {onFormalHolds && <button className="action-menu-item" onClick={(event) => {
+                                                        event.currentTarget.closest('.actions-cell')?.querySelector<HTMLButtonElement>('.action-menu-btn')?.focus();
+                                                        setActiveMenu(null); onFormalHolds(tenant);
+                                                    }}>Formal holds</button>}
+                                                    {tenant.status === 'active' || tenant.status === 'trialing' ? (
                                                         <button
                                                             className="action-menu-item danger"
-                                                            onClick={() => {
+                                                            onClick={(event) => {
+                                                                event.currentTarget.closest('.actions-cell')?.querySelector<HTMLButtonElement>('.action-menu-btn')?.focus();
                                                                 setActionError(null);
                                                                 setConfirmAction({
                                                                     open: true,
@@ -301,12 +383,13 @@ export function TenantsTable({
                                                             }}
                                                         >
                                                             <Pause size={14} />
-                                                            Suspend Tenant
+                                                            Suspend subscription
                                                         </button>
                                                     ) : (
                                                         <button
                                                             className="action-menu-item"
-                                                            onClick={() => {
+                                                            onClick={(event) => {
+                                                                event.currentTarget.closest('.actions-cell')?.querySelector<HTMLButtonElement>('.action-menu-btn')?.focus();
                                                                 setActionError(null);
                                                                 setConfirmAction({
                                                                     open: true,
@@ -317,12 +400,13 @@ export function TenantsTable({
                                                             }}
                                                         >
                                                             <Play size={14} />
-                                                            Resume Tenant
+                                                            Resume subscription
                                                         </button>
                                                     )}
                                                     <button
                                                         className="action-menu-item"
-                                                        onClick={() => {
+                                                        onClick={(event) => {
+                                                            event.currentTarget.closest('.actions-cell')?.querySelector<HTMLButtonElement>('.action-menu-btn')?.focus();
                                                             setActionError(null);
                                                             setQuotaModal({ open: true, tenant });
                                                             setActiveMenu(null);
@@ -342,43 +426,16 @@ export function TenantsTable({
                 )}
             </div>
 
-            {/* Confirm Modal */}
-            {confirmAction.open && confirmAction.tenant && (
-                <div className="modal-overlay" onClick={closeConfirm}>
-                    <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-                        <h3 className="modal-title">
-                            {confirmAction.action === 'suspend' ? 'Suspend Tenant?' : 'Resume Tenant?'}
-                        </h3>
-                        <p className="modal-description">
-                            {confirmAction.action === 'suspend'
-                                ? `Are you sure you want to suspend "${confirmAction.tenant.business_name}"? This will block all calls and platform access.`
-                                : `Are you sure you want to resume "${confirmAction.tenant.business_name}"? This will restore full platform access.`
-                            }
-                        </p>
-                        {actionError && (
-                            <div className="error-banner" role="alert">
-                                <p>{actionError}</p>
-                            </div>
-                        )}
-                        <div className="modal-actions">
-                            <button
-                                className="btn btn-secondary"
-                                onClick={closeConfirm}
-                                disabled={actionLoading}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                className={`btn ${confirmAction.action === 'suspend' ? 'btn-danger' : 'btn-primary'}`}
-                                onClick={handleSuspendResume}
-                                disabled={actionLoading}
-                            >
-                                {actionLoading ? 'Processing...' : confirmAction.action === 'suspend' ? 'Suspend' : 'Resume'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <ConfirmationModal
+                isOpen={confirmAction.open && Boolean(confirmAction.tenant)}
+                title={confirmAction.action === 'suspend' ? 'Suspend subscription?' : 'Resume subscription?'}
+                message={confirmAction.action === 'suspend'
+                    ? `Suspend the subscription for "${confirmAction.tenant?.business_name}"? New calls will be blocked. Formal holds are separate.`
+                    : `Set the subscription for "${confirmAction.tenant?.business_name}" to active? Formal holds and existing plan and quota limits still apply.`}
+                confirmLabel={confirmAction.action === 'suspend' ? 'Suspend' : 'Resume'}
+                onConfirm={() => void handleSuspendResume()} onCancel={closeConfirm}
+                loading={actionLoading} error={actionError}
+            />
 
             {/* Quota Modal */}
             {quotaModal.open && quotaModal.tenant && (
@@ -411,32 +468,35 @@ function parseBounded(raw: string, min: number, max: number): number | null {
 }
 
 function QuotaModal({ tenant, onClose, onSave, loading, error }: QuotaModalProps) {
+    const root = useRef<HTMLDivElement>(null);
+    useDialogFocus(true, root, onClose, loading);
     const [minutes, setMinutes] = useState(String(tenant.minutes_allocated));
     const [concurrentCalls, setConcurrentCalls] = useState(String(tenant.max_concurrent_calls));
 
-    const parsedMinutes = parseBounded(minutes, 0, Number.MAX_SAFE_INTEGER);
-    const parsedConcurrent = parseBounded(concurrentCalls, 1, 100);
+    const parsedMinutes = parseBounded(minutes, 0, 2147483647);
+    const parsedConcurrent = parseBounded(concurrentCalls, 1, 1000);
     // Send only what the admin actually changed, so a stale snapshot of the
     // other field cannot overwrite a value changed elsewhere since the list loaded.
-    const changes: QuotaUpdateRequest = {};
+    const changes: QuotaUpdateRequest = { expected_updated_at: tenant.updated_at ?? null };
     if (parsedMinutes !== null && parsedMinutes !== tenant.minutes_allocated) {
         changes.minutes_allocated = parsedMinutes;
     }
     if (parsedConcurrent !== null && parsedConcurrent !== tenant.max_concurrent_calls) {
         changes.max_concurrent_calls = parsedConcurrent;
     }
-    const canSave = parsedMinutes !== null && parsedConcurrent !== null && Object.keys(changes).length > 0;
+    const canSave = tenant.updated_at !== undefined && parsedMinutes !== null && parsedConcurrent !== null && Object.keys(changes).length > 1;
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!canSave) return;
+        if (!canSave || loading) return;
         onSave(changes);
     };
 
     return (
-        <div className="modal-overlay" onClick={onClose}>
-            <div className="modal-content quota-modal" onClick={(e) => e.stopPropagation()}>
-                <h3 className="modal-title">Edit Quota - {tenant.business_name}</h3>
+        <div className="modal-overlay" onClick={() => { if (!loading) onClose(); }}>
+            <div className="modal-content quota-modal" role="dialog" aria-modal="true" aria-labelledby="quota-title" ref={root} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
+                <h3 id="quota-title" className="modal-title">Edit Quota - {tenant.business_name}</h3>
+                {tenant.updated_at === undefined && <p role="alert">The tenant version is missing. Close this dialog and refresh the list.</p>}
                 <form onSubmit={handleSubmit}>
                     <div className="form-group">
                         <label htmlFor="minutes">Minutes Allocated</label>
@@ -446,6 +506,7 @@ function QuotaModal({ tenant, onClose, onSave, loading, error }: QuotaModalProps
                             value={minutes}
                             onChange={(e) => setMinutes(e.target.value)}
                             min={0}
+                            max={2147483647}
                             className="form-input"
                         />
                         <span className="form-help">Current usage: {tenant.minutes_used} minutes</span>
@@ -458,7 +519,7 @@ function QuotaModal({ tenant, onClose, onSave, loading, error }: QuotaModalProps
                             value={concurrentCalls}
                             onChange={(e) => setConcurrentCalls(e.target.value)}
                             min={1}
-                            max={100}
+                            max={1000}
                             className="form-input"
                         />
                     </div>

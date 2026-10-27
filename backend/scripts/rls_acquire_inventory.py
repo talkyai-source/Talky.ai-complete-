@@ -154,12 +154,17 @@ _TENANT_NAME_RE = re.compile(r"^_?tenant(_id|_uuid)?$|_tenant_id$|^tenant_uuid$"
 # Match this ALTER action directly. A free-text gap can cross separate Python
 # SQL literals and attribute another table's ENABLE statement to this table.
 _ENABLE_RLS_RE = re.compile(
-    r"alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(?:public\.)?\"?"
-    r"([a-z_][a-z0-9_]*)\"?\s+enable\s+row\s+level\s+security",
+    r"alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(?:(?P<schema>public|pg_temp)\.)?\"?"
+    r"(?P<table>[a-z_][a-z0-9_]*)\"?\s+enable\s+row\s+level\s+security",
     re.IGNORECASE | re.DOTALL,
 )
 _CREATE_POLICY_RE = re.compile(
-    r"create\s+policy\s+[^\s]+\s+on\s+(?:public\.)?\"?([a-z_][a-z0-9_]*)\"?",
+    r"create\s+policy\s+[^\s]+\s+on\s+(?:(?P<schema>public|pg_temp)\.)?\"?(?P<table>[a-z_][a-z0-9_]*)\"?",
+    re.IGNORECASE,
+)
+_CREATE_TEMP_TABLE_RE = re.compile(
+    r"\bcreate\s+temp(?:orary)?\s+table\s+(?:if\s+not\s+exists\s+)?"
+    r"(?:pg_temp\.)?\"?([a-z_][a-z0-9_]*)\"?\s*\(",
     re.IGNORECASE,
 )
 # `create_table("x", ..., sa.Column("tenant_id", ...))` and CREATE TABLE ... tenant_id
@@ -378,10 +383,20 @@ def discover_rls_tables(backend_root: Path) -> tuple[set[str], set[str]]:
             python_rls, python_tenant_scoped = _python_schema_evidence(text)
             rls.update(name.lower() for name in python_rls)
             tenant_scoped.update(name.lower() for name in python_tenant_scoped)
-        for m in _ENABLE_RLS_RE.finditer(text):
-            rls.add(m.group(1).lower())
-        for m in _CREATE_POLICY_RE.finditer(text):
-            rls.add(m.group(1).lower())
+        # A migration can parse policy expressions on a temporary reference
+        # table without adding persistent application surface. Keep this
+        # exclusion local to its source: a real public table with the same
+        # name, here or in another migration, must remain in the inventory.
+        temporary = {m.group(1).lower() for m in _CREATE_TEMP_TABLE_RE.finditer(text)}
+        for pattern in (_ENABLE_RLS_RE, _CREATE_POLICY_RE):
+            for m in pattern.finditer(text):
+                name = m.group("table").lower()
+                schema = (m.group("schema") or "").lower()
+                if schema == "pg_temp":
+                    continue
+                if name in temporary and schema != "public":
+                    continue
+                rls.add(name)
         for m in _CREATE_TABLE_SQL_RE.finditer(text):
             if "tenant_id" in m.group(2).lower():
                 tenant_scoped.add(m.group(1).lower())

@@ -108,7 +108,8 @@ test('a 401 from the login call means bad credentials, not an expired session', 
 test('a late 401 from a previous session cannot sign out a newer login', async () => {
     const slow = deferred();
     state.route = (call) => {
-        if (call.path.endsWith('/auth/me')) return response(ME);
+        if (call.path.endsWith('/auth/me')) return response(call.authorization === 'Bearer new-token'
+            ? { ...ME, id: 'admin-2', email: 'b@example.invalid' } : ME);
         if (call.path.endsWith('/auth/login')) {
             return response({ access_token: 'new-token', user_id: 'admin-2', email: 'b@example.invalid', role: 'platform_admin' });
         }

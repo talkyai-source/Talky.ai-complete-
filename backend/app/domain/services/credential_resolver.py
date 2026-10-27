@@ -31,12 +31,40 @@ from __future__ import annotations
 import logging
 import os
 import time
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from app.core.db_utils import acquire_with_tenant
 from app.infrastructure.providers.key_pool import POOLED_ENV_VARS, platform_key_rotation
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ResolvedCredential:
+    """Internal credential plus provenance; the public resolve() stays str-only."""
+    secret: str = field(repr=False)
+    source: str = "unattributed"
+    tenant_id: str | None = None
+    credential_id: str | None = None
+
+    @property
+    def observation_context(self) -> dict[str, str | None]:
+        return {"source": self.source, "tenant_id": self.tenant_id,
+                "credential_id": self.credential_id}
+
+
+def _tenant_material(value, tenant_id: str) -> ResolvedCredential | None:
+    if isinstance(value, ResolvedCredential):
+        return value
+    # Compatibility for existing resolver ports returning just the key. No
+    # retained row identity is inferred from a plaintext string.
+    return ResolvedCredential(value, tenant_id=tenant_id) if value else None
+
+
+def _env_material(provider: str, env_var: str | None, tenant_id: str | None) -> ResolvedCredential | None:
+    value = resolve_sync_env_only(provider, env_var=env_var)
+    return ResolvedCredential(value, source="platform", tenant_id=tenant_id) if value else None
 
 # Cache lifetimes. The cache is per process, so these bound how long another
 # process (or a rotation/revocation) can be out of date.
@@ -128,7 +156,19 @@ class CredentialResolver:
         credential_kind: str = "api_key",
         env_var: Optional[str] = None,
     ) -> Optional[str]:
-        """Return the plaintext credential for `provider` under
+        """Return the plaintext credential; selection and cache semantics stay shared."""
+        material = await self.resolve_with_metadata(
+            provider, tenant_id=tenant_id, credential_kind=credential_kind, env_var=env_var,
+        )
+        return material.secret if material is not None else None
+
+    async def resolve_with_metadata(
+        self, provider: str, *, tenant_id: Optional[str] = None,
+        credential_kind: str = "api_key", env_var: Optional[str] = None,
+    ) -> Optional[ResolvedCredential]:
+        """Return the same selected credential with its retained internal identity.
+
+        Return the plaintext credential for `provider` under
         `tenant_id`, or the env-var fallback, or None.
 
         Never raises. On any tenant-lookup failure the method logs and
@@ -148,8 +188,8 @@ class CredentialResolver:
                     credential_kind=credential_kind,
                 )
                 if outcome == _FOUND and tenant_value:
-                    return tenant_value
-                return resolve_sync_env_only(provider, env_var=env_var)
+                    return _tenant_material(tenant_value, tenant_id)
+                return _env_material(provider, env_var, tenant_id)
 
             cache_key = (
                 self._cache_scope,
@@ -162,8 +202,8 @@ class CredentialResolver:
                 payload, expires_at = entry
                 if time.monotonic() < expires_at:
                     if payload is CredentialResolver._SENTINEL_USE_ENV:
-                        return resolve_sync_env_only(provider, env_var=env_var)
-                    return payload  # type: ignore[return-value]
+                        return _env_material(provider, env_var, tenant_id)
+                    return _tenant_material(payload, tenant_id)
                 CredentialResolver._CACHE.pop(cache_key, None)
 
             outcome, tenant_value = await self._resolve_tenant(
@@ -176,7 +216,7 @@ class CredentialResolver:
                     tenant_value,
                     time.monotonic() + _FOUND_TTL_S,
                 )
-                return tenant_value
+                return _tenant_material(tenant_value, tenant_id)
             if outcome == _ABSENT:
                 CredentialResolver._CACHE[cache_key] = (
                     CredentialResolver._SENTINEL_USE_ENV,
@@ -185,7 +225,7 @@ class CredentialResolver:
             # _ERROR: fall back to env for THIS call only; the next resolve
             # retries the DB instead of pinning the tenant to the platform key.
 
-        return resolve_sync_env_only(provider, env_var=env_var)
+        return _env_material(provider, env_var, tenant_id)
 
     @classmethod
     def invalidate_cache(
@@ -216,8 +256,8 @@ class CredentialResolver:
         provider: str,
         tenant_id: str,
         credential_kind: str,
-    ) -> tuple[str, Optional[str]]:
-        """Returns (outcome, plaintext): _FOUND with the key, _ABSENT when the
+    ) -> tuple[str, Optional[ResolvedCredential]]:
+        """Returns (outcome, material): _FOUND with the key, _ABSENT when the
         tenant has no usable BYOK row, or _ERROR on a lookup/decrypt failure."""
         if self._db_pool is None:
             return _ABSENT, None
@@ -291,7 +331,8 @@ class CredentialResolver:
         value = plaintext.strip() if plaintext else None
         if not value:
             return _ABSENT, None
-        return _FOUND, value
+        return _FOUND, ResolvedCredential(value, source="tenant", tenant_id=tenant_id,
+                                          credential_id=str(row["id"]))
 
     @staticmethod
     def _lazy_encryption() -> Any:

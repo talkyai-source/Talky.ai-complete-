@@ -159,8 +159,12 @@ export async function startPasskeyAuth(email?: string): Promise<AuthenticationSt
 /**
  * Completes passkey authentication
  */
-export async function completePasskeyAuth(ceremonyId: string, credentialData: Record<string, unknown>) {
-  return api.completePasskeyLogin(ceremonyId, credentialData);
+export async function completePasskeyAuth(
+  ceremonyId: string,
+  credentialData: Record<string, unknown>,
+  options?: { signal?: AbortSignal; ownsOperation?: () => boolean },
+) {
+  return api.completePasskeyLogin(ceremonyId, credentialData, options);
 }
 
 /**
@@ -226,7 +230,11 @@ export async function createWebAuthnCredential(options: PublicKeyCredentialCreat
 /**
  * Performs WebAuthn credential assertion (authentication)
  */
-export async function getWebAuthnCredential(options: PublicKeyCredentialRequestOptionsJSON): Promise<PublicKeyCredential> {
+export async function getWebAuthnCredential(
+  options: PublicKeyCredentialRequestOptionsJSON,
+  signal?: AbortSignal,
+): Promise<PublicKeyCredential> {
+  signal?.throwIfAborted();
   // Convert challenge from base64 to ArrayBuffer
   const modifiedOptions = {
     ...options,
@@ -236,7 +244,9 @@ export async function getWebAuthnCredential(options: PublicKeyCredentialRequestO
 
   const assertion = await navigator.credentials.get({
     publicKey: modifiedOptions as PublicKeyCredentialRequestOptions,
+    signal,
   });
+  signal?.throwIfAborted();
 
   if (!assertion || !(assertion instanceof PublicKeyCredential)) {
     throw new Error("Failed to get credential");

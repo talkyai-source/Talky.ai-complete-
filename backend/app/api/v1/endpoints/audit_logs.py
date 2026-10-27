@@ -3,10 +3,11 @@ Audit Logs API Endpoints
 
 Provides access to comprehensive audit trail for compliance and forensics.
 """
+import asyncio
 import csv
 import io
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Annotated, Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -46,6 +47,24 @@ def resolve_tenant_scope(current_user, requested_tenant_id, *, denied_detail: st
     return str(own_tenant_id)
 
 
+def validate_read_bounds(start_date, end_date, before_time, before_id, offset):
+    """The two existing log lists share date/seek syntax, not authority."""
+    for value in (start_date, end_date, before_time):
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise HTTPException(status_code=422, detail="Log query timestamps require a timezone")
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise HTTPException(status_code=422, detail="start_date must not be after end_date")
+    if (before_time is None) != (before_id is None):
+        raise HTTPException(status_code=422, detail="before_time and before_id must be supplied together")
+    if before_time is not None and offset:
+        raise HTTPException(status_code=422, detail="Seek pagination cannot be combined with a nonzero offset")
+
+
+def require_platform_partner_filter(current_user, partner_id):
+    if partner_id is not None and normalize_role(current_user.get("role")) != UserRole.PLATFORM_ADMIN:
+        raise HTTPException(status_code=403, detail="Partner filtering requires a platform administrator")
+
+
 class AuditLogResponse(BaseModel):
     """Audit log entry response"""
     event_id: UUID
@@ -81,75 +100,71 @@ class AuditStatsResponse(BaseModel):
 @router.get("/logs", response_model=list[AuditLogResponse])
 async def query_audit_logs(
     request: Request,
-    start_date: Optional[datetime] = Query(None, description="Filter from date"),
-    end_date: Optional[datetime] = Query(None, description="Filter to date"),
-    event_type: Optional[AuditEvent] = Query(None, description="Filter by event type"),
-    actor_id: Optional[UUID] = Query(None, description="Filter by actor"),
+    start_date: Optional[datetime] = Query(None, description="Inclusive start, with timezone"),
+    end_date: Optional[datetime] = Query(None, description="Inclusive end, with timezone"),
+    event_type: Optional[AuditEvent] = Query(None, description="Exact event type"),
+    actor_id: Optional[UUID] = Query(None, description="Exact saved actor"),
     tenant_id: Optional[UUID] = Query(None, description="Filter by tenant"),
     resource_type: Optional[str] = Query(None, description="Filter by resource type"),
-    severity: Optional[Severity] = Query(None, description="Minimum severity"),
+    severity: Optional[Severity] = Query(None, description="Exact severity"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    event_group: Optional[Literal["login", "role_change", "billing_change", "suspension"]] = None,
+    user_query: Annotated[Optional[str], Query(max_length=255, description="Literal current actor name/email or saved actor UUID")] = None,
+    partner_id: Annotated[Optional[UUID], Query(description="Platform only: current child tenants or direct partner resource")] = None,
+    before_time: Optional[datetime] = None,
+    before_id: Optional[UUID] = None,
     current_user: dict = Depends(require_permissions(["audit:read"])),
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
-    """
-    Query audit logs with filters.
-
-    Requires: audit:read permission
-    """
-    # Non-platform admins can only see their tenant's logs; a platform admin
-    # may name any tenant or none (every tenant).
+    """Read canonical raw rows; optional seek preserves live descending order."""
+    validate_read_bounds(start_date, end_date, before_time, before_id, offset)
+    require_platform_partner_filter(current_user, partner_id)
     tenant_id = resolve_tenant_scope(
         current_user, tenant_id, denied_detail="Cannot access other tenant logs"
     )
-
-    logs = await audit_logger.query(
-        start_date=start_date,
-        end_date=end_date,
-        event_type=event_type,
-        actor_id=actor_id,
-        tenant_id=tenant_id,
-        resource_type=resource_type,
-        severity=severity,
-        limit=limit,
-        offset=offset,
-    )
-
-    # Log this access
-    await audit_logger.log(
-        event_type=AuditEvent.RECORD_VIEWED,
-        action="audit_logs_queried",
-        actor_id=current_user["id"],
-        tenant_id=tenant_id,
-        resource_type="audit_logs",
-        metadata={"filters": {"event_type": event_type.value if event_type else None, "limit": limit}},
-    )
-
-    return [
-        AuditLogResponse(
-            event_id=log.event_id,
-            event_time=log.event_time,
-            event_type=log.event_type.value if isinstance(log.event_type, AuditEvent) else log.event_type,
-            event_category=log.event_category.value if isinstance(log.event_category, EventCategory) else log.event_category,
-            severity=log.severity.value if isinstance(log.severity, Severity) else log.severity,
-            actor_id=log.actor_id,
-            actor_type=log.actor_type,
-            tenant_id=log.tenant_id,
-            resource_type=log.resource_type,
-            resource_id=log.resource_id,
-            action=log.action,
-            description=log.description,
-            ip_address=str(log.ip_address) if log.ip_address else None,
-            user_agent=log.user_agent,
-            session_id=log.session_id,
-            before_state=log.before_state,
-            after_state=log.after_state,
-            metadata=log.metadata,
-            compliance_tags=log.compliance_tags,
-        )
-        for log in logs
-    ]
+    platform_read = normalize_role(current_user.get("role")) == UserRole.PLATFORM_ADMIN
+    try:
+        async with asyncio.timeout(5):
+            logs = await audit_logger.query(
+                start_date=start_date, end_date=end_date, event_type=event_type,
+                actor_id=actor_id, tenant_id=tenant_id, resource_type=resource_type,
+                severity=severity, limit=limit, offset=offset,
+                event_group=event_group, user_query=user_query, partner_id=partner_id,
+                before_time=before_time, before_id=before_id, platform_read=platform_read,
+            )
+            response = [
+                AuditLogResponse(
+                    event_id=log.event_id, event_time=log.event_time,
+                    event_type=log.event_type.value if isinstance(log.event_type, AuditEvent) else log.event_type,
+                    event_category=log.event_category.value if isinstance(log.event_category, EventCategory) else log.event_category,
+                    severity=log.severity.value if isinstance(log.severity, Severity) else log.severity,
+                    actor_id=log.actor_id, actor_type=log.actor_type, tenant_id=log.tenant_id,
+                    resource_type=log.resource_type, resource_id=log.resource_id,
+                    action=log.action, description=log.description,
+                    ip_address=str(log.ip_address) if log.ip_address else None,
+                    user_agent=log.user_agent, session_id=log.session_id,
+                    before_state=log.before_state, after_state=log.after_state,
+                    metadata=log.metadata, compliance_tags=log.compliance_tags,
+                )
+                for log in logs
+            ]
+            # Preserve existing access logging, but never record an apparently
+            # successful read before SQL and response validation have succeeded.
+            await audit_logger.log(
+                event_type=AuditEvent.RECORD_VIEWED, action="audit_logs_queried",
+                actor_id=current_user["id"], tenant_id=tenant_id, resource_type="audit_logs",
+                metadata={"filters": {"event_type": event_type.value if event_type else None, "limit": limit}},
+            )
+            return response
+    except asyncio.CancelledError:
+        raise
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={
+            "code": "audit_logs_unavailable", "message": "Audit logs are temporarily unavailable",
+        }) from exc
 
 
 @router.get("/logs/{event_id}", response_model=AuditLogResponse)

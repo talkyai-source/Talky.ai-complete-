@@ -268,6 +268,8 @@ async def register_begin(
     ua = _get_user_agent(request)
 
     async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
+        from app.core.security.credential_issuance import lock_authenticated_credential_change
+        current = await lock_authenticated_credential_change(conn, request, current_user)
         options = await generate_registration_options(
             conn=conn,
             user_id=current_user.id,
@@ -276,7 +278,7 @@ async def register_begin(
             authenticator_type=body.authenticator_type,
             ip_address=ip,
             user_agent=ua,
-            user_role=current_user.role,
+            user_role=current["role"],
         )
 
     # Parse the JSON string to a dict for the response
@@ -311,6 +313,8 @@ async def register_complete(
     expected_origin = _validate_passkey_origin(request)
 
     async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
+        from app.core.security.credential_issuance import lock_authenticated_credential_change
+        current = await lock_authenticated_credential_change(conn, request, current_user)
         # Verify the registration response
         try:
             verified = await verify_registration(
@@ -339,7 +343,7 @@ async def register_complete(
         # rogue self-attesting software "authenticator" as their
         # second factor.
         from app.core.security.passkeys import check_admin_aaguid_allowed
-        allowed, reason = check_admin_aaguid_allowed(current_user.role, verified.aaguid)
+        allowed, reason = check_admin_aaguid_allowed(current["role"], verified.aaguid)
         if not allowed:
             logger.warning(
                 "passkey_admin_aaguid_rejected user=%s role=%s aaguid=%s reason=%s",
@@ -513,7 +517,7 @@ async def login_complete(
     # The credential must be resolved before its owning tenant is known.
     async with _passkey_login_transaction(db_client.pool) as conn:
         # Look up the credential
-        credential = await get_credential_by_id(conn, raw_credential_id, for_update=True)
+        credential = await get_credential_by_id(conn, raw_credential_id)
 
         if not credential:
             logger.warning(
@@ -530,8 +534,16 @@ async def login_complete(
         # auth.py / dependencies.py for the rationale; we compute live
         # from the calls table via compute_tenant_minutes_remaining.
         try:
+            from app.core.security.credential_issuance import (
+                lock_user_credential_issuance, require_current_passkey_ceremony,
+            )
+            await lock_user_credential_issuance(conn, user_id)
+            credential = await get_credential_by_id(conn, raw_credential_id, for_update=True)
+            if not credential or str(credential["user_id"]) != user_id:
+                raise PrincipalUnavailable("credentials_changed")
             user_row = await load_current_principal(conn, user_id)
             assert_expected_identity(request, user_row)
+            await require_current_passkey_ceremony(conn, user_id, body.ceremony_id)
         except PrincipalUnavailable as exc:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -743,6 +755,7 @@ async def update_passkey(
 @router.delete("/{passkey_id}")
 async def delete_passkey(
     passkey_id: str,
+    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ) -> dict[str, str]:
@@ -754,6 +767,8 @@ async def delete_passkey(
     itself (that's not possible via WebAuthn).
     """
     async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
+        from app.core.security.credential_issuance import lock_authenticated_credential_change
+        await lock_authenticated_credential_change(conn, request, current_user)
         # Check if this is their last passkey
         count_result = await conn.fetchrow(
             "SELECT COUNT(*) as cnt FROM user_passkeys WHERE user_id = $1",

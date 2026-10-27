@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
     Mail,
     MessageSquare,
@@ -16,6 +16,8 @@ import {
     User
 } from 'lucide-react';
 import { api } from '../lib/api';
+import { useAuthGeneration } from '../lib/use-auth-generation';
+import { useOperationOwner } from '../lib/use-operation-owner';
 import { ActionStatusBadge } from './ActionStatusBadge';
 import type { ActionItem, ActionListParams, ActionType } from '../lib/api';
 
@@ -60,7 +62,12 @@ function formatDuration(ms: number | null): string {
     return `${(ms / 1000).toFixed(1)}s`;
 }
 
-export function ActionsTable({ onActionSelect }: ActionsTableProps) {
+export function ActionsTable(props: ActionsTableProps) {
+    const generation = useAuthGeneration();
+    return <OwnedActionsTable key={generation} {...props} generation={generation} />;
+}
+
+function OwnedActionsTable({ onActionSelect, generation }: ActionsTableProps & { generation: number }) {
     const [actions, setActions] = useState<ActionItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -72,6 +79,11 @@ export function ActionsTable({ onActionSelect }: ActionsTableProps) {
     const [typeFilter, setTypeFilter] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
 
+    const query = JSON.stringify([page, debouncedSearch, statusFilter, typeFilter]);
+    const capture = useOperationOwner(generation, query);
+    const request = useRef(0);
+    const [loadedQuery, setLoadedQuery] = useState('');
+
     // Debounce search
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -82,6 +94,10 @@ export function ActionsTable({ onActionSelect }: ActionsTableProps) {
     }, [search]);
 
     const fetchActions = useCallback(async () => {
+        const owns = capture();
+        if (!owns()) return;
+        const sequence = ++request.current;
+        const current = () => owns() && sequence === request.current;
         setLoading(true);
         try {
             const params: ActionListParams = {
@@ -93,6 +109,9 @@ export function ActionsTable({ onActionSelect }: ActionsTableProps) {
             if (typeFilter) params.type = typeFilter;
 
             const response = await api.getActions(params);
+            if (!current()) return;
+            setLoadedQuery(query);
+            if (!response.error && (!response.data || !Array.isArray(response.data.items) || !Number.isSafeInteger(response.data.total))) throw new Error('The list response is incomplete.');
             if (response.error) {
                 // The API client returns { error } instead of throwing.
                 setError(response.error.message || 'Failed to fetch actions');
@@ -104,11 +123,13 @@ export function ActionsTable({ onActionSelect }: ActionsTableProps) {
                 setError(null);
             }
         } catch (err) {
+            if (!current()) return;
+            setLoadedQuery(query);
             setError(err instanceof Error ? err.message : 'Failed to fetch actions');
         } finally {
-            setLoading(false);
+            if (current()) setLoading(false);
         }
-    }, [page, pageSize, debouncedSearch, statusFilter, typeFilter]);
+    }, [page, pageSize, debouncedSearch, statusFilter, typeFilter, capture, query]);
 
     useEffect(() => {
         fetchActions();
@@ -173,13 +194,13 @@ export function ActionsTable({ onActionSelect }: ActionsTableProps) {
 
             {/* Table */}
             <div className="table-container">
-                {loading ? (
+                {loading || loadedQuery !== query ? (
                     <div className="table-loading">
                         <div className="loading-spinner"></div>
                         <p>Loading actions...</p>
                     </div>
                 ) : error ? (
-                    <div className="error-banner">
+                    <div className="error-banner" role="alert">
                         <p>{error}</p>
                         <button onClick={fetchActions}>Retry</button>
                     </div>
@@ -206,8 +227,11 @@ export function ActionsTable({ onActionSelect }: ActionsTableProps) {
                             {actions.map((action) => (
                                 <tr
                                     key={action.id}
-                                    onClick={() => onActionSelect(action.id)}
+                                    onClick={() => { if (capture()()) onActionSelect(action.id); }}
                                     className="clickable-row"
+                                    tabIndex={0}
+                                    aria-label={`View action ${action.id}`}
+                                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (capture()()) onActionSelect(action.id); } }}
                                 >
                                     <td>{formatDate(action.created_at)}</td>
                                     <td>
@@ -239,7 +263,7 @@ export function ActionsTable({ onActionSelect }: ActionsTableProps) {
             </div>
 
             {/* Pagination */}
-            {!loading && actions.length > 0 && (
+            {!loading && loadedQuery === query && !error && actions.length > 0 && (
                 <div className="pagination">
                     <span className="pagination-info">
                         Showing {((page - 1) * pageSize) + 1} - {Math.min(page * pageSize, total)} of {total}

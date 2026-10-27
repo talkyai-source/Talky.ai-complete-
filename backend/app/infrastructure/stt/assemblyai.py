@@ -13,6 +13,7 @@ import inspect
 import json
 import logging
 import os
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
@@ -87,6 +88,8 @@ class _Connection:
     ws: object
     slot: object
     call_id: str | None
+    observation: ProviderAttempt | None = None
+    recognition: ProviderAttempt | None = None
     agent_context: str = ""
     closed: bool = False
     adopted: bool = False
@@ -95,6 +98,15 @@ class _Connection:
     keepalive_task: asyncio.Task | None = None
     send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     close_task: asyncio.Task | None = None
+
+    def recognized(self) -> None:
+        if self.observation and self.observation.closed:
+            return
+        if self.observation:
+            self.observation.recognized()
+        if self.recognition:
+            self.recognition.recognized()
+            self.recognition.finish(outcome="recognized")
 
     async def send(self, payload: bytes | dict) -> None:
         async with self.send_lock:
@@ -128,6 +140,9 @@ class _Connection:
                 await asyncio.wait_for(self.ws.close(), timeout=_CLOSE_TIMEOUT)
         finally:
             self.closed = True
+            if self.observation:
+                # Closing an adopted stream outside its normal completion is cancellation.
+                self.observation.finish(asyncio.CancelledError() if self.adopted else None, outcome="connected")
             await self.slot.__aexit__(None, None, None)
 
 
@@ -152,6 +167,8 @@ def _merge_keyterms(saved, campaign) -> list[str]:
 
 class AssemblyAISTTProvider(STTProvider):
     def __init__(self) -> None:
+        self._observation_context = None
+        self._configured_key = None
         self._api_key: str | None = None
         self._sample_rate = 16000
         self._encoding = "pcm_s16le"
@@ -198,6 +215,8 @@ class AssemblyAISTTProvider(STTProvider):
             config.get("keyterms") if self._settings.auto_campaign_keyterms else None,
         )
         self._api_key = api_key.strip()
+        self._configured_key = self._api_key
+        self._observation_context = config.get("observation_context")
         logger.info(
             "AssemblyAI initialized model=%s mode=%s region=%s sample_rate=%s",
             ASSEMBLYAI_MODEL,
@@ -261,10 +280,16 @@ class AssemblyAISTTProvider(STTProvider):
         slot = self._guard.acquire()
         await slot.__aenter__()
         connection = None
+        api_key = self._api_key
+        context = self._observation_context
+        if api_key != self._configured_key and (context or {}).get("source") == "tenant":
+            context = None
+        observation = ProviderAttempt("stt", "assemblyai", api_key, context)
+        recognition = ProviderAttempt("stt", "assemblyai", api_key, context)
         try:
             ws = await websockets.connect(
                 f"{_ENDPOINTS[self._settings.region]}?{query}",
-                additional_headers={"Authorization": self._api_key},
+                additional_headers={"Authorization": api_key},
                 open_timeout=_CONNECT_TIMEOUT,
                 close_timeout=2.0,
                 ping_interval=20,
@@ -273,7 +298,8 @@ class AssemblyAISTTProvider(STTProvider):
                 logger=_wire_logger,
             )
             connection = _Connection(
-                ws, slot, call_id, agent_context=params.get("agent_context", "")
+                ws, slot, call_id, observation=observation, recognition=recognition,
+                agent_context=params.get("agent_context", "")
             )
             self._connections.add(connection)
             # Opening TCP/WebSocket is insufficient: model selection is confirmed
@@ -297,12 +323,15 @@ class AssemblyAISTTProvider(STTProvider):
                 )
             if generation != self._generation or not self._api_key:
                 raise RuntimeError("AssemblyAI provider closed during handshake")
+            observation.accepted()
+            recognition.accepted()
             if call_id:
                 self._last_message_at[call_id] = time.monotonic()
             if self._settings.inactivity_timeout is not None:
                 connection.keepalive_task = asyncio.create_task(self._keep_alive(connection))
             return connection
         except BaseException as exc:
+            observation.finish(exc)
             if connection:
                 await self._close_connection(connection)
             else:
@@ -326,6 +355,8 @@ class AssemblyAISTTProvider(STTProvider):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            if connection.observation:
+                connection.observation.finish(exc)
             connection.error = _safe_error(exc, "keepalive")
             # recv/send will also discover closure. Store the sanitized cause so
             # adopting a failed prewarm cannot be reported as a healthy session.
@@ -516,6 +547,8 @@ class AssemblyAISTTProvider(STTProvider):
                     raise connection.error
                 if sender.done() and not sender.cancelled() and sender.exception():
                     error = sender.exception()
+                    if connection.observation:
+                        connection.observation.finish(error)
                     if isinstance(error, ValueError):
                         raise error
                     raise _safe_error(error, "audio send") from None
@@ -531,6 +564,8 @@ class AssemblyAISTTProvider(STTProvider):
                 except Exception as exc:
                     if generation != self._generation:
                         break
+                    if connection.observation:
+                        connection.observation.finish(exc)
                     raise _safe_error(exc, "stream") from None
                 try:
                     event = json.loads(raw)
@@ -640,6 +675,8 @@ class AssemblyAISTTProvider(STTProvider):
                     paused_order = None
                     yield BargeInSignal(text=text, phase="resume")
                 if text:
+                    if final:
+                        connection.recognized()
                     yield TranscriptChunk(
                         text=text, is_final=final, confidence=confidence, metadata=metadata
                     )
@@ -652,6 +689,12 @@ class AssemblyAISTTProvider(STTProvider):
                     if not text:
                         metadata = {**metadata, "empty_turn": True}
                     yield TranscriptChunk(text="", is_final=True, confidence=1.0, metadata=metadata)
+            if connection.observation:
+                connection.observation.finish(outcome="recognized" if connection.observation.output_seen else "connected")
+        except BaseException as exc:
+            if connection and connection.observation:
+                connection.observation.finish(exc)
+            raise
         finally:
             if sender:
                 sender.cancel()

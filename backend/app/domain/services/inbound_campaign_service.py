@@ -7,11 +7,14 @@ version conflicts, duplicate DIDs and cross-tenant ownership.
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import hashlib
 import json
 import logging
 import os
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -21,6 +24,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import asyncpg
 
 from app.core.db_utils import acquire_with_tenant
+from app.core.security.platform_admin_guard import require_platform_admin_mutation
 from app.domain.services.campaign_direction_guard import (
     acquire_campaign_direction_lock,
 )
@@ -337,6 +341,28 @@ _BUNDLE_SQL = """
 
 
 class InboundCampaignService:
+    @asynccontextmanager
+    async def _admin_transaction(self, actor_id: str):
+        """Fence authority before idempotency/domain locks, through commit.
+
+        The 10-second deadline bounds ordinary work and lock waits, including
+        production ownership checks. Transport cancellation/rollback may take
+        longer; a timeout is an unconfirmed outcome, safe to reconcile using
+        the unchanged idempotency key, never proof of an absent commit.
+        """
+        try:
+            async with asyncio.timeout(10.0):
+                async with acquire_with_tenant(self._pool, None) as conn:
+                    await require_platform_admin_mutation(conn, actor_id)
+                    await conn.execute("SET LOCAL lock_timeout='3s'")
+                    yield conn
+        except (TimeoutError, asyncpg.PostgresError, asyncpg.InterfaceError, OSError) as exc:
+            raise InboundCampaignError(
+                "The Inbound administrator operation outcome could not be confirmed. "
+                "Reconcile using the same idempotency key.",
+                code="inbound_admin_outcome_unconfirmed", status_code=503,
+            ) from exc
+
     def __init__(self, db_pool: Any):
         self._pool = db_pool
 
@@ -2398,7 +2424,8 @@ class InboundCampaignService:
         operation = "platform_inbound_controls.patch"
         scope = "platform"
         expected = int(payload.get("expected_version") or 0)
-        async with acquire_with_tenant(self._pool, None) as conn:
+        async with self._admin_transaction(actor_id) as conn:
+            actor_role = "platform_admin"  # Canonical authority was checked under the fence.
             replay = await self._claim_operation(
                 conn,
                 tenant_id=None,
@@ -2692,7 +2719,8 @@ class InboundCampaignService:
         action = "quarantine" if quarantined else "unquarantine"
         operation = f"platform_inbound_assignment.{action}:{assignment_id}"
         payload = {"expected_version": expected_version, "reason": reason}
-        async with acquire_with_tenant(self._pool, None) as conn:
+        async with self._admin_transaction(actor_id) as conn:
+            actor_role = "platform_admin"  # Canonical authority was checked under the fence.
             replay = await self._claim_operation(
                 conn,
                 tenant_id=None,
@@ -2870,7 +2898,8 @@ class InboundCampaignService:
             "expected_version": expected_version,
             "reason": reason,
         }
-        async with acquire_with_tenant(self._pool, None) as conn:
+        async with self._admin_transaction(actor_id) as conn:
+            actor_role = "platform_admin"  # Canonical authority was checked under the fence.
             replay = await self._claim_operation(
                 conn,
                 tenant_id=None,
@@ -3053,19 +3082,159 @@ class InboundCampaignService:
             )
             return result
 
-    async def list_reassignment_requests(self, *, status: str = "pending") -> dict[str, Any]:
-        if status not in {"pending", "approved", "rejected", "cancelled"}:
+    @asynccontextmanager
+    async def _reassignment_read(self):
+        """Bound these operator recovery reads without changing mutation locks."""
+        try:
+            async with asyncio.timeout(5):
+                async with acquire_with_tenant(self._pool, None, timeout=3) as conn:
+                    yield conn
+        except InboundCampaignError:
+            raise
+        except Exception as exc:
+            # Cancellation remains cancellation. Database/transport uncertainty
+            # must never become an empty history or a false missing decision.
+            raise InboundCampaignError(
+                "Reassignment history is temporarily unavailable. Refresh to read the saved decision.",
+                code="inbound_reassignment_read_unavailable", status_code=503,
+            ) from exc
+
+    @staticmethod
+    def _reassignment_cursor(cursor: Optional[str], status: str) -> Optional[tuple[datetime, uuid.UUID]]:
+        if cursor is None:
+            return None
+        try:
+            if not isinstance(cursor, str) or not 1 <= len(cursor) <= 512:
+                raise ValueError("Invalid cursor length")
+            if any(char not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-" for char in cursor):
+                raise ValueError("Invalid cursor alphabet")
+            data = json.loads(base64.b64decode(cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True))
+            if not isinstance(data, dict) or set(data) != {"v", "status", "requested_at", "id"}:
+                raise ValueError("Invalid cursor fields")
+            if type(data["v"]) is not int or data["v"] != 1 or data["status"] != status:
+                raise ValueError("Cursor does not belong to this filter")
+            if not isinstance(data["requested_at"], str) or len(data["requested_at"]) > 64:
+                raise ValueError("Invalid cursor timestamp")
+            timestamp = datetime.fromisoformat(data["requested_at"])
+            identifier = uuid.UUID(data["id"])
+            if timestamp.tzinfo is None or timestamp.utcoffset() is None or str(identifier) != data["id"]:
+                raise ValueError("Cursor requires an aware timestamp and canonical UUID")
+            return timestamp, identifier
+        except (ValueError, TypeError, KeyError, AttributeError, UnicodeError) as exc:
+            raise InboundCampaignError(
+                "Invalid reassignment history cursor. Refresh the selected history filter.",
+                code="invalid_cursor", status_code=422,
+            ) from exc
+
+    @staticmethod
+    def _next_reassignment_cursor(row: Mapping[str, Any], status: str) -> str:
+        data = {"v": 1, "status": status, "requested_at": row["requested_at"].isoformat(), "id": str(row["id"])}
+        return base64.urlsafe_b64encode(json.dumps(data, separators=(",", ":")).encode()).decode().rstrip("=")
+
+    async def get_reassignment_request(self, request_id: str) -> dict[str, Any]:
+        request_id = _uuid(request_id, "request_id")
+        async with self._reassignment_read() as conn:
+            row = await conn.fetchrow("SELECT * FROM inbound_reassignment_requests WHERE id=$1", request_id)
+            if row is None:
+                raise InboundCampaignError(
+                    "Reassignment request not found", code="reassignment_not_found", status_code=404,
+                )
+            # This is the durable saved decision, not an HTTP delivery/replay
+            # claim or an inference from the successor assignment's state.
+            return self._serialize_reassignment(dict(row))
+
+    async def list_reassignment_requests(
+        self, *, status: str = "pending", limit: int = 50, cursor: Optional[str] = None,
+    ) -> dict[str, Any]:
+        if status not in {"pending", "approved", "rejected", "cancelled", "all"}:
             raise InboundCampaignError("Invalid reassignment status", code="invalid_status")
-        async with acquire_with_tenant(self._pool, None) as conn:
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise InboundCampaignError("History limit must be between 1 and 100", code="invalid_limit", status_code=422)
+        position = self._reassignment_cursor(cursor, status)
+        async with self._reassignment_read() as conn:
             rows = await conn.fetch(
                 """
                 SELECT * FROM inbound_reassignment_requests
-                WHERE status=$1 ORDER BY requested_at DESC LIMIT 500
+                WHERE ($1::text='all' OR status=$1)
+                  AND ($2::timestamptz IS NULL OR (requested_at,id)<($2::timestamptz,$3::uuid))
+                ORDER BY requested_at DESC,id DESC LIMIT $4
                 """,
-                status,
+                status, position[0] if position else None, position[1] if position else None, limit + 1,
             )
-        items = [self._serialize_reassignment(dict(row)) for row in rows]
-        return {"items": items, "total": len(items)}
+            has_more = len(rows) > limit
+            page = rows[:limit]
+            return {
+                "items": [self._serialize_reassignment(dict(row)) for row in page],
+                "has_more": has_more,
+                "next_cursor": self._next_reassignment_cursor(page[-1], status) if has_more else None,
+            }
+
+    async def cancel_reassignment(
+        self,
+        *,
+        request_id: str,
+        reason: str,
+        actor_id: str,
+        actor_role: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        request_id = _uuid(request_id, "request_id")
+        actor_id = _uuid(actor_id, "actor_id")
+        reason = reason.strip()
+        if not 3 <= len(reason) <= 2000:
+            raise InboundCampaignError(
+                "Cancellation reason must contain 3 to 2000 characters",
+                code="invalid_reason", status_code=422,
+            )
+        operation = f"platform_inbound_reassignment.cancel:{request_id}"
+        async with self._admin_transaction(actor_id) as conn:
+            actor_role = "platform_admin"  # Current authority checked under the fence.
+            replay = await self._claim_operation(
+                conn, tenant_id=None, scope_key="platform", operation=operation,
+                idempotency_key=idempotency_key, actor_id=actor_id,
+                # A key replay must not attribute another administrator's decision
+                # to this actor. Preserve the existing helper for other operations.
+                request_payload={"actor_id": actor_id, "reason": reason},
+            )
+            if replay is not None:
+                replay["idempotent_replay"] = True
+                return replay
+            request = await conn.fetchrow(
+                "SELECT * FROM inbound_reassignment_requests WHERE id=$1 FOR UPDATE",
+                request_id,
+            )
+            if request is None:
+                raise InboundCampaignError(
+                    "Reassignment request not found", code="reassignment_not_found", status_code=404,
+                )
+            if request["status"] != "pending":
+                raise InboundConflictError(
+                    f"Reassignment is already {request['status']}", code="already_decided",
+                )
+            # Closing a stranded review must not require target readiness or
+            # restore/change its DID assignment. Approval keeps its four-eye rule.
+            cancelled = await conn.fetchrow(
+                """
+                UPDATE inbound_reassignment_requests
+                SET status='cancelled', decision_reason=$2, decided_at=NOW()
+                WHERE id=$1 AND status='pending' RETURNING *
+                """,
+                request_id, reason,
+            )
+            result = self._serialize_reassignment(dict(cancelled))
+            await self._audit(
+                conn, tenant_id=None, event_type="inbound_reassignment_cancelled",
+                actor_id=actor_id, actor_role=actor_role,
+                resource_type="inbound_reassignment_request", resource_id=request_id,
+                reason=reason, before={"request": self._serialize_reassignment(dict(request))},
+                after={"request": result}, idempotency_key=idempotency_key,
+            )
+            await self._store_operation(
+                conn, scope_key="platform", operation=operation,
+                idempotency_key=idempotency_key, response=result,
+                resource_type="inbound_reassignment_request", resource_id=request_id,
+            )
+            return result
 
     async def approve_reassignment(
         self,
@@ -3079,7 +3248,8 @@ class InboundCampaignService:
         request_id = _uuid(request_id, "request_id")
         actor_id = _uuid(actor_id, "actor_id")
         operation = f"platform_inbound_reassignment.approve:{request_id}"
-        async with acquire_with_tenant(self._pool, None) as conn:
+        async with self._admin_transaction(actor_id) as conn:
+            actor_role = "platform_admin"  # Canonical authority was checked under the fence.
             replay = await self._claim_operation(
                 conn,
                 tenant_id=None,

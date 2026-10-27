@@ -6,6 +6,7 @@ Based on LiveKit's implementation for jitter-free audio streaming.
 Uses pcm_s16le encoding at 24kHz as recommended by Cartesia.
 """
 import os
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
 import json
 import base64
 import asyncio
@@ -63,6 +64,7 @@ class CartesiaTTSProvider(TTSProvider):
     API_VERSION = "2024-06-10"
     
     def __init__(self):
+        self._observation_context = None
         self._api_key: Optional[str] = None
         self._model_id: str = "sonic-3"
         self._voice_id: str = ""
@@ -93,6 +95,7 @@ class CartesiaTTSProvider(TTSProvider):
 
     async def initialize(self, config: dict) -> None:
         """Initialize Cartesia client with configuration"""
+        self._observation_context = config.get("observation_context")
         pool_keys = parse_keys_csv(os.getenv("CARTESIA_API_KEYS"))
         single_key = config.get("api_key") or os.getenv("CARTESIA_API_KEY")
         if pool_keys and not config.get("api_key"):
@@ -190,6 +193,7 @@ class CartesiaTTSProvider(TTSProvider):
         elif call_id not in self._call_keys:
             self._call_keys[call_id] = self._api_key
 
+        observation = self._observation(self._call_keys.get(call_id))
         _t0 = asyncio.get_event_loop().time()
         try:
             ws = await self._session.ws_connect(
@@ -198,8 +202,14 @@ class CartesiaTTSProvider(TTSProvider):
                 heartbeat=20.0,
             )
         except Exception as exc:
+            observation.finish(exc)
             logger.warning("cartesia_ws_connect_failed call_id=%s: %s", call_id, _redact_key(exc))
             return
+        except BaseException as exc:
+            observation.finish(exc)
+            raise
+        observation.accepted()
+        observation.finish(outcome="connected")
         handshake_ms = (asyncio.get_event_loop().time() - _t0) * 1000.0
         self._call_ws[call_id] = ws
         self._call_ws_locks.setdefault(call_id, asyncio.Lock())
@@ -319,7 +329,8 @@ class CartesiaTTSProvider(TTSProvider):
                         return
                     chunks_yielded = False
                     try:
-                        async for chunk in self._stream_over_ws(ws, payload, sample_rate):
+                        async for chunk in self._stream_over_ws(ws, payload, sample_rate,
+                                observation=self._observation(self._call_keys.get(call_id))):
                             chunks_yielded = True
                             yield chunk
                         return
@@ -346,7 +357,8 @@ class CartesiaTTSProvider(TTSProvider):
                             text, selected_voice_id, sample_rate, language, speed, emotion
                         )
                         self._call_active_context[call_id] = payload["context_id"]
-                        async for chunk in self._stream_over_ws(ws, payload, sample_rate):
+                        async for chunk in self._stream_over_ws(ws, payload, sample_rate,
+                                observation=self._observation(self._call_keys.get(call_id))):
                             yield chunk
                         return
             finally:
@@ -368,26 +380,41 @@ class CartesiaTTSProvider(TTSProvider):
             else _SingleKeyLease(self._api_key)
         )
         async with key_ctx as lease:
+          observation = self._observation(lease.key)
           try:
             async with self._session.ws_connect(
                 self._ws_url(lease.key),
                 timeout=aiohttp.ClientTimeout(connect=3.0, sock_read=10.0),
             ) as ws:
-                async for chunk in self._stream_over_ws(ws, payload, sample_rate):
+                async for chunk in self._stream_over_ws(ws, payload, sample_rate, observation=observation):
                     yield chunk
             lease.report_success()
-          except asyncio.TimeoutError:
+          except asyncio.TimeoutError as exc:
+            observation.finish(exc)
             lease.report_failure(retryable=True)
             raise RuntimeError("Cartesia TTS WebSocket timeout")
           except aiohttp.ClientError as exc:
+            observation.finish(exc)
             lease.report_failure(retryable=True)
             raise RuntimeError(f"Cartesia TTS WebSocket error: {_redact_key(exc)}") from None
+          except BaseException as exc:
+            observation.finish(exc)
+            raise
+          finally:
+            observation.finish()
+
+    def _observation(self, api_key):
+        context = self._observation_context
+        if api_key != self._api_key and (context or {}).get("source") == "tenant":
+            context = None
+        return ProviderAttempt("tts", "cartesia", api_key, context)
 
     async def _stream_over_ws(
         self,
         ws: aiohttp.ClientWebSocketResponse,
         payload: Dict[str, Any],
         sample_rate: int,
+        *, observation=None,
     ) -> AsyncIterator[AudioChunk]:
         """Send one generation and yield its audio chunks until `done` or error.
 
@@ -404,9 +431,11 @@ class CartesiaTTSProvider(TTSProvider):
         bleed into the next one.
         """
         context_id = payload.get("context_id")
-        await ws.send_str(json.dumps(payload))
+        observation = observation or self._observation(self._api_key)
         finished = False
         try:
+            await ws.send_str(json.dumps(payload))
+            observation.accepted()
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     data = json.loads(msg.data)
@@ -426,6 +455,8 @@ class CartesiaTTSProvider(TTSProvider):
                             audio_bytes = audio_bytes[:-1]
                         int16_arr = np.frombuffer(audio_bytes, dtype=np.int16)
                         float32_data = (int16_arr.astype(np.float32) / 32768.0).tobytes()
+                        if float32_data:
+                            observation.first_output()
                         yield AudioChunk(
                             data=float32_data,
                             sample_rate=sample_rate,
@@ -434,6 +465,7 @@ class CartesiaTTSProvider(TTSProvider):
                     elif data.get("done"):
                         # Generation complete; WS stays open for the next context_id.
                         finished = True
+                        observation.complete()
                         return
                     elif data.get("type") == "error":
                         logger.error("[Cartesia WS] Error: %s", data)
@@ -447,7 +479,11 @@ class CartesiaTTSProvider(TTSProvider):
             # aiohttp converts CLOSE/CLOSED to StopAsyncIteration before this
             # loop sees them. Only our context's done certifies synthesis EOF.
             raise RuntimeError("Cartesia WS ended without generation completion")
+        except BaseException as exc:
+            observation.finish(exc)
+            raise
         finally:
+            observation.finish()
             # Reached whenever this generation ends WITHOUT its own `done`:
             # an error/closed-WS above, OR — the barge-in case — the caller
             # simply stops iterating and this generator is later closed
@@ -516,8 +552,10 @@ class CartesiaTTSProvider(TTSProvider):
         if generation_config:
             payload["generation_config"] = generation_config
         
+        observation = self._observation(self._api_key)
         try:
             async with self._session.ws_connect(ws_url) as ws:
+                observation.accepted()
                 # Send the TTS request
                 await ws.send_str(json.dumps(payload))
                 
@@ -535,12 +573,15 @@ class CartesiaTTSProvider(TTSProvider):
                             float32_array = (int16_array.astype(np.float32) / 32768.0)
                             float32_data = float32_array.tobytes()
                             
+                            if float32_data:
+                                observation.first_output()
                             yield AudioChunk(
                                 data=float32_data,
                                 sample_rate=sample_rate,
                                 channels=1
                             )
                         elif data.get("done"):
+                            observation.complete()
                             break
                         elif data.get("type") == "error":
                             logger.error(f"[Cartesia WS] Error: {data}")
@@ -550,8 +591,14 @@ class CartesiaTTSProvider(TTSProvider):
                         break
         
         except Exception as e:
+            observation.finish(e)
             logger.error(f"[Cartesia WS] Error: {_redact_key(e)}")
             raise RuntimeError(f"Cartesia WebSocket error: {_redact_key(e)}") from None
+        except BaseException as exc:
+            observation.finish(exc)
+            raise
+        finally:
+            observation.finish()
     
     async def get_available_voices(self) -> List[Dict]:
         """Get list of available Cartesia voices"""

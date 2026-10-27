@@ -16,6 +16,7 @@ Reference:
     https://developers.deepgram.com/docs/tts-text-chunking
 """
 import os
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
 import asyncio
 import json
 import logging
@@ -186,6 +187,7 @@ class DeepgramTTSProvider(TTSProvider):
         self._warm_ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._warm_ws_voice: Optional[str] = None
         self._warm_ws_rate: Optional[int] = None
+        self._warm_ws_key: Optional[str] = None
         # Prevents concurrent synthesis on same connection
         self._synthesis_lock: Optional[asyncio.Lock] = None
         # Serialises only the connect step (NOT the whole synthesis, so barge-in
@@ -313,8 +315,13 @@ class DeepgramTTSProvider(TTSProvider):
                 f"&sample_rate={rate}"
                 f"&container=none"
             )
-            headers = {"Authorization": f"Token {self._api_key}"}
-            self._warm_ws = await self._session.ws_connect(url, headers=headers, heartbeat=30)
+            api_key = self._api_key
+            headers = {"Authorization": f"Token {api_key}"}
+            with ProviderAttempt("tts", "deepgram", api_key, self._config.get("observation_context")) as connection_observation:
+                self._warm_ws = await self._session.ws_connect(url, headers=headers, heartbeat=30)
+                connection_observation.accepted()
+                connection_observation.finish(outcome="connected")
+            self._warm_ws_key = api_key
             self._warm_ws_voice = voice_id
             self._warm_ws_rate = rate
             return self._warm_ws
@@ -387,10 +394,12 @@ class DeepgramTTSProvider(TTSProvider):
         # (stale audio/Flushed messages buffered) and must be discarded so the
         # next synthesis opens a fresh connection rather than reading stale data.
         flushed_cleanly = False
+        observation = ProviderAttempt("tts", "deepgram", self._api_key, self._config.get("observation_context"))
         try:
             try:
                 ws = await self._get_connection(selected_voice, rate)
             except aiohttp.WSServerHandshakeError as e:
+                observation.finish(e)
                 if e.status == 400:
                     logger.error(
                         "Deepgram TTS rejected model/voice '%s' (HTTP 400)",
@@ -403,24 +412,37 @@ class DeepgramTTSProvider(TTSProvider):
                 logger.error(f"Deepgram TTS WS handshake error: {e}")
                 raise RuntimeError(f"Deepgram TTS handshake error: {e}")
             except aiohttp.ClientError as e:
+                observation.finish(e)
                 logger.error(f"Deepgram TTS WS network error: {e}")
                 raise RuntimeError(f"Deepgram TTS network error: {e}")
 
+            if self._warm_ws_key is not None and self._warm_ws_key != self._api_key:
+                context = self._config.get("observation_context")
+                if (context or {}).get("source") == "tenant":
+                    context = None
+                observation = ProviderAttempt("tts", "deepgram", self._warm_ws_key, context)
+            observation.accepted()
             # Send all text chunks + Flush concurrently while the receive loop
             # is already running — Deepgram starts synthesising on the first
             # Speak message, so first audio arrives ~75ms after the first send,
             # without waiting for all chunks to be transmitted.
             async def _send_all() -> None:
-                for chunk in chunks:
-                    if chunk.strip():
-                        await ws.send_json({"type": "Speak", "text": chunk})
-                await ws.send_json({"type": "Flush"})
+                try:
+                    for chunk in chunks:
+                        if chunk.strip():
+                            await ws.send_json({"type": "Speak", "text": chunk})
+                    await ws.send_json({"type": "Flush"})
+                except Exception as exc:
+                    observation.finish(exc)
+                    raise
 
             sender_task = asyncio.create_task(_send_all())
 
             try:
                 async for msg in ws:
                     if msg.type == aiohttp.WSMsgType.BINARY:
+                        if msg.data:
+                            observation.first_output()
                         yield AudioChunk(data=msg.data, sample_rate=rate, channels=1)
 
                     elif msg.type == aiohttp.WSMsgType.TEXT:
@@ -430,6 +452,7 @@ class DeepgramTTSProvider(TTSProvider):
                         if event_type == "Flushed":
                             logger.debug("Deepgram TTS Flushed — synthesis complete")
                             flushed_cleanly = True
+                            observation.complete()
                             break
                         elif event_type == "Warning":
                             logger.warning(f"Deepgram TTS warning: {data.get('warn_msg', data)}")
@@ -453,11 +476,16 @@ class DeepgramTTSProvider(TTSProvider):
                 raise
 
         except Exception as e:
+            observation.finish(e)
             if not isinstance(e, RuntimeError):
                 logger.error(f"Deepgram TTS WS synthesis failed: {e}", exc_info=True)
                 raise RuntimeError(f"Deepgram TTS synthesis failed: {e}")
             raise
+        except BaseException as exc:
+            observation.finish(exc)
+            raise
         finally:
+            observation.finish()
             if sender_task is not None and not sender_task.done():
                 sender_task.cancel()
                 try:
@@ -578,23 +606,28 @@ class DeepgramTTSProvider(TTSProvider):
                 "Content-Type": "application/json",
             }
 
-            async with self._session.post(
-                url, json={"text": chunk}, headers=headers
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise RuntimeError(
-                        f"Deepgram TTS error ({response.status}): {error_text}"
-                    )
-                audio_data = await response.read()
-                audio_parts.append(audio_data)
-                
-                # Add small silence between sentences (100ms of 16-bit silence)
-                if i < len(chunks) - 1:
-                    silence_samples = int(sample_rate * 0.1)  # 100ms
-                    silence_bytes = b'\x00\x00' * silence_samples
-                    audio_parts.append(silence_bytes)
-        
+            with ProviderAttempt("tts", "deepgram", self._api_key, self._config.get("observation_context")) as observation:
+                async with self._session.post(
+                    url, json={"text": chunk}, headers=headers
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        error = RuntimeError(f"Deepgram TTS error ({response.status}): {error_text}")
+                        error.status_code = response.status
+                        raise error
+                    observation.accepted()
+                    audio_data = await response.read()
+                    if audio_data:
+                        observation.first_output()
+                    observation.complete()
+                    audio_parts.append(audio_data)
+
+                    # Add small silence between sentences (100ms of 16-bit silence)
+                    if i < len(chunks) - 1:
+                        silence_samples = int(sample_rate * 0.1)  # 100ms
+                        silence_bytes = b'\x00\x00' * silence_samples
+                        audio_parts.append(silence_bytes)
+
         return b"".join(audio_parts)
 
     # ------------------------------------------------------------------

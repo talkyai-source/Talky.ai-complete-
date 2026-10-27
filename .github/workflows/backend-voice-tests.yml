@@ -98,4 +98,4 @@ jobs:
           pip install pytest pytest-asyncio 'fakeredis[lua]'
 
       - name: Full suite
-        run: python -m pytest tests/unit tests/security -q -p no:randomly -rfsE
+        run: python -m pytest tests/unit tests/security -vv -o faulthandler_timeout=60 --maxfail=5 -p no:randomly -rfsE

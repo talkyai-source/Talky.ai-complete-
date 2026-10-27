@@ -450,6 +450,8 @@ async def test_actual_websocket_lost_response_recovers_without_redispatch(
     monkeypatch.setattr(assistant_ws, "check_assistant_session", AsyncMock())
     monkeypatch.setattr(dispatch, "dispatch_tool", execute)
     socket = Socket()
+    from tests.helpers.assistant_runtime import stub_runtime_receipts
+    stub_runtime_receipts(monkeypatch)
     await assistant_ws.assistant_chat(socket, token=None, conversation_id=None)
     results = [row for row in socket.messages if row["type"] == "proposal_result"]
     assert effect_count == 1 and len(results) == 2
@@ -749,13 +751,16 @@ async def test_voice_websocket_recovers_original_receipt_without_speaking_false_
 
     monkeypatch.setattr(
         "app.domain.services.credential_resolver.get_credential_resolver",
-        lambda: SimpleNamespace(resolve=AsyncMock(return_value="synthetic-unused")),
+        lambda: SimpleNamespace(resolve_with_metadata=AsyncMock(return_value=SimpleNamespace(
+            secret="synthetic-unused", observation_context={}))),
     )
     monkeypatch.setattr("app.infrastructure.stt.deepgram_flux.DeepgramFluxSTTProvider", STT)
     monkeypatch.setattr("app.infrastructure.tts.cartesia.CartesiaTTSProvider", TTS)
     monkeypatch.setattr(voice, "get_tenant_assistant_model", AsyncMock(return_value="unused"))
     monkeypatch.setattr(dispatch, "dispatch_tool", execute)
     socket = Socket()
+    from tests.helpers.assistant_runtime import stub_runtime_receipts
+    stub_runtime_receipts(monkeypatch)
     await voice._run_voice_session(
         websocket=socket,
         session_id="synthetic",

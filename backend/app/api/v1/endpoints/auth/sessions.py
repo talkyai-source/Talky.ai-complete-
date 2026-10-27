@@ -26,6 +26,7 @@ from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.cookies import REFRESH_COOKIE_NAME, clear_auth_cookies
+from app.core.security.credential_issuance import lock_authenticated_credential_change
 from app.core.security.refresh_tokens import revoke_family_by_token
 from app.core.security.sessions import (
     SESSION_COOKIE_NAME,
@@ -61,6 +62,9 @@ async def logout(
     # browser's expected identity. Refresh ownership must agree too, before any
     # revocation or cookie mutation; it is never an alternate identity selector.
     async with acquire_with_tenant(db_client.pool, None) as conn:
+        # Match refresh/issuance lock order before touching session/token rows.
+        # Recheck the fixed authenticated session after acquiring that fence.
+        await lock_authenticated_credential_change(conn, request, current_user)
         if talky_rt:
             refresh_owner = await conn.fetchrow(
                 "SELECT user_id,session_id FROM refresh_tokens WHERE token_hash=$1",
@@ -112,6 +116,7 @@ async def logout_all(
     minute by accident) and well below the abuse threshold.
     """
     async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
+        await lock_authenticated_credential_change(conn, request, current_user)
         count = await revoke_all_user_sessions(
             conn,
             current_user.id,

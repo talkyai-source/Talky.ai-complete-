@@ -29,6 +29,7 @@ import httpx
 
 from app.infrastructure.llm.cerebras import CerebrasLLMProvider
 from app.infrastructure.llm.groq import DEFAULT_LLM_TIMEOUT
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
 from app.infrastructure.providers.key_pool import (
     BENCH_RATE_LIMITED_KEY_S,
     BENCH_REFUSED_KEY_S,
@@ -58,16 +59,19 @@ class _ChatCompletions:
         url: str = _DEEPSEEK_CHAT_URL,
         label: str = "DeepSeek chat",
         pool_env: Optional[str] = None,
+        observation_context: Optional[dict] = None,
     ) -> None:
         self._http = http
         self._api_key = api_key
+        self._configured_key = api_key
+        self._observation_context = dict(observation_context or {})
         # Any OpenAI-compatible chat-completions endpoint (DeepSeek reuses it).
         self._url = url
         self._label = label
         # Env var of the platform key pool this key may come from (2026-10-19).
         self._pool_env = pool_env
 
-    def _next_pool_key(self, status: int, tried: set[str]) -> Optional[str]:
+    def _next_pool_key(self, status: int, tried: set[str], failed_key: str) -> Optional[str]:
         """Bench a refused platform key and return another one to try, or None
         (a tenant's own key, a non-key error, or no unbenched key left)."""
         if status in (401, 402, 403):
@@ -79,9 +83,9 @@ class _ChatCompletions:
         if not self._pool_env:
             return None
         rotation = platform_key_rotation(self._pool_env)
-        if not rotation.bench(self._api_key, seconds):
+        if not rotation.bench(failed_key, seconds):
             return None
-        tried.add(self._api_key)
+        tried.add(failed_key)
         return rotation.retry_key(exclude=tried)
 
     async def create(self, **request: Any):
@@ -89,16 +93,31 @@ class _ChatCompletions:
         by the caller before any token is spoken), then yield chunks."""
         tried: set[str] = set()
         while True:
-            headers = {"Authorization": f"Bearer {self._api_key}"}
-            cm = self._http.stream("POST", self._url, headers=headers, json=request)
-            response = await cm.__aenter__()
-            if response.status_code == 200:
-                break
-            body = (await response.aread()).decode(errors="replace")[:500]
-            await cm.__aexit__(None, None, None)
-            next_key = self._next_pool_key(response.status_code, tried)
+            actual_key = self._api_key
+            context = self._observation_context
+            if actual_key != self._configured_key and context.get("source") == "tenant":
+                context = None
+            observation = ProviderAttempt("llm", "deepseek", actual_key, context)
+            try:
+                headers = {"Authorization": f"Bearer {actual_key}"}
+                cm = self._http.stream("POST", self._url, headers=headers, json=request)
+                response = await cm.__aenter__()
+                if response.status_code == 200:
+                    observation.accepted()
+                    break
+                try:
+                    body = (await response.aread()).decode(errors="replace")[:500]
+                finally:
+                    await cm.__aexit__(None, None, None)
+                refused = RuntimeError(f"{self._label} HTTP {response.status_code}: {body}")
+                refused.status_code = response.status_code
+                observation.finish(refused)
+            except BaseException as error:
+                observation.finish(error)
+                raise
+            next_key = self._next_pool_key(response.status_code, tried, actual_key)
             if next_key is None:
-                raise RuntimeError(f"{self._label} HTTP {response.status_code}: {body}")
+                raise refused
             self._api_key = next_key
 
         async def chunks():
@@ -113,7 +132,24 @@ class _ChatCompletions:
             finally:
                 await cm.__aexit__(None, None, None)
 
-        return chunks()
+        # The shared stream consumer owns terminal validation and cancellation.
+        # Carry this exact admitted HTTP attempt through key rotation to it.
+        return _ObservedStream(chunks(), observation)
+
+
+class _ObservedStream:
+    def __init__(self, stream, observation: ProviderAttempt):
+        self._stream = stream
+        self.provider_attempt = observation
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        return await self._stream.__anext__()
+
+    async def aclose(self):
+        await self._stream.aclose()
 
 
 class _DeepSeekChatClient:
@@ -124,11 +160,13 @@ class _DeepSeekChatClient:
         url: str = _DEEPSEEK_CHAT_URL,
         label: str = "DeepSeek chat",
         pool_env: Optional[str] = None,
+        observation_context: Optional[dict] = None,
     ) -> None:
         self._http = httpx.AsyncClient(timeout=timeout)
         self.chat = SimpleNamespace(
             completions=_ChatCompletions(
-                self._http, api_key, url=url, label=label, pool_env=pool_env
+                self._http, api_key, url=url, label=label, pool_env=pool_env,
+                observation_context=observation_context,
             )
         )
 
@@ -164,12 +202,14 @@ class DeepSeekLLMProvider(CerebrasLLMProvider):
         self._model = config.get("model") or DEFAULT_DEEPSEEK_MODEL
         self._temperature = config.get("temperature", 0.5)
         self._max_tokens = config.get("max_tokens", 150)
+        self._observes_http_attempts = True
         self._client = _DeepSeekChatClient(
             api_key,
             timeout=config.get("timeout", DEFAULT_LLM_TIMEOUT),
             url=_DEEPSEEK_CHAT_URL,
             label="DeepSeek chat",
             pool_env="DEEPSEEK_API_KEY",
+            observation_context=config.get("observation_context"),
         )
         logger.info(
             "DeepSeekLLMProvider initialized: model=%s max_tokens=%s thinking=disabled",

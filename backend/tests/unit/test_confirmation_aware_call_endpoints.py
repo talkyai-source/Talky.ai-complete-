@@ -16,6 +16,7 @@ from app.core import container as container_module
 from app.domain.services.telephony import inbound_admission
 from app.domain.services.telephony.termination import TerminationContext
 from app.domain.services.call_status import TERMINAL_CALL_STATUSES
+from tests.unit.pbx_identity_helpers import BINDING, bound_test_adapter
 
 
 def test_operator_endpoints_never_calculate_inbound_duration_from_wall_clock():
@@ -64,6 +65,7 @@ def _stub_termination_context(monkeypatch, module, row, *, events=None):
             previous_status=previous_status,
             provider_leg_ids=(),
             provider=row.get("provider"),
+            control_backend=BINDING,
             direction=row.get("direction", "outbound"),
         )
 
@@ -124,6 +126,7 @@ async def test_tenant_unconfirmed_hangup_performs_no_terminal_write(monkeypatch)
         "external_call_uuid": "pbx-unconfirmed",
         "provider_call_id": None,
         "provider": "asterisk",
+                    "route_snapshot": {"control_backend": BINDING},
         "direction": "outbound",
         "status": "in_call",
         "started_at": datetime.now(timezone.utc),
@@ -137,7 +140,7 @@ async def test_tenant_unconfirmed_hangup_performs_no_terminal_write(monkeypatch)
         async def hangup_confirmed(self, _call_id):
             return False
 
-    monkeypatch.setattr(telephony_bridge, "_adapter", Adapter())
+    monkeypatch.setattr(telephony_bridge, "_adapter", bound_test_adapter(Adapter()))
     _stub_termination_context(monkeypatch, calls, row)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -166,6 +169,7 @@ async def test_tenant_confirmed_hangup_orders_proof_before_settlement_and_projec
         "external_call_uuid": "pbx-confirmed",
         "provider_call_id": "pbx-confirmed",
         "provider": "asterisk",
+                    "route_snapshot": {"control_backend": BINDING},
         "direction": "inbound",
         "status": "in_call",
         "started_at": datetime.now(timezone.utc),
@@ -190,7 +194,7 @@ async def test_tenant_confirmed_hangup_orders_proof_before_settlement_and_projec
         async def release(self, **_kwargs):
             raise AssertionError("answered calls must finalize")
 
-    monkeypatch.setattr(telephony_bridge, "_adapter", Adapter())
+    monkeypatch.setattr(telephony_bridge, "_adapter", bound_test_adapter(Adapter()))
     monkeypatch.setattr(inbound_admission, "InboundAdmissionService", AdmissionService)
     _stub_termination_context(monkeypatch, calls, row, events=events)
 
@@ -218,6 +222,7 @@ async def test_tenant_terminal_replay_is_idempotent_after_provider_absence_proof
         "external_call_uuid": "pbx-already-ended",
         "provider_call_id": "pbx-already-ended",
         "provider": "asterisk",
+                    "route_snapshot": {"control_backend": BINDING},
         "direction": "inbound",
         "status": terminal_status,
         "started_at": datetime.now(timezone.utc),
@@ -234,7 +239,7 @@ async def test_tenant_terminal_replay_is_idempotent_after_provider_absence_proof
             requested.append(provider_call_id)
             return True
 
-    monkeypatch.setattr(telephony_bridge, "_adapter", Adapter())
+    monkeypatch.setattr(telephony_bridge, "_adapter", bound_test_adapter(Adapter()))
     _stub_termination_context(monkeypatch, calls, row)
 
     result = await calls.hangup_live_call(
@@ -260,6 +265,7 @@ async def test_tenant_terminal_replay_does_not_treat_database_state_as_pbx_proof
         "external_call_uuid": "pbx-terminal-but-live",
         "provider_call_id": "pbx-terminal-but-live",
         "provider": "asterisk",
+                    "route_snapshot": {"control_backend": BINDING},
         "direction": "inbound",
         "status": "ended",
         "started_at": datetime.now(timezone.utc),
@@ -273,7 +279,7 @@ async def test_tenant_terminal_replay_does_not_treat_database_state_as_pbx_proof
         async def hangup_confirmed(self, _call_id):
             return False
 
-    monkeypatch.setattr(telephony_bridge, "_adapter", Adapter())
+    monkeypatch.setattr(telephony_bridge, "_adapter", bound_test_adapter(Adapter()))
     _stub_termination_context(monkeypatch, calls, row)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -306,7 +312,7 @@ async def test_raw_hangup_reports_only_confirmed_provider_absence(monkeypatch):
 
     monkeypatch.setattr(telephony_bridge, "_require_call_control", authorize)
     monkeypatch.setattr(telephony_bridge, "_verify_call_ownership", verify)
-    monkeypatch.setattr(telephony_bridge, "_adapter", Adapter())
+    monkeypatch.setattr(telephony_bridge, "_adapter", bound_test_adapter(Adapter()))
     monkeypatch.setattr(
         container_module,
         "get_container",
@@ -318,6 +324,7 @@ async def test_raw_hangup_reports_only_confirmed_provider_absence(monkeypatch):
         {
             "status": "in_call",
             "provider": "asterisk",
+                    "route_snapshot": {"control_backend": BINDING},
             "provider_call_id": "pbx-raw",
             "external_call_uuid": "pbx-raw",
         },
@@ -347,7 +354,7 @@ async def test_raw_hangup_returns_gateway_error_when_proof_is_missing(monkeypatc
 
     monkeypatch.setattr(telephony_bridge, "_require_call_control", authorize)
     monkeypatch.setattr(telephony_bridge, "_verify_call_ownership", verify)
-    monkeypatch.setattr(telephony_bridge, "_adapter", Adapter())
+    monkeypatch.setattr(telephony_bridge, "_adapter", bound_test_adapter(Adapter()))
     monkeypatch.setattr(
         container_module,
         "get_container",
@@ -359,6 +366,7 @@ async def test_raw_hangup_returns_gateway_error_when_proof_is_missing(monkeypatc
         {
             "status": "in_call",
             "provider": "asterisk",
+                    "route_snapshot": {"control_backend": BINDING},
             "provider_call_id": "pbx-raw",
             "external_call_uuid": "pbx-raw",
         },
@@ -398,11 +406,12 @@ class _CampaignConn:
             assert "COALESCE(c.provider_call_id, c.external_call_uuid)" in query
             assert "FOR UPDATE OF c" in query
             return [
-                {"durable_call_id": "call-good", "provider_call_id": "pbx-good", "provider": "asterisk"},
+                {"durable_call_id": "call-good", "provider_call_id": "pbx-good", "provider": "asterisk", "route_snapshot": {"control_backend": BINDING}},
                 {
                     "durable_call_id": "call-still-live",
                     "provider_call_id": "pbx-still-live",
                     "provider": "asterisk",
+                    "route_snapshot": {"control_backend": BINDING},
                 },
             ]
         assert "FROM call_legs" in query
@@ -411,6 +420,7 @@ class _CampaignConn:
                 "durable_call_id": "call-good",
                 "provider_leg_id": "talky-xfer-good",
                 "provider": "asterisk",
+                    "route_snapshot": {"control_backend": BINDING},
             }
         ]
 
@@ -432,7 +442,7 @@ async def test_campaign_bulk_hangup_separates_attempts_from_confirmations(monkey
         "get_container",
         lambda: SimpleNamespace(db_pool=pool),
     )
-    monkeypatch.setattr(telephony_bridge, "_adapter", Adapter())
+    monkeypatch.setattr(telephony_bridge, "_adapter", bound_test_adapter(Adapter()))
 
     result = await telephony_bridge.hangup_calls_for_campaign(str(uuid4()))
 

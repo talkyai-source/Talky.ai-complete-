@@ -2,7 +2,7 @@ import { z } from "zod";
 import { api } from "@/lib/api";
 import { env } from "@/lib/env";
 
-const uuid = z.string().uuid().transform(value => value.toLowerCase());
+const uuid = z.guid().transform(value => value.toLowerCase());
 const priceFields = {
   id: uuid, kind: z.enum(["free", "stripe"]),
   interval: z.enum(["month", "year"]), interval_count: z.literal(1),

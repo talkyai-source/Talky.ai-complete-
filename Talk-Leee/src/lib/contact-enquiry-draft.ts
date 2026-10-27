@@ -7,7 +7,7 @@ const savedSchema = z.object({
   version: z.literal(1), savedAt: z.number().finite(),
   draft: z.object({ name: z.string().max(120), email: z.string().max(254), company: z.string().max(120), message: z.string().max(500) }).optional(),
   submission: contactRequestSchema.optional(),
-  expiredRequestId: z.string().uuid().optional(),
+  expiredRequestId: z.guid().optional(),
 });
 export type SavedContactDraft = z.infer<typeof savedSchema>;
 

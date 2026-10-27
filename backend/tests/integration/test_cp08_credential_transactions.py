@@ -40,7 +40,7 @@ def request():
 async def credential_db(lead_db, monkeypatch):  # noqa: F811
     db=lead_db
     await db.admin.execute(f'GRANT SELECT,INSERT,UPDATE,DELETE ON user_profiles,webauthn_challenges,user_passkeys,user_mfa,mfa_challenges,recovery_codes,security_sessions,refresh_tokens,login_attempts TO "{db.role}"')
-    await db.admin.execute(f'GRANT SELECT ON tenants,tenant_users,roles TO "{db.role}"')
+    await db.admin.execute(f'GRANT SELECT ON tenants,tenant_users,roles,suspension_events,white_label_partners,audit_logs TO "{db.role}"')
     db.users=[uuid4(),uuid4()]
     for index,user in enumerate(db.users):
         await db.admin.execute("""INSERT INTO user_profiles(id,email,name,tenant_id,role,is_active,is_verified,email_verified_at,password_hash)
@@ -57,6 +57,9 @@ async def credential_db(lead_db, monkeypatch):  # noqa: F811
     try:
         yield db
     finally:
+        # The production FK intentionally retains attempts by nulling user_id.
+        # Remove only this fixture's attempts before deleting its identities.
+        await db.admin.execute('DELETE FROM login_attempts WHERE user_id=ANY($1::uuid[])',db.users)
         await db.admin.execute('DELETE FROM tenant_users WHERE user_id=ANY($1::uuid[])',db.users)
         await db.admin.execute('DELETE FROM user_profiles WHERE id=ANY($1::uuid[])',db.users)
 
@@ -67,12 +70,24 @@ async def registration(db,user=None):
     return ceremony
 
 
+async def authenticated_request(db, user=None):
+    from app.core.security.sessions import create_session
+    identity = str(user or db.users[0])
+    async with acquire_with_tenant(db.pool, None) as conn:
+        _, session_id = await create_session(conn, user_id=identity, ip_address="127.0.0.1",
+            bind_to_ip=False, bind_to_fingerprint=False, return_session_id=True)
+    result = request()
+    result.state.authenticated_user_id = identity
+    result.state.authenticated_session_id = session_id
+    return result
+
+
 async def test_registration_cannot_reassign_another_users_challenge(credential_db):
     db=credential_db
     ceremony=await registration(db)
     other=SimpleNamespace(id=str(db.users[1]),tenant_id=str(db.tenants[0]),role='tenant_admin')
     with pytest.raises(HTTPException) as caught:
-        await api.register_complete(request(),api.RegisterCompleteRequest(ceremony_id=ceremony,credential_response={}),other,db.client)
+        await api.register_complete(await authenticated_request(db, db.users[1]),api.RegisterCompleteRequest(ceremony_id=ceremony,credential_response={}),other,db.client)
     assert caught.value.status_code in (400,401)
     assert await db.admin.fetchval('SELECT COUNT(*) FROM user_passkeys WHERE user_id=ANY($1::uuid[])',db.users)==0
 
@@ -217,7 +232,7 @@ async def test_recovery_regeneration_failure_does_not_destroy_existing_codes(cre
     monkeypatch.setattr(recovery,'store_recovery_codes',AsyncMock(side_effect=RuntimeError('synthetic replacement storage outage')))
     current=SimpleNamespace(id=str(db.users[0]),tenant_id=str(db.tenants[0]))
     with pytest.raises(RuntimeError):
-        await recovery.regenerate_recovery_codes(MFARegenerateCodesRequest(code='123456'),current,db.client)
+        await recovery.regenerate_recovery_codes(await authenticated_request(db),MFARegenerateCodesRequest(code='123456'),current,db.client)
     assert await db.admin.fetchval('SELECT COUNT(*) FROM recovery_codes WHERE user_id=$1',db.users[0])==1
     assert await db.admin.fetchval('SELECT last_used_at FROM user_mfa WHERE user_id=$1',db.users[0]) is None
 
@@ -343,8 +358,8 @@ async def test_mfa_setup_cannot_downgrade_concurrently_confirmed_factor(credenti
     db = credential_db
     user = ready_setup(db, monkeypatch)
     await db.admin.execute("INSERT INTO user_mfa(user_id,totp_secret_enc,enabled) VALUES($1,'synthetic-pending-secret',FALSE)", db.users[0])
-    read_pending = asyncio.Event()
-    confirmed = asyncio.Event()
+    confirm_locked = asyncio.Event()
+    setup_started = asyncio.Event()
     original = setup.acquire_with_tenant
 
     class Connection:
@@ -356,9 +371,9 @@ async def test_mfa_setup_cannot_downgrade_concurrently_confirmed_factor(credenti
 
         async def fetchrow(self, sql, *args):
             result = await self.conn.fetchrow(sql, *args)
-            if 'SELECT enabled FROM user_mfa' in sql:
-                read_pending.set()
-                await asyncio.wait_for(confirmed.wait(), 5)
+            if 'FROM   user_mfa' in sql and 'FOR UPDATE' in sql:
+                confirm_locked.set()
+                await asyncio.wait_for(setup_started.wait(), 5)
             return result
 
     @asynccontextmanager
@@ -367,18 +382,18 @@ async def test_mfa_setup_cannot_downgrade_concurrently_confirmed_factor(credenti
             yield Connection(conn)
 
     monkeypatch.setattr(setup, 'acquire_with_tenant', barrier)
+    confirm_request = await authenticated_request(db)
+    setup_request = await authenticated_request(db)
 
     async def confirm():
-        await asyncio.wait_for(read_pending.wait(), 5)
-        try:
-            result = await setup.confirm_mfa(MFAConfirmRequest(code='123456'), user, db.client)
-            assert result.enabled is True
-        finally:
-            confirmed.set()
+        result = await setup.confirm_mfa(confirm_request, MFAConfirmRequest(code='123456'), user, db.client)
+        assert result.enabled is True
 
     async def restart_setup():
+        await asyncio.wait_for(confirm_locked.wait(), 5)
+        setup_started.set()
         try:
-            await setup.setup_mfa(user, db.client)
+            await setup.setup_mfa(setup_request, user, db.client)
             return 'downgraded'
         except HTTPException as exc:
             return exc.status_code
@@ -395,6 +410,6 @@ async def test_mfa_new_and_pending_setup_remain_available(credential_db, monkeyp
     db = credential_db
     user = ready_setup(db, monkeypatch)
     for _ in range(2):
-        result = await setup.setup_mfa(user, db.client)
+        result = await setup.setup_mfa(await authenticated_request(db), user, db.client)
         assert result.account == user.email
         assert await db.admin.fetchval('SELECT enabled FROM user_mfa WHERE user_id=$1', db.users[0]) is False

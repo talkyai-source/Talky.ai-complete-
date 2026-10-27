@@ -68,7 +68,9 @@ export TALKY_DEPLOY_DRAIN_MANIFEST_SHA256='<64-lowercase-hex-sha256-of-exact-fil
    `reconcile_asterisk_release.sh --check-only` to reject ambiguous
    account-to-DID inventory, and validates the mandatory carrier-hairpin
    synthetic configuration
-5. only after those candidate proofs, checks out the frozen SHA with
+5. only after those candidate proofs and the zero-session check, saves the exact
+   `/etc/systemd/system/talky-api-web.service` file or symlink using `cp -a` in a
+   root-private directory under `/var/backups/talky/deploy-unit-recovery`, then checks out the frozen SHA with
    `git checkout --detach <full-sha>` and verifies `HEAD` and the clean tree; it
    never deploys a moving branch tip
 6. proves the existing gateway has zero sessions, atomically publishes the
@@ -84,18 +86,34 @@ export TALKY_DEPLOY_DRAIN_MANIFEST_SHA256='<64-lowercase-hex-sha256-of-exact-fil
    and `BACKEND_INTERNAL_URL` origin from `backend/.env`; it refuses startup if
    secrets are absent, short, or reused, and refuses any callback whose scheme,
    host, port, or caller-audio path falls outside that pinned origin
-8. starts `talky-migrate.service` and verifies `alembic current == heads`;
-   migration errors fail closed. It then applies the repository-owned Asterisk
+8. starts `talky-migrate.service`, verifies `alembic current == heads`, and runs
+   the Admin runtime database privilege gate against the application's configured
+   connection. Both checks run with sudo because the production environment file
+   is root-owned mode `0600`; inherited database URL overrides are cleared.
+   Failures block the backend restart. It then applies the repository-owned Asterisk
    configuration through `reconcile_asterisk_release.sh`, which requires zero
    active Asterisk channels and atomically applies, reloads, verifies, or rolls
    back the managed configuration
-9. restarts the API and three Python workers only after the matching gateway,
-   schema, and Asterisk configuration are proven; it then restarts the
-   trunk-status timer and restarts `talky-inbound-synthetic.timer`, while the
-   trunk-status one-shot remains non-fatal because its timer retries
+9. atomically sets only `APP_VERSION` in `backend/.env` to the full candidate SHA,
+   preserving the other bindings, file ownership and permissions. It restarts both
+   APIs and three Python workers only after the matching gateway, schema, runtime
+   privileges and Asterisk configuration are proven. It then restarts
+   `talky-inbound-synthetic.timer` and the long-running trunk-status service;
+   trunk-status restart failure remains non-fatal because that unit retries
 10. requires every listed unit to be active, then requires liveness, capacity
     readiness, and dependency-aware deep readiness to return successful HTTP
-    responses; any failure keeps the deploy command non-zero
+    responses. It reads each API unit's current `MainPID` and verifies that process's
+    exact `APP_VERSION` without printing its environment; any failure keeps the
+    deploy command non-zero
+
+An abort before a successful migration restores the previous checkout and runs
+its unit installer, then restores the saved API-web file or symlink with
+`cp -a --remove-destination` and reloads systemd. This preserves an independently
+pinned maintenance web unit that the old installer alone would overwrite. The
+rollback does not restart services, and retains the private unit backup for
+recovery. Once migration succeeds, failures require code-forward recovery or a
+separately approved compatible restore; the deploy does not roll code backward
+under the migrated schema.
 
 Asterisk configuration is generated and reconciled from the repository:
 `setup-asterisk.sh` provisions the managed includes, and deploys use
@@ -169,10 +187,13 @@ sha256sum "$TALKY_DEPLOY_DRAIN_MANIFEST"
 
 The local replay ledger is an additional fail-closed guard; the change system
 must also enforce global manifest-ID uniqueness. SHA-256 binds the bytes but is
-not an approver signature. Most importantly, repository code does not yet read
-the carrier, Asterisk legs, Redis leases, or database live-call state. Those
-values, the topology reference, and the ingress/origination freeze remain
-externally attested. The later gateway `/stats` checks narrow only the local
+not an approver signature. The optional `backend/scripts/observe_release_quiescence.py`
+now reads bounded gateway/Asterisk/Redis/database counters using an explicit
+`--env-file`. Its output is a non-atomic snapshot, never a drain manifest or
+approval; exit zero means the reads were complete and internally consistent,
+not that every counter was zero. The carrier topology and ingress/origination
+freeze still require owner attestation, and counts must be rechecked after that
+freeze. The later gateway `/stats` checks narrow only the local
 gateway restart window; neither the manifest nor a phrase eliminates TOCTOU
 across the external topology.
 
@@ -188,6 +209,65 @@ journalctl -u talky-migrate --since '10 min ago'
 The unit runs `/opt/talky/backend/venv/bin/alembic -c /opt/talky/backend/alembic.ini upgrade head`
 with `TimeoutStartSec=180`. It is deliberately **not** install-enabled — a
 migration must never run merely because the machine rebooted.
+
+### Admin runtime database privilege check
+
+After migrations and the existing Alembic-head check, run this read-only gate
+using the **same environment and OS identity as the backend application**. The
+supported API and migration units currently load `/opt/talky/backend/.env`;
+environment variables already supplied to the command take precedence over
+that file. Do not substitute migration-owner credentials when the application
+has a separate runtime connection. Do not print or copy connection strings.
+
+```bash
+cd /opt/talky/backend
+sudo env -u DATABASE_URL -u READ_DATABASE_URL venv/bin/python scripts/verify_admin_runtime_privileges.py > admin-runtime-privileges.json
+```
+
+Require exit code zero before accepting the database capability portion of an
+Admin release. `deploy_to_server.sh` invokes this gate automatically after the
+successful migration and exact-head check, before publishing `APP_VERSION` or
+restarting backend services. The supported units run as root and read their
+connections from `backend/.env`; the command clears inherited database URL
+overrides so it observes that file's actual runtime role. It opens bounded, read-only transactions and reads
+catalogs plus the Alembic version metadata. It never grants privileges, changes
+roles, changes application RLS settings, or reads customer records. The role
+must be able to read `public.alembic_version` for the head check. Reports omit
+connection strings, role names, passwords and raw connection-error messages.
+
+The contract checks the existing Admin routes and their identity, audit,
+connector authorization and call-settlement dependencies. `DATABASE_URL`
+covers both the primary pool and the legacy adapter's independent connections;
+changing a test pool alone does not change that adapter. A running adapter
+captures its URL at import, so a fresh preflight cannot certify an old process's
+environment. If `READ_DATABASE_URL` differs, its role/head/schema posture is
+checked separately; no active Admin route uses that read pool, so the check
+does not require Admin writes there or certify its other consumers.
+
+Missing privileges, schema/head drift, required RLS flags, shadowed table
+resolution, or SUPERUSER/BYPASSRLS authority on the effective **or login** role
+fail the gate. Table ownership is reported separately from effective grants:
+ordinary ownership retains DDL/regrant authority, while FORCE RLS still applies.
+Column-only grants are an explicit unverified result needing a review of the
+exact SQL statements, not a recommendation to grant broad access. Policy
+presence is not proof of policy semantics, authorization, or provider effects;
+retain the restricted-role behavior tests and normal-auth acceptance journey.
+
+The engineer changing an Admin route, a mandatory shared writer, a table or its
+RLS migration must update `GROUPS`, `RLS_TABLES` and `NEW_COLUMNS` in the script
+as applicable and have the release reviewer check the cited source paths.
+`python scripts/verify_admin_runtime_privileges.py --contract` prints that
+inventory offline without loading environment files or connecting. Contract
+drift, hosted execution and a successful report remain release requirements;
+synthetic unit tests do not establish the host's grants. Optional platform SIP
+seeding is included only when its existing configuration enables that hook.
+
+`backend/scripts/set_release_version.py --env-file /opt/talky/backend/.env
+--candidate-sha <full-sha>` changes only the release identity and refuses an
+invalid file or detected concurrent file change. The deploy runs it with sudo, then checks
+both started API processes using `--check-pid <MainPID>`. A public health response
+alone is not evidence that both processes loaded the intended version. These
+checks read process environments internally and never print credentials.
 
 ## Rollback
 
@@ -317,6 +397,12 @@ Postgres and Redis on the box are compose-managed:
 ```bash
 docker compose -f /opt/talky/docker-compose.yml ps
 ```
+
+## Website enquiry intake configuration
+
+Set `CONTACT_ENQUIRY_PUBLIC_ORIGIN` in the Next server environment to the exact public website origin; the backend's allowed origins must include it. When browser API requests use a same-origin reverse proxy, also set server-only `CONTACT_ENQUIRY_API_BASE_URL` to the explicit FastAPI base ending in `/api/v1`, such as `http://127.0.0.1:8000/api/v1` on a host where that is the actual backend listener. Do not point it at the public website or Next listener. If the override is absent, the existing separate-origin `NEXT_PUBLIC_API_BASE_URL` remains the fallback; an explicitly empty or invalid override fails closed. No caller-supplied destination, cookies or authorization headers are forwarded.
+
+Verify public contact submission produces a committed receipt, then use normal platform-admin access to find that exact reference, mark it handled and reopen it. This saves an enquiry; it does not send email. Apply migration `0074_contact_enquiry_revision` before the matching backend and Admin client: status writes require the reviewed revision, and an unknown response requires a saved-state read before another deliberate decision. Older clients without that revision are rejected rather than overwriting a newer decision.
 
 ## Pre-production checklist
 

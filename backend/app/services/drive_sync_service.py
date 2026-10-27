@@ -70,7 +70,6 @@ class DriveSyncService:
         """
         self.db_client = db_client
         self.supabase = db_client
-        self._connector_cache: Dict[str, Any] = {}
     
     async def sync_call_files(
         self,
@@ -212,63 +211,14 @@ class DriveSyncService:
             )
     
     async def _get_drive_connector(self, tenant_id: str):
-        """Get active Drive connector for tenant."""
+        """Resolve current canonical credentials for each sync; never cache authority."""
+        from app.services.connector_resolver import resolve_active_connector, ConnectorNotConnectedError
         try:
-            cache_key = f"drive_{tenant_id}"
-            if cache_key in self._connector_cache:
-                return self._connector_cache[cache_key]
-            
-            result = self.db_client.table("connectors").select(
-                "id, provider, type, status, encrypted_tokens"
-            ).eq(
-                "tenant_id", tenant_id
-            ).eq(
-                "type", "drive"
-            ).eq(
-                "status", "active"
-            ).limit(1).execute()
-            
-            if not result.data:
-                return None
-            
-            connector_data = result.data[0]
-            
-            from app.infrastructure.connectors.base import ConnectorFactory
-            from app.infrastructure.connectors.encryption import decrypt_tokens
-            
-            provider = connector_data["provider"]
-            connector = ConnectorFactory.create(
-                provider=provider,
-                tenant_id=tenant_id,
-                connector_id=connector_data["id"]
-            )
-            
-            tokens = decrypt_tokens(connector_data["encrypted_tokens"])
-            await connector.set_access_token(
-                token=tokens.get("access_token"),
-                expires_at=tokens.get("expires_at")
-            )
-            
-            if connector.is_token_expired():
-                refresh_token = tokens.get("refresh_token")
-                if refresh_token:
-                    new_tokens = await connector.refresh_tokens(refresh_token)
-                    await connector.set_access_token(
-                        token=new_tokens.access_token,
-                        expires_at=new_tokens.expires_at
-                    )
-                    await self._update_connector_tokens(
-                        connector_data["id"],
-                        new_tokens
-                    )
-            
-            self._connector_cache[cache_key] = connector
+            connector, _, _ = await resolve_active_connector(self.db_client, tenant_id, "drive")
             return connector
-            
-        except Exception as e:
-            logger.error(f"Failed to get Drive connector for tenant {tenant_id[:8]}...: {e}")
+        except ConnectorNotConnectedError:
             return None
-    
+
     async def _get_tenant(self, tenant_id: str) -> Optional[Dict[str, Any]]:
         """Get tenant info for folder naming."""
         try:
@@ -406,24 +356,6 @@ class DriveSyncService:
             }).eq("call_id", call_id).execute()
         except Exception as e:
             logger.warning(f"Failed to update transcript Drive info: {e}")
-    
-    async def _update_connector_tokens(self, connector_id: str, tokens) -> None:
-        """Update connector with refreshed tokens."""
-        try:
-            from app.infrastructure.connectors.encryption import encrypt_tokens
-            
-            encrypted = encrypt_tokens({
-                "access_token": tokens.access_token,
-                "refresh_token": tokens.refresh_token,
-                "expires_at": tokens.expires_at.isoformat() if tokens.expires_at else None
-            })
-            
-            self.db_client.table("connectors").update({
-                "encrypted_tokens": encrypted,
-                "updated_at": datetime.utcnow().isoformat()
-            }).eq("id", connector_id).execute()
-        except Exception as e:
-            logger.warning(f"Failed to update connector tokens: {e}")
     
     def _sanitize_folder_name(self, name: str) -> str:
         """Sanitize folder name for Drive compatibility."""

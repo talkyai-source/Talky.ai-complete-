@@ -3,19 +3,18 @@ Suspension Management API Endpoints
 
 User, tenant, and partner suspension with appeal workflow.
 """
-from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from app.api.v1.dependencies import get_current_user, require_permissions, require_platform_admin, get_audit_logger, get_suspension_service
+from app.api.v1.dependencies import require_permissions, require_platform_admin, get_audit_logger, get_suspension_service
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.suspension_service import (
     SuspensionService,
     SuspensionType,
-    TargetType,
+    validate_duration_hours,
 )
 
 router = APIRouter(prefix="/admin/suspensions", tags=["Suspensions"])
@@ -27,8 +26,13 @@ class SuspendRequest(BaseModel):
     reason_category: str
     reason_description: str
     evidence: Optional[dict] = None
-    duration_hours: Optional[int] = None
+    duration_hours: Optional[int] = Field(default=None, gt=0, strict=True)
     notify_user: bool = True
+
+    @field_validator("duration_hours")
+    @classmethod
+    def duration_is_representable(cls, value):
+        return validate_duration_hours(value)
 
 
 class SuspendResponse(BaseModel):
@@ -39,6 +43,13 @@ class SuspendResponse(BaseModel):
     status: str
     propagated_to: list[str]
     propagation_failed: list[str]
+    propagation_pending: list[str] = Field(default_factory=list)
+    audit_event_id: Optional[UUID] = None
+    changed: bool = True
+    effective_status: Optional[str] = None
+    remaining_hold_ids: list[UUID] = Field(default_factory=list)
+    restoration_warnings: list[str] = Field(default_factory=list)
+    revoked_sessions: Optional[int] = None
 
 
 class RestoreRequest(BaseModel):
@@ -46,9 +57,19 @@ class RestoreRequest(BaseModel):
     reason: str
 
 
+class UserRestoreRequest(RestoreRequest):
+    expected_suspension_id: Optional[UUID] = Field(default=None, description="Exact reviewed hold; Admin UI always supplies it.")
+
+
+class AccountRestoreRequest(RestoreRequest):
+    expected_suspension_id: UUID = Field(
+        description="Exact reviewed formal hold. A stale retry cannot restore a later hold."
+    )
+
+
 class AppealRequest(BaseModel):
     """Appeal request"""
-    appeal_reason: str
+    appeal_reason: str = Field(min_length=1, max_length=4000)
 
 
 class AppealReviewRequest(BaseModel):
@@ -65,6 +86,10 @@ class SuspensionStatusResponse(BaseModel):
     is_suspended: bool
     active_suspension: Optional[dict]
     suspension_history: list[dict]
+    effective_status: Optional[str] = None
+    remaining_hold_ids: list[UUID] = Field(default_factory=list)
+    history_complete: bool = True
+    history_limit: int = 200
 
 
 # User Suspension Endpoints
@@ -89,21 +114,6 @@ async def suspend_user(
         notify_user=data.notify_user,
     )
 
-    # Log suspension
-    await audit_logger.log(
-        event_type=AuditEvent.USER_SUSPENDED,
-        action="user_suspended",
-        actor_id=current_user["id"],
-        resource_type="user",
-        resource_id=user_id,
-        after_state={
-            "suspension_id": str(result.suspension_id),
-            "suspension_type": data.suspension_type.value,
-            "reason_category": data.reason_category,
-        },
-        metadata={"duration_hours": data.duration_hours},
-    )
-
     return SuspendResponse(
         suspension_id=result.suspension_id,
         target_type=result.target_type.value,
@@ -111,13 +121,15 @@ async def suspend_user(
         status=result.status,
         propagated_to=result.propagated_to,
         propagation_failed=result.propagation_failed,
+        audit_event_id=result.audit_event_id,
+        propagation_pending=result.propagation_pending,
     )
 
 
 @router.post("/users/{user_id}/restore")
 async def restore_user(
     user_id: UUID,
-    data: RestoreRequest,
+    data: UserRestoreRequest,
     current_user: dict = Depends(require_permissions(["users:restore"])),
     suspension_service: SuspensionService = Depends(get_suspension_service),
     audit_logger: AuditLogger = Depends(get_audit_logger),
@@ -127,19 +139,14 @@ async def restore_user(
         user_id=user_id,
         restored_by=current_user["id"],
         reason=data.reason,
+        expected_suspension_id=data.expected_suspension_id,
     )
 
-    # Log restoration
-    await audit_logger.log(
-        event_type=AuditEvent.USER_RESTORED,
-        action="user_restored",
-        actor_id=current_user["id"],
-        resource_type="user",
-        resource_id=user_id,
-        metadata={"restore_reason": data.reason},
-    )
-
-    return {"restored": True, "suspension_id": result.suspension_id}
+    return {"restored": True, "suspension_id": result.suspension_id,
+            "audit_event_id": result.audit_event_id,
+            "propagated_to": result.propagated_to,
+            "propagation_failed": result.propagation_failed,
+            "propagation_pending": result.propagation_pending}
 
 
 # The three read routes below return raw suspension_events rows (evidence,
@@ -158,6 +165,10 @@ async def get_user_suspension_status(
         target_id=status.target_id,
         status=status.status.value,
         is_suspended=status.is_suspended,
+        effective_status=status.effective_status,
+        remaining_hold_ids=status.remaining_hold_ids,
+        history_complete=status.history_complete,
+        history_limit=status.history_limit,
         active_suspension=status.active_suspension.dict() if status.active_suspension else None,
         suspension_history=[s.dict() for s in status.suspension_history],
     )
@@ -171,7 +182,8 @@ async def get_user_suspension_history(
 ):
     """Get user suspension history"""
     status = await suspension_service.get_status(user_id=user_id)
-    return {"history": [s.dict() for s in status.suspension_history]}
+    return {"history": [s.dict() for s in status.suspension_history],
+            "history_complete":status.history_complete,"history_limit":status.history_limit}
 
 
 # Tenant Suspension Endpoints
@@ -198,36 +210,13 @@ async def suspend_tenant(
         notify_users=data.notify_user,
     )
 
-    # Log suspension
-    await audit_logger.log(
-        event_type=AuditEvent.TENANT_SUSPENDED,
-        action="tenant_suspended",
-        actor_id=current_user["id"],
-        tenant_id=tenant_id,
-        resource_type="tenant",
-        resource_id=tenant_id,
-        after_state={
-            "suspension_id": str(result.suspension_id),
-            "suspension_type": data.suspension_type.value,
-            "immediate": immediate,
-        },
-        metadata={"reason_category": data.reason_category},
-    )
-
-    return SuspendResponse(
-        suspension_id=result.suspension_id,
-        target_type=result.target_type.value,
-        target_id=result.target_id,
-        status=result.status,
-        propagated_to=result.propagated_to,
-        propagation_failed=result.propagation_failed,
-    )
+    return SuspendResponse(**result.model_dump())
 
 
 @router.post("/tenants/{tenant_id}/restore")
 async def restore_tenant(
     tenant_id: UUID,
-    data: RestoreRequest,
+    data: AccountRestoreRequest,
     current_user: dict = Depends(require_permissions(["tenants:restore"])),
     suspension_service: SuspensionService = Depends(get_suspension_service),
     audit_logger: AuditLogger = Depends(get_audit_logger),
@@ -237,20 +226,10 @@ async def restore_tenant(
         tenant_id=tenant_id,
         restored_by=current_user["id"],
         reason=data.reason,
+        expected_suspension_id=data.expected_suspension_id,
     )
 
-    # Log restoration
-    await audit_logger.log(
-        event_type=AuditEvent.TENANT_RESTORED,
-        action="tenant_restored",
-        actor_id=current_user["id"],
-        tenant_id=tenant_id,
-        resource_type="tenant",
-        resource_id=tenant_id,
-        metadata={"restore_reason": data.reason},
-    )
-
-    return {"restored": True, "suspension_id": result.suspension_id}
+    return {"restored": True, **result.model_dump()}
 
 
 @router.get("/tenants/{tenant_id}/status", response_model=SuspensionStatusResponse)
@@ -267,12 +246,25 @@ async def get_tenant_suspension_status(
         target_id=status.target_id,
         status=status.status.value,
         is_suspended=status.is_suspended,
+        effective_status=status.effective_status,
+        remaining_hold_ids=status.remaining_hold_ids,
+        history_complete=status.history_complete,
+        history_limit=status.history_limit,
         active_suspension=status.active_suspension.dict() if status.active_suspension else None,
         suspension_history=[s.dict() for s in status.suspension_history],
     )
 
 
 # Partner Suspension Endpoints
+
+@router.get("/partners/{partner_id}/status", response_model=SuspensionStatusResponse)
+async def get_partner_suspension_status(
+    partner_id: UUID,
+    current_user: dict = Depends(require_platform_admin),
+    suspension_service: SuspensionService = Depends(get_suspension_service),
+):
+    status = await suspension_service.get_status(partner_id=partner_id)
+    return SuspensionStatusResponse(**status.model_dump())
 
 @router.post("/partners/{partner_id}/suspend", response_model=SuspendResponse)
 async def suspend_partner(
@@ -293,33 +285,13 @@ async def suspend_partner(
         duration_hours=data.duration_hours,
     )
 
-    # Log suspension
-    await audit_logger.log(
-        event_type=AuditEvent.TENANT_SUSPENDED,
-        action="partner_suspended",
-        actor_id=current_user["id"],
-        resource_type="partner",
-        resource_id=partner_id,
-        after_state={
-            "suspension_id": str(result.suspension_id),
-            "suspension_type": data.suspension_type.value,
-        },
-    )
-
-    return SuspendResponse(
-        suspension_id=result.suspension_id,
-        target_type=result.target_type.value,
-        target_id=result.target_id,
-        status=result.status,
-        propagated_to=result.propagated_to,
-        propagation_failed=result.propagation_failed,
-    )
+    return SuspendResponse(**result.model_dump())
 
 
 @router.post("/partners/{partner_id}/restore")
 async def restore_partner(
     partner_id: UUID,
-    data: RestoreRequest,
+    data: AccountRestoreRequest,
     current_user: dict = Depends(require_permissions(["partners:restore"])),
     suspension_service: SuspensionService = Depends(get_suspension_service),
     audit_logger: AuditLogger = Depends(get_audit_logger),
@@ -329,33 +301,24 @@ async def restore_partner(
         partner_id=partner_id,
         restored_by=current_user["id"],
         reason=data.reason,
+        expected_suspension_id=data.expected_suspension_id,
     )
 
-    await audit_logger.log(
-        event_type=AuditEvent.TENANT_RESTORED,
-        action="partner_restored",
-        actor_id=current_user["id"],
-        resource_type="partner",
-        resource_id=partner_id,
-        metadata={"restore_reason": data.reason},
-    )
+    return {"restored": True, **result.model_dump()}
 
-    return {"restored": True, "suspension_id": result.suspension_id}
-
-
-# Appeal Endpoints
 
 @router.post("/{suspension_id}/appeal")
 async def submit_appeal(
     suspension_id: UUID,
     data: AppealRequest,
-    current_user: dict = Depends(require_permissions(["appeals:submit"])),
+    current_user: dict = Depends(require_platform_admin),
     suspension_service: SuspensionService = Depends(get_suspension_service),
 ):
-    """Submit an appeal for a suspension"""
+    """Record an administrator-operated appeal for an exact active hold."""
     result = await suspension_service.submit_appeal(
         suspension_id=suspension_id,
         appeal_reason=data.appeal_reason,
+        submitted_by=current_user["id"],
     )
     return result
 
@@ -364,9 +327,8 @@ async def submit_appeal(
 async def review_appeal(
     suspension_id: UUID,
     data: AppealReviewRequest,
-    current_user: dict = Depends(require_permissions(["appeals:review"])),
+    current_user: dict = Depends(require_platform_admin),
     suspension_service: SuspensionService = Depends(get_suspension_service),
-    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Review and decide on a suspension appeal"""
     result = await suspension_service.review_appeal(
@@ -374,15 +336,6 @@ async def review_appeal(
         reviewed_by=current_user["id"],
         decision=data.decision,
         response=data.response,
-    )
-
-    await audit_logger.log(
-        event_type=AuditEvent.USER_UPDATED,
-        action="appeal_reviewed",
-        actor_id=current_user["id"],
-        resource_type="suspension",
-        resource_id=suspension_id,
-        metadata={"decision": data.decision},
     )
 
     return result
@@ -399,27 +352,15 @@ async def bulk_suspend(
     current_user: dict = Depends(require_permissions(["admin:bulk_suspend"])),
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
-    """Bulk suspend users/tenants matching criteria"""
-    # Implementation would process bulk suspension
-    await audit_logger.log(
-        event_type=AuditEvent.USER_SUSPENDED,
-        action="bulk_suspension",
-        actor_id=current_user["id"],
-        metadata={"criteria": criteria, "suspension_type": suspension_type.value},
-    )
-
-    return {"bulk_suspend_initiated": True}
+    """The dormant bulk API has no supported execution workflow."""
+    raise HTTPException(status_code=501, detail="Bulk suspension is not supported. Review and suspend individual accounts.")
 
 
 @router.get("/propagation-status/{suspension_id}")
 async def get_propagation_status(
     suspension_id: UUID,
-    current_user: dict = Depends(require_permissions(["admin:read"])),
+    current_user: dict = Depends(require_platform_admin),
+    suspension_service: SuspensionService = Depends(get_suspension_service),
 ):
-    """Check block propagation status"""
-    return {
-        "suspension_id": suspension_id,
-        "propagation_status": "completed",
-        "services_confirmed": ["api_gateway", "session_manager", "call_guard"],
-        "pending_services": [],
-    }
+    """Read the durable hold and distinguish it from downstream acknowledgement."""
+    return await suspension_service.get_propagation_status(suspension_id)

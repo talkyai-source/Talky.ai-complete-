@@ -5,6 +5,8 @@ the fail-safe behaviours (bad ciphertext, DB down, missing pool).
 """
 from __future__ import annotations
 
+from uuid import uuid4
+
 from typing import Any, Optional
 from unittest.mock import AsyncMock, MagicMock
 
@@ -84,6 +86,34 @@ class _FakeEncryption:
 # ──────────────────────────────────────────────────────────────────────────
 # Env resolution (the old single-tenant path)
 # ──────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_metadata_preserves_real_tenant_row_and_same_cache_selection(monkeypatch):
+    tenant, row_id = str(uuid4()), str(uuid4())
+    pool = _FakePool({"id": row_id, "encrypted_key": "synthetic ciphertext"})
+    resolver = CredentialResolver(db_pool=pool, encryption_service=_FakeEncryption("tenant-secret"))
+    value = await resolver.resolve_with_metadata("groq", tenant_id=tenant)
+    assert value.secret == "tenant-secret"
+    assert value.observation_context == {"source": "tenant", "tenant_id": tenant, "credential_id": row_id}
+    assert "tenant-secret" not in repr(value)
+    resolver._resolve_tenant = AsyncMock(side_effect=AssertionError("cache should be shared"))
+    assert await resolver.resolve("groq", tenant_id=tenant) == "tenant-secret"
+    assert await resolver.resolve_with_metadata("groq", tenant_id=tenant) is value
+
+
+@pytest.mark.asyncio
+async def test_metadata_platform_rotation_does_not_invent_tenant_row(monkeypatch):
+    tenant = str(uuid4())
+    resolver = CredentialResolver(db_pool=_FakePool(None))
+    keys = iter(("platform-first", "platform-second"))
+    monkeypatch.setattr(credential_resolver_module, "resolve_sync_env_only", lambda *_a, **_kw: next(keys))
+    first = await resolver.resolve_with_metadata("groq", tenant_id=tenant)
+    second = await resolver.resolve_with_metadata("groq", tenant_id=tenant)
+    assert (first.secret, second.secret) == ("platform-first", "platform-second")
+    assert first.observation_context == second.observation_context == {
+        "source": "platform", "tenant_id": tenant, "credential_id": None,
+    }
+
 
 def test_env_lookup_returns_stripped_value(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "  env-key-123  ")

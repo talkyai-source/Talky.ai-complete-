@@ -8,9 +8,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from app.domain.services.telephony.termination_receipts import TerminationReceiptResult
 
 from app.domain.services.telephony import lifecycle, termination
 from app.infrastructure.telephony.asterisk_adapter import AsteriskAdapter
+from tests.unit.pbx_identity_helpers import bind_test_adapter
 
 
 @pytest.fixture
@@ -47,6 +49,7 @@ def path(monkeypatch):
                 direction="inbound",
                 campaign_id=None,
                 answered_at=None,
+                route_snapshot={"control_backend": adapter.control_backend_identity},
             )
             if "recovery_match_count" in query:
                 row.update(id=row["call_id"], recovery_match_count=1)
@@ -105,7 +108,13 @@ def path(monkeypatch):
         return 404, {}
 
     adapter._ari = ari
+    bind_test_adapter(adapter)
     monkeypatch.setattr(termination, "acquire_with_tenant", acquire)
+    async def receipt(_pool, context, *, requested):
+        assert context.provider_call_id == value.parent
+        assert context.provider_legs == ((value.child, "asterisk"),)
+        return TerminationReceiptResult(True, True, "saved")
+    monkeypatch.setattr(lifecycle, "_save_confirmed_termination_receipt", receipt)
     monkeypatch.setattr(lifecycle, "get_adapter", lambda: adapter)
     monkeypatch.setattr(lifecycle, "_state", lambda: state)
     monkeypatch.setattr(lifecycle, "_on_call_ended", ended)
@@ -131,10 +140,10 @@ def path(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_outage_parent_request_and_synchronous_callback_never_settle(path):
+async def test_outage_cannot_dispatch_without_original_backend_and_callbacks_never_settle(path):
     assert await path.invoke() is False
-    assert path.deletes == ["/channels/" + path.parent]
-    assert path.callback_results == [False]
+    assert path.deletes == []
+    assert path.callback_results == []
     assert path.entries == []
     assert path.parent in lifecycle._orphan_recovery_contexts_by_call
     assert path.parent not in lifecycle._orphan_recovery_in_flight
@@ -151,13 +160,14 @@ async def test_repeated_db_outage_then_durable_all_leg_proof_converges(path):
     assert await path.invoke() is True
     assert len(path.entries) == 1
     assert "/channels/" + path.child in path.entries[0][1]
-    assert path.callback_results == [False, False, False]
+    assert path.callback_results == [False]
     assert path.parent not in lifecycle._orphan_recovery_contexts_by_call
     assert path.state.register_cleanup_obligation.await_count == 3
 
 
 @pytest.mark.asyncio
 async def test_cancellation_retains_callback_fence_and_retry_ownership(path):
+    path.db_available = True
     path.blocked = asyncio.Event()
     task = asyncio.create_task(path.invoke())
     await asyncio.wait_for(path.started.wait(), timeout=2)
@@ -246,6 +256,8 @@ async def test_context_replaced_during_proof_is_not_removed_or_settled(path):
 
 @pytest.mark.asyncio
 async def test_second_lease_attempt_cannot_overwrite_paused_owner(path):
+    path.db_available = True
+    path.child_present = True
     path.blocked = asyncio.Event()
     task = asyncio.create_task(path.invoke())
     await asyncio.wait_for(path.started.wait(), timeout=2)

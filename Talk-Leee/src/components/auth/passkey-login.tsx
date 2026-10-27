@@ -1,8 +1,10 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
+import { useIsPresent } from "framer-motion";
 import { Loader2, Key } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { getRequestIdentityGeneration, subscribeRequestIdentityGeneration } from "@/lib/http-client";
 import {
   isWebAuthnSupported,
   startPasskeyAuth,
@@ -26,8 +28,54 @@ export default function PasskeyLogin({ onSuccess, onError, disabled = false }: P
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const errorId = useId();
+  const isPresent = useIsPresent();
+  const mounted = useRef(false);
+  const enabled = useRef(false);
+  const callbacks = useRef({ onSuccess, onError });
+  const active = useRef<{ controller: AbortController; identity: number } | null>(null);
+
+  const retire = useCallback(() => {
+    const previous = active.current;
+    active.current = null;
+    previous?.controller.abort();
+  }, []);
+
+  useLayoutEffect(() => {
+    callbacks.current = { onSuccess, onError };
+  }, [onSuccess, onError]);
+
+  useLayoutEffect(() => {
+    mounted.current = true;
+    const unsubscribe = subscribeRequestIdentityGeneration(() => {
+      retire();
+      setLoading(false);
+      setError("");
+    });
+    return () => {
+      mounted.current = false;
+      retire();
+      unsubscribe();
+    };
+  }, [retire]);
+
+  useLayoutEffect(() => {
+    enabled.current = !disabled && isPresent;
+    if (!enabled.current) {
+      retire();
+      // Back starts AnimatePresence's exit before unmount. Retire the prompt
+      // at that committed transition, including its visible loading state.
+      setLoading(false);
+    }
+  }, [disabled, isPresent, retire]);
 
   async function handlePasskeyLogin() {
+    // A ref closes the double-activation window before React commits disabled.
+    // Retained callbacks also consult the current committed availability.
+    if (!mounted.current || !enabled.current || active.current) return;
+    const operation = { controller: new AbortController(), identity: getRequestIdentityGeneration() };
+    active.current = operation;
+    const ownsOperation = () => mounted.current && enabled.current && active.current === operation
+      && !operation.controller.signal.aborted && getRequestIdentityGeneration() === operation.identity;
     setLoading(true);
     setError("");
 
@@ -38,18 +86,25 @@ export default function PasskeyLogin({ onSuccess, onError, disabled = false }: P
 
       // Start authentication
       const startResponse = await startPasskeyAuth();
+      if (!ownsOperation()) return;
 
       // Get credential from user
-      const assertion = await getWebAuthnCredential(startResponse.options);
+      const assertion = await getWebAuthnCredential(startResponse.options, operation.controller.signal);
+      if (!ownsOperation()) return;
 
       // Extract assertion data
       const assertionData = extractCredentialAssertionData(assertion);
 
       // Complete authentication
-      const tokens = await completePasskeyAuth(startResponse.ceremony_id, assertionData);
+      const tokens = await completePasskeyAuth(startResponse.ceremony_id, assertionData, {
+        signal: operation.controller.signal,
+        ownsOperation,
+      });
+      if (!ownsOperation()) return;
 
-      onSuccess(tokens);
+      callbacks.current.onSuccess(tokens);
     } catch (err) {
+      if (!ownsOperation()) return;
       let errorMsg = "Passkey login failed";
 
       if (err instanceof Error) {
@@ -65,9 +120,12 @@ export default function PasskeyLogin({ onSuccess, onError, disabled = false }: P
       }
 
       setError(errorMsg);
-      onError?.(errorMsg);
+      callbacks.current.onError?.(errorMsg);
     } finally {
-      setLoading(false);
+      if (ownsOperation()) {
+        active.current = null;
+        setLoading(false);
+      }
     }
   }
 
@@ -80,7 +138,7 @@ export default function PasskeyLogin({ onSuccess, onError, disabled = false }: P
       <Button
         type="button"
         onClick={handlePasskeyLogin}
-        disabled={loading || disabled}
+        disabled={loading || disabled || !isPresent}
         className="w-full"
         variant="outline"
       >

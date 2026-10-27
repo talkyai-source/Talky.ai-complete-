@@ -1,47 +1,17 @@
 "use client";
 
-/**
- * Audit trail, read from the real audit log.
- *
- * This page used to render a fixtures array and issue no request at all. It now
- * reads GET /api/v1/admin/audit/logs, which the backend mounts and gates on the
- * `audit:read` permission, and which scopes every row to the caller's own
- * tenant.
- *
- * The three outcomes are kept visibly distinct, because conflating them is what
- * made the old page dangerous: "still loading", "the request failed" and "the
- * tenant genuinely has no audit events" look identical if all three render an
- * empty table, and only the last one is good news.
- *
- * The category buttons filter what has already been fetched rather than
- * re-querying. The endpoint takes start_date, end_date, event_type, actor_id,
- * resource_type and severity, but has no category parameter, so a server-side
- * category filter is not available to ask for.
+/** A validated, identity-owned view of the most recent 200 canonical records.
+ * Category buttons filter this loaded page only; they do not search all history.
  */
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Filter, Loader2, Shield } from "lucide-react";
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api";
-
-/** One row of GET /admin/audit/logs (backend `AuditLogResponse`). */
-interface AuditLogRow {
-  event_id: string;
-  event_time: string;
-  event_type: string;
-  event_category: string;
-  severity: string;
-  actor_id: string | null;
-  actor_type: string;
-  resource_type: string | null;
-  action: string;
-  description: string | null;
-  ip_address: string | null;
-}
+import { useAuditLogs } from "@/lib/api-hooks";
+import type { AuditLogEvent } from "@/lib/models";
 
 /**
  * The server's vocabulary, not a friendlier one invented here. `EventCategory`
@@ -88,32 +58,22 @@ function badge(value: string, className: string) {
 }
 
 /** Actors arrive as an id and a type; there is no display name on this endpoint. */
-function actorLabel(log: AuditLogRow) {
-  if (!log.actor_id) return log.actor_type || "system";
-  return `${log.actor_type}:${log.actor_id.slice(0, 8)}`;
+function actorLabel(log: AuditLogEvent) {
+  return log.actor.id ? `${log.actor.type}: ${log.actor.id}` : `${log.actor.type} (ID unavailable)`;
 }
 
 export default function AuditLogsPage() {
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
-  const logsQuery = useQuery({
-    queryKey: ["admin", "auditLogs"],
-    queryFn: () =>
-      api.request<AuditLogRow[]>({
-        path: "/admin/audit/logs",
-        method: "GET",
-        query: { limit: 200 },
-      }),
-  });
-
-  const logs = useMemo(() => logsQuery.data ?? [], [logsQuery.data]);
+  const logsQuery = useAuditLogs({ pageSize: 200 });
+  const logs = useMemo(() => logsQuery.data?.items ?? [], [logsQuery.data]);
   const filteredLogs = useMemo(
-    () => (categoryFilter === "all" ? logs : logs.filter((log) => log.event_category === categoryFilter)),
+    () => (categoryFilter === "all" ? logs : logs.filter((log) => log.eventCategory === categoryFilter)),
     [logs, categoryFilter],
   );
 
   return (
-    <DashboardLayout title="Audit Logs" description="Security events, role changes, and access activity for your tenant.">
+    <DashboardLayout title="Audit Logs" description="Audit activity available to the current session. Up to 200 recent events; categories filter this loaded page.">
       <div className="space-y-6">
         {/* Filters */}
         <Card>
@@ -143,7 +103,7 @@ export default function AuditLogsPage() {
               <Shield className="h-5 w-5" aria-hidden /> Audit Trail
             </CardTitle>
             <CardDescription>
-              {logsQuery.isLoading
+              {logsQuery.isPending
                 ? "Loading…"
                 : logsQuery.isError
                   ? "Could not be loaded"
@@ -151,7 +111,7 @@ export default function AuditLogsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {logsQuery.isLoading && (
+            {logsQuery.isPending && (
               <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading audit events…
               </div>
@@ -192,17 +152,17 @@ export default function AuditLogsPage() {
                   </thead>
                   <tbody>
                     {filteredLogs.map((log) => (
-                      <tr key={log.event_id} className="border-b border-border transition-colors last:border-b-0 hover:bg-muted/20">
-                        <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{formatTimestamp(log.event_time)}</td>
+                      <tr key={log.id} className="border-b border-border transition-colors last:border-b-0 hover:bg-muted/20">
+                        <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{formatTimestamp(log.timestamp)}</td>
                         <td className="px-4 py-3">
-                          <div className="font-mono text-xs text-foreground">{actorLabel(log)}</div>
+                          <div className="break-all font-mono text-xs text-foreground">{actorLabel(log)}</div>
                         </td>
                         <td className="px-4 py-3">
-                          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">{log.action}</code>
+                          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">{log.actionType}</code>
                         </td>
-                        <td className="px-4 py-3">{badge(log.event_category, UNKNOWN_CLASS)}</td>
-                        <td className="max-w-[300px] px-4 py-3 text-xs text-muted-foreground">{log.description ?? log.event_type}</td>
-                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{log.ip_address ?? "—"}</td>
+                        <td className="px-4 py-3">{badge(log.eventCategory, UNKNOWN_CLASS)}</td>
+                        <td className="max-w-[300px] px-4 py-3 text-xs text-muted-foreground">{log.description ?? log.eventType}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{log.ipAddress ?? "—"}</td>
                         <td className="px-4 py-3">{badge(log.severity, SEVERITY_CLASS[log.severity] ?? UNKNOWN_CLASS)}</td>
                       </tr>
                     ))}
@@ -214,7 +174,7 @@ export default function AuditLogsPage() {
             {logsQuery.isSuccess && filteredLogs.length === 0 && (
               <div className="py-8 text-center text-sm text-muted-foreground">
                 {logs.length === 0
-                  ? "No audit events have been recorded for your tenant."
+                  ? "No audit events were returned for the current scope."
                   : "No audit events in the loaded page match the selected category."}
               </div>
             )}

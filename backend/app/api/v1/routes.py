@@ -68,6 +68,7 @@ from app.api.v1.endpoints.tenant_phone_numbers import router as tenant_phone_num
 from app.api.v1.endpoints.vonage_bridge import router as vonage_bridge_router
 from app.api.v1.endpoints.twilio_bridge import router as twilio_bridge_router
 from app.api.v1.endpoints.webhooks import router as webhooks_router
+from app.api.v1.endpoints.alertmanager import router as alertmanager_router
 from app.api.v1.endpoints.webhooks_secure import router as webhooks_secure_router
 
 # --- Day 8: Audit Logs + Suspension + Secrets endpoints ---
@@ -112,6 +113,7 @@ api_router.include_router(salesforce_router)
 api_router.include_router(connectors_router)
 api_router.include_router(meetings_router)
 api_router.include_router(webhooks_router)
+api_router.include_router(alertmanager_router)
 api_router.include_router(webhooks_secure_router)
 api_router.include_router(assistant_config_router)
 api_router.include_router(assistant_ws_router)

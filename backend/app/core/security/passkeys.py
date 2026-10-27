@@ -201,7 +201,7 @@ async def create_challenge(
         INSERT INTO webauthn_challenges
                (id, challenge, ceremony, user_id, ip_address, user_agent,
                 expires_at, used, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp() + $7::interval, FALSE, clock_timestamp())
         """,
         ceremony_id,
         challenge_b64,
@@ -209,8 +209,7 @@ async def create_challenge(
         uuid.UUID(user_id) if user_id else None,
         ip_address,
         user_agent,
-        expires_at,
-        now,
+        timedelta(minutes=WEBAUTHN_CHALLENGE_TTL_MINUTES),
     )
 
     logger.debug(

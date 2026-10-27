@@ -4,11 +4,12 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
+from app.core.security.credential_issuance import lock_authenticated_credential_change
 from app.core.security.recovery import (
     format_recovery_code,
     generate_recovery_codes,
@@ -37,6 +38,7 @@ router = APIRouter(tags=["mfa"])
 
 @router.post("/setup", response_model=MFASetupResponse)
 async def setup_mfa(
+    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ) -> MFASetupResponse:
@@ -55,6 +57,7 @@ async def setup_mfa(
     OWASP: A new setup overwrites any existing pending (unconfirmed) secret.
     """
     async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
+        await lock_authenticated_credential_change(conn, request, current_user)
         # P3.3 — refuse to silently downgrade an account that already has
         # confirmed MFA. The previous UPSERT would reset enabled=TRUE rows
         # back to FALSE, leaving the account briefly without 2FA AND
@@ -126,6 +129,7 @@ async def setup_mfa(
 
 @router.post("/confirm", response_model=MFAConfirmResponse)
 async def confirm_mfa(
+    request: Request,
     body: MFAConfirmRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
@@ -144,6 +148,7 @@ async def confirm_mfa(
     OWASP: Recovery codes must be provided at setup time.
     """
     async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
+        await lock_authenticated_credential_change(conn, request, current_user)
         # Load the pending MFA record
         row = await conn.fetchrow(
             """

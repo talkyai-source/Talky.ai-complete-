@@ -245,9 +245,11 @@ async def test_the_catalog_reuses_a_verified_price_for_five_minutes(monkeypatch)
 def test_admin_minutes_cannot_be_negative():
     from app.api.v1.endpoints.admin.tenants import QuotaUpdateRequest
 
-    with pytest.raises(ValidationError):
-        QuotaUpdateRequest(minutes_allocated=-1)
-    assert QuotaUpdateRequest(minutes_allocated=0).minutes_allocated == 0
+    reviewed = {"expected_updated_at": "2026-10-27T00:00:00Z"}
+    with pytest.raises(ValidationError) as rejected:
+        QuotaUpdateRequest(minutes_allocated=-1, **reviewed)
+    assert [error["loc"] for error in rejected.value.errors()] == [("minutes_allocated",)]
+    assert QuotaUpdateRequest(minutes_allocated=0, **reviewed).minutes_allocated == 0
 
 
 async def test_an_expiring_top_up_package_is_not_sold():

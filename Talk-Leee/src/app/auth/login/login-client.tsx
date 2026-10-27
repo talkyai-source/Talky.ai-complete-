@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
     ArrowLeft,
@@ -29,7 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { markFreshLogin } from "@/lib/http-client";
+import { getRequestIdentityGeneration, markFreshLogin, subscribeRequestIdentityGeneration } from "@/lib/http-client";
 import { postAuthDashboard } from "@/lib/post-auth-navigation";
 import MFAVerification from "@/components/auth/mfa-verification";
 import PasskeyLogin from "@/components/auth/passkey-login";
@@ -190,6 +190,38 @@ export default function LoginClientPage() {
     // <MFAVerification /> so it can call /auth/mfa/verify with the right
     // proof — the email field on its own is not accepted by the backend.
     const [mfaChallengeToken, setMfaChallengeToken] = useState<string | null>(null);
+    const [completionError, setCompletionError] = useState("");
+    const mounted = useRef(false);
+    const currentStep = useRef<Step>(step);
+    const currentCredentials = useRef({ email, password });
+    const completed = useRef(false);
+    const passwordAttempt = useRef<{ controller: AbortController; identity: number } | null>(null);
+    const retirePasswordAttempt = useCallback(() => {
+        const previous = passwordAttempt.current;
+        passwordAttempt.current = null;
+        previous?.controller.abort();
+    }, []);
+
+    useLayoutEffect(() => {
+        mounted.current = true;
+        const unsubscribe = subscribeRequestIdentityGeneration(() => {
+            retirePasswordAttempt();
+            if (completed.current) return;
+            currentStep.current = "email";
+            setStep("email");
+            setShowPasskey(false);
+            setPassword("");
+            setMfaChallengeToken(null);
+            setLoading(false);
+            setError("Your sign-in changed. Please sign in again.");
+        });
+        return () => { mounted.current = false; retirePasswordAttempt(); unsubscribe(); };
+    }, [retirePasswordAttempt]);
+    useLayoutEffect(() => {
+        currentStep.current = step;
+        currentCredentials.current = { email, password };
+        if (step !== "password") retirePasswordAttempt();
+    }, [email, password, step, retirePasswordAttempt]);
 
     const { applyLoginResult } = useAuth();
     const [logoutUnconfirmed, setLogoutUnconfirmed] = useState(false);
@@ -214,80 +246,95 @@ export default function LoginClientPage() {
     // ─── Shared post-login handler (deduplicated) ────────────────────
     const handleLoginSuccess = useCallback(
         async (tokens: LoginTokens) => {
-            api.setToken(tokens.access_token);
-            // Phase 7 universal-auth-state: dropped the
-            // `localStorage.setItem("refresh_token", …)` write. Nothing
-            // reads it — the backend's `talky_rt` HttpOnly cookie is the
-            // canonical refresh-token store; the shared http-client hits
-            // /auth/refresh which sends the cookie via credentials: 'include'.
-            // The legacy localStorage write was Phase A-era plumbing that
-            // never got cleaned up.
-            if (rememberMe) localStorage.setItem("remember_me", "true");
+            if (!mounted.current || completed.current) return;
+            if (!tokens.access_token.trim()) throw new Error("The server did not confirm sign-in. Please start again.");
+            // Retire before deliberately adopting our own successful identity.
+            // That adoption advances the shared generation synchronously.
+            passwordAttempt.current = null;
+            completed.current = true;
+            try {
+                api.setToken(tokens.access_token);
+                // Phase 7 universal-auth-state: dropped the
+                // `localStorage.setItem("refresh_token", …)` write. Nothing
+                // reads it — the backend's `talky_rt` HttpOnly cookie is the
+                // canonical refresh-token store; the shared http-client hits
+                // /auth/refresh which sends the cookie via credentials: 'include'.
+                // The legacy localStorage write was Phase A-era plumbing that
+                // never got cleaned up.
+                if (rememberMe) {
+                    try { localStorage.setItem("remember_me", "true"); } catch { /* An optional preference cannot prevent sign-in. */ }
+                }
 
-            // Seed AuthContext.user from the login response BEFORE the
-            // navigation to /dashboard. React 18 batches state updates,
-            // so a bare setUser call wouldn't commit before router.push
-            // triggers the soft navigation — the dashboard layout would
-            // render with user=null and redirect right back to login.
-            // flushSync forces React to commit the update synchronously
-            // so by the time router.push runs, AuthContext.user is set.
-            if (tokens.user_id && tokens.email && tokens.role) {
-                flushSync(() => {
-                    applyLoginResult({
-                        user_id: tokens.user_id!,
-                        tenant_id: tokens.tenant_id,
-                        email: tokens.email!,
-                        role: tokens.role!,
-                        business_name: tokens.business_name,
-                        minutes_remaining: tokens.minutes_remaining,
-                        minutes_state: tokens.minutes_state,
-                        access_token: tokens.access_token,
+                // Seed AuthContext.user from the login response BEFORE the
+                // navigation to /dashboard. React 18 batches state updates,
+                // so a bare setUser call wouldn't commit before router.push
+                // triggers the soft navigation — the dashboard layout would
+                // render with user=null and redirect right back to login.
+                // flushSync forces React to commit the update synchronously
+                // so by the time router.push runs, AuthContext.user is set.
+                if (tokens.user_id && tokens.email && tokens.role) {
+                    flushSync(() => {
+                        applyLoginResult({
+                            user_id: tokens.user_id!,
+                            tenant_id: tokens.tenant_id,
+                            email: tokens.email!,
+                            role: tokens.role!,
+                            business_name: tokens.business_name,
+                            minutes_remaining: tokens.minutes_remaining,
+                            minutes_state: tokens.minutes_state,
+                            access_token: tokens.access_token,
+                        });
                     });
-                });
-            }
+                }
 
-            // Open a short grace window so the dashboard's first /me
-            // call cannot trip the session-expired handler back to
-            // /auth/login on a freshly-minted token (clock skew /
-            // cookie propagation race).
-            markFreshLogin();
+                // Open a short grace window so the dashboard's first /me
+                // call cannot trip the session-expired handler back to
+                // /auth/login on a freshly-minted token (clock skew /
+                // cookie propagation race).
+                markFreshLogin();
 
-            // Use the role straight from the login response. Calling
-            // /auth/me here used to be the source of a "after login,
-            // redirected back to login" bug: any 401 from that round-trip
-            // (clock skew on a freshly-issued token, transient backend
-            // hiccup, etc.) would trip the http-client's session-expired
-            // handler, clear the token we just stored, and bounce the user
-            // to /auth/login — making it look like the login never worked.
-            // Destination. A visitor sent here by the homepage Ask AI button
-            // (per-tab session flag, never a URL parameter) goes back to the
-            // homepage to start the call themselves; everyone else opens
-            // their dashboard. Read the flag BEFORE clearing it — the notice
-            // must not survive a successful login, and the flag is the only
-            // record of the arrival. A white-label admin always gets their
-            // own dashboard; the proxy would redirect them off "/" anyway.
-            const fromAskAi = hasAskAiSignInFlag();
-            clearAskAiSignInFlag();
-            const destination =
-                fromAskAi && tokens.role !== "white_label_admin"
-                    ? "/"
-                    : postAuthDashboard(tokens.role);
+                // Use the role straight from the login response. Calling
+                // /auth/me here used to be the source of a "after login,
+                // redirected back to login" bug: any 401 from that round-trip
+                // (clock skew on a freshly-issued token, transient backend
+                // hiccup, etc.) would trip the http-client's session-expired
+                // handler, clear the token we just stored, and bounce the user
+                // to /auth/login — making it look like the login never worked.
+                // Destination. A visitor sent here by the homepage Ask AI button
+                // (per-tab session flag, never a URL parameter) goes back to the
+                // homepage to start the call themselves; everyone else opens
+                // their dashboard. Read the flag BEFORE clearing it — the notice
+                // must not survive a successful login, and the flag is the only
+                // record of the arrival. A white-label admin always gets their
+                // own dashboard; the proxy would redirect them off "/" anyway.
+                const fromAskAi = hasAskAiSignInFlag();
+                clearAskAiSignInFlag();
+                const destination =
+                    fromAskAi && tokens.role !== "white_label_admin"
+                        ? "/"
+                        : postAuthDashboard(tokens.role);
 
-            // Use a hard navigation instead of router.push. A soft navigation
-            // races the auth cookie commit: the destination's first protected
-            // request can go out before the browser has stored the new
-            // HttpOnly talky_at cookie, the dashboard sees no session and
-            // bounces straight back to /auth/login. window.location.assign
-            // guarantees the cookies are committed before the new page's
-            // first request fires and the URL bar updates immediately. The
-            // cost is a full page reload (slight flash of background), which
-            // is worth it for correctness.
-            if (typeof window !== "undefined") {
-                window.location.assign(destination);
-            } else {
-                // SSR / no-window fallback (shouldn't happen — this code only
-                // runs from a form-submit handler in a Client Component).
-                router.push(destination);
+                // Use a hard navigation instead of router.push. A soft navigation
+                // races the auth cookie commit: the destination's first protected
+                // request can go out before the browser has stored the new
+                // HttpOnly talky_at cookie, the dashboard sees no session and
+                // bounces straight back to /auth/login. window.location.assign
+                // guarantees the cookies are committed before the new page's
+                // first request fires and the URL bar updates immediately. The
+                // cost is a full page reload (slight flash of background), which
+                // is worth it for correctness.
+                if (typeof window !== "undefined") {
+                    window.location.assign(destination);
+                } else {
+                    // SSR / no-window fallback (shouldn't happen — this code only
+                    // runs from a form-submit handler in a Client Component).
+                    router.push(destination);
+                }
+            } catch {
+                if (mounted.current) {
+                    setLoading(false);
+                    setCompletionError("The server confirmed sign-in, but this page could not finish opening your account. Reload to check your session.");
+                }
             }
         },
         [router, rememberMe, applyLoginResult],
@@ -295,6 +342,9 @@ export default function LoginClientPage() {
 
     // ─── Step navigation ─────────────────────────────────────────────
     function goToStep(next: Step, dir: 1 | -1 = 1) {
+        if (!mounted.current || completed.current) return;
+        currentStep.current = next;
+        if (next !== "password") retirePasswordAttempt();
         setDirection(dir);
         setStep(next);
         setError("");
@@ -305,7 +355,7 @@ export default function LoginClientPage() {
         const normalizedEmail = email.trim().toLowerCase();
         const result = emailSchema.safeParse(normalizedEmail);
         if (!result.success) {
-            setEmailError(result.error.errors[0]?.message ?? "Invalid email");
+            setEmailError(result.error.issues[0]?.message ?? "Invalid email");
             return false;
         }
         setEmailError("");
@@ -334,12 +384,20 @@ export default function LoginClientPage() {
     // ─── Password submit ─────────────────────────────────────────────
     async function handlePasswordSubmit(e: React.FormEvent) {
         e.preventDefault();
+        if (!mounted.current || completed.current || currentStep.current !== "password" || passwordAttempt.current
+            || currentCredentials.current.email !== email || currentCredentials.current.password !== password) return;
+        const operation = { controller: new AbortController(), identity: getRequestIdentityGeneration() };
+        passwordAttempt.current = operation;
+        const ownsOperation = () => mounted.current && !completed.current && passwordAttempt.current === operation
+            && !operation.controller.signal.aborted && currentStep.current === "password"
+            && getRequestIdentityGeneration() === operation.identity;
         setLoading(true);
         setError("");
 
         try {
             void turnstileToken;
-            const response = await api.login(email, password);
+            const response = await api.login(email, password, { signal: operation.controller.signal, ownsOperation });
+            if (!ownsOperation()) return;
 
             if (response.mfa_required) {
                 if (!response.mfa_challenge_token) {
@@ -352,6 +410,8 @@ export default function LoginClientPage() {
                     );
                     return;
                 }
+                passwordAttempt.current = null;
+                setLoading(false);
                 setMfaChallengeToken(response.mfa_challenge_token);
                 goToStep("mfa");
                 return;
@@ -359,9 +419,10 @@ export default function LoginClientPage() {
 
             await handleLoginSuccess(response as unknown as LoginTokens);
         } catch (err) {
+            if (!ownsOperation()) return;
             setError(parseApiError(err));
         } finally {
-            setLoading(false);
+            if (ownsOperation()) { passwordAttempt.current = null; setLoading(false); }
         }
     }
 
@@ -376,8 +437,10 @@ export default function LoginClientPage() {
 
     // ─── Back handler ────────────────────────────────────────────────
     function handleBack() {
+        if (!mounted.current || completed.current || passwordAttempt.current) return;
         goToStep("email", -1);
         setPassword("");
+        setMfaChallengeToken(null);
         setShowPasskey(false);
         setBreachCount(null);
     }
@@ -702,7 +765,7 @@ export default function LoginClientPage() {
                                         <Button
                                             type="submit"
                                             className="w-full"
-                                            disabled={loading || !password}
+                                            disabled={loading || !!completionError || !password}
                                         >
                                             {loading ? (
                                                 <>
@@ -795,6 +858,12 @@ export default function LoginClientPage() {
                             </motion.div>
                         ) : null}
                     </AnimatePresence>
+                    {completionError && <CardContent className="space-y-3">
+                        <p role="alert" className="text-sm text-red-600 dark:text-red-400">{completionError}</p>
+                        <Button type="button" className="w-full" onClick={() => {
+                            if (mounted.current) window.location.reload();
+                        }}>Reload to check sign-in</Button>
+                    </CardContent>}
                 </Card>
 
                 {/* Terms & Privacy with actual links */}

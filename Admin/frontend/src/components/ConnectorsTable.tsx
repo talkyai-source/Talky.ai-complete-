@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
     Link2,
     Calendar,
@@ -23,9 +23,12 @@ import {
 import { api } from '../lib/api';
 import type { AdminConnectorItem, ConnectorListParams } from '../lib/api';
 import { ConfirmationModal } from './ConfirmationModal';
+import { useAuthGeneration } from '../lib/use-auth-generation';
 
 interface ConnectorsTableProps {
     onSelectConnector?: (connector: AdminConnectorItem) => void;
+    onChanged?: () => void;
+    refreshVersion?: number;
 }
 
 const providerIcons: Record<string, React.ReactNode> = {
@@ -70,7 +73,7 @@ function ConnectorStatusBadge({ status }: { status: string }) {
         expired: { icon: <AlertTriangle size={12} />, label: 'Expired', className: 'badge-warning' },
         disconnected: { icon: <Ban size={12} />, label: 'Disconnected', className: 'badge-default' },
     };
-    const c = config[status as keyof typeof config] || config.pending;
+    const c = config[status as keyof typeof config] || { icon: <Clock size={12} />, label: 'Unknown', className: 'badge-default' };
     return <span className={`badge ${c.className}`}>{c.icon} {c.label}</span>;
 }
 
@@ -84,7 +87,12 @@ function ProviderBadge({ provider }: { provider: string }) {
     );
 }
 
-export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
+export function ConnectorsTable(props: ConnectorsTableProps) {
+    const generation = useAuthGeneration();
+    return <OwnedConnectorsTable key={generation} {...props} generation={generation} />;
+}
+
+function OwnedConnectorsTable({ onSelectConnector, onChanged, refreshVersion, generation }: ConnectorsTableProps & { generation: number }) {
     const [connectors, setConnectors] = useState<AdminConnectorItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
@@ -99,8 +107,24 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
     // The API client never throws; failures come back as { error }.
     const [listError, setListError] = useState<string | null>(null);
     const [actionError, setActionError] = useState<string | null>(null);
+    const [notice, setNotice] = useState<string | null>(null);
+    const [mutating, setMutating] = useState(false);
+    const [loadedQuery, setLoadedQuery] = useState('');
+    const query = JSON.stringify([page, statusFilter, typeFilter, providerFilter, refreshVersion]);
+    const mounted = useRef(false);
+    const sequence = useRef(0);
+    const mutation = useRef(false);
+    const searchInput = useRef<HTMLInputElement>(null);
+    const owns = useCallback(() => mounted.current && generation === api.getAuthGeneration(), [generation]);
+    useEffect(() => {
+        mounted.current = true;
+        return () => { mounted.current = false; sequence.current += 1; };
+    }, []);
 
     const fetchConnectors = useCallback(async () => {
+        if (!owns()) return;
+        const request = ++sequence.current;
+        const current = () => owns() && sequence.current === request;
         setLoading(true);
         try {
             const params: ConnectorListParams = {
@@ -112,68 +136,90 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
             if (providerFilter) params.provider = providerFilter;
 
             const response = await api.getConnectors(params);
-            if (response.error) {
-                setListError(response.error.message || 'Failed to load connectors.');
-                setConnectors([]);
-                setTotal(0);
-            } else if (response.data) {
-                setListError(null);
-                setConnectors(response.data.items);
-                setTotal(response.data.total);
+            if (!current()) return;
+            if (response.error) throw new Error(response.error.message);
+            if (!response.data || !Array.isArray(response.data.items) || !Number.isSafeInteger(response.data.total) || response.data.total < 0
+                || response.data.items.some(item => !item.id || !item.tenant_id)) throw new Error('The connector list response is incomplete.');
+            setListError(null);
+            const lastPage = Math.max(1, Math.ceil(response.data.total / pageSize));
+            if (page > lastPage) {
+                // This current response proves the page no longer exists. The query effect
+                // reads the last valid page without repeating the confirmed mutation.
+                setConnectors([]); setLoadedQuery(''); setPage(lastPage);
+                return;
             }
+            setConnectors(response.data.items);
+            setTotal(response.data.total);
+            setLoadedQuery(query);
         } catch (error) {
-            console.error('Failed to fetch connectors:', error);
-            setListError(error instanceof Error ? error.message : 'Failed to load connectors.');
+            if (current()) {
+                setListError(error instanceof Error ? error.message : 'Failed to load connectors.');
+                setConnectors([]); setTotal(0); setLoadedQuery(query);
+            }
         } finally {
-            setLoading(false);
+            if (current()) setLoading(false);
         }
-    }, [page, pageSize, statusFilter, typeFilter, providerFilter]);
+    }, [page, pageSize, statusFilter, typeFilter, providerFilter, owns, query]);
 
+    const retryInventory = (trigger: HTMLButtonElement) => {
+        if (!owns() || !trigger.isConnected || loading || loadedQuery !== query || !listError) return;
+        // Loading removes Retry; preserve only the current invoking control's focus.
+        if (document.activeElement === trigger) searchInput.current?.focus();
+        void fetchConnectors();
+    };
 
     useEffect(() => {
         fetchConnectors();
+        return () => { sequence.current += 1; };
     }, [fetchConnectors]);
 
     const handleReconnect = async (e: React.MouseEvent, connectorId: string) => {
         e.stopPropagation();
+        if (!owns() || mutation.current || loading || loadedQuery !== query) return;
+        mutation.current = true; setMutating(true);
         setActionError(null);
+        setNotice(null);
         try {
             const res = await api.forceReconnect(connectorId);
-            if (res.error) {
-                setActionError(res.error.message || 'Reconnect failed.');
-                return;
-            }
-            fetchConnectors();
+            if (!owns()) return;
+            if (res.error) throw new Error(res.error.message);
+            if (!res.data?.success || res.data.connector_id !== connectorId) throw new Error('Token refresh was not confirmed. Refresh the list to check its state.');
+            setNotice('Token refresh confirmed.');
+            onChanged?.();
         } catch (error) {
-            console.error('Failed to reconnect:', error);
-            setActionError(error instanceof Error ? error.message : 'Reconnect failed.');
+            if (owns()) setActionError(error instanceof Error ? error.message : 'Token refresh was not confirmed. Refresh the list to check its state.');
+        } finally {
+            if (owns()) { mutation.current = false; setMutating(false); void fetchConnectors(); }
         }
     };
 
     const handleRevokeClick = (e: React.MouseEvent, connectorId: string) => {
         e.stopPropagation();
+        if (!owns() || mutation.current || loading || loadedQuery !== query) return;
         setActionError(null);
         setRevokeTarget(connectorId);
     };
 
     const handleRevokeConfirm = async () => {
-        if (!revokeTarget) return;
+        if (!revokeTarget || !owns() || mutation.current) return;
+        mutation.current = true; setMutating(true);
         setRevokeLoading(true);
         setActionError(null);
         try {
             const res = await api.revokeConnector(revokeTarget);
-            if (res.error) {
-                // Access is NOT revoked: keep the confirm open and say so.
-                setActionError(res.error.message || 'Revoke failed. The connector is still active.');
-                return;
-            }
+            if (!owns()) return;
+            if (res.error) throw new Error(res.error.message);
+            if (!res.data?.success || res.data.connector_id !== revokeTarget) throw new Error('Disconnection was not confirmed. Refresh the list to check its state.');
+            setNotice(res.data.provider_revoked === true && res.data.provider_revocation_status === 'confirmed'
+                ? 'Disabled locally. Provider access revocation confirmed.'
+                : 'Disabled locally. Provider access revocation is unconfirmed; access at the provider may remain.');
             setRevokeTarget(null);
-            fetchConnectors();
+            onChanged?.();
+            void fetchConnectors();
         } catch (error) {
-            console.error('Failed to revoke:', error);
-            setActionError(error instanceof Error ? error.message : 'Revoke failed. The connector is still active.');
+            if (owns()) setActionError(error instanceof Error ? error.message : 'Disconnection was not confirmed. Refresh the list to check its state.');
         } finally {
-            setRevokeLoading(false);
+            if (owns()) { mutation.current = false; setMutating(false); setRevokeLoading(false); }
         }
     };
 
@@ -197,8 +243,10 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
                 <div className="search-box">
                     <Search size={16} />
                     <input
+                        ref={searchInput}
                         type="text"
-                        placeholder="Search connectors..."
+                        placeholder="Search this page..."
+                        aria-label="Search connectors on this page"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         className="search-input"
@@ -207,6 +255,7 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
                 <div className="filter-group">
                     <Filter size={16} />
                     <select
+                        aria-label="Connector status" disabled={mutating || revokeTarget !== null}
                         value={statusFilter}
                         onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
                         className="filter-select"
@@ -222,6 +271,7 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
                 <div className="filter-group">
                     <Filter size={16} />
                     <select
+                        aria-label="Connector type" disabled={mutating || revokeTarget !== null}
                         value={typeFilter}
                         onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }}
                         className="filter-select"
@@ -236,6 +286,7 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
                 <div className="filter-group">
                     <Filter size={16} />
                     <select
+                        aria-label="Connector provider" disabled={mutating || revokeTarget !== null}
                         value={providerFilter}
                         onChange={(e) => { setProviderFilter(e.target.value); setPage(1); }}
                         className="filter-select"
@@ -248,11 +299,14 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
                         <option value="google_drive">Google Drive</option>
                     </select>
                 </div>
-                <button className="btn btn-secondary btn-sm" onClick={fetchConnectors}>
+                <button className="btn btn-secondary btn-sm" onClick={fetchConnectors} disabled={mutating || revokeTarget !== null}>
                     <RefreshCw size={14} />
                     Refresh
                 </button>
             </div>
+
+            {notice && <div className="info-banner" role="status">{notice}</div>}
+            {search && <p className="pagination-info">Search matches only the currently loaded page; use filters and pagination to inspect other connectors.</p>}
 
             {actionError && revokeTarget === null && (
                 <div className="error-banner" role="alert">
@@ -262,7 +316,7 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
 
             {/* Table */}
             <div className="table-container">
-                {loading ? (
+                {loading || loadedQuery !== query ? (
                     <div className="loading-state">
                         <Loader2 className="spinner" size={24} />
                         <span>Loading connectors...</span>
@@ -270,7 +324,7 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
                 ) : listError ? (
                     <div className="error-banner" role="alert">
                         <p>{listError}</p>
-                        <button onClick={fetchConnectors}>Retry</button>
+                        <button onClick={event => retryInventory(event.currentTarget)}>Retry</button>
                     </div>
                 ) : filteredConnectors.length === 0 ? (
                     <div className="empty-state">
@@ -309,7 +363,11 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
                                     <td>{typeLabels[connector.type] || connector.type}</td>
                                     <td>{connector.account_email || '-'}</td>
                                     <td><ConnectorStatusBadge status={connector.status} /></td>
-                                    <td><TokenStatusBadge status={connector.token_status} /></td>
+                                    <td><TokenStatusBadge status={connector.token_status} />
+                                        {connector.refresh_state === 'uncertain' && <span className="badge badge-warning">Refresh uncertain</span>}
+                                        {connector.refresh_state === 'in_flight' && <span className="badge badge-warning">Refreshing</span>}
+                                        {connector.provider_revocation_status === 'unconfirmed' && <span className="badge badge-warning">Provider revocation unconfirmed</span>}
+                                    </td>
                                     <td>
                                         {connector.last_refreshed_at
                                             ? new Date(connector.last_refreshed_at).toLocaleString()
@@ -320,6 +378,7 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
                                             <button
                                                 className="btn btn-icon btn-sm"
                                                 title="View Details"
+                                                aria-label={`View details for ${connector.name || connector.provider}`}
                                                 onClick={(e) => { e.stopPropagation(); onSelectConnector?.(connector); }}
                                             >
                                                 <Eye size={14} />
@@ -327,7 +386,9 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
                                             {connector.status === 'active' && connector.token_status !== 'valid' && (
                                                 <button
                                                     className="btn btn-icon btn-sm btn-warning"
-                                                    title="Force Reconnect"
+                                                    title="Refresh token"
+                                                    aria-label={`Refresh token for ${connector.name || connector.provider}`}
+                                                    disabled={mutating || connector.refresh_state !== 'idle'}
                                                     onClick={(e) => handleReconnect(e, connector.id)}
                                                 >
                                                     <Zap size={14} />
@@ -337,6 +398,8 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
                                                 <button
                                                     className="btn btn-icon btn-sm btn-danger"
                                                     title="Revoke Access"
+                                                    aria-label={`Revoke access for ${connector.name || connector.provider}`}
+                                                    disabled={mutating}
                                                     onClick={(e) => handleRevokeClick(e, connector.id)}
                                                 >
                                                     <Ban size={14} />
@@ -352,7 +415,7 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
             </div>
 
             {/* Pagination */}
-            {!loading && totalPages > 1 && (
+            {!loading && loadedQuery === query && !listError && totalPages > 1 && (
                 <div className="table-footer">
                     <div className="pagination-info">
                         Showing {((page - 1) * pageSize) + 1} - {Math.min(page * pageSize, total)} of {total}
@@ -360,7 +423,7 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
                     <div className="pagination-controls">
                         <button
                             className="btn btn-icon btn-sm"
-                            disabled={page === 1}
+                            aria-label="Previous connectors page" disabled={page === 1 || mutating || revokeTarget !== null}
                             onClick={() => setPage(p => p - 1)}
                         >
                             <ChevronLeft size={16} />
@@ -368,7 +431,7 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
                         <span className="page-info">Page {page} of {totalPages}</span>
                         <button
                             className="btn btn-icon btn-sm"
-                            disabled={page === totalPages}
+                            aria-label="Next connectors page" disabled={page >= totalPages || mutating || revokeTarget !== null}
                             onClick={() => setPage(p => p + 1)}
                         >
                             <ChevronRight size={16} />
@@ -381,7 +444,7 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
             <ConfirmationModal
                 isOpen={revokeTarget !== null}
                 title="Revoke Connector Access"
-                message="Are you sure you want to revoke this connector? This will disconnect the integration."
+                message="Disable this integration locally and request provider access revocation? Provider confirmation will be shown separately."
                 confirmLabel="Revoke"
                 cancelLabel="Cancel"
                 variant="danger"
@@ -389,6 +452,7 @@ export function ConnectorsTable({ onSelectConnector }: ConnectorsTableProps) {
                 onCancel={() => { setRevokeTarget(null); setActionError(null); }}
                 loading={revokeLoading}
                 error={revokeTarget !== null ? actionError : null}
+                returnFocusFallback={searchInput}
             />
         </div>
     );

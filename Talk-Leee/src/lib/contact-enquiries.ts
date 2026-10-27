@@ -6,10 +6,10 @@ export const contactDraftSchema = z.object({
   company: z.string().trim().max(120).default(""),
   message: z.string().trim().min(1, "Message is required").max(500),
 });
-export const contactRequestSchema = contactDraftSchema.extend({ request_id: z.string().uuid().transform(value => value.toLowerCase()) }).strict();
+export const contactRequestSchema = contactDraftSchema.extend({ request_id: z.guid().transform(value => value.toLowerCase()) }).strict();
 export const contactReceiptSchema = z.object({
   status: z.literal("accepted"),
-  receipt_id: z.string().uuid().transform(value => value.toLowerCase()),
+  receipt_id: z.guid().transform(value => value.toLowerCase()),
   accepted_at: z.string().datetime({ offset: true }),
 });
 export type ContactDraft = z.infer<typeof contactDraftSchema>;

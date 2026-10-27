@@ -248,6 +248,7 @@ _RLS_TABLES = (
     "inbound_reassignment_requests",
     "inbound_rejections",
     "inbound_usage_transactions",
+    "incidents",
     "invoice_snapshots",
     "invoices",
     "leads",
@@ -264,6 +265,8 @@ _RLS_TABLES = (
     "security_events",
     "stream_events",
     "subscriptions",
+    "supplier_statement_evidence",
+    "supplier_statement_reviews",
     "tenant_ai_configs",
     "tenant_ai_credentials",
     "tenant_call_limits",
@@ -447,6 +450,20 @@ def test_pooled_acquire_establishes_tenant_context(path: Path) -> None:
             "plumbing the tenant id through.",
         ]
     )
+
+
+def test_incident_queries_require_an_rls_context(tmp_path: Path) -> None:
+    """Platform-owned incidents are protected even though they lack tenant_id."""
+    path = tmp_path / "unsafe_incident_reader.py"
+    path.write_text(
+        "async def read_incidents(pool):\n"
+        "    async with pool.acquire() as conn:\n"
+        "        return await conn.fetch('SELECT * FROM incidents')\n",
+        encoding="utf-8",
+    )
+    assert _acquisitions_without_tenant_context(path) == [
+        ("read_incidents", 2, ["incidents"])
+    ]
 
 
 def test_no_guc_allowlist_has_no_stale_entries() -> None:

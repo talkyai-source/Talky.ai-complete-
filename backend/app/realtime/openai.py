@@ -59,6 +59,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import websockets
+from websockets.exceptions import ConnectionClosed
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
 
 from app.domain.services.voice_pipeline.live_structured_state import (
     replace_live_state_block,
@@ -184,6 +186,7 @@ class OpenAIRealtimeSession:
     # Documented response.create metadata is echoed on response events. This
     # capability is deliberately disabled by adapters without that contract.
     supports_response_metadata = True
+    observation_provider = "openai"
 
     def __init__(
         self,
@@ -195,10 +198,16 @@ class OpenAIRealtimeSession:
         tools: Optional[List[Dict[str, Any]]] = None,
         settings: Optional[Dict[str, Any]] = None,
         call_id: Optional[str] = None,
+        observation_context: Optional[Dict[str, Any]] = None,
     ) -> None:
         if not api_key:
             raise ValueError("OpenAIRealtimeSession requires an api_key")
         self._api_key = api_key
+        self._observation_context = observation_context
+        self._response_observation = None
+        self._observed_response_id = None
+        self._observation_valid_tool = False
+        self._observation_invalid_tool = False
         from app.realtime.playout_buffer import RealtimePlayoutBuffer
         self._playout = RealtimePlayoutBuffer()
         self._dnc_repair_owner = None
@@ -260,6 +269,32 @@ class OpenAIRealtimeSession:
     def closed(self) -> bool:
         return self._closed.is_set()
 
+    def _new_observation(self):
+        return ProviderAttempt("realtime", self.observation_provider,
+                               self._api_key, self._observation_context)
+
+    def _finish_response_observation(self, *, outcome="incomplete", error=None):
+        observation = self._response_observation
+        self._response_observation = None
+        self._observed_response_id = None
+        if observation is not None:
+            if outcome == "completed":
+                observation.complete()
+            observation.finish(error, outcome=outcome)
+
+    @staticmethod
+    def _provider_observation_error(details=None):
+        # Keep only an allowlisted status category, never provider message,
+        # transcript, arguments, session id or response id in telemetry.
+        error = RuntimeError("Realtime provider rejected the operation")
+        code = details.get("code") if isinstance(details, dict) else None
+        error.status_code = {
+            "invalid_api_key": 401, "authentication_error": 401,
+            "rate_limit_exceeded": 429, "insufficient_quota": 429,
+            "invalid_request_error": 400,
+        }.get(code)
+        return error
+
     # ── Connect / handshake ──────────────────────────────────────────────
     async def connect(self) -> bool:
         """Open the WS, wait for session.created, send session.update, wait
@@ -273,15 +308,20 @@ class OpenAIRealtimeSession:
             "Authorization": f"Bearer {self._api_key}",
             "User-Agent": "TalkyAI-VoiceAgent/1.0",
         }
+        observation = self._new_observation()
         try:
             self._ws = await asyncio.wait_for(
                 websockets.connect(url, additional_headers=headers, max_size=None),
                 timeout=_CONNECT_HANDSHAKE_TIMEOUT_S,
             )
         except Exception as exc:  # noqa: BLE001 — fail-soft on any connect error
+            observation.finish(exc)
             logger.error("realtime connect failed call=%s err=%s", self._call_id, exc)
             self._closed.set()
             return False
+        except asyncio.CancelledError as exc:
+            observation.finish(exc)
+            raise
 
         try:
             # 1. Server greets with session.created.
@@ -289,6 +329,7 @@ class OpenAIRealtimeSession:
                 self._recv_json(), timeout=_CONNECT_HANDSHAKE_TIMEOUT_S
             )
             if not created or created.get("type") != "session.created":
+                observation.finish(self._provider_observation_error((created or {}).get("error")))
                 logger.error(
                     "realtime: expected session.created, got %s call=%s",
                     (created or {}).get("type"), self._call_id,
@@ -313,18 +354,25 @@ class OpenAIRealtimeSession:
                     self._compatibility_changes.append("reasoning_field_unsupported_omitted")
                     ok = await self._send_session_update(include_reasoning=False)
             if not ok:
+                observation.finish(self._provider_observation_error(self._handshake_error))
                 logger.error("realtime: session.update not confirmed call=%s",
                              self._call_id)
                 await self._teardown()
                 return False
             self._last_published_instructions = self._instructions
         except Exception as exc:  # noqa: BLE001
+            observation.finish(exc)
             logger.error("realtime handshake failed call=%s err=%s",
                          self._call_id, exc)
             await self._teardown()
             return False
+        except asyncio.CancelledError as exc:
+            observation.finish(exc)
+            raise
 
         # Handshake done — start the single receive task.
+        observation.accepted()
+        observation.finish(outcome="connected")
         self._recv_task = asyncio.create_task(
             self._recv_loop(), name=f"realtime-recv-{self._call_id}"
         )
@@ -527,7 +575,8 @@ class OpenAIRealtimeSession:
                 {"type": "input_audio_buffer.append", "audio": b64}
             ))
             self.stats.audio_frames_in += 1
-        except websockets.exceptions.ConnectionClosed:
+        except ConnectionClosed:
+            self._finish_response_observation(error=ConnectionError("Realtime transport closed"))
             self._closed.set()
         except Exception as exc:  # noqa: BLE001
             logger.warning("realtime send_caller_audio failed call=%s err=%s",
@@ -573,7 +622,7 @@ class OpenAIRealtimeSession:
                 )
             )
             self._record_instruction_submission(updated)
-        except websockets.exceptions.ConnectionClosed:
+        except ConnectionClosed:
             self._closed.set()
         except Exception as exc:  # noqa: BLE001 - state update is fail-soft
             logger.warning(
@@ -617,7 +666,7 @@ class OpenAIRealtimeSession:
                 self._pending_response_create = True
             else:
                 await self._create_response()
-        except websockets.exceptions.ConnectionClosed:
+        except ConnectionClosed:
             self._closed.set()
         except Exception as exc:  # noqa: BLE001
             logger.warning("realtime send_function_result failed call=%s err=%s",
@@ -742,16 +791,20 @@ class OpenAIRealtimeSession:
                     continue
                 await self._handle_server_event(data)
         except websockets.exceptions.ConnectionClosed:
+            self._finish_response_observation(error=ConnectionError("Realtime transport closed"))
             logger.info("realtime WS closed call=%s", self._call_id)
             # PHASE 1b RECONNECT HOOK: to add mid-call reconnect, re-run
             # connect() here (re-sending session.update) and `continue` the
             # loop instead of falling through to teardown. Phase 1 ends cleanly.
         except asyncio.CancelledError:
+            self._finish_response_observation(outcome="cancelled")
             raise
         except Exception as exc:  # noqa: BLE001 — never let the loop crash a call
+            self._finish_response_observation(error=exc)
             logger.error("realtime recv loop error call=%s err=%s",
                          self._call_id, exc)
         finally:
+            self._finish_response_observation()
             self._closed.set()
             # Wake any consumer blocked in events().
             self._offer_event(None)
@@ -774,6 +827,8 @@ class OpenAIRealtimeSession:
             except Exception:  # noqa: BLE001
                 return
             self.stats.audio_frames_out += 1
+            if audio and self._playout.owns(data) and self._response_observation is not None:
+                self._response_observation.first_output()
             if self._playout.owns(data):
                 part_key = (data.get("item_id"), data.get("content_index", 0))
                 part = self._last_audio_parts.setdefault(part_key, {
@@ -847,7 +902,15 @@ class OpenAIRealtimeSession:
                         or not response.get("id") or owner["response_id"] is not None):
                     return  # A delayed old repair must not take a fresh epoch/buffer.
                 owner["response_id"] = response["id"]
+            response_id = response.get("id")
+            if isinstance(response_id, str) and response_id and response_id != self._observed_response_id:
+                self._finish_response_observation()
+                self._observed_response_id = response_id
+                self._response_observation = self._new_observation()
+                self._response_observation.accepted()
             self._playout.reset((data.get("response") or {}).get("id"))
+            self._observation_valid_tool = False
+            self._observation_invalid_tool = False
             self._last_response_id = self._playout.response_id
             self._last_audio_parts = {}
             # Tag audio deltas that follow to the current epoch so a later
@@ -864,6 +927,14 @@ class OpenAIRealtimeSession:
             if call_id and name:
                 self.stats.function_calls += 1
                 if self._playout.owns(data):
+                    try:
+                        valid_arguments = isinstance(json.loads(args), dict)
+                    except (ValueError, TypeError):
+                        valid_arguments = False
+                    if valid_arguments and self._response_observation is not None:
+                        self._response_observation.first_output()
+                    self._observation_valid_tool = self._observation_valid_tool or valid_arguments
+                    self._observation_invalid_tool = self._observation_invalid_tool or not valid_arguments
                     self._playout.tools.append(RealtimeEvent(
                         kind="function_call", function_call=RealtimeFunctionCall(call_id, name, args), raw=data))
             return
@@ -879,10 +950,23 @@ class OpenAIRealtimeSession:
                 if (not owner or repair_id != owner["id"] or owner["epoch"] != self._response_epoch
                         or owner["response_id"] != resp.get("id")):
                     self._playout.reset()
+                    self._finish_response_observation()
                     self._response_active = False
                     self._offer_event(RealtimeEvent(kind="response_unplayable", text="Uncorrelated exact repair", raw=data))
                     return
             candidate = self._playout.finish(resp)
+            status = resp.get("status")
+            if status == "failed":
+                self._finish_response_observation(error=self._provider_observation_error(
+                    (resp.get("status_details") or {}).get("error")))
+            elif status == "cancelled" or (status == "incomplete" and
+                    (resp.get("status_details") or {}).get("reason") in {"turn_detected", "interruption", "cancelled"}):
+                self._finish_response_observation(outcome="cancelled")
+            elif (status == "completed" and not self._playout.invalid
+                    and not self._observation_invalid_tool and (candidate or self._observation_valid_tool)):
+                self._finish_response_observation(outcome="completed")
+            else:
+                self._finish_response_observation()
             data = {**data, "audio_parts": list(self._last_audio_parts.values())}
             if candidate:
                 audio, transcript = candidate
@@ -908,7 +992,7 @@ class OpenAIRealtimeSession:
             # A cancelled/interrupted response means the caller barged in and
             # the server truncated the turn — flush any stale queued audio.
             if status in ("cancelled", "incomplete") and \
-                    resp.get("status_details", {}).get("reason") in (
+                    (resp.get("status_details") or {}).get("reason") in (
                         "turn_detected", "interruption", "cancelled"):
                 self._on_interruption("response_done_cancelled")
             # A function-call result was submitted while this response was
@@ -931,6 +1015,10 @@ class OpenAIRealtimeSession:
                              self._call_id, err)
                 return
             self.stats.errors += 1
+            if self._response_observation is not None:
+                self._finish_response_observation(error=self._provider_observation_error(err))
+            else:
+                self._new_observation().finish(self._provider_observation_error(err))
             logger.warning("realtime server error call=%s: %s", self._call_id, err)
             # Rejected mid-call instructions can leave stale contact/policy
             # state active. Let the owning lifecycle end visibly instead of
@@ -946,6 +1034,7 @@ class OpenAIRealtimeSession:
         """Caller took the floor: invalidate the in-flight response and FLUSH
         any model audio still queued, so the agent stops mid-sentence instead
         of talking over the caller."""
+        self._finish_response_observation(outcome="cancelled")
         self._playout.audio.clear()
         self._playout.parts.clear()
         self._playout.transcripts.clear()
@@ -1000,6 +1089,7 @@ class OpenAIRealtimeSession:
         while not self._event_queue.empty():
             self._event_queue.get_nowait()
         self._closed.set()
+        self._finish_response_observation()
         self._playout.reset()
         self._event_queue.put_nowait(RealtimeEvent(kind="error", text="Realtime event queue overflow"))
 
@@ -1029,6 +1119,7 @@ class OpenAIRealtimeSession:
     async def close(self) -> None:
         """Idempotent, exception-proof teardown: cancel the receive task and
         close the socket. Safe to call multiple times."""
+        self._finish_response_observation(outcome="cancelled")
         await self._teardown()
 
     async def _teardown(self) -> None:

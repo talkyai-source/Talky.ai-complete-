@@ -13,6 +13,11 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from app.core.db_utils import acquire_with_tenant
+from app.domain.services.telephony.control_backend_identity import (
+    ControlBackendIdentityError,
+    control_backend_error,
+    saved_control_backend,
+)
 
 
 _ACTIVE_PROVIDER_LEG_STATUSES = (
@@ -50,6 +55,10 @@ class TerminationContext:
     answered_at: Any = None
     # Preserve every row, including duplicate IDs with conflicting providers.
     provider_legs: tuple[tuple[str, str | None], ...] = ()
+    control_backend: str | None = None
+    # Immutable pre-proof row identities, including already-terminal and
+    # synthetic legs. None means legacy/incomplete inventory, never empty.
+    leg_inventory: tuple[tuple[str, str, str], ...] | None = None
 
 
 _CONCRETE_PROVIDERS = frozenset({"asterisk", "freeswitch", "twilio", "vonage"})
@@ -69,11 +78,7 @@ def provider_family_error(
     identity from their existing, positively adapter-owned cleanup operation.
     """
 
-    expected = (
-        expected_provider.strip().lower()
-        if isinstance(expected_provider, str)
-        else ""
-    )
+    expected = expected_provider.strip().lower() if isinstance(expected_provider, str) else ""
     if expected not in _CONCRETE_PROVIDERS:
         return "provider_identity_unconfirmed"
     actual = getattr(adapter, "name", None)
@@ -119,6 +124,73 @@ async def request_confirmed_hangup(
     provider_leg_ids: Iterable[str] = (),
     provider_legs: Iterable[tuple[str, str | None]] = (),
     timeout_s: float = 5.0,
+    expected_backend: str | None = None,
+    require_backend_identity: bool = False,
+) -> HangupProof:
+    """Prove all legs on the saved PBX; local cleanup may use its owned adapter.
+
+    Durable call entry points always require the saved backend. The unbound
+    path is retained only for an operation that already owns its adapter and
+    freshly-created channels, never as fallback for a historical database row.
+    """
+    if not str(call_id or "").strip():
+        return HangupProof(False, False, "missing_provider_call_id")
+    if adapter is None:
+        return HangupProof(False, False, "adapter_unavailable")
+    leg_ids, legs = tuple(provider_leg_ids), tuple(provider_legs)
+    family_error = provider_family_error(
+        adapter, expected_provider, provider_leg_ids=leg_ids, provider_legs=legs
+    )
+    if family_error:
+        return HangupProof(False, False, family_error)
+    if not require_backend_identity:
+        return await _request_confirmed_hangup(
+            adapter,
+            call_id,
+            expected_provider=expected_provider,
+            provider_leg_ids=leg_ids,
+            provider_legs=legs,
+            timeout_s=timeout_s,
+        )
+    error = control_backend_error(adapter, expected_backend)
+    guard = getattr(adapter, "control_backend_guard", None)
+    if error or not callable(guard):
+        return HangupProof(False, False, error or "adapter_backend_identity_unconfirmed")
+    dispatched = False
+    proof = None
+    try:
+        async with asyncio.timeout(max(0.1, min(5.0, float(timeout_s)))):
+            async with guard(expected_backend):
+                dispatched = True
+                proof = await _request_confirmed_hangup(
+                    adapter,
+                    call_id,
+                    expected_provider=expected_provider,
+                    provider_leg_ids=leg_ids,
+                    provider_legs=legs,
+                    timeout_s=timeout_s,
+                )
+        return proof
+    except ControlBackendIdentityError as exc:
+        return HangupProof(proof.requested if proof else dispatched, False, str(exc))
+    except (asyncio.TimeoutError, TimeoutError):
+        return HangupProof(proof.requested if proof else dispatched, False, "confirmation_timeout")
+    except Exception:
+        return HangupProof(
+            proof.requested if proof else dispatched,
+            False,
+            "control_backend_verification_unavailable",
+        )
+
+
+async def _request_confirmed_hangup(
+    adapter: Any,
+    call_id: str,
+    *,
+    expected_provider: str | None,
+    provider_leg_ids: Iterable[str] = (),
+    provider_legs: Iterable[tuple[str, str | None]] = (),
+    timeout_s: float = 5.0,
 ) -> HangupProof:
     """Request a hangup and return proof only when the adapter can provide it.
 
@@ -149,8 +221,7 @@ async def request_confirmed_hangup(
         dict.fromkeys(
             normalized
             for value in provider_leg_ids
-            if (normalized := str(value or "").strip())
-            and normalized != call_id
+            if (normalized := str(value or "").strip()) and normalized != call_id
         )
     )
     if linked_ids:
@@ -184,9 +255,7 @@ async def request_confirmed_hangup(
     confirmed_hangup = getattr(adapter, "hangup_confirmed", None)
     if callable(confirmed_hangup):
         try:
-            confirmed = bool(
-                await asyncio.wait_for(confirmed_hangup(call_id), timeout=timeout_s)
-            )
+            confirmed = bool(await asyncio.wait_for(confirmed_hangup(call_id), timeout=timeout_s))
         except (asyncio.TimeoutError, TimeoutError):
             return HangupProof(True, False, "confirmation_timeout")
         except Exception as exc:  # noqa: BLE001 - provider boundary
@@ -284,11 +353,7 @@ async def fetch_active_provider_leg_ids(
             normalized_reference,
         )
     )
-    expected = (
-        expected_provider.strip().lower()
-        if isinstance(expected_provider, str)
-        else ""
-    )
+    expected = expected_provider.strip().lower() if isinstance(expected_provider, str) else ""
     error = _provider_legs_error(
         expected,
         (),
@@ -298,9 +363,7 @@ async def fetch_active_provider_leg_ids(
         raise ValueError(error)
     return tuple(
         dict.fromkeys(
-            normalized
-            for row in rows
-            if (normalized := str(row["provider_leg_id"] or "").strip())
+            normalized for row in rows if (normalized := str(row["provider_leg_id"] or "").strip())
         )
     )
 
@@ -342,7 +405,7 @@ async def mark_termination_pending_and_load_context(
                    COALESCE(provider_call_id, external_call_uuid)
                        AS provider_call_id,
                    status, provider, direction, campaign_id::text AS campaign_id,
-                   answered_at
+                   answered_at, route_snapshot
             FROM calls
             WHERE (
                    id::text=$1
@@ -391,31 +454,40 @@ async def mark_termination_pending_and_load_context(
             )
         )
 
+        inventory_rows = list(await conn.fetch(
+            """SELECT id::text AS id, provider, provider_leg_id FROM call_legs
+               WHERE call_id=$1::uuid ORDER BY id LIMIT 1025""",
+            str(row["call_id"]),
+        ))
+        leg_inventory = None
+        if len(inventory_rows) <= 1024 and all(item.get("id") for item in inventory_rows):
+            leg_inventory = tuple(
+                (str(item["id"]), str(item.get("provider") or ""), str(item.get("provider_leg_id") or ""))
+                for item in inventory_rows
+            )
+
     return TerminationContext(
         call_id=str(row["call_id"]),
         tenant_id=(str(row["tenant_id"]) if row["tenant_id"] else None),
         provider_call_id=(
-            str(row["provider_call_id"]).strip()
-            if row["provider_call_id"]
-            else None
+            str(row["provider_call_id"]).strip() if row["provider_call_id"] else None
         ),
         previous_status=previous_status,
         provider_leg_ids=tuple(
             dict.fromkeys(
                 normalized
                 for leg_row in leg_rows
-                if (
-                    normalized := str(leg_row["provider_leg_id"] or "").strip()
-                )
+                if (normalized := str(leg_row["provider_leg_id"] or "").strip())
             )
         ),
         provider=(str(row["provider"]) if row["provider"] else None),
         direction=str(row["direction"] or "outbound"),
         campaign_id=(str(row["campaign_id"]) if row["campaign_id"] else None),
         answered_at=row["answered_at"],
+        control_backend=saved_control_backend(row.get("route_snapshot")),
+        leg_inventory=leg_inventory,
         provider_legs=tuple(
-            (str(leg["provider_leg_id"]).strip(), leg["provider"])
-            for leg in leg_rows
+            (str(leg["provider_leg_id"]).strip(), leg["provider"]) for leg in leg_rows
         ),
     )
 

@@ -76,8 +76,8 @@ test('call detail drawer names recording and feedback downloads from their own m
     state.route = (call) => {
         if (call.path.includes('/admin/recordings/') && call.path.endsWith('/audio')) return audio('audio/mpeg');
         if (call.path.includes('/admin/feedback/') && call.path.endsWith('/audio')) return audio('audio/mp4');
-        if (call.path.includes('/admin/recordings')) return response(page([recording('audio/mpeg')]));
-        if (call.path.includes('/admin/feedback')) return response(page([feedbackItem('audio/mp4')]));
+        if (call.path.includes('/admin/recordings')) return response(page([{ ...recording('audio/mpeg'), call_id: 'call-789' }]));
+        if (call.path.includes('/admin/feedback')) return response(page([{ ...feedbackItem('audio/mp4'), call_id: 'call-789' }]));
         if (call.path.includes('/admin/calls/call-789')) {
             return response({
                 id: 'call-789', tenant_id: 't1', tenant_name: 'Acme', phone_number: '+15550100', campaign_id: null,

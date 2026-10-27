@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef, useLayoutEffect } from 'react';
 import {
     X,
     Phone,
@@ -21,6 +21,7 @@ import {
     ShieldCheck,
 } from 'lucide-react';
 import { api } from '../lib/api';
+import { useAuthGeneration } from '../lib/use-auth-generation';
 import { formatCallCost } from '../lib/call-cost';
 import type {
     AdminCallDetail,
@@ -33,6 +34,8 @@ import type {
 } from '../lib/api';
 import { AdminMediaPlayer } from './AdminMediaPlayer';
 import { ConfirmationModal } from './ConfirmationModal';
+import { MediaDeletionHistory } from './MediaDeletionHistory';
+import { mediaDeletionTarget, matchesMediaDeletionReceipt, recoveredMediaDeletion, matchesFeedbackRetry, type MediaDeletionNotice } from '../lib/media-deletion-contracts';
 
 interface CallDetailDrawerProps {
     callId: string | null;
@@ -189,23 +192,25 @@ export function CRMReceiptsSection({ callId, receipts, available }: {
     const [errors, setErrors] = useState<Partial<Record<AdminCRMReceipt['provider'], string>>>({});
     const generation = useRef(0);
     const inFlight = useRef(new Set<AdminCRMReceipt['provider']>());
+    const session = api.getAuthGeneration();
 
     useEffect(() => {
         generation.current += 1;
         setObservations({}); setPending({}); setErrors({}); inFlight.current.clear();
         return () => { generation.current += 1; };
-    }, [callId]);
+    }, [callId, session]);
 
     const inspect = async (provider: AdminCRMReceipt['provider']) => {
-        if (inFlight.current.has(provider)) return;
+        if (inFlight.current.has(provider) || session !== api.getAuthGeneration()) return;
         const ownGeneration = generation.current;
+        const owns = () => generation.current === ownGeneration && session === api.getAuthGeneration();
         inFlight.current.add(provider);
         setPending((before) => ({ ...before, [provider]: true }));
         setErrors((before) => ({ ...before, [provider]: undefined }));
         setObservations((before) => ({ ...before, [provider]: undefined }));
         try {
             const result = await api.inspectAdminCRMDelivery(callId, provider);
-            if (generation.current !== ownGeneration) return;
+            if (!owns()) return;
             if (result.error || !result.data || result.data.call_id !== callId || result.data.provider !== provider
                 || !Object.hasOwn(inspectionLabels, result.data.outcome) || !Object.hasOwn(inspectionReasons, result.data.reason)) {
                 setErrors((before) => ({ ...before, [provider]: 'Inspection unavailable. Saved receipt unchanged.' }));
@@ -213,11 +218,11 @@ export function CRMReceiptsSection({ callId, receipts, available }: {
                 setObservations((before) => ({ ...before, [provider]: result.data }));
             }
         } catch {
-            if (generation.current === ownGeneration) {
+            if (owns()) {
                 setErrors((before) => ({ ...before, [provider]: 'Inspection unavailable. Saved receipt unchanged.' }));
             }
         } finally {
-            if (generation.current === ownGeneration) {
+            if (owns()) {
                 inFlight.current.delete(provider);
                 setPending((before) => ({ ...before, [provider]: false }));
             }
@@ -262,29 +267,78 @@ type MediaDeleteTarget =
     | { kind: 'feedback'; item: AdminFeedbackItem };
 
 export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
+    const session = useAuthGeneration();
+    if (!callId) return null;
+    return <OwnedCallDetailDrawer key={`${session}:${callId}`} callId={callId} onClose={onClose} session={session} />;
+}
+
+function OwnedCallDetailDrawer({ callId, onClose, session }: CallDetailDrawerProps & { session: number }) {
     const [call, setCall] = useState<AdminCallDetail | null>(null);
     const [recordings, setRecordings] = useState<AdminRecordingItem[]>([]);
     const [feedback, setFeedback] = useState<AdminFeedbackItem | null>(null);
     const [loading, setLoading] = useState(false);
+    const [recordingError, setRecordingError] = useState<string | null>(null);
+    const [feedbackError, setFeedbackError] = useState<string | null>(null);
+    const [deletionNotice, setDeletionNotice] = useState<MediaDeletionNotice | null>(null);
+    const mediaRead = useRef(0);
     const [error, setError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<DetailTab>('timeline');
     const [retryingFeedback, setRetryingFeedback] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<MediaDeleteTarget | null>(null);
     const [deleteReason, setDeleteReason] = useState('');
+    const [reasonReadOnly, setReasonReadOnly] = useState(false);
+    const submittedReason = useRef<string | null>(null);
     const [deleteIdempotencyKey, setDeleteIdempotencyKey] = useState('');
     const [deleting, setDeleting] = useState(false);
+    const mounted = useRef(false);
+    const deletionInFlight = useRef(false);
+    const retryInFlight = useRef(false);
+    const currentMedia = useRef({ recordings, feedback });
+    useLayoutEffect(() => { currentMedia.current = { recordings, feedback }; }, [recordings, feedback]);
 
-    const loadMedia = useCallback(async (selectedCallId: string, isCurrent: () => boolean = () => true) => {
-        const [recordingResponse, feedbackResponse] = await Promise.all([
-            api.getAdminRecordings({ call_id: selectedCallId, page_size: 20 }),
-            api.getAdminFeedback({ call_id: selectedCallId, page_size: 1 }),
-        ]);
-        if (!isCurrent()) return;
-        if (recordingResponse.error) throw new Error(recordingResponse.error.message);
-        if (feedbackResponse.error) throw new Error(feedbackResponse.error.message);
-        setRecordings(recordingResponse.data?.items ?? []);
-        setFeedback(feedbackResponse.data?.items[0] ?? null);
+    useEffect(() => {
+        mounted.current = true;
+        return () => { mounted.current = false; };
     }, []);
+    const owns = useCallback(() => mounted.current && session === api.getAuthGeneration(), [session]);
+
+    const loadMedia = useCallback(async (selectedCall: AdminCallDetail, isCurrent: () => boolean = owns) => {
+        if (!owns() || !isCurrent()) return;
+        const sequence = ++mediaRead.current;
+        const current = () => owns() && isCurrent() && sequence === mediaRead.current;
+        try {
+            const [recordingResponse, feedbackResponse] = await Promise.all([
+                api.getAdminRecordings({ call_id: selectedCall.id, page_size: 20 }),
+                api.getAdminFeedback({ call_id: selectedCall.id, page_size: 1 }),
+            ]);
+            if (!current()) return;
+            const matches = (items: unknown): items is Array<AdminRecordingItem | AdminFeedbackItem> => Array.isArray(items)
+                && items.every(item => item && typeof item.id === 'string' && item.id.trim()
+                    && selectedCall.tenant_id && item.call_id === selectedCall.id && item.tenant_id === selectedCall.tenant_id);
+            const recordingItems = recordingResponse.data?.items;
+            const feedbackItems = feedbackResponse.data?.items;
+            if ((!recordingResponse.error && !matches(recordingItems)) || (!feedbackResponse.error && !matches(feedbackItems))) {
+                const message = 'Call media ownership could not be verified. Reload the call before continuing.';
+                setRecordings([]); setFeedback(null); setRecordingError(message); setFeedbackError(message);
+                return;
+            }
+            if (!recordingResponse.error && matches(recordingItems)) {
+                setRecordings(recordingItems as AdminRecordingItem[]); setRecordingError(null);
+            } else {
+                setRecordings([]); setRecordingError(recordingResponse.error?.message ?? 'Call media ownership could not be verified. Reload the call before continuing.');
+            }
+            if (!feedbackResponse.error && matches(feedbackItems)) {
+                setFeedback((feedbackItems[0] as AdminFeedbackItem | undefined) ?? null); setFeedbackError(null);
+            } else {
+                setFeedback(null); setFeedbackError(feedbackResponse.error?.message ?? 'Call media ownership could not be verified. Reload the call before continuing.');
+            }
+        } catch (caught) {
+            if (current()) {
+                const message = caught instanceof Error ? caught.message : 'Call media could not be loaded.';
+                setRecordings([]); setFeedback(null); setRecordingError(message); setFeedbackError(message);
+            }
+        }
+    }, [owns]);
 
     useEffect(() => {
         let cancelled = false;
@@ -302,75 +356,114 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
             setActiveTab('timeline');
             try {
                 const response = await api.getAdminCallDetail(callId);
-                if (cancelled) return;
+                if (cancelled || !owns()) return;
                 if (response.error) throw new Error(response.error.message);
                 if (!response.data || response.data.id !== callId) throw new Error('Call details were unavailable');
                 setCall(response.data);
-                await loadMedia(callId, () => !cancelled);
+                await loadMedia(response.data, () => !cancelled);
             } catch (err) {
-                if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to fetch call details');
+                if (!cancelled && owns()) setError(err instanceof Error ? err.message : 'Failed to fetch call details');
             } finally {
-                if (!cancelled) setLoading(false);
+                if (!cancelled && owns()) setLoading(false);
             }
         };
 
         void fetchCallDetail();
         return () => { cancelled = true; };
-    }, [callId, loadMedia]);
+    }, [callId, loadMedia, owns]);
 
     const retryFeedback = async () => {
-        if (!feedback) return;
+        if (!owns() || !feedback || !call || retryInFlight.current || deletionInFlight.current
+            || currentMedia.current.feedback !== feedback) return;
+        const selectedFeedback = feedback;
+        retryInFlight.current = true;
+        ++mediaRead.current;
         setRetryingFeedback(true);
         setError(null);
-        const response = await api.retryAdminFeedbackTranscription(feedback.id);
-        if (response.error) setError(response.error.message);
-        if (response.data) setFeedback(response.data);
-        setRetryingFeedback(false);
+        try {
+            const response = await api.retryAdminFeedbackTranscription(selectedFeedback.id);
+            if (!owns()) return;
+            if (response.error) setError(response.error.message);
+            else if (!matchesFeedbackRetry(response.data, selectedFeedback)) {
+                setError('Feedback ownership could not be verified. Reload the call before continuing.');
+            } else {
+                ++mediaRead.current;
+                setFeedback(response.data);
+            }
+        } catch (caught) {
+            if (owns()) setError(caught instanceof Error ? caught.message : 'Feedback retry could not be confirmed.');
+        } finally {
+            retryInFlight.current = false;
+            if (owns()) setRetryingFeedback(false);
+        }
     };
 
     const deleteMedia = async () => {
-        if (!deleteTarget || !callId || !deleteIdempotencyKey) return;
+        if (!owns() || !deleteTarget || !call || !deleteIdempotencyKey || deletionInFlight.current || retryInFlight.current) return;
+        deletionInFlight.current = true;
+        ++mediaRead.current;
+        const target = mediaDeletionTarget(deleteTarget.kind === 'recording' ? 'recording' : 'call_feedback', deleteTarget.item);
+        setDeletionNotice({ target, state: 'pending' });
+        submittedReason.current ??= deleteReason.trim();
+        setReasonReadOnly(true);
         setDeleting(true);
-        const response = deleteTarget.kind === 'recording'
-            ? await api.deleteAdminRecording(
-                deleteTarget.item.id,
-                deleteReason.trim(),
-                deleteIdempotencyKey,
-            )
-            : await api.deleteAdminFeedback(
-                deleteTarget.item.id,
-                deleteReason.trim(),
-                deleteIdempotencyKey,
-            );
-        if (response.error) {
-            setError(response.error.message);
-        } else {
-            setDeleteTarget(null);
-            setDeleteReason('');
-            setDeleteIdempotencyKey('');
-            try {
-                await loadMedia(callId);
-            } catch (caught) {
-                setError(caught instanceof Error ? caught.message : 'Failed to refresh call media');
+        setError(null);
+        try {
+            const response = deleteTarget.kind === 'recording'
+                ? await api.deleteAdminRecording(
+                    deleteTarget.item.id,
+                    submittedReason.current,
+                    deleteIdempotencyKey,
+                )
+                : await api.deleteAdminFeedback(
+                    deleteTarget.item.id,
+                    submittedReason.current,
+                    deleteIdempotencyKey,
+                );
+            if (!owns()) return;
+            if (response.error || !matchesMediaDeletionReceipt(response.data, target)) {
+                const message = response.error?.message ?? 'Deletion was not confirmed. Check the saved deletion or explicitly retry the same reviewed request.';
+                setError(message); setDeletionNotice({ target, state: 'unconfirmed', message });
+            } else {
+                setDeletionNotice({ target, state: response.data.outcome, receipt: response.data });
+                setDeleteTarget(null);
+                setDeleteReason(''); submittedReason.current = null; setReasonReadOnly(false);
+                setDeleteIdempotencyKey('');
+                try {
+                    await loadMedia(call);
+                } catch (caught) {
+                    if (owns()) setError(caught instanceof Error ? caught.message : 'Failed to refresh call media');
+                }
             }
+        } catch (caught) {
+            if (owns()) {
+                const message = caught instanceof Error ? caught.message : 'Deletion could not be confirmed. Check the saved deletion.';
+                setError(message); setDeletionNotice(previous => previous?.state === 'completed' || previous?.state === 'absent' ? previous : { target, state: 'unconfirmed', message });
+            }
+        } finally {
+            deletionInFlight.current = false;
+            if (owns()) setDeleting(false);
         }
-        setDeleting(false);
     };
 
     const openMediaDelete = (target: MediaDeleteTarget) => {
-        if (target.item.legal_hold) return;
+        if (!owns() || !call || retryInFlight.current || deletionInFlight.current || target.item.legal_hold
+            || (target.kind === 'recording' ? !currentMedia.current.recordings.includes(target.item) : currentMedia.current.feedback !== target.item)
+            || target.item.call_id !== call.id
+            || target.item.tenant_id !== call.tenant_id) return;
         const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto
             ? crypto.randomUUID()
             : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
         setDeleteTarget(target);
-        setDeleteReason('');
+        setError(null);
+        setDeleteReason(''); submittedReason.current = null; setReasonReadOnly(false);
         setDeleteIdempotencyKey(`admin-media:${target.kind}:${target.item.id}:${id}`);
     };
 
     const closeMediaDelete = () => {
         if (deleting) return;
         setDeleteTarget(null);
-        setDeleteReason('');
+        setDeleteReason(''); submittedReason.current = null; setReasonReadOnly(false);
         setDeleteIdempotencyKey('');
     };
 
@@ -531,6 +624,11 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                 </div>
                             )}
 
+                            {(recordingError || feedbackError) && <div role="alert" className="error-banner">
+                                {recordingError && <p>Recordings: {recordingError}</p>}
+                                {feedbackError && <p>Feedback: {feedbackError}</p>}
+                                <button className="btn btn-secondary btn-sm" onClick={() => { if (!retryInFlight.current && !deletionInFlight.current) void loadMedia(call); }}>Retry media</button>
+                            </div>}
                             {/* Tabs */}
                             <div className="drawer-tabs" role="tablist" aria-label="Call detail sections">
                                 <button
@@ -582,7 +680,7 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                         transcriptJson={call.transcript_json}
                                     />
                                 )}
-                                {activeTab === 'recordings' && (
+                                {activeTab === 'recordings' && !recordingError && (
                                     recordings.length === 0 ? (
                                         <p className="no-data">No recording is available for this call.</p>
                                     ) : (
@@ -599,6 +697,7 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                                         </span>
                                                     </div>
                                                     <AdminMediaPlayer
+                                                        resourceId={`recording:${recording.id}`}
                                                         disabled={!recording.playable}
                                                         filenameBase={`call-${call.id}`}
                                                         mimeType={recording.mime_type}
@@ -610,7 +709,7 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                                         <button
                                                             className="btn btn-danger btn-sm"
                                                             onClick={() => openMediaDelete({ kind: 'recording', item: recording })}
-                                                            disabled={recording.legal_hold}
+                                                            disabled={recording.legal_hold || retryingFeedback || deleting}
                                                             title={recording.legal_hold ? 'Deletion blocked by an active compliance/legal hold' : undefined}
                                                         >
                                                             {recording.legal_hold ? <ShieldAlert size={14} /> : <Trash2 size={14} />}
@@ -622,7 +721,7 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                         </div>
                                     )
                                 )}
-                                {activeTab === 'feedback' && (
+                                {activeTab === 'feedback' && !feedbackError && (
                                     !feedback ? (
                                         <p className="no-data">No reviewer feedback note has been submitted.</p>
                                     ) : (
@@ -637,6 +736,7 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                                 </span>
                                             </div>
                                             <AdminMediaPlayer
+                                                resourceId={`feedback:${feedback.id}`}
                                                 filenameBase={`feedback-${call.id}`}
                                                 mimeType={feedback.audio_mime_type}
                                                 fallbackExtension="webm"
@@ -658,7 +758,7 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                                     {(feedback.retryable || feedback.transcript_status === 'pending') && (
                                                         <button
                                                             className="btn btn-secondary btn-sm"
-                                                            disabled={retryingFeedback}
+                                                            disabled={retryingFeedback || deleting}
                                                             onClick={() => void retryFeedback()}
                                                         >
                                                             <RefreshCw size={14} className={retryingFeedback ? 'spinning' : ''} />
@@ -668,7 +768,7 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                                     <button
                                                         className="btn btn-danger btn-sm"
                                                         onClick={() => openMediaDelete({ kind: 'feedback', item: feedback })}
-                                                        disabled={feedback.legal_hold}
+                                                        disabled={feedback.legal_hold || retryingFeedback || deleting}
                                                         title={feedback.legal_hold ? 'Deletion blocked by an active compliance/legal hold' : undefined}
                                                     >
                                                         {feedback.legal_hold ? <ShieldAlert size={14} /> : <Trash2 size={14} />}
@@ -679,6 +779,14 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                         </div>
                                     )
                                 )}
+                                {(activeTab === 'recordings' || activeTab === 'feedback') && <MediaDeletionHistory
+                                    resourceType={activeTab === 'recordings' ? 'recording' : 'call_feedback'} tenantId={call.tenant_id} callId={call.id}
+                                    notice={deletionNotice?.target.resource_type === (activeTab === 'recordings' ? 'recording' : 'call_feedback') ? deletionNotice : null}
+                                    onRecovered={(expected, saved) => {
+                                        if (!owns()) return;
+                                        setDeletionNotice(previous => previous === expected ? recoveredMediaDeletion(previous, saved) : previous);
+                                    }}
+                                />}
                             </div>
                         </>
                     ) : null}
@@ -692,10 +800,12 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                 variant="danger"
                 loading={deleting}
                 reason={deleteReason}
-                onReasonChange={setDeleteReason}
+                reasonReadOnly={reasonReadOnly}
+                onReasonChange={value => { if (submittedReason.current === null) setDeleteReason(value); }}
                 reasonLabel="Deletion reason"
                 onConfirm={() => void deleteMedia()}
                 onCancel={closeMediaDelete}
+                error={deleteTarget ? error : null}
             />
         </>
     );

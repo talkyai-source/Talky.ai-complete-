@@ -227,7 +227,7 @@ async def test_orchestrator_honors_explicit_agent_first_inbound_realtime_policy(
         realtime_greet_on_start=True,
         realtime_opening_greeting="Thanks for calling Acme.",
     )
-    resolver = SimpleNamespace(resolve=AsyncMock(return_value="test-api-key"))
+    resolver = SimpleNamespace(resolve_with_metadata=AsyncMock(return_value=SimpleNamespace(secret="test-api-key", observation_context={})))
     realtime_session = SimpleNamespace(
         connect=AsyncMock(return_value=True), close=AsyncMock()
     )
