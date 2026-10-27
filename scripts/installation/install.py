@@ -235,7 +235,10 @@ def validate_config(config: dict, *, inputs: bool = False) -> dict:
     require('MIGRATION_DATABASE_URL' not in env, 'Keep migration credentials out of the runtime environment')
     require(not env.get('READ_DATABASE_URL'),
             'READ_DATABASE_URL needs separate qualification; leave it unset for this fresh-host profile')
+    # Match the existing production API's provider configuration requirements
+    # before apply mutates the host. This does not verify provider credentials.
     for name in ('DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'SECRET_KEY',
+                 'DEEPGRAM_API_KEY', 'CARTESIA_API_KEY', 'GROQ_API_KEY',
                  'CONNECTOR_ENCRYPTION_KEY', 'SECRETS_MASTER_KEY', 'TELEPHONY_METRICS_TOKEN', 'INTERNAL_SERVICE_TOKEN',
                  'VOICE_GATEWAY_AUTH_TOKEN', 'BACKEND_INTERNAL_URL',
                  'VOICE_GATEWAY_CALLBACK_HOST', 'ASTERISK_ARI_USER',
