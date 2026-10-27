@@ -39,19 +39,17 @@ def get_billing_mode(*, sdk_available: bool | None = None) -> BillingMode:
     return mode if sdk_available else "unconfigured"
 
 
-def checkout_permitted_in_test_mode(*, is_platform_admin: bool, email: str | None) -> bool:
-    """Production on Stripe TEST mode sells only to the team.
+# Plans only the team can see or buy (owner decision 2026-10-27): a real $1
+# charge that checks the live money flow end to end before customers pay.
+# Never listed publicly; the checkout endpoint refuses it to everyone else.
+TEAM_ONLY_PLAN_IDS = frozenset({"payment_test"})
 
-    A test card pays nothing, so in production test mode a public checkout
-    would hand real phone minutes to anyone. Until live keys exist, checkout
-    and top-ups are open only to platform admins and to the addresses in
-    STRIPE_TEST_CHECKOUT_EMAILS (comma-separated; ``name+tag@domain`` matches
-    ``name@domain``). Every other mode and environment is unaffected.
+
+def is_billing_team(*, is_platform_admin: bool, email: str | None) -> bool:
+    """Platform admins and the addresses in STRIPE_TEST_CHECKOUT_EMAILS.
+
+    The list is comma-separated; ``name+tag@domain`` matches ``name@domain``.
     """
-    if get_billing_mode() != "test":
-        return True
-    if os.getenv("ENVIRONMENT", "").strip().lower() != "production":
-        return True
     if is_platform_admin:
         return True
     allowed = {item.strip().lower() for item in os.getenv("STRIPE_TEST_CHECKOUT_EMAILS", "").split(",") if item.strip()}
@@ -60,3 +58,18 @@ def checkout_permitted_in_test_mode(*, is_platform_admin: bool, email: str | Non
     if not at or not local or not domain:
         return False
     return address in allowed or f"{local.split('+', 1)[0]}@{domain}" in allowed
+
+
+def checkout_permitted_in_test_mode(*, is_platform_admin: bool, email: str | None) -> bool:
+    """Production on Stripe TEST mode sells only to the team.
+
+    A test card pays nothing, so in production test mode a public checkout
+    would hand real phone minutes to anyone. Until live keys exist, checkout
+    and top-ups are open only to the team (``is_billing_team``). Every other
+    mode and environment is unaffected.
+    """
+    if get_billing_mode() != "test":
+        return True
+    if os.getenv("ENVIRONMENT", "").strip().lower() != "production":
+        return True
+    return is_billing_team(is_platform_admin=is_platform_admin, email=email)
