@@ -8,6 +8,7 @@ data, application-role grants, or restore operations.
 import asyncio
 from contextlib import asynccontextmanager
 import os
+import json
 from pathlib import Path
 import re
 from urllib.parse import urlparse, urlunparse
@@ -29,12 +30,14 @@ PAID = "0071_paid_only_billing"
 PREVIOUS_HEAD = "0078_admin_billing_merge"
 SUPPLIER = "0079_supplier_evidence"
 ALLOWANCE = "0072_allowance_anchor"
-HEAD = "0080_supplier_allowance_merge"
+SUPPLIER_ALLOWANCE = "0080_supplier_allowance_merge"
+PAYMENT = "0073_payment_test_plan"
+HEAD = "0081_admin_payment_merge"
 CURRENT_ADMIN_REVISIONS = {
     "0070_trunk_soft_delete", "0071_connector_lifecycle",
     "0072_admin_incidents", "0073_alertmanager_incidents", "0074_contact_enquiry_revision",
     "0075_admin_user_review", "0076_admin_user_operations", ADMIN, PAID,
-    PREVIOUS_HEAD, SUPPLIER, ALLOWANCE, HEAD,
+    PREVIOUS_HEAD, SUPPLIER, ALLOWANCE, SUPPLIER_ALLOWANCE, PAYMENT, HEAD,
 }
 RUN_EVIDENCE = []
 pytestmark = pytest.mark.integration
@@ -207,7 +210,8 @@ def test_actual_upgrade_retains_both_histories_and_audit_evidence(monkeypatch, s
     assert parsed.path in {"/cp04_acceptance_test", "/admin_premortem_20261021_test"} and not parsed.query and not parsed.fragment
     name = "release_merge_" + uuid4().hex + "_test"
     dsn = urlunparse(parsed._replace(path="/" + name))
-    monkeypatch.setenv("DATABASE_URL", dsn)
+    for key in ("DATABASE_URL", "READ_DATABASE_URL", "MIGRATION_DATABASE_URL"):
+        monkeypatch.setenv(key, dsn)
     monkeypatch.chdir(BACKEND)
     config = Config(str(BACKEND / "alembic.ini"))
     config.set_main_option("script_location", str(BACKEND / "Alembic"))
@@ -250,13 +254,19 @@ async def billing_state(dsn, tenant):
             "allowance_anchor_at": await conn.fetchval("SELECT to_jsonb(t)->>'allowance_anchor_at' FROM tenants t WHERE id=$1", tenant),
             "allowance_column": await conn.fetchval("""SELECT EXISTS(SELECT 1 FROM information_schema.columns
                 WHERE table_schema='public' AND table_name='tenants' AND column_name='allowance_anchor_at')"""),
+            "payment_plan": await conn.fetchval("SELECT to_jsonb(p)::text FROM plans p WHERE id='payment_test'"),
             "catalog": {table: [row["value"] for row in await conn.fetch(
-                f'SELECT to_jsonb(t)::text AS value FROM public."{table}" t ORDER BY to_jsonb(t)::text')]
+                f'SELECT to_jsonb(t)::text AS value FROM public."{table}" t '
+                + ("WHERE id <> 'payment_test' " if table == "plans" else "")
+                + 'ORDER BY to_jsonb(t)::text')]
                 for table in ("plans", "plan_price_options", "topup_packages")},
         }
 
 
-@pytest.mark.parametrize("start_heads", [(PAID,), (ADMIN,), (ADMIN, PAID), (ALLOWANCE,), (SUPPLIER,), (SUPPLIER, ALLOWANCE)])
+@pytest.mark.parametrize("start_heads", [
+    (PAID,), (ADMIN,), (ADMIN, PAID), (ALLOWANCE,), (SUPPLIER,), (SUPPLIER, ALLOWANCE),
+    (PAYMENT,), (SUPPLIER_ALLOWANCE,), (SUPPLIER_ALLOWANCE, PAYMENT), (SUPPLIER, PAYMENT),
+])
 def test_actual_admin_billing_merge_preserves_applied_terms_and_allowances(monkeypatch, start_heads):
     admin_dsn = os.getenv("TALKY_RELEASE_MERGE_ADMIN_DSN", "")
     if not admin_dsn:
@@ -266,14 +276,17 @@ def test_actual_admin_billing_merge_preserves_applied_terms_and_allowances(monke
     assert parsed.path in {"/cp04_acceptance_test", "/admin_premortem_20261021_test"} and not parsed.query and not parsed.fragment
     name = "release_merge_" + uuid4().hex + "_test"
     dsn = urlunparse(parsed._replace(path="/" + name))
-    monkeypatch.setenv("DATABASE_URL", dsn)
+    for key in ("DATABASE_URL", "READ_DATABASE_URL", "MIGRATION_DATABASE_URL"):
+        monkeypatch.setenv(key, dsn)
     monkeypatch.chdir(BACKEND)
     config = Config(str(BACKEND / "alembic.ini"))
     config.set_main_option("script_location", str(BACKEND / "Alembic"))
     scripts = ScriptDirectory.from_config(config)
     assert scripts.get_heads() == [HEAD]
-    paid_applied = any(PAID in {r.revision for r in scripts.iterate_revisions(start, "base")}
-                       for start in start_heads)
+    applied = {r.revision for start in start_heads for r in scripts.iterate_revisions(start, "base")}
+    paid_applied = PAID in applied
+    payment_applied = PAYMENT in applied
+    allowance_applied = ALLOWANCE in applied
     report = {"start_heads": list(start_heads), "database": name, "steps": []}
     RUN_EVIDENCE.append(report)
     tenant = uuid4()
@@ -287,7 +300,9 @@ def test_actual_admin_billing_merge_preserves_applied_terms_and_allowances(monke
                 # Replaying paid0071 would erase this marker, even though its SQL
                 # uses UPSERT and superficially appears idempotent.
                 await conn.execute("UPDATE plans SET description='Synthetic post-release catalog marker' WHERE id='basic'")
-            if ALLOWANCE in start_heads:
+            if payment_applied:
+                await conn.execute("UPDATE plans SET description='Synthetic retained payment terms' WHERE id='payment_test'")
+            if allowance_applied:
                 await conn.execute("UPDATE tenants SET allowance_anchor_at='2026-10-25T12:34:56Z' WHERE id=$1", tenant)
 
     try:
@@ -305,10 +320,18 @@ def test_actual_admin_billing_merge_preserves_applied_terms_and_allowances(monke
         assert after["tenant"] == before["tenant"]
         assert after["allowance_column"] is True
         assert after["allowance_anchor_at"] == before["allowance_anchor_at"]
-        if ALLOWANCE in start_heads:
+        if allowance_applied:
             assert before["allowance_column"] and before["allowance_anchor_at"] is not None
         else:
             assert before["allowance_anchor_at"] is None
+        if payment_applied:
+            assert after["payment_plan"] == before["payment_plan"]
+            report["existing_payment_terms_unchanged"] = True
+        else:
+            assert before["payment_plan"] is None
+            payment = json.loads(after["payment_plan"])
+            assert payment["id"] == "payment_test" and payment["price"] == 1 and payment["minutes"] == 2
+            report["missing_payment_plan_added"] = True
         if paid_applied:
             assert after["catalog"] == before["catalog"]
             report["existing_paid_catalog_unchanged"] = True

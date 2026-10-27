@@ -205,7 +205,7 @@ def list_responder(total: int, page_size_cap: int = 10_000):
 NEW_TENANT_ID = "00000000-0000-0000-0000-0000000f0001"
 
 
-def create_responder(*, existing: dict | None = None, plan_minutes: int = 30):
+def create_responder(*, existing: dict | None = None, plan_minutes: int = 30, plan_concurrency: int = 3):
     """Answers the statements POST /tenants issues."""
 
     def _respond(method, sql, args):
@@ -215,7 +215,7 @@ def create_responder(*, existing: dict | None = None, plan_minutes: int = 30):
                 "id": args[0],
                 "name": "Free",
                 "minutes": plan_minutes,
-                "concurrent_calls": 3,
+                "concurrent_calls": plan_concurrency,
             }
         if "pg_advisory_xact_lock" in low:
             return None
@@ -312,18 +312,22 @@ def test_create_planless_tenant_honours_explicit_admin_quota():
     assert audit.events[0]["after_state"]["minutes_allocated"] == 80
 
 
-@pytest.mark.parametrize("quota_fields, expected_minutes", [({}, 300), ({"minutes_allocated": 0}, 0)])
-@pytest.mark.parametrize("plan_id", ["basic", "free"])
-def test_explicit_plan_keeps_plan_allowance_and_accepts_explicit_zero(quota_fields, expected_minutes, plan_id):
+@pytest.mark.parametrize("quota_fields", [{}, {"minutes_allocated": 0}])
+@pytest.mark.parametrize("plan_id, plan_minutes, plan_concurrency", [
+    ("basic", 300, 3), ("free", 300, 3), ("payment_test", 2, 1),
+])
+def test_explicit_plan_keeps_plan_allowance_and_accepts_explicit_zero(
+    quota_fields, plan_id, plan_minutes, plan_concurrency,
+):
     # Explicit legacy selection is an admin decision, not a public catalog offer.
-    client, _, _ = make_client(create_responder(plan_minutes=300))
+    client, _, _ = make_client(create_responder(plan_minutes=plan_minutes, plan_concurrency=plan_concurrency))
     response = client.post("/api/v1/admin/tenants", json={
         "business_name": "Selected plan", "plan_id": plan_id, **quota_fields,
     })
     assert response.status_code == 201, response.text
     assert response.json()["plan_id"] == plan_id
-    assert response.json()["minutes_allocated"] == expected_minutes
-    assert response.json()["max_concurrent_calls"] == 3
+    assert response.json()["minutes_allocated"] == quota_fields.get("minutes_allocated", plan_minutes)
+    assert response.json()["max_concurrent_calls"] == plan_concurrency
 
 
 def test_create_tenant_honours_explicit_plan_and_limits():

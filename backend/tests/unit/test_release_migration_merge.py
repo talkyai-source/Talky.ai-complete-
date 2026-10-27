@@ -14,7 +14,9 @@ PAID = "0071_paid_only_billing"
 PREVIOUS_HEAD = "0078_admin_billing_merge"
 SUPPLIER = "0079_supplier_evidence"
 ALLOWANCE = "0072_allowance_anchor"
-HEAD = "0080_supplier_allowance_merge"
+SUPPLIER_ALLOWANCE = "0080_supplier_allowance_merge"
+PAYMENT = "0073_payment_test_plan"
+HEAD = "0081_admin_payment_merge"
 
 
 def test_release_exposes_one_head_containing_both_existing_histories():
@@ -24,7 +26,9 @@ def test_release_exposes_one_head_containing_both_existing_histories():
     # line soft delete) remain common ancestors. Published paid billing and
     # connector/Admin histories now join through a metadata-only merge.
     assert SCRIPTS.get_heads() == [HEAD]
-    assert set(SCRIPTS.get_revision(HEAD).down_revision) == {SUPPLIER, ALLOWANCE}
+    assert set(SCRIPTS.get_revision(HEAD).down_revision) == {SUPPLIER_ALLOWANCE, PAYMENT}
+    assert set(SCRIPTS.get_revision(SUPPLIER_ALLOWANCE).down_revision) == {SUPPLIER, ALLOWANCE}
+    assert SCRIPTS.get_revision(PAYMENT).down_revision == ALLOWANCE
     assert SCRIPTS.get_revision(SUPPLIER).down_revision == PREVIOUS_HEAD
     assert SCRIPTS.get_revision(ALLOWANCE).down_revision == PAID
     assert set(SCRIPTS.get_revision(PREVIOUS_HEAD).down_revision) == {ADMIN, PAID}
@@ -65,7 +69,7 @@ def test_upgrade_plan_runs_only_the_missing_branch(start, required, already_pres
         "0070_trunk_soft_delete", "0071_connector_lifecycle",
         "0072_admin_incidents", "0073_alertmanager_incidents", "0074_contact_enquiry_revision",
         "0075_admin_user_review", "0076_admin_user_operations", ADMIN, PAID,
-        PREVIOUS_HEAD, SUPPLIER, ALLOWANCE, HEAD,
+        PREVIOUS_HEAD, SUPPLIER, ALLOWANCE, SUPPLIER_ALLOWANCE, PAYMENT, HEAD,
     } <= head_revisions
     assert already_present not in head_revisions
 
@@ -107,23 +111,49 @@ def test_admin_billing_merge_has_no_business_sql_and_refuses_history_split():
 @pytest.mark.parametrize("start,expected", [
     (ALLOWANCE, {"0071_connector_lifecycle", "0072_admin_incidents", "0073_alertmanager_incidents",
                  "0074_contact_enquiry_revision", "0075_admin_user_review", "0076_admin_user_operations",
-                 ADMIN, PREVIOUS_HEAD, SUPPLIER, HEAD}),
-    (SUPPLIER, {ALLOWANCE, HEAD}),
-    ((SUPPLIER, ALLOWANCE), {HEAD}),
-    (PREVIOUS_HEAD, {SUPPLIER, ALLOWANCE, HEAD}),
-    ((PREVIOUS_HEAD, ALLOWANCE), {SUPPLIER, HEAD}),
-    (HEAD, set()),
+                 ADMIN, PREVIOUS_HEAD, SUPPLIER, SUPPLIER_ALLOWANCE}),
+    (SUPPLIER, {ALLOWANCE, SUPPLIER_ALLOWANCE}),
+    ((SUPPLIER, ALLOWANCE), {SUPPLIER_ALLOWANCE}),
+    (PREVIOUS_HEAD, {SUPPLIER, ALLOWANCE, SUPPLIER_ALLOWANCE}),
+    ((PREVIOUS_HEAD, ALLOWANCE), {SUPPLIER, SUPPLIER_ALLOWANCE}),
+    (SUPPLIER_ALLOWANCE, set()),
 ])
 def test_supplier_allowance_upgrade_plan_never_replays_paid_terms(start, expected):
-    revisions = [step.revision.revision for step in SCRIPTS._upgrade_revs("head", start)]
+    revisions = [step.revision.revision for step in SCRIPTS._upgrade_revs(SUPPLIER_ALLOWANCE, start)]
     assert set(revisions) == expected and len(revisions) == len(expected)
     assert PAID not in revisions
     if revisions:
-        assert revisions[-1] == HEAD
+        assert revisions[-1] == SUPPLIER_ALLOWANCE
 
 
 def test_supplier_allowance_merge_has_no_business_sql_and_refuses_history_split():
     migration = import_module("Alembic.versions.0080_supplier_allowance_merge")
+    assert migration.upgrade() is None
+    with pytest.raises(RuntimeError, match="forward migration"):
+        migration.downgrade()
+
+
+@pytest.mark.parametrize("start,expected", [
+    (SUPPLIER_ALLOWANCE, {PAYMENT, HEAD}),
+    (PAYMENT, {"0071_connector_lifecycle", "0072_admin_incidents", "0073_alertmanager_incidents",
+               "0074_contact_enquiry_revision", "0075_admin_user_review", "0076_admin_user_operations",
+               ADMIN, PREVIOUS_HEAD, SUPPLIER, SUPPLIER_ALLOWANCE, HEAD}),
+    ((SUPPLIER_ALLOWANCE, PAYMENT), {HEAD}),
+    ((SUPPLIER, PAYMENT), {SUPPLIER_ALLOWANCE, HEAD}),
+    (HEAD, set()),
+])
+def test_payment_merge_runs_only_missing_revisions(start, expected):
+    revisions = [step.revision.revision for step in SCRIPTS._upgrade_revs("head", start)]
+    assert set(revisions) == expected and len(revisions) == len(expected)
+    assert PAID not in revisions and ALLOWANCE not in revisions
+    applied = {start} if isinstance(start, str) else set(start)
+    assert not applied.intersection(revisions)
+    if revisions:
+        assert revisions[-1] == HEAD
+
+
+def test_payment_merge_has_no_business_sql_and_refuses_history_split():
+    migration = import_module("Alembic.versions.0081_admin_payment_merge")
     assert migration.upgrade() is None
     with pytest.raises(RuntimeError, match="forward migration"):
         migration.downgrade()

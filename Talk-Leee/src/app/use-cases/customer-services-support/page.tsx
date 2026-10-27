@@ -274,16 +274,16 @@ export default function CustomerServicesSupportUseCasePage() {
             the moment it matters, across voice, chat, SMS, and email.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Book a Demo
-              </Button>
-            </Link>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+              </Link>
+            </Button>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 See It in Action
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
           <div className="mt-10 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
             {heroStats.map((stat) => (
@@ -355,11 +355,11 @@ export default function CustomerServicesSupportUseCasePage() {
             </div>
           </div>
           <div className={centeredCtaClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Book a Demo
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -437,11 +437,11 @@ export default function CustomerServicesSupportUseCasePage() {
             ))}
           </div>
           <div className={centeredCtaClassName}>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 See It in Action
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -511,11 +511,11 @@ export default function CustomerServicesSupportUseCasePage() {
               Give your customers instant, intelligent support across every channel &mdash; without expanding your support team.
             </p>
             <div className="mt-8 flex justify-center">
-              <Link href="/auth/register">
-                <Button size="lg" className={primaryButtonClassName}>
+              <Button asChild size="lg" className={primaryButtonClassName}>
+                <Link href="/auth/register">
                   Book a Demo
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </div>
         </section>

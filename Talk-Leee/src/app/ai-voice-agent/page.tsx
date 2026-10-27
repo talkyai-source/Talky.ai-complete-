@@ -366,16 +366,16 @@ export default function AIVoiceAgentPage() {
             prospects, and handling customer inquiries around the clock.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 Book a Demo
-              </Button>
-            </Link>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+              </Link>
+            </Button>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Build Your AI Agent
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
           <div className="mt-10 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
             {capabilityPills.map((pill) => (
@@ -406,11 +406,11 @@ export default function AIVoiceAgentPage() {
             calling and helps them reach the right outcome.
           </p>
           <div className={centeredCtaClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Stop Losing Calls to Voicemail &rarr;
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -505,11 +505,11 @@ export default function AIVoiceAgentPage() {
             Tell us what happens on your calls. We&rsquo;ll show you what AI can automate.
           </p>
           <div className={centeredCtaClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Turn Your Calls Into Actions &rarr;
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -527,11 +527,11 @@ export default function AIVoiceAgentPage() {
             ))}
           </div>
           <div className={centeredCtaClassName}>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 Find Out How It Fits Your Industry
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -600,11 +600,11 @@ export default function AIVoiceAgentPage() {
             Appointment booked. The customer helped. No employee needed to step away from their work.
           </p>
           <div className={centeredCtaClassName}>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 Hear Your AI in Action &rarr;
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
           <div className="mt-10 flex justify-center">
             <div className={imageFrameClassName}>
@@ -712,16 +712,16 @@ export default function AIVoiceAgentPage() {
               conversations an intelligent layer.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-              <Link href="/auth/register">
-                <Button size="lg" className={primaryButtonClassName}>
+              <Button asChild size="lg" className={primaryButtonClassName}>
+                <Link href="/auth/register">
                   Book a Demo
-                </Button>
-              </Link>
-              <Link href="/#contact">
-                <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                </Link>
+              </Button>
+              <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                <Link href="/#contact">
                   Talk to an AI Expert
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </div>
         </section>

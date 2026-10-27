@@ -10,7 +10,7 @@ import time
 from uuid import UUID
 
 from app.core.db_utils import acquire_with_tenant
-from app.domain.services.billing_mode import get_billing_mode
+from app.domain.services.billing_mode import TEAM_ONLY_PLAN_IDS, get_billing_mode
 
 logger = logging.getLogger(__name__)
 # Explicit supported Stripe charge conventions; unknown currencies fail closed.
@@ -153,7 +153,7 @@ def validate_provider_price(option: dict, price, *, require_active: bool = True)
         )
 
 
-async def resolve_checkout_option(pool, option_id) -> dict:
+async def resolve_checkout_option(pool, option_id, *, allow_team_only: bool = False) -> dict:
     try:
         option_id = UUID(str(option_id))
     except (ValueError, TypeError) as exc:
@@ -164,7 +164,8 @@ async def resolve_checkout_option(pool, option_id) -> dict:
             FROM plan_price_options o JOIN plans p ON p.id=o.plan_id WHERE o.id=$1""",
             option_id,
         )
-    if not row:
+    if not row or (row["plan_id"] in TEAM_ONLY_PLAN_IDS and not allow_team_only):
+        # A team-only plan (the $1 payment check) does not exist for anyone else.
         raise BillingCatalogUnavailable("Unknown price option.")
     option = dict(row)
     option["id"] = str(option["id"])
@@ -173,7 +174,7 @@ async def resolve_checkout_option(pool, option_id) -> dict:
     return option
 
 
-async def list_plan_catalog(pool) -> list[dict]:
+async def list_plan_catalog(pool, *, include_team_only: bool = False) -> list[dict]:
     mode = get_billing_mode()
     async with acquire_with_tenant(pool, None) as conn:
         plans = await conn.fetch(
@@ -226,7 +227,13 @@ async def list_plan_catalog(pool) -> list[dict]:
         return option["plan_id"], public
 
     presented = await asyncio.gather(
-        *(present(row) for row in rows if row["kind"] == "stripe" and row["provider_mode"] == mode)
+        *(
+            present(row)
+            for row in rows
+            if row["kind"] == "stripe"
+            and row["provider_mode"] == mode
+            and (include_team_only or row["plan_id"] not in TEAM_ONLY_PLAN_IDS)
+        )
     )
     offered = {plan_id for plan_id, _ in presented}
     result = []

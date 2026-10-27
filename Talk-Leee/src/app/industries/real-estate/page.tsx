@@ -365,16 +365,16 @@ export default function RealEstateIndustryPage() {
             inquiries, and qualifies prospects. It schedules appointments and keeps leads moving forward around the clock.
           </p>
           <div className={ctaPairClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 See It Handle a Real Estate Call
-              </Button>
-            </Link>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+              </Link>
+            </Button>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 Book a Demo
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
           <p className="mt-6 text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground">
             Give your team an AI assistant built for faster lead response.
@@ -441,11 +441,11 @@ export default function RealEstateIndustryPage() {
             ))}
           </div>
           <div className={centeredCtaClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 See AI in Action
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -549,11 +549,11 @@ export default function RealEstateIndustryPage() {
             ))}
           </div>
           <div className={centeredCtaClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Book a Demo
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -590,11 +590,11 @@ export default function RealEstateIndustryPage() {
             ))}
           </div>
           <div className={centeredCtaClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 See It Handle a Real Estate Call
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -627,17 +627,19 @@ export default function RealEstateIndustryPage() {
                   ))}
                 </ul>
                 <div className={centeredCtaClassName}>
-                  <Link href={plan.ctaHref}>
-                    {plan.ctaPrimary ? (
-                      <Button size="lg" className={primaryButtonClassName}>
+                  {plan.ctaPrimary ? (
+                    <Button asChild size="lg" className={primaryButtonClassName}>
+                      <Link href={plan.ctaHref}>
                         {plan.ctaLabel}
-                      </Button>
-                    ) : (
-                      <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                      <Link href={plan.ctaHref}>
                         {plan.ctaLabel}
-                      </Button>
-                    )}
-                  </Link>
+                      </Link>
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
@@ -663,16 +665,16 @@ export default function RealEstateIndustryPage() {
               Configure approved answers, enquiry capture and enabled scheduling actions for your property workflow.
             </p>
             <div className={ctaPairClassName}>
-              <Link href="/auth/register">
-                <Button size="lg" className={primaryButtonClassName}>
+              <Button asChild size="lg" className={primaryButtonClassName}>
+                <Link href="/auth/register">
                   Book a Demo
-                </Button>
-              </Link>
-              <Link href="/#contact">
-                <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                </Link>
+              </Button>
+              <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                <Link href="/#contact">
                   See AI in Action
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </div>
         </section>

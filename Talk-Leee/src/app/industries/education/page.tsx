@@ -317,16 +317,16 @@ export default function EducationIndustryPage() {
             admissions, scheduling, and support with intelligent AI available 24/7.
           </p>
           <div className={ctaPairClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Start Free &mdash; 2 Minutes
-              </Button>
-            </Link>
-            <Link href="/#contact">
-              <Button size="lg" className={outlineButtonClassName}>
+              </Link>
+            </Button>
+            <Button asChild size="lg" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 See How It Works
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
           <p className="mt-6 text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground">
             No credit card needed. Go live with AI support in days.
@@ -375,11 +375,11 @@ export default function EducationIndustryPage() {
             ))}
           </div>
           <div className={centeredCtaClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Start Free &mdash; 2 Minutes
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -455,12 +455,12 @@ export default function EducationIndustryPage() {
             ))}
           </div>
           <div className={centeredCtaClassName}>
-            <Link href="/#contact">
-              <Button size="lg" className={outlineButtonClassName}>
+            <Button asChild size="lg" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 <Video aria-hidden />
                 Book a Demo
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
 
@@ -512,15 +512,16 @@ export default function EducationIndustryPage() {
                   ))}
                 </ul>
                 <div className="mt-8 flex flex-1 items-end justify-center">
-                  <Link href={plan.ctaHref}>
-                    <Button
-                      size="lg"
-                      className={plan.ctaVariant === "primary" ? primaryButtonClassName : outlineButtonClassName}
-                    >
+                  <Button
+                    asChild
+                    size="lg"
+                    className={plan.ctaVariant === "primary" ? primaryButtonClassName : outlineButtonClassName}
+                  >
+                    <Link href={plan.ctaHref}>
                       {plan.ctaIcon ? <Video aria-hidden /> : null}
                       {plan.ctaLabel}
-                    </Button>
-                  </Link>
+                    </Link>
+                  </Button>
                 </div>
               </div>
             ))}
@@ -546,17 +547,17 @@ export default function EducationIndustryPage() {
             assistance.
           </p>
           <div className={ctaPairClassName}>
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Start Free
-              </Button>
-            </Link>
-            <Link href="/#contact">
-              <Button size="lg" className={outlineButtonClassName}>
+              </Link>
+            </Button>
+            <Button asChild size="lg" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 <Video aria-hidden />
                 Book a Live Demo
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </section>
       </div>

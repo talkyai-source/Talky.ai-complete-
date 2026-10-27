@@ -322,16 +322,16 @@ export default function RecruitmentIndustryPage() {
             process &mdash; all from one intelligent platform.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-            <Link href="/auth/register">
-              <Button size="lg" className={primaryButtonClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
                 Book a Demo
-              </Button>
-            </Link>
-            <Link href="/#contact">
-              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+              </Link>
+            </Button>
+            <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+              <Link href="/#contact">
                 See How It Works
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
           <p className="mt-6 text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground">
             Transform your hiring process with AI in just a few days.
@@ -517,17 +517,19 @@ export default function RecruitmentIndustryPage() {
                   ))}
                 </ul>
                 <div className="mt-8 flex flex-1 items-end justify-center">
-                  <Link href={plan.ctaHref}>
-                    {plan.ctaVariant === "primary" ? (
-                      <Button size="lg" className={primaryButtonClassName}>
+                  {plan.ctaVariant === "primary" ? (
+                    <Button asChild size="lg" className={primaryButtonClassName}>
+                      <Link href={plan.ctaHref}>
                         {plan.ctaLabel}
-                      </Button>
-                    ) : (
-                      <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                      <Link href={plan.ctaHref}>
                         {plan.ctaLabel}
-                      </Button>
-                    )}
-                  </Link>
+                      </Link>
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
@@ -554,16 +556,16 @@ export default function RecruitmentIndustryPage() {
               communication with AI built for modern hiring teams.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-              <Link href="/auth/register">
-                <Button size="lg" className={primaryButtonClassName}>
+              <Button asChild size="lg" className={primaryButtonClassName}>
+                <Link href="/auth/register">
                   Book a Demo
-                </Button>
-              </Link>
-              <Link href="/#contact">
-                <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                </Link>
+              </Button>
+              <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
+                <Link href="/#contact">
                   See Recruitment Plans
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </div>
         </section>

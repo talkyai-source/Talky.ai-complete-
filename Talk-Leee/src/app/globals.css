@@ -279,7 +279,9 @@
 
 .home-navbar-fixed {
   position: absolute;
-  top: 8px;
+  /* Viewport width only: 16px (the px-4 page gutter) on phones, rising
+     2.5vw to 20px (the navbar's own md:px-5 inner padding) from 800px. */
+  top: clamp(1rem, 2.5vw, 1.25rem);
   left: 0;
   right: 0;
   margin: 0 auto;
@@ -311,12 +313,6 @@
   backdrop-filter: blur(20px) saturate(1.5);
   z-index: -1;
   pointer-events: none;
-}
-
-@media (min-width: 768px) {
-  .home-navbar-fixed {
-    top: 10px;
-  }
 }
 
 /* The horizontal navbar exists only from 1024px up (navbar.tsx: lg: prefixes
@@ -1253,8 +1249,9 @@ details > summary.home-menu-toggle {
    navbar uses (.home-navbar-fixed), so the two side gaps are always equal
    by construction. The top offset is measured from the navbar element at
    runtime (ResizeObserver in voice-agent-popup.tsx) and set inline at
-   every size; the 8px/10px below are the fallbacks before the first
-   measurement.
+   every size; the clamp(1rem, 2.5vw, 1.25rem) below is the navbar's own
+   top rule (.home-navbar-fixed), so the bar sits where the navbar is from
+   first paint and does not move when the measurement lands.
 
    Two forms, split at the same sm breakpoint the rest of the site uses
    (viewport width only, no device targeting):
@@ -1280,7 +1277,7 @@ details > summary.home-menu-toggle {
 .askAiCallBar {
   position: fixed;
   z-index: 600;
-  top: 8px;
+  top: clamp(1rem, 2.5vw, 1.25rem);
   left: 0;
   right: 0;
   margin-inline: auto;
@@ -1327,13 +1324,6 @@ details > summary.home-menu-toggle {
     /* -webkit- first, unprefixed second: see .home-navbar-fixed::before. */
     -webkit-backdrop-filter: blur(20px) saturate(1.5);
     backdrop-filter: blur(20px) saturate(1.5);
-  }
-}
-
-/* Same breakpoint as the navbar's own top offset (.home-navbar-fixed). */
-@media (min-width: 768px) {
-  .askAiCallBar {
-    top: 10px;
   }
 }
 

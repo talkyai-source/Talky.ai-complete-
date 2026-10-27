@@ -93,15 +93,16 @@ class FakeStripe:
                                   billing_portal=SimpleNamespace(configurations=Portal()))
 
 
-def test_a_first_run_creates_one_product_and_both_prices_per_plan():
+def test_a_first_run_creates_one_product_per_plan_and_each_of_its_prices():
     client = FakeStripe()
     options = setup.ensure_prices(client, "test", apply=True)
     prices = {(o["plan_id"], o["interval"]): o["amount_minor"] for o in options}
     assert prices == {("basic", "month"): 9900, ("basic", "year"): 98600,
-                      ("business", "month"): 29900, ("business", "year"): 297800}
+                      ("business", "month"): 29900, ("business", "year"): 297800,
+                      ("payment_test", "month"): 100}
     assert all(o["provider_mode"] == "test" and o["stripe_price_id"].startswith("price_") for o in options)
     kinds = [kind for kind, _, _ in client.created]
-    assert kinds.count("product") == 2 and kinds.count("price") == 4
+    assert kinds.count("product") == 3 and kinds.count("price") == 5
     assert all(options_["idempotency_key"] for _, _, options_ in client.created)
 
 
