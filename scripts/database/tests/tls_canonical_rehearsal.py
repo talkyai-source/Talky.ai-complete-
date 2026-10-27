@@ -60,6 +60,7 @@ class Fixture:
         self.work, self.image = work, image
         self.token = uuid4().hex
         self.network = None
+        self.docker_verified = False
         self.network_name = f"talklee-recovery-{self.token}"
         self.containers = []
         self.container_names = set()
@@ -80,6 +81,7 @@ class Fixture:
         endpoint = json.loads(self.docker("context", "inspect", "--format", "{{json .Endpoints.docker.Host}}"))
         require(endpoint.startswith("unix://"), "The Docker context must use a local Unix socket")
         require(self.docker("info", "--format", "{{.OSType}}") == "linux", "Linux Docker is required")
+        self.docker_verified = True
         self.docker("pull", self.image, timeout=300)
         observed = json.loads(self.docker("image", "inspect", self.image))[0]
         self.image_id = observed["Id"]
@@ -147,6 +149,8 @@ class Fixture:
         return recovery.Service(self.services, name)
 
     def cleanup(self):
+        if not self.docker_verified:
+            return
         failures = []
         containers = self.docker("container", "ls", "--all", "--quiet", "--no-trunc", "--filter", f"label={LABEL}={self.token}").splitlines()
         for container in containers:
@@ -348,6 +352,7 @@ def main():
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--image", default="postgres:16-bookworm")
     args = parser.parse_args()
+    require(sys.platform == "linux", "This fixture requires Linux and a local Docker daemon")
     require(args.image == "postgres:16-bookworm" or re.fullmatch(r"postgres@sha256:[a-f0-9]{64}", args.image),
             "Only the official PostgreSQL16 fixture image or a reviewed official digest is accepted")
     require(not args.receipt.exists(), "Refusing to replace an existing receipt")
@@ -369,6 +374,13 @@ def main():
                "limits": ["not off-host survivability, retention/PITR, RPO/RTO, or alert-delivery acceptance",
                           "no application lifespan, provider, payment, call, or recording/encryption-key recovery",
                           "runtime data-operation checks cover campaigns, leads and calls; grants are fixture-specific"]}
+    inputs = [ROOT / name for name in ("backend/database/complete_schema.sql", "backend/Alembic/env.py",
+              "backend/alembic.ini", "scripts/database/recovery.py", "scripts/database/tests/tls_canonical_rehearsal.py",
+              "scripts/installation/requirements-linux-py312.lock")]
+    inputs += sorted((ROOT / "backend/Alembic/versions").glob("*.py"))
+    receipt["source_sha256"] = {path.relative_to(ROOT).as_posix(): recovery.digest(path) for path in inputs}
+    receipt["source_git_sha"] = run(["git", "rev-parse", "HEAD"], cwd=ROOT)
+    receipt["source_worktree_dirty"] = bool(run(["git", "status", "--porcelain"], cwd=ROOT))
     try:
         fixture.prepare()
         receipt.update(postgres_image_id=fixture.image_id, postgres_image_digests=fixture.image_digests)

@@ -221,7 +221,8 @@ Cleanup verifies the invocation's unique labels and names before removing its
 containers and network. Only a nonsecret receipt is uploaded by
 [`database-recovery-acceptance.yml`](../../.github/workflows/database-recovery-acceptance.yml);
 passwords, certificate keys and database archives are temporary and are never
-uploaded. The receipt records the actual image digest, schema heads and results.
+uploaded. The receipt records the actual image digest, schema heads, Git revision,
+source-file hashes, worktree state and results.
 The default image is the official `postgres:16-bookworm`; `--image
 postgres@sha256:REVIEWED_DIGEST` can replay a recorded official image digest.
 
