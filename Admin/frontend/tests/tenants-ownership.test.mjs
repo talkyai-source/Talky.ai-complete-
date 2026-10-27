@@ -10,6 +10,21 @@ const draw = async (row = tenant(), onRefresh = () => {}) => render(el(C.Tenants
 const menu = async () => act(async () => find('[aria-label="Actions for Acme"]').click());
 const mutations = () => state.requests.filter((r) => r.method !== 'GET');
 
+test('a planless zero-allowance tenant is displayed honestly and keeps explicit quota editing', async () => {
+    state.route = () => response(receipt({ minutes_allocated: 80 }));
+    await draw(tenant({ minutes_allocated: 0 }));
+    assert.equal(find('.plan-badge').textContent, 'No Plan');
+    assert.equal(find('.usage-text').textContent, '0 / 0 min');
+    assert.equal(find('.usage-fill').style.width, '0%');
+    assert.equal(mutations().length, 0);
+    await menu(); await click('Edit Quota');
+    assert.equal(find('#minutes').value, '0');
+    await setInput(find('#minutes'), '80'); await click('Save Changes');
+    assert.equal(mutations().length, 1);
+    assert.deepEqual(mutations()[0].body, { expected_updated_at: stamp, minutes_allocated: 80 });
+    assert.match(find('[aria-label="Saved tenant change"]').textContent, /Minutes allocated: 80/);
+});
+
 test('status writes carry the displayed version and reject double submission', async () => {
     const pending = deferred(); state.route = () => pending.promise;
     await draw(); await menu(); await click('Suspend subscription');

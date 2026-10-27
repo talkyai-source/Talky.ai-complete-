@@ -129,7 +129,7 @@ class QuotaUpdateRequest(TenantVersionRequest):
 class TenantCreateRequest(BaseModel):
     """Request model for provisioning a tenant."""
     business_name: str = Field(..., min_length=1, max_length=255)
-    plan_id: str = Field("free", min_length=1, max_length=50)
+    plan_id: Optional[str] = Field(None, min_length=1, max_length=50)
     minutes_allocated: Optional[int] = Field(None, ge=0, le=2147483647)
     max_concurrent_calls: Optional[int] = Field(None, ge=1, le=1000)
     subscription_status: str = Field("active", pattern=_SUBSCRIPTION_STATUS_PATTERN)
@@ -296,8 +296,8 @@ async def create_tenant(
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """
-    Provision a tenant with its plan, minute quota and limits rows
-    (platform_admin only).
+    Provision a planless tenant with zero minutes by default (platform_admin
+    only). An explicit plan or quota remains an administrator decision.
 
     Idempotent on the natural key ``business_name`` (case-insensitive): a
     re-run of a seeder returns the existing tenant with ``created: false``
@@ -312,16 +312,18 @@ async def create_tenant(
         async with acquire_with_tenant(db_client.pool, None) as conn:
             async with conn.transaction():
                 await _lock_operator_write(conn, audit_logger, admin_user)
-                plan = await conn.fetchrow(
-                    "SELECT id, name, minutes, concurrent_calls "
-                    "FROM plans WHERE id = $1",
-                    body.plan_id,
-                )
-                if not plan:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Unknown plan_id '{body.plan_id}'",
+                plan = None
+                if body.plan_id is not None:
+                    plan = await conn.fetchrow(
+                        "SELECT id, name, minutes, concurrent_calls "
+                        "FROM plans WHERE id = $1",
+                        body.plan_id,
                     )
+                    if not plan:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Unknown plan_id '{body.plan_id}'",
+                        )
 
                 # Serialise concurrent creates of the same natural key.
                 await conn.fetchval(
@@ -340,7 +342,7 @@ async def create_tenant(
                 minutes = (
                     body.minutes_allocated
                     if body.minutes_allocated is not None
-                    else (plan["minutes"] or 0)
+                    else ((plan["minutes"] or 0) if plan else 0)
                 )
 
                 # Same column list the signup path writes.
@@ -355,7 +357,7 @@ async def create_tenant(
                               calling_rules, created_at, updated_at
                     """,
                     name,
-                    plan["id"],
+                    plan["id"] if plan else None,
                     int(minutes),
                     body.subscription_status,
                 )
@@ -363,7 +365,7 @@ async def create_tenant(
                 rules = _calling_rules(tenant["calling_rules"])
                 desired = (
                     body.max_concurrent_calls
-                    or plan["concurrent_calls"]
+                    or (plan["concurrent_calls"] if plan else None)
                     or _max_concurrent(rules)
                 )
                 if int(desired) != _max_concurrent(rules):
@@ -405,7 +407,7 @@ async def create_tenant(
                     actor_id=admin_user.id, actor_role="platform_admin",
                     tenant_id=tenant["id"], resource_type="tenant", resource_id=tenant["id"],
                     action="tenant_created",
-                    after_state={"business_name": name, "plan_id": plan["id"],
+                    after_state={"business_name": name, "plan_id": tenant["plan_id"],
                                  "minutes_allocated": int(minutes),
                                  "subscription_status": body.subscription_status,
                                  "calling_rules": rules},
@@ -424,7 +426,7 @@ async def create_tenant(
             "id": tenant["id"],
             "business_name": tenant["business_name"],
             "plan_id": tenant["plan_id"],
-            "plan_name": plan["name"],
+            "plan_name": plan["name"] if plan else None,
             "minutes_allocated": tenant["minutes_allocated"],
             "minutes_used": tenant["minutes_used"],
             "subscription_status": tenant["subscription_status"],

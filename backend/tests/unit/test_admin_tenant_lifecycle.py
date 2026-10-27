@@ -265,25 +265,25 @@ def archive_responder(*, found: bool = True, status: str = "active"):
 # 1. Create
 # ===========================================================================
 
-def test_create_tenant_returns_usable_tenant_with_defaults():
-    """POST /admin/tenants creates a tenant on the default plan with quota."""
+@pytest.mark.parametrize("plan_fields", [{}, {"plan_id": None}], ids=["omitted-plan", "null-plan"])
+def test_create_tenant_defaults_to_no_plan_and_zero_minutes(plan_fields):
+    """Admin provisioning must not silently grant the retired free allowance."""
     client, conn, audit = make_client(create_responder())
 
-    r = client.post("/api/v1/admin/tenants", json={"business_name": "Acme Ltd"})
+    r = client.post("/api/v1/admin/tenants", json={"business_name": "Acme Ltd", **plan_fields})
 
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["id"] == NEW_TENANT_ID
     assert body["business_name"] == "Acme Ltd"
     assert body["created"] is True
-    # default plan + quota derived from the plan row, not invented here
-    assert body["plan_id"] == "free"
-    assert body["plan_name"] == "Free"
-    assert body["minutes_allocated"] == 30
+    assert body["plan_id"] is None
+    assert body["plan_name"] is None
+    assert body["minutes_allocated"] == 0
     assert body["minutes_used"] == 0
     assert body["status"] == "active"
-    # concurrency limit falls back to the plan's concurrent_calls
-    assert body["max_concurrent_calls"] == 3
+    assert body["max_concurrent_calls"] == DEFAULT_CALLING_RULES["max_concurrent_calls"]
+    assert not conn.statements_matching("FROM plans")
 
     sql = conn.sql_text().lower()
     assert "insert into tenants" in sql
@@ -294,6 +294,36 @@ def test_create_tenant_returns_usable_tenant_with_defaults():
     )
     assert audit.events, "tenant creation must be audited (goals.md §12)"
     assert audit.events[0]["event_type"].value == "tenant_created"
+    assert audit.events[0]["after_state"]["plan_id"] is None
+    assert audit.events[0]["after_state"]["minutes_allocated"] == 0
+
+
+def test_create_planless_tenant_honours_explicit_admin_quota():
+    client, conn, audit = make_client(create_responder())
+    response = client.post("/api/v1/admin/tenants", json={
+        "business_name": "Operator allowance", "minutes_allocated": 80,
+        "max_concurrent_calls": 4,
+    })
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["plan_id"] is None and body["plan_name"] is None
+    assert body["minutes_allocated"] == 80 and body["max_concurrent_calls"] == 4
+    assert not conn.statements_matching("FROM plans")
+    assert audit.events[0]["after_state"]["minutes_allocated"] == 80
+
+
+@pytest.mark.parametrize("quota_fields, expected_minutes", [({}, 300), ({"minutes_allocated": 0}, 0)])
+@pytest.mark.parametrize("plan_id", ["basic", "free"])
+def test_explicit_plan_keeps_plan_allowance_and_accepts_explicit_zero(quota_fields, expected_minutes, plan_id):
+    # Explicit legacy selection is an admin decision, not a public catalog offer.
+    client, _, _ = make_client(create_responder(plan_minutes=300))
+    response = client.post("/api/v1/admin/tenants", json={
+        "business_name": "Selected plan", "plan_id": plan_id, **quota_fields,
+    })
+    assert response.status_code == 201, response.text
+    assert response.json()["plan_id"] == plan_id
+    assert response.json()["minutes_allocated"] == expected_minutes
+    assert response.json()["max_concurrent_calls"] == 3
 
 
 def test_create_tenant_honours_explicit_plan_and_limits():
@@ -329,7 +359,7 @@ def test_create_tenant_is_idempotent_on_business_name():
         "created_at": "2026-08-01T00:00:00+00:00",
         "updated_at": "2026-08-01T00:00:00+00:00",
     }
-    client, conn, _ = make_client(create_responder(existing=already))
+    client, conn, audit = make_client(create_responder(existing=already))
 
     r = client.post("/api/v1/admin/tenants", json={"business_name": "Acme Ltd"})
 
@@ -337,6 +367,10 @@ def test_create_tenant_is_idempotent_on_business_name():
     body = r.json()
     assert body["created"] is False
     assert body["id"] == already["id"]
+    assert body["plan_id"] == "free" and body["minutes_allocated"] == 30
+    assert body["minutes_used"] == 7
+    assert audit.events == []
+    assert not conn.statements_matching("UPDATE tenants")
     assert not conn.statements_matching("INSERT INTO tenants"), (
         "idempotent replay must not insert a second tenant row"
     )

@@ -26,6 +26,7 @@ async def crud_db(journey_db, monkeypatch):  # noqa: F811
     await db.owner.execute(f'GRANT INSERT ON tenants,tenant_quotas TO "{role}"')
     db.owned_emails = []
     db.created_tenants = []
+    db.owned_tenant_names = []
     db.client_ip = "127.0.1." + str(1 + uuid4().int % 250)
     db.report["database_errors"] = []
     for method in ("execute", "fetch", "fetchrow", "fetchval"):
@@ -46,6 +47,13 @@ async def crud_db(journey_db, monkeypatch):  # noqa: F811
         # parent's owned cleanup. A hard delete can null login_attempts.user_id.
         created = await db.owner.fetch("SELECT id FROM user_profiles WHERE email=ANY($1::text[])", db.owned_emails)
         db.users.extend(row["id"] for row in created if row["id"] not in db.users)
+        created_tenants = await db.owner.fetch(
+            "SELECT id FROM tenants WHERE business_name=ANY($1::text[])", db.owned_tenant_names)
+        for row in created_tenants:
+            if row["id"] not in db.tenants:
+                db.tenants.append(row["id"])
+            if row["id"] not in db.created_tenants:
+                db.created_tenants.append(row["id"])
         await db.owner.execute("DELETE FROM login_attempts WHERE email=ANY($1::text[])", db.owned_emails)
         await db.owner.execute("DELETE FROM tenant_quotas WHERE tenant_id=ANY($1::uuid[])", db.created_tenants)
 
@@ -272,10 +280,12 @@ async def test_tenant_create_quota_version_and_subscription_receipts(crud_db):
     plan = await db.owner.fetchval("SELECT id FROM plans ORDER BY id LIMIT 1")
     assert plan is not None
     name = "Synthetic CRUD " + uuid4().hex
+    db.owned_tenant_names.append(name)
     async with signed_in(db) as admin:
         created = await call(db, admin, "POST", "/admin/tenants", json={"business_name": name, "plan_id": plan,
                             "minutes_allocated": 50, "max_concurrent_calls": 3})
         assert created.status_code == 201
+        assert created.json()["plan_id"] == plan and created.json()["minutes_allocated"] == 50
         target = UUID(created.json()["id"])
         db.tenants.append(target)
         db.created_tenants.append(target)
@@ -300,3 +310,56 @@ async def test_tenant_create_quota_version_and_subscription_receipts(crud_db):
             version = response.json()["updated_at"]
         RUN_EVIDENCE.append({"case": "tenant_crud", "quota_receipt_and_stale_conflict": True,
                              "subscription_transitions": 4, "formal_account_status_unchanged": True})
+
+
+@pytest.mark.parametrize("plan_fields", [{}, {"plan_id": None}], ids=["omitted-plan", "null-plan"])
+async def test_tenant_default_is_planless_zero_with_explicit_quota_authority(crud_db, plan_fields):
+    db = crud_db
+    name = "Synthetic planless " + uuid4().hex
+    db.owned_tenant_names.append(name)
+    async with signed_in(db) as admin:
+        created = await call(db, admin, "POST", "/admin/tenants", json={"business_name": name, **plan_fields})
+        assert created.status_code == 201, created.text
+        target = UUID(created.json()["id"])
+        db.tenants.append(target)
+        db.created_tenants.append(target)
+        assert created.json()["plan_id"] is None and created.json()["plan_name"] is None
+        assert created.json()["minutes_allocated"] == created.json()["minutes_used"] == 0
+        await audit(db, created, "tenant_created")
+        persisted = await db.owner.fetchrow(
+            "SELECT plan_id,minutes_allocated,minutes_used FROM tenants WHERE id=$1", target)
+        assert dict(persisted) == {"plan_id": None, "minutes_allocated": 0, "minutes_used": 0}
+        assert await db.owner.fetchval("SELECT count(*) FROM tenant_quotas WHERE tenant_id=$1", target) == 1
+        reviewed = await call(db, admin, "GET", f"/admin/tenants/{target}")
+        assert reviewed.status_code == 200 and reviewed.json()["plan_id"] is None
+        assert reviewed.json()["minutes_allocated"] == 0
+        quota = await call(db, admin, "PATCH", f"/admin/tenants/{target}/quota", json={
+            "expected_updated_at": reviewed.json()["updated_at"], "minutes_allocated": 80})
+        assert quota.status_code == 200 and quota.json()["minutes_allocated"] == 80
+        await audit(db, quota, "tenant_quota_updated")
+        replay = await call(db, admin, "POST", "/admin/tenants", json={"business_name": name})
+        assert replay.status_code == 200 and replay.json()["created"] is False
+        assert replay.json()["plan_id"] is None and replay.json()["minutes_allocated"] == 80
+        assert await db.owner.fetchval(
+            "SELECT count(*) FROM audit_logs WHERE tenant_id=$1 AND action='tenant_created'", target) == 1
+        RUN_EVIDENCE.append({"case": "planless_tenant_default", "explicit_null": bool(plan_fields),
+                             "persisted_zero_allowance": True, "explicit_quota_retained_on_replay": True})
+
+
+async def test_default_create_replay_preserves_existing_legacy_tenant(crud_db):
+    db = crud_db
+    target = db.tenants[2]
+    assert await db.owner.fetchval("SELECT id FROM plans WHERE id='free'") == "free"
+    await db.owner.execute(
+        "UPDATE tenants SET plan_id='free',minutes_allocated=30,minutes_used=7 WHERE id=$1", target)
+    before = await db.owner.fetchval("SELECT to_jsonb(t)::text FROM tenants t WHERE id=$1", target)
+    name = await db.owner.fetchval("SELECT business_name FROM tenants WHERE id=$1", target)
+    async with signed_in(db) as admin:
+        replay = await call(db, admin, "POST", "/admin/tenants", json={"business_name": name})
+        assert replay.status_code == 200 and replay.json()["created"] is False
+        assert replay.json()["id"] == str(target) and replay.json()["plan_id"] == "free"
+        assert replay.json()["minutes_allocated"] == 30 and replay.json()["minutes_used"] == 7
+        assert await db.owner.fetchval("SELECT to_jsonb(t)::text FROM tenants t WHERE id=$1", target) == before
+        assert await db.owner.fetchval("SELECT count(*) FROM audit_logs WHERE tenant_id=$1", target) == 0
+        RUN_EVIDENCE.append({"case": "existing_legacy_tenant_replay", "row_unchanged": True,
+                             "created_audits": 0})
