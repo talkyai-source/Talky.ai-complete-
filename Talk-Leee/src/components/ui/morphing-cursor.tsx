@@ -133,7 +133,10 @@ export function MagneticText({
             onMouseMove={handleMouseMove}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
-            className={cn("relative inline-flex items-center justify-center cursor-none select-none", className)}
+            // No `cursor-none` here: the system pointer stays visible over the
+            // heading in both motion modes. The decorative disc below is an
+            // addition to the pointer, not a replacement for it.
+            className={cn("relative inline-flex items-center justify-center select-none", className)}
         >
             <span
                 className={cn(

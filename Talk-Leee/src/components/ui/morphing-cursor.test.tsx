@@ -49,3 +49,21 @@ test("with prefers-reduced-motion: reduce, the heading stays static", () => {
     assert.match(circle.style.transform, /scale\(0\)$/);
     assert.equal(circle.style.transition, "none");
 });
+
+// The wrapper used to carry Tailwind's `cursor-none`, which hid the system
+// pointer over the heading: with motion allowed only the lagging disc was
+// visible, and under reduced motion nothing was. The pointer is drawn by the
+// OS, so no z-index can bring it back; the only rule that can hide it is a
+// `cursor: none` on an element under it, and there must be none.
+for (const [label, reduce] of [["motion allowed", false], ["prefers-reduced-motion: reduce", true]] as const) {
+    test(`${label}: the system pointer is never hidden over the heading`, () => {
+        stubMatchMedia(reduce);
+        const { container } = render(<MagneticText text="AI VOICE" hoverText="AI VOICE" />);
+        const wrapper = container.firstElementChild as HTMLElement;
+        act(() => { fireEvent.mouseEnter(wrapper, { clientX: 10, clientY: 10 }); });
+        for (const el of [wrapper, ...wrapper.querySelectorAll<HTMLElement>("*")]) {
+            assert.ok(!el.classList.contains("cursor-none"), `${el.tagName} hides the pointer with cursor-none`);
+            assert.equal(el.style.cursor, "", `${el.tagName} hides the pointer with an inline cursor rule`);
+        }
+    });
+}
