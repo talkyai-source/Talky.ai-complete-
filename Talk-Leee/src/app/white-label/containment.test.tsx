@@ -87,7 +87,7 @@ function request<T>(path: string, operation: () => T, cookie = "talky_at=synthet
     return workAsyncStorage.run({ route: path } as WorkStore, () => workUnitAsyncStorage.run(store, operation));
 }
 
-function UnsafeEditor() {
+function UnsafeEditor(): never {
     throw new Error("An operational child must never mount through containment");
 }
 const props = () => ({ params: Promise.resolve({ partner: "acme" }), children: <UnsafeEditor /> });

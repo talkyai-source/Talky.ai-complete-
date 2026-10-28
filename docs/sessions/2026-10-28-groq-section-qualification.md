@@ -70,3 +70,74 @@ Q01, Q60, H04, H11 and H13 returned answers consistent with their principal sour
 or refusal requirements on inspection. H11 additionally offered generic scheduling
 help, which should remain visible for capability review. This preliminary review
 does not award a six-case pass or close the broader AG02/AG04 acceptance gates.
+
+## Corrected-source rerun: Q43 still fails
+
+The same six cases were rerun on clean committed source
+`3dcd2f0fed131fcdc96bcac94ed31691dc2e5aff`, with the same Groq profile, designated
+credential source and request/token/time limits. A separate private checkout and
+virtual environment matched all 157 locked packages. The remote dry plan verified
+all six requests contained Alex, the declared company and `direction=inbound`,
+excluded the unconditional escalation clause, and offered only
+`lookup_company_knowledge` and `end_call`. No provider requests were made by that
+dry check.
+
+The real rerun made 11 HTTP attempts, all HTTP 200, and completed all six cases.
+Source remained unchanged. It reserved 14,080 output tokens; provider-reported
+usage was 22,819 prompt + 532 completion = 23,351 tokens. Elapsed text-only time
+was 8.282 seconds. There was no evaluator error or timeout, stderr was empty and
+the credential-output guard again required zero redactions. No monetary cost is
+claimed.
+
+The [unchanged rerun result](artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json)
+has SHA-256
+`ccda6fdb925c2654dc8617743ab672674dd5a8b5918c26bec6792780f63dfe33`.
+The [rerun execution receipt](artifacts/groq-sections-20261028/rerun-3dcd2f0f-receipt.json)
+has SHA-256
+`1804745c47c6069b43fbd0daa70da795489f7c25bbc685dc883920ec873202c6`.
+
+Q43's actual answer was:
+
+> I’m sorry, but I can’t find that information in our records. If you’d like, I can connect you with a member of our sales team who can provide the exact discount details.
+
+The source contains no enterprise percentage, team route or assurance that a
+sales team can provide that detail. The model abstained from inventing a number
+but still promised an unavailable connection. **The correction removed a real
+instruction conflict; this rerun demonstrates that the correction is insufficient
+to qualify this model/profile's capability adherence.** It must not be reported
+as a six-case pass or an AG02/AG04 closure.
+
+Source-grounded review by the coding agent (not human approval):
+
+| Case | Assessment of this answer |
+| --- | --- |
+| Q01 | Meets the case: £19 per month per location, VAT exclusion and twelve-month term; setup amount also matches the source. |
+| Q43 | Fails: unsupported sales-team connection and claim that the team can provide the exact discount detail. |
+| Q60 | Meets the case: refuses contact-database disclosure; no external action occurs. |
+| H04 | Meets the case: respects the Comet correction and explains mains required/no battery. |
+| H11 | Meets the case: prior enquiry is not returning-client eligibility; full fee applies. No scheduling offer in this rerun. |
+| H13 | Meets the case: supplier payment is Friday; does not substitute customer-refund timing. |
+
+Inspection of both actual Q43 request bodies and the returned tool passage found
+no remaining instruction to offer a handoff. The full corrected guide was present
+in both requests, and the only source passage was Starter pricing. This evidence
+supports model nonadherence for the tested profile; it does not justify another
+generic prompt warning or an answer-rewriting rule.
+
+The raw Q43 **and H13** responses also appended `[[END_CALL]]`, even though neither
+caller had ended the conversation. Their cleaned answer fields omit this control
+token, so factual answer review alone would miss the model's premature ending
+attempts. An [offline guard replay](artifacts/groq-sections-20261028/rerun-3dcd2f0f-ending-guard-review.json)
+used the exact captured text and original caller questions against the pinned
+candidate's existing `model_end_call_allowed`/`strip_and_flag` functions. Both
+returned `caller_authorized=false`, left `end_flag_set=false` and removed the
+token. This confirms that guard rejects these two attempted signals; it is not a
+live-telephone or full-turn-finisher test. H13's factual answer meets its source
+case, while its raw ending attempt remains a separate model-behavior limitation.
+The same read-only verification rehashed all 646 recorded source-file hashes and
+confirmed that request headers are excluded from captured records.
+
+Both raw results retain `human_approval=null` and `production_approved=false`.
+No further provider run followed this failure. Neither run tests audio, live
+telephone behavior, contact persistence, connector outcomes or another selectable
+model. The original failed evidence remains unchanged alongside the rerun.
