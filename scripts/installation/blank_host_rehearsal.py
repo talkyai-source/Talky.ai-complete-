@@ -168,7 +168,7 @@ def web_certificate(folder):
          '-extfile', str(folder / 'web.ext'), '-out', str(folder / 'web.crt')])
 
 
-def verify(vm, ca, database_host, database_route):
+def verify(vm, ca, database_host, database_route, sha):
     states = {unit: vm.ssh('systemctl is-active ' + shlex.quote(unit)) for unit in UNITS}
     require(all(value == 'active' for value in states.values()), 'Not all installed services are active')
     identities = {unit: vm.ssh('systemctl show --property=User --value ' + shlex.quote(unit))
@@ -193,13 +193,22 @@ def verify(vm, ca, database_host, database_route):
             'Redis must bind only to host loopback')
     for endpoint in ('http://127.0.0.1:8000/health', 'http://127.0.0.1:8000/api/v1/healthz/ready',
                      'http://127.0.0.1:8000/api/v1/healthz/deep', 'http://127.0.0.1:18080/ready'):
-        vm.ssh('curl --fail --silent --show-error --max-time 30 ' + shlex.quote(endpoint))
+        response = vm.ssh('curl --fail --silent --show-error --max-time 30 ' + shlex.quote(endpoint))
+        if endpoint.endswith(':18080/ready'):
+            gateway = json.loads(response)
+            require(gateway.get('build_sha') == sha and gateway.get('ready') is True
+                    and gateway.get('protocol_version') == 2, 'Running gateway source/protocol mismatch')
+    pid = vm.ssh('systemctl show talky-api.service --property=MainPID --value')
+    require(re.fullmatch(r'[1-9][0-9]{0,9}', pid), 'API has no running process')
+    vm.ssh('/opt/talky/backend/venv/bin/python /opt/talky/backend/scripts/set_release_version.py '
+           '--candidate-sha ' + sha + ' --check-pid ' + pid)
     for domain, path in (('api.installer.test', '/health'), ('app.installer.test', '/'), ('admin.installer.test', '/')):
         run(['curl', '--fail', '--silent', '--show-error', '--max-time', '60', '--noproxy', '*',
              '--cacert', str(ca), '--resolve', f'{domain}:{vm.https_port}:127.0.0.1',
              f'https://{domain}:{vm.https_port}{path}'])
     return {'services': states, 'application_identities': identities, 'operator_identity_and_scheduling_verified': True,
-            'local_and_host_https_probes': True, 'database_route_device': route['dev'], 'redis_host_loopback_verified': True}
+            'local_and_host_https_probes': True, 'database_route_device': route['dev'], 'redis_host_loopback_verified': True,
+            'api_process_and_gateway_source_sha': sha}
 
 
 def main():
@@ -272,7 +281,7 @@ def main():
                 receipt['install'] = json.loads(vm.ssh('cat /var/lib/talky-install/receipt.json'))
                 require(receipt['install']['source_sha'] == sha and receipt['install']['status'] == 'installed_health_checked',
                         'Installer receipt did not prove the selected source')
-                receipt['before_reboot'] = verify(vm, folder / 'ca.crt', runtime['host'], database_route)
+                receipt['before_reboot'] = verify(vm, folder / 'ca.crt', runtime['host'], database_route, sha)
                 receipt['stage'] = 'reboot'
                 before = vm.ssh('cat /proc/sys/kernel/random/boot_id')
                 vm.ssh('systemctl reboot --no-block')
@@ -289,7 +298,7 @@ def main():
                 deadline = time.monotonic() + 180
                 while True:
                     try:
-                        receipt['after_reboot'] = verify(vm, folder / 'ca.crt', runtime['host'], database_route)
+                        receipt['after_reboot'] = verify(vm, folder / 'ca.crt', runtime['host'], database_route, sha)
                         break
                     except RuntimeError:
                         require(time.monotonic() < deadline, 'Installed services did not recover after reboot')

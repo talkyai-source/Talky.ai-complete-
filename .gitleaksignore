@@ -1,4 +1,4 @@
-# .gitleaksignore â€” explicitly reviewed, fingerprint-scoped findings.
+# .gitleaksignore — explicitly reviewed, fingerprint-scoped findings.
 #
 # Historical credential findings are not false positives. Enable an exception
 # only after rotation is confirmed; otherwise keep it commented out. The finding
@@ -365,3 +365,36 @@ dc9e25d00f652333065e6b7276bac923fe0aab73:docs/sessions/artifacts/groq-sections-2
 dc9e25d00f652333065e6b7276bac923fe0aab73:docs/sessions/artifacts/groq-sections-20261028/original-ccd45f10-result.json:generic-api-key:761
 dc9e25d00f652333065e6b7276bac923fe0aab73:docs/sessions/artifacts/groq-sections-20261028/original-ccd45f10-result.json:generic-api-key:808
 dc9e25d00f652333065e6b7276bac923fe0aab73:docs/sessions/artifacts/groq-sections-20261028/original-ccd45f10-result.json:generic-api-key:892
+
+# === 2026-10-28: exact-source model rerun receipt (29 verified source hashes) ===
+# Each reported source SHA256 was recomputed at 3dcd2f0f and matched.
+# Preserve raw evidence; exclude only this committed artifact fingerprint set.
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:309
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:318
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:319
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:320
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:348
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:361
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:372
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:396
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:430
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:436
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:440
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:443
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:445
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:447
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:448
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:453
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:459
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:461
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:464
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:465
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:544
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:550
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:568
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:592
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:742
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:763
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:810
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:generic-api-key:894
+652ced7249821278a2cb66d5df78d37a9812ed69:docs/sessions/artifacts/groq-sections-20261028/rerun-3dcd2f0f-result.json:sentry-access-token:468

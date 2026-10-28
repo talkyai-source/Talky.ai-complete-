@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import secrets
 import re
+import stat
 import subprocess
 import sys
 
@@ -56,18 +57,29 @@ def diagnose():
                             secret_values.extend((password, unquote(password)))
                     except ValueError:
                         pass
+    def sanitize(text):
+        for value in sorted(set(secret_values), key=len, reverse=True):
+            if len(value) >= 8:
+                text = text.replace(value, '[redacted synthetic credential]')
+        return re.sub(r'(?:postgres(?:ql)?|redis)://\S+', '[redacted connection]', text)
+
     result = {}
     for unit in UNITS:
         state = subprocess.run(['systemctl', 'show', unit, '--property=ActiveState,SubState,Result,ExecMainStatus,User,Group'],
                                capture_output=True, text=True, timeout=10)
         journal = subprocess.run(['journalctl', '-u', unit, '-n', '35', '--no-pager', '-o', 'cat'],
                                  capture_output=True, text=True, timeout=10)
-        text = journal.stdout[-12000:]
-        for value in sorted(set(secret_values), key=len, reverse=True):
-            if len(value) >= 8:
-                text = text.replace(value, '[redacted synthetic credential]')
-        text = re.sub(r'(?:postgres(?:ql)?|redis)://\S+', '[redacted connection]', text)
+        text = sanitize(journal.stdout[-12000:])
         result[unit] = {'state': state.stdout.strip(), 'sanitized_journal': text}
+    failures = []
+    for path in sorted(Path('/var/lib/talky-install').glob('command-failure-*.json'))[:3]:
+        metadata = path.lstat()
+        if (stat.S_ISREG(metadata.st_mode) and metadata.st_uid == 0
+                and stat.S_IMODE(metadata.st_mode) == 0o600 and metadata.st_size < 1024 * 1024):
+            record = json.loads(path.read_text())
+            failures.append({key: sanitize(str(record.get(key, ''))[-16000:])
+                             for key in ('binary', 'exit_code', 'stdout_tail', 'stderr_tail')})
+    result['sanitized_install_failures'] = failures
     print(json.dumps(result))
 
 

@@ -474,6 +474,49 @@ class InstallerTests(unittest.TestCase):
                 self.assertEqual(str(error.exception), command[0] + ' failed (exit 1); '
                     'inspect the service/package locally; command output was suppressed to protect secrets')
 
+    @unittest.skipUnless(os.name == 'posix', 'Linux filesystem permission acceptance')
+    def test_failed_command_keeps_private_bounded_output_without_argv_or_environment(self):
+        sink = self.path / 'private-failures'
+        sink.mkdir(mode=0o700)
+        result = types.SimpleNamespace(returncode=9, stdout='X' * 70000 + 'PRIVATE_OUTPUT', stderr='PRIVATE_ERROR')
+        metadata = types.SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_uid=0)
+        with patch.object(installer, 'FAILURE_LOG_DIRECTORY', sink), \
+             patch.object(installer.os, 'geteuid', return_value=0), \
+             patch.object(Path, 'lstat', return_value=metadata), \
+             patch.object(installer.subprocess, 'run', return_value=result):
+            with self.assertRaises(installer.InstallError) as error:
+                installer.run(['python', '-c', 'PRIVATE_ARG'], env={'PRIVATE_ENV': 'PRIVATE_VALUE'})
+        self.assertNotIn('PRIVATE_', str(error.exception))
+        self.assertIn('root-private diagnostics:', str(error.exception))
+        files = list(sink.iterdir())
+        self.assertEqual(len(files), 1)
+        self.assertEqual(stat.S_IMODE(files[0].stat().st_mode), 0o600)
+        payload = json.loads(files[0].read_text())
+        self.assertEqual(set(payload), {'binary', 'exit_code', 'stdout_tail', 'stderr_tail'})
+        self.assertEqual(len(payload['stdout_tail']), 65536)
+        self.assertTrue(payload['stdout_tail'].endswith('PRIVATE_OUTPUT'))
+        self.assertEqual(payload['stderr_tail'], 'PRIVATE_ERROR')
+        self.assertNotIn('PRIVATE_ARG', files[0].read_text())
+        self.assertNotIn('PRIVATE_VALUE', files[0].read_text())
+
+    def test_failure_sink_refuses_unprotected_or_linked_directory(self):
+        result = types.SimpleNamespace(returncode=1, stdout='PRIVATE_OUTPUT', stderr='PRIVATE_ERROR')
+        for mode, owner in ((stat.S_IFDIR | 0o755, 0), (stat.S_IFDIR | 0o700, 1000),
+                            (stat.S_IFLNK | 0o700, 0), (stat.S_IFREG | 0o600, 0)):
+            with self.subTest(mode=mode, owner=owner), \
+                 patch.object(installer, 'FAILURE_LOG_DIRECTORY', self.path), \
+                 patch.object(installer.os, 'geteuid', return_value=0, create=True), \
+                 patch.object(Path, 'lstat', return_value=types.SimpleNamespace(st_mode=mode, st_uid=owner)), \
+                 patch.object(installer.tempfile, 'mkstemp') as create:
+                self.assertIsNone(installer.record_command_failure('python', result))
+                create.assert_not_called()
+
+    def test_read_only_helpers_do_not_enable_failure_logging(self):
+        with patch.object(installer, 'FAILURE_LOG_DIRECTORY', None), \
+             patch.object(installer.tempfile, 'mkstemp') as create:
+            self.assertIsNone(installer.record_command_failure('python', None))
+            create.assert_not_called()
+
     def test_migration_identity_requires_root_private_regular_file_and_exact_loaded_value(self):
         path = self.path / 'migration.env'
         value = 'postgresql://migration:synthetic@db.example.test/db?sslmode=verify-full'

@@ -47,7 +47,7 @@ services, schema, calls, payments or email delivery.
   recipients remain explicit, and replay preserves the original delivery
   identity and financial outcome. No live email/payment outcome is inferred.
 
-Offline checks are bounded: 51 installer tests, 14 actual Ubuntu shell/environment
+Offline checks are bounded: 54 installer tests on actual Ubuntu, 14 Ubuntu shell/environment
 regressions, nine runtime-grants boundary
 tests, 25 bootstrap tests with one Windows-only permissions skip, and ten
 existing billing unit tests passed. Nineteen new billing PostgreSQL cases were
@@ -58,7 +58,13 @@ The first native grants run successfully exercised ordinary password/MFA login,
 then exposed ownership-validation ordering in a negative test. Validation now
 precedes table locks and is repeated after acquiring them. The billing run
 exposed a test fixture using a nonexistent role; it now uses the canonical
-`user` role. Combined native acceptance remains required after these fixes.
+`user` role. Subsequent native canonical recovery and all 16 runtime-grants/
+first-admin checks passed on candidate `3dcd2f0f`, tested merge `45eb607f`.
+The hashed Linux dependency audit checked 156 packages with no reported
+vulnerabilities. Main backend/billing acceptance was skipped behind the
+separately reviewed scanner findings and must run after their repair. The
+[CI finding review](2026-10-28-ci-false-positive-review.md) preserves exact
+results, source identities and narrowly verified evidence-hash exceptions.
 
 ## Actual blank-host rehearsal
 
@@ -87,6 +93,27 @@ Both reconciliation entry points now parse literal dotenv values without shell
 evaluation, preserving TLS query parameters containing `&`. Managed inbound
 dialplan inclusion is required before installation. These repairs have focused
 tests; only a successful complete VM run can qualify installation and reboot.
+
+The third run, [40671709402](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40671709402),
+failed at a frontend `runuser` command before service activation; owned resources
+were cleaned. The parallel Linux frontend job identified a TypeScript return
+type error in the containment test, now corrected. The VM's discarded command
+output cannot independently identify the same error. Installer failures now
+retain bounded root-private diagnostic files; only the explicitly marked
+synthetic VM exports excerpts after redacting its generated credentials.
+
+## Measured conversation quality
+
+The [six-case Groq evaluation](2026-10-28-groq-section-qualification.md) preserved
+the original failure and repeated the same cases after removing a contradictory
+unconditional escalation instruction and correcting evaluator call identity.
+The rerun still offered an unavailable sales-team connection on Q43. Five
+factual/refusal answers met their cases; two premature ending signals were
+rejected by the existing caller-authorization guard in a separate offline
+replay. HTTP success, correct source retrieval and that guard do not establish
+conversation quality or telephone acceptance. This tested profile remains
+unqualified; no additional speculative prompt patch or provider change is
+included.
 
 ## Engineering and database review
 

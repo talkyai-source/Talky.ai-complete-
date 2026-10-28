@@ -7,6 +7,13 @@ builds and serves both the dashboard and Admin on this host. Set
 `frontend_mode` to `external` to retain the documented Vercel topology.
 Choosing a mode does not move the existing production frontends.
 
+If an installation command fails, its bounded output is retained in a root-only
+`/var/lib/talky-install/command-failure-*.json` file. The terminal reports the
+private path and exit status, without printing command arguments, environment
+or tool output. Inspect it as the authorized host operator; tool output may
+contain credentials, so do not upload the raw file. The marked synthetic CI VM
+redacts its generated secrets before retaining any diagnostic excerpt.
+
 The default command is a read-only plan. It does not install packages, read
 secret inputs, access a database, contact a server, or make calls:
 

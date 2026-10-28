@@ -32,6 +32,7 @@ from urllib.request import urlopen
 ROOT = Path(__file__).resolve().parents[2]
 TARGET = Path('/opt/talky')
 STATE = Path('/var/lib/talky-install')
+FAILURE_LOG_DIRECTORY: Path | None = None
 PACKAGES = ('asterisk', 'build-essential', 'ca-certificates', 'cmake', 'curl',
             'docker.io', 'docker-compose-v2', 'git', 'libffi-dev', 'libpq-dev',
             'libssl-dev', 'nginx', 'postgresql-client-16', 'python3.12',
@@ -425,6 +426,30 @@ def systemctl_diagnostic(args: list[str]) -> str:
     return ' '.join(args)
 
 
+def record_command_failure(binary: str, result) -> Path | None:
+    """Retain bounded private diagnostics only during an actual installation.
+
+    Tool output can contain credentials. Never echo it or include argv/env.
+    Read-only commands and imported helper callers do not enable this sink.
+    """
+    if FAILURE_LOG_DIRECTORY is None or not hasattr(os, 'geteuid') or os.geteuid() != 0:
+        return None
+    try:
+        metadata = FAILURE_LOG_DIRECTORY.lstat()
+        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0 or stat.S_IMODE(metadata.st_mode) != 0o700:
+            return None
+        descriptor, name = tempfile.mkstemp(prefix='command-failure-', suffix='.json', dir=FAILURE_LOG_DIRECTORY)
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
+            json.dump({'binary': binary, 'exit_code': result.returncode,
+                       'stdout_tail': result.stdout[-65536:], 'stderr_tail': result.stderr[-65536:]}, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        return Path(name)
+    except OSError:
+        # Logging must not replace the original command failure or disclose output.
+        return None
+
+
 def run(args: list[str], *, cwd: Path | None = None, env: dict | None = None,
         capture: bool = False) -> str:
     # Capture rather than echo commands/environment: package tools may reveal URLs.
@@ -432,8 +457,10 @@ def run(args: list[str], *, cwd: Path | None = None, env: dict | None = None,
                             stderr=subprocess.PIPE, check=False)
     if result.returncode:
         command = systemctl_diagnostic(args) or Path(args[0]).name
+        log_path = record_command_failure(Path(args[0]).name, result)
+        inspection = f'root-private diagnostics: {log_path}' if log_path else 'inspect the service/package locally'
         raise InstallError(f'{command} failed (exit {result.returncode}); '
-                           'inspect the service/package locally; command output was suppressed to protect secrets')
+                           f'{inspection}; command output was suppressed to protect secrets')
     return result.stdout if capture else ''
 
 
@@ -696,11 +723,13 @@ def frontend_build_environment(env_file: Path) -> dict[str, str]:
 
 
 def apply(config: dict, source: Path) -> None:
+    global FAILURE_LOG_DIRECTORY
     validate_config(config, inputs=True)
     ensure_fresh_host(config, source)
     versions = json.loads(Path(config['apt_versions_file']).read_text())
     env = read_env(Path(config['backend_env_file']))
     STATE.mkdir(mode=0o700)
+    FAILURE_LOG_DIRECTORY = STATE
     write(STATE / 'state.json', json.dumps({'status': 'installing', 'source_sha': config['source_sha']}) + '\n', 0o600)
     # Prevent package installation from exposing default Asterisk/nginx configs.
     policy = Path('/usr/sbin/policy-rc.d')
@@ -737,6 +766,9 @@ def apply(config: dict, source: Path) -> None:
     run([str(backend / 'venv/bin/python'), '-m', 'pip', 'install', '--require-hashes',
          '-r', config['python_requirements_lock']])
     run([str(backend / 'venv/bin/python'), '-m', 'pip', 'check'])
+    run([str(backend / 'venv/bin/python'), str(backend / 'scripts/set_release_version.py'),
+         '--candidate-sha', config['source_sha'], '--env-file', str(backend / '.env')])
+    env['APP_VERSION'] = config['source_sha']
     run([str(backend / 'venv/bin/python'), '-c',
          'from app.core.prod_gate import enforce_production_gate; enforce_production_gate()'],
         cwd=backend, env=runtime_environment(env))
@@ -790,13 +822,17 @@ def apply(config: dict, source: Path) -> None:
                     if url.endswith(':18080/ready'):
                         payload = json.load(response)
                         healthy = healthy and payload.get('ready') is True and payload.get('protocol_version') == 2 \
-                            and 'pcmu' in payload.get('codecs', [])
+                            and 'pcmu' in payload.get('codecs', []) and payload.get('build_sha') == config['source_sha']
                 if healthy:
                     break
             except OSError:
                 pass
             time.sleep(5)
         require(healthy, f'Health check failed: {url}')
+    api_pid = run(['systemctl', 'show', 'talky-api.service', '--property=MainPID', '--value'], capture=True).strip()
+    require(re.fullmatch(r'[1-9][0-9]{0,9}', api_pid) is not None, 'API must have a running process')
+    run([str(backend / 'venv/bin/python'), str(backend / 'scripts/set_release_version.py'),
+         '--candidate-sha', config['source_sha'], '--check-pid', api_pid])
     # Resolve to this new host while validating the supplied certificate name.
     run(['curl', '--fail', '--silent', '--show-error', '--max-time', '15', '--resolve',
          f"{config['api_domain']}:443:127.0.0.1", f"https://{config['api_domain']}/health"])

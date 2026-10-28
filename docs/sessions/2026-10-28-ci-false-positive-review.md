@@ -40,6 +40,17 @@ output: **27 commits, no leaks found, exit 0**. This result covers those
 historical findings. New artifacts and new commits still require scanning;
 it does not assert that an unrelated or future credential is safe.
 
+The subsequent model rerun artifact was committed as
+`652ced7249821278a2cb66d5df78d37a9812ed69`, with unchanged raw SHA-256
+`ccda6fdb925c2654dc8617743ab672674dd5a8b5918c26bec6792780f63dfe33`.
+Its 29 findings were independently verified as source-file SHA-256 fields
+against exact source `3dcd2f0f`, then excluded by that commit's exact
+artifact/rule/line fingerprints. Replaying the same first-parent CI range
+through `652ced72` passed: **28 commits, zero findings, exit 0**. A separate
+redacted scan of the then-current uncommitted diff and the two in-progress
+fresh-release script snapshots also found no leaks. That snapshot check does
+not qualify later edits or declare the unfinished scripts release-ready.
+
 ## Other checks on that source
 
 [Canonical database TLS recovery run 40671709491](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40671709491)
