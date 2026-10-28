@@ -94,6 +94,9 @@ change. A changed schema without that flag is refused before consuming the
 manifest or stopping services.
 
 Activation checks the prepared artifacts and installed configuration again.
+It pins the actual database name, endpoint fingerprint and schema heads in the
+private journal before stopping application services. The backup and migration
+connection must match that original identity.
 It records and disables all known application/backup/retention/synthetic timers
 before confirming maintenance oneshots are fully stopped. Unknown application
 timers are refused. The existing observer must then read four complete zero
@@ -136,8 +139,10 @@ diagnostic files can contain secrets and must not be uploaded as public CI
 artifacts or pasted into chat. Error messages do not echo subprocess output.
 
 Before migration starts, failure attempts to restore the prior source and unit
-files, then reruns exact-version and health checks. The schema must still equal
-the old head. Once migration has started—even when Alembic reports failure—the
+files, then reruns exact-version and health checks. Recovery first verifies the
+prior source, artifacts, protected configuration, keys and host/data identity;
+its read-only database check must match the original endpoint, database and old
+heads before any service or timer changes. Once migration has started—even when Alembic reports failure—the
 updater forbids automatic or manual code rollback through this command. It
 keeps application services stopped for a reviewed code-forward release or a
 separately approved compatible restore. A failed recovery is not success.
@@ -155,7 +160,10 @@ python3 /root/reviewed-candidate/scripts/installation/fresh_release.py recover \
 Successful activation or recovery leaves producer/maintenance timers disabled,
 including across reboot. It does not reopen external traffic. After the owner
 has completed the approved health/business checks and chosen the reopening
-window, restore exactly the recorded enabled/active timer states:
+window, restore exactly the recorded enabled/active timer states. Reopening
+rechecks protected configuration, artifacts and the pinned database identity
+with the successfully activated or recovered schema before starting services
+or timers:
 
 ```bash
 python3 /root/reviewed-candidate/scripts/installation/fresh_release.py resume-schedules \

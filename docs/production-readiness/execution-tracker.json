@@ -318,10 +318,11 @@
           "path": "docs/sessions/2026-10-28-paid-readiness-followup.md",
           "kind": "bounded_paid_readiness_followup",
           "status": "implementation_and_acceptance_in_progress_not_release_closure"
-        }
+        },
+        "docs/sessions/2026-10-28-customer-first-paid-release-scope.md"
       ],
       "blocker": "Excluded from the first paid release by the user on 28 October; retained as future work. Partner-scoped provisioning/billing and invitation contracts remain incomplete, not feature-complete. Verify the explicit exclusion in deployed surfaces and preserve cosmetic branding previews.",
-      "next_action": "Verify the user-approved first-paid-release exclusion in Linux/browser/deployed surfaces. Retain reseller functionality as future work without claiming it built; the accepted release scope does not require implementing it before launch.",
+      "next_action": "Preserve the accepted first-paid-release exclusion of reseller operations and staff invitations. The customer-only release is live at80b52743 with exact production source/alias and nine anonymous route checks verified. Keep the excluded capabilities as future work; do not describe unavailable controls as implemented reseller functionality.",
       "target_date": null
     },
     {
@@ -2298,10 +2299,11 @@
           "path": "docs/sessions/2026-10-28-paid-readiness-followup.md",
           "kind": "bounded_paid_readiness_followup",
           "status": "implementation_and_acceptance_in_progress_not_release_closure"
-        }
+        },
+        "docs/sessions/2026-10-28-ci-false-positive-review.md"
       ],
       "blocker": "Real Ubuntu rehearsals on two TLS PostgreSQL containers passed for both the earlier 0075 source and combined 0082 candidate. The latter preserved all 113 public-table records and five sequence states, verified restricted runtime access, source invariance and cleanup. Both containers share one runner. The observed production database remains on the application server without TLS; a designated external database, off-host archive/restore target, retention/PITR policy, recovery objectives and operator are still required.",
-      "next_action": "Qualify the explicit runtime-grants profile and real login/tenant boundaries, retain canonical TLS recovery evidence, then execute migration and off-host recovery on the designated production-shaped infrastructure. Prove separate failure domains, retained encryption keys, durability and measured recovery objectives; CI containers remain a bounded layer.",
+      "next_action": "Retain the passed canonical TLS recovery, restricted runtime-grants and first-admin acceptance. Apply and verify the external production database topology and identities on designated infrastructure; prove separate failure domains, preserved keys, off-host durability and measured recovery objectives. Same-runner CI does not satisfy those operating outcomes.",
       "target_date": null
     },
     {
@@ -2354,10 +2356,11 @@
           "path": "docs/sessions/2026-10-28-paid-readiness-followup.md",
           "kind": "bounded_paid_readiness_followup",
           "status": "implementation_and_acceptance_in_progress_not_release_closure"
-        }
+        },
+        "docs/sessions/2026-10-28-blank-ubuntu-acceptance.md"
       ],
       "blocker": "Supplier-cost ingestion/reconciliation is unavailable. Source permission inventory is complete, but approved deployment identity/topology, permission matrix and positive/negative host acceptance are outstanding.",
-      "next_action": "Verify fresh-host runtime/operator service isolation and protected migration credentials on the actual Ubuntu VM; obtain privileged deployment access and exercise deployed host boundaries. Supplier statements and finance reconciliation remain required.",
+      "next_action": "Fresh Ubuntu application/operator identity and scheduling checks passed before and after reboot. Apply the reviewed boundaries to production with designated privileged access; remove live runtime ownership and CREATEROLE/CREATEDB privileges through the qualified migration/runtime split. Supplier statements and finance reconciliation remain separate requirements.",
       "target_date": null
     },
     {
@@ -2407,10 +2410,12 @@
           "path": "docs/sessions/2026-10-28-paid-readiness-followup.md",
           "kind": "bounded_paid_readiness_followup",
           "status": "implementation_and_acceptance_in_progress_not_release_closure"
-        }
+        },
+        "docs/sessions/2026-10-28-blank-ubuntu-acceptance.md",
+        "docs/sessions/2026-10-28-customer-first-paid-release-scope.md"
       ],
       "blocker": "PR26 combines billing, Admin and Ubuntu work at schema 0082. Restricted-owner TLS upgrades and 55 incident-adoption cases passed; final Linux CI is tracked on the exact PR candidate. Privileged deployment access, a designated clean Ubuntu host and external database, required traffic-freeze/drain/operator attestations, coordinated activation and actual reboot/call/update/rollback/handover acceptance remain outstanding.",
-      "next_action": "Resolve and retain actual blank-Ubuntu apply/reboot failure evidence, then complete exact-candidate Linux CI and the required compatible update/rollback path. Use designated live-host access, release/drain records and owned destinations for activation. Independent handover and videos remain separate acceptance; no local or CI pass lifts the freeze.",
+      "next_action": "Preserve the successful blank Ubuntu installation/reboot and green combined ce93fc6a CI, plus the independently deployed customer-only release. Qualify the new real update/rollback and migration-failure refusal VM path. Complete backend activation using designated access and fresh release/drain/backup records. Controlled calls, off-host recovery, independent handover and videos remain separate acceptance; the feature freeze remains active.",
       "target_date": null
     },
     {

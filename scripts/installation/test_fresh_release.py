@@ -13,7 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from contextlib import ExitStack
 
 SPEC = importlib.util.spec_from_file_location('fresh_release_test_module', Path(__file__).with_name('fresh_release.py'))
@@ -56,6 +56,19 @@ class InputBoundaries(unittest.TestCase):
                         url + '&connect_timeout=1&connect_timeout=2'):
             with self.subTest(value=invalid), self.assertRaises(release.ReleaseError):
                 release.service_matches_url(service, invalid)
+
+    def test_ambient_or_relative_password_file_is_refused_before_database_access(self):
+        for explicit in (None, '', 'relative.pgpass'):
+            values = {} if explicit is None else {'passfile': explicit}
+            service = argparse.Namespace(values=values, passfile=Path('/ambient/protected.pgpass'))
+            recovery = argparse.Namespace(Service=lambda *args: service, backup=Mock(), Postgres=Mock())
+            with self.subTest(passfile=explicit), patch.object(release, 'load_module', return_value=recovery), \
+                 patch.object(release, 'protected'), patch.object(release, 'database_state') as database:
+                with self.assertRaisesRegex(release.ReleaseError, 'Explicit absolute'):
+                    release.database_backup(Path('/unused'), Path('/protected/services'), 'runtime', 'owner', 'backup', Path('/owned/bundle'))
+            database.assert_not_called()
+            recovery.Postgres.assert_not_called()
+            recovery.backup.assert_not_called()
 
     def test_actual_migration_login_must_match_restricted_owner_and_verified_endpoint(self):
         valid = dict(user='owner', session='owner', database='fixture', endpoint='known', tls=True,
@@ -284,14 +297,74 @@ class NativePublication(unittest.TestCase):
                     self.fail('Second operation acquired the lock')
 
     def test_changed_schema_blocks_code_rollback_with_no_service_stop(self):
-        journal = dict(migration_started=False, previous_sha=OLD, candidate_sha=NEW, old_heads=['old'], timers={})
-        with patch.object(release, 'database_state', return_value={'heads': ['new']}), \
+        journal = self.rollback_fixture()
+        with patch.object(release, 'database_state', return_value={**journal['initial_database'], 'heads': ['new']}), \
              patch.object(release, 'git', side_effect=lambda path, *args: OLD if args == ('rev-parse', 'HEAD') else ''), \
              patch.object(release, 'verify_previous_artifacts'), \
+             patch.object(release, 'host_configuration', return_value={}), \
              patch.object(release, 'freeze_timers'), patch.object(release, 'stop_runtime') as stop:
-            with self.assertRaisesRegex(release.ReleaseError, 'Schema changed'):
+            with self.assertRaisesRegex(release.ReleaseError, 'Database identity or schema changed'):
                 release.rollback_journal(self.layout, journal, self.layout.root / 'journal.json')
         stop.assert_not_called()
+
+    def rollback_fixture(self):
+        return dict(migration_started=False, previous_sha=OLD, candidate_sha=NEW, old_heads=['base'],
+                    keys=self.initial_keys, configuration_invariants=self.initial_config,
+                    data_identity=self.initial_data, host_configuration={}, timers={},
+                    initial_database=dict(database='fixture', endpoint='e' * 64, heads=['base']))
+
+    def test_changed_database_configuration_blocks_recovery_before_any_side_effect(self):
+        journal = self.rollback_fixture()
+        with (self.layout.current / 'backend/.env').open('a') as stream:
+            stream.write('DATABASE_URL=postgresql://changed.invalid/same_schema\n')
+        with patch.object(release, 'git', side_effect=lambda path, *args: OLD if args == ('rev-parse', 'HEAD') else ''), \
+             patch.object(release, 'verify_previous_artifacts'), \
+             patch.object(release, 'host_configuration', return_value={}), \
+             patch.object(release, 'database_state') as database, patch.object(release, 'freeze_timers') as freeze, \
+             patch.object(release, 'stop_runtime') as stop, patch.object(release, 'start_runtime') as start, \
+             patch.object(release, 'command') as command:
+            with self.assertRaisesRegex(release.ReleaseError, 'Protected prior configuration'):
+                release.rollback_journal(self.layout, journal, self.layout.root / 'journal.json')
+        for effect in (database, freeze, stop, start, command):
+            effect.assert_not_called()
+
+    def test_same_schema_on_another_actual_database_or_endpoint_blocks_recovery(self):
+        journal = self.rollback_fixture()
+        for field, value in (('database', 'different_fixture'), ('endpoint', 'f' * 64)):
+            with self.subTest(field=field), \
+                 patch.object(release, 'git', side_effect=lambda path, *args: OLD if args == ('rev-parse', 'HEAD') else ''), \
+                 patch.object(release, 'verify_previous_artifacts'), \
+                 patch.object(release, 'host_configuration', return_value={}), \
+                 patch.object(release, 'database_state', return_value={**journal['initial_database'], field: value}) as database, \
+                 patch.object(release, 'freeze_timers') as freeze, patch.object(release, 'stop_runtime') as stop, \
+                 patch.object(release, 'start_runtime') as start, patch.object(release, 'command') as command:
+                with self.assertRaisesRegex(release.ReleaseError, 'Database identity or schema changed'):
+                    release.rollback_journal(self.layout, journal, self.layout.root / 'journal.json')
+                database.assert_called_once_with(self.layout.current)
+                for effect in (freeze, stop, start, command):
+                    effect.assert_not_called()
+
+    def test_reopening_refuses_config_or_database_drift_before_runtime_or_timers(self):
+        journal = dict(self.rollback_fixture(), status='activated_health_checked', new_heads=['base'])
+        for drift in ('config', 'database', 'endpoint'):
+            with self.subTest(drift=drift), ExitStack() as stack:
+                stack.enter_context(patch.object(release, 'installed', return_value=self.layout.current))
+                stack.enter_context(patch.object(release, 'verify_artifacts'))
+                stack.enter_context(patch.object(release, 'host_configuration', return_value={}))
+                state = dict(journal['initial_database'])
+                if drift == 'config':
+                    stack.enter_context(patch.object(release, 'configuration_invariants', return_value={'changed': True}))
+                else:
+                    state[drift] = 'other-target'
+                database = stack.enter_context(patch.object(release, 'database_state', return_value=state))
+                start = stack.enter_context(patch.object(release, 'start_runtime'))
+                command = stack.enter_context(patch.object(release, 'command'))
+                with self.assertRaisesRegex(release.ReleaseError, 'changed before reopening'):
+                    release.resume_schedules(self.layout, journal, self.layout.root / 'journal.json')
+                if drift == 'config':
+                    database.assert_not_called()
+                start.assert_not_called()
+                command.assert_not_called()
 
     def test_real_git_detects_code_drift_while_allowing_only_explicit_runtime_overlay(self):
         root = self.layout.current
@@ -330,16 +403,14 @@ class NativePublication(unittest.TestCase):
         release.share_state(self.layout, OLD, NEW)
         release.switch_current(self.layout, OLD, NEW)
         path = self.layout.state / 'transactions/owned-fixture/journal.json'
-        journal = dict(migration_started=False, previous_sha=OLD, candidate_sha=NEW, old_heads=['base'],
-                       keys=self.initial_keys, configuration_invariants=self.initial_config,
-                       data_identity=self.initial_data, host_configuration={}, timers={})
+        journal = self.rollback_fixture()
         release.private_json(path, journal)
         release.private_json(self.layout.state / 'current.json', {'candidate_sha': NEW})
-        with patch.object(release, 'database_state', return_value={'heads': ['base']}), \
+        with patch.object(release, 'database_state', return_value=journal['initial_database']), \
              patch.object(release, 'git', side_effect=lambda path, *args: OLD if args == ('rev-parse', 'HEAD') else ''), \
              patch.object(release, 'verify_previous_artifacts'), \
              patch.object(release, 'stop_runtime'), patch.object(release, 'restore_units'), \
-             patch.object(release, 'freeze_timers'), \
+             patch.object(release, 'freeze_timers'), patch.object(release, 'active', return_value=False), \
              patch.object(release, 'publish_version'), patch.object(release, 'command'), \
              patch.object(release, 'start_runtime'), patch.object(release, 'host_configuration', return_value={}):
             release.rollback_journal(self.layout, journal, path)
@@ -360,7 +431,7 @@ class NativePublication(unittest.TestCase):
         stack.enter_context(patch.object(release, 'schema_heads', return_value=heads))
         stack.enter_context(patch.object(release, 'verify_artifacts'))
         stack.enter_context(patch.object(release, 'verify_previous_artifacts'))
-        stack.enter_context(patch.object(release, 'database_state', return_value={'heads': ['base']}))
+        stack.enter_context(patch.object(release, 'database_state', return_value=dict(database='fixture', endpoint='e' * 64, heads=['base'])))
         stack.enter_context(patch.object(release, 'migration_preflight'))
         stack.enter_context(patch.object(release, 'host_configuration', return_value={}))
         stack.enter_context(patch.object(release, 'timer_states', return_value={
@@ -369,7 +440,9 @@ class NativePublication(unittest.TestCase):
         stack.enter_context(patch.object(release, 'active', side_effect=lambda name: name in (*release.install.SERVICES, 'talky-dashboard', *release.TIMERS)))
         stack.enter_context(patch.object(release, 'observe', return_value={'complete': True, 'all_zero_observed': True}))
         stack.enter_context(patch.object(release, 'unit_snapshot', side_effect=lambda layout, path: path.mkdir()))
-        stack.enter_context(patch.object(release, 'database_backup', return_value={'status': 'archive_verified'}))
+        stack.enter_context(patch.object(release, 'database_backup', return_value=dict(
+            status='archive_verified', source_database='fixture', source_endpoint_fingerprint='e' * 64,
+            inventory=dict(heads=['base']))))
         stop = stack.enter_context(patch.object(release, 'stop_runtime'))
         rollback = stack.enter_context(patch.object(release, 'rollback_journal'))
         run = stack.enter_context(patch.object(release, 'command', side_effect=lambda args, **kwargs:
@@ -416,6 +489,7 @@ class NativePublication(unittest.TestCase):
     def test_failure_during_forward_migration_never_attempts_code_rollback(self):
         with ExitStack() as stack:
             manifest, digest, services, stop, rollback, run = self.transaction_fixture(stack, migrating=True)
+            preflight = stack.enter_context(patch.object(release, 'migration_preflight'))
 
             def fail_migration(root, args, env=None):
                 if '-m' in args and 'alembic' in args:
@@ -429,9 +503,29 @@ class NativePublication(unittest.TestCase):
                 release.activate(self.layout, NEW, manifest, digest, services, allow_migration=True)
             rollback.assert_not_called()
             self.assertGreaterEqual(stop.call_count, 2)
+            self.assertEqual(preflight.call_args.args[3], dict(database='fixture', endpoint='e' * 64, heads=['base']))
         journal = json.loads(next((self.layout.state / 'transactions').glob('*/journal.json')).read_text())
         self.assertEqual(journal['status'], 'failed_migration_started')
+        self.assertEqual(journal['initial_database'], dict(database='fixture', endpoint='e' * 64, heads=['base']))
         self.assertFalse(self.layout.current.is_symlink())
+
+    def test_backup_from_changed_endpoint_blocks_migration_before_owner_or_grants(self):
+        with ExitStack() as stack:
+            manifest, digest, services, stop, rollback, run = self.transaction_fixture(stack, migrating=True)
+            stack.enter_context(patch.object(release, 'database_backup', return_value=dict(
+                source_database='fixture', source_endpoint_fingerprint='f' * 64, inventory=dict(heads=['base']))))
+            backend = stack.enter_context(patch.object(release, 'backend_command'))
+            grants = stack.enter_context(patch.object(release, 'grants'))
+            preflight = stack.enter_context(patch.object(release, 'migration_preflight'))
+            with self.assertRaisesRegex(release.ReleaseError, 'traffic remains frozen'):
+                release.activate(self.layout, NEW, manifest, digest, services, allow_migration=True)
+            for effect in (backend, grants, preflight):
+                effect.assert_not_called()
+            rollback.assert_called_once()
+            self.assertFalse(rollback.call_args.args[1]['migration_started'])
+        journal = json.loads(next((self.layout.state / 'transactions').glob('*/journal.json')).read_text())
+        self.assertEqual(journal['initial_database']['endpoint'], 'e' * 64)
+        self.assertEqual(journal['status'], 'failed_before_migration')
 
     def test_schema_change_without_explicit_forward_flag_stops_before_manifest_or_services(self):
         with ExitStack() as stack:

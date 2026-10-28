@@ -674,7 +674,8 @@ def database_backup(release, service_file, runtime_name, owner_name, backup_name
     protected(service_file, private=True)
     runtime, owner, backup = (recovery.Service(service_file, name) for name in (runtime_name, owner_name, backup_name))
     for service in (runtime, owner, backup):
-        require(service.passfile is not None, 'Explicit protected database password file is required')
+        require(service.values.get('passfile') and Path(service.values['passfile']).is_absolute()
+                and service.passfile is not None, 'Explicit absolute protected database password file is required')
         protected(service.passfile, private=True)
     service_matches_url(runtime, install.read_env(release / 'backend/.env')['DATABASE_URL'])
     for key in ('host', 'hostaddr', 'port', 'dbname'):
@@ -719,14 +720,32 @@ with psycopg2.connect(os.environ['MIGRATION_DATABASE_URL'],connect_timeout=10) a
 
 def rollback_journal(layout, journal, journal_path):
     require(not journal['migration_started'], 'Migration began: automatic/code rollback is forbidden; use reviewed code-forward or isolated restore')
-    freeze_timers(journal)
     previous, candidate = layout.release(journal['previous_sha']), layout.release(journal['candidate_sha'])
     current = layout.current.resolve(strict=True) if layout.current.exists() else previous
     old_source = previous if previous.exists() else layout.current
     require(git(old_source, 'rev-parse', 'HEAD') == journal['previous_sha'] and tracked_source_clean(old_source),
             'Prior tracked source changed; rollback is unqualified')
     verify_previous_artifacts(layout, journal['candidate_sha'], journal, old_source)
-    require(database_state(current)['heads'] == journal['old_heads'], 'Schema changed; code rollback is forbidden')
+    require(configuration_invariants(old_source) == journal['configuration_invariants']
+            and key_fingerprints(old_source) == journal['keys'] and data_identity(old_source) == journal['data_identity']
+            and host_configuration(layout) == journal['host_configuration'],
+            'Protected prior configuration, keys, host or data changed; recovery is refused')
+    if current != old_source:
+        require(configuration_invariants(current) == journal['configuration_invariants'],
+                'Current release configuration changed; recovery is refused')
+    expected_database = journal['initial_database']
+    require(set(expected_database) == {'database', 'endpoint', 'heads'} and expected_database['heads'] == journal['old_heads'],
+            'Recovery journal lacks the original database identity')
+    require(database_state(old_source) == expected_database, 'Database identity or schema changed; code rollback is forbidden')
+    if 'backup' in journal:
+        backup = journal['backup']
+        require(backup['source_database'] == expected_database['database']
+                and backup['source_endpoint_fingerprint'] == expected_database['endpoint']
+                and backup['inventory']['heads'] == expected_database['heads'],
+                'Recovery backup identity differs from the original database')
+    freeze_timers(journal)
+    if any(active(unit) for unit in RUNTIME):
+        observe(current)
     stop_runtime(journal)
     if not layout.current.exists():
         protected(previous, directory=True)
@@ -751,6 +770,30 @@ def rollback_journal(layout, journal, journal_path):
     private_json(layout.state / 'current.json', {'candidate_sha': journal['previous_sha'], 'journal': str(journal_path)})
 
 
+def resume_schedules(layout, journal, journal_path):
+    require(journal['status'] in ('activated_health_checked', 'rolled_back_health_checked'),
+            'Schedules cannot resume for an unsuccessful release/recovery')
+    activated = journal['status'] == 'activated_health_checked'
+    sha = journal['candidate_sha'] if activated else journal['previous_sha']
+    current = installed(layout, sha)
+    if activated:
+        verify_artifacts(layout, sha, journal)
+    else:
+        verify_previous_artifacts(layout, journal['candidate_sha'], journal, current)
+    require(configuration_invariants(current) == journal['configuration_invariants']
+            and key_fingerprints(current) == journal['keys'] and data_identity(current) == journal['data_identity']
+            and host_configuration(layout) == journal['host_configuration'],
+            'Protected configuration, keys, host or data changed before reopening')
+    expected = {**journal['initial_database'], 'heads': journal['new_heads'] if activated else journal['old_heads']}
+    require(database_state(current) == expected, 'Current database identity or schema changed before reopening')
+    start_runtime(journal, current, sha)
+    for timer, state in journal['timers'].items():
+        if state['enabled'] == 'enabled': command(['systemctl', 'enable', timer])
+        if state['active']: command(['systemctl', 'start', timer])
+    journal['schedules_restored_utc'] = datetime.now(timezone.utc).isoformat()
+    private_json(journal_path, journal)
+
+
 def activate(layout, sha, manifest, manifest_digest, services, allow_migration=False):
     prepared_path = layout.prepared(sha)
     protected(prepared_path, private=True)
@@ -767,8 +810,9 @@ def activate(layout, sha, manifest, manifest_digest, services, allow_migration=F
     require(configuration_fingerprints(previous) == proof['configuration'] and key_fingerprints(previous) == proof['keys'],
             'Installed configuration or keys changed after prepare')
     require(host_configuration(layout) == proof['host_configuration'], 'Protected host configuration changed after prepare')
-    require(schema_heads(candidate) == proof['new_heads'] and database_state(previous)['heads'] == proof['old_heads'],
-            'Database or candidate migration graph changed')
+    require(schema_heads(candidate) == proof['new_heads'], 'Candidate migration graph changed')
+    initial_database = database_state(previous)
+    require(initial_database['heads'] == proof['old_heads'], 'Database schema changed')
     migrating = proof['old_heads'] != proof['new_heads']
     require(not migrating or allow_migration, 'New schema requires explicit --allow-forward-migration')
     verifier = load_module('fresh_drain_verifier', candidate / 'backend/scripts/verify_deploy_drain_manifest.py')
@@ -778,7 +822,7 @@ def activate(layout, sha, manifest, manifest_digest, services, allow_migration=F
     folder = layout.state / 'transactions' / uuid.uuid4().hex
     folder.mkdir(parents=True, mode=0o700)
     journal_path = folder / 'journal.json'
-    journal = {**proof, 'status': 'activating', 'manifest_id': manifest_id,
+    journal = {**proof, 'status': 'activating', 'manifest_id': manifest_id, 'initial_database': initial_database,
                'migration_started': False, 'runtime_stop_started': False, 'traffic_reopened': False,
                'active_services': [unit for unit in RUNTIME if active(unit)],
                'timers': timer_states()}
@@ -798,6 +842,10 @@ def activate(layout, sha, manifest, manifest_digest, services, allow_migration=F
         stop_runtime(journal)
         journal['backup'] = database_backup(previous, services.file, services.runtime, services.owner, services.backup, folder / 'database')
         private_json(journal_path, journal)
+        require(journal['backup']['source_database'] == initial_database['database']
+                and journal['backup']['source_endpoint_fingerprint'] == initial_database['endpoint']
+                and journal['backup']['inventory']['heads'] == initial_database['heads'],
+                'Backup identity differs from the original database')
         if migrating:
             migration_env = layout.root / 'etc/talky/migration.env'
             protected(migration_env, private=True)
@@ -808,14 +856,15 @@ def activate(layout, sha, manifest, manifest_digest, services, allow_migration=F
             migration_values = {**install.read_env(candidate / 'backend/.env'), **values}
             backend_command(candidate, [str(candidate / 'scripts/installation/install.py'), 'check-migration-identity'], migration_values)
             grants(previous, services, folder, 'verify')
-            migration_preflight(candidate, migration_values, recovery.Service(services.file, services.owner).values['user'], database_state(previous))
+            migration_preflight(candidate, migration_values, recovery.Service(services.file, services.owner).values['user'], initial_database)
             journal['migration_started'] = True
             private_json(journal_path, journal)
             backend_command(candidate, ['-m', 'alembic', '-c', 'alembic.ini', 'upgrade', 'heads'], migration_values)
             grants(candidate, services, folder, 'apply')
         else:
             grants(candidate, services, folder, 'verify')
-        require(database_state(candidate)['heads'] == proof['new_heads'], 'Schema did not reach the exact candidate heads')
+        require(database_state(candidate) == {**initial_database, 'heads': proof['new_heads']},
+                'Database identity changed or schema did not reach the exact candidate heads')
         # First conversion makes the original state stable before linking it
         # into the candidate. Services remain stopped throughout.
         if not layout.current.is_symlink():
@@ -907,8 +956,6 @@ def main(argv=None):
                 verifier = load_module('fresh_recovery_verifier', HERE.parents[1] / 'backend/scripts/verify_deploy_drain_manifest.py')
                 verifier.verify_and_consume_manifest(manifest_path=args.manifest, candidate_sha=journal['previous_sha'],
                     expected_sha256=args.manifest_sha256, replay_dir=layout.state / 'used-manifests')
-                if any(active(unit) for unit in RUNTIME):
-                    observe(layout.current.resolve(strict=True))
                 # A crashed/stopped runtime cannot provide live counters. The
                 # operator's new candidate-bound manifest records the actual
                 # independent drain observation and continuing external freeze.
@@ -919,18 +966,7 @@ def main(argv=None):
                 protected(args.journal, private=True)
                 require(args.journal.resolve().is_relative_to(layout.state / 'transactions'), 'Journal is outside the release store')
                 journal = json.loads(args.journal.read_text())
-                require(journal['status'] in ('activated_health_checked', 'rolled_back_health_checked'),
-                        'Schedules cannot resume for an unsuccessful release/recovery')
-                sha = journal['candidate_sha'] if journal['status'] == 'activated_health_checked' else journal['previous_sha']
-                current = installed(layout, sha)
-                require(database_state(current)['heads'] == (journal['new_heads'] if sha == journal['candidate_sha'] else journal['old_heads']),
-                        'Current database schema changed before reopening')
-                start_runtime(journal, current, sha)
-                for timer, state in journal['timers'].items():
-                    if state['enabled'] == 'enabled': command(['systemctl', 'enable', timer])
-                    if state['active']: command(['systemctl', 'start', timer])
-                journal['schedules_restored_utc'] = datetime.now(timezone.utc).isoformat()
-                private_json(args.journal, journal)
+                resume_schedules(layout, journal, args.journal)
                 print('Prior maintenance schedules restored; external traffic controls remain operator-owned.')
         return 0
     except Exception as error:

@@ -1,0 +1,85 @@
+{
+  "checked_at": "2026-10-28T11:28:23.241584+00:00",
+  "pr": 27,
+  "head": "49d26b79ea73030f70e773dc5cc9c2fc7ae55f11",
+  "base": "b8f7488fefa75928acca158bf3d27dcfbdaa9830",
+  "tested_merge": "e77516c61cacb15a497b01ee8ef81d683c26030a",
+  "candidate_and_merge_tree": "f022788aaf2647073ea7ebf98a9e2b99024f831d",
+  "all_reported_checks_passed": true,
+  "checks": [
+    {
+      "bucket": "pass",
+      "link": "https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40677108477/job/122786993403",
+      "name": "Docker Build & Scan",
+      "state": "SUCCESS"
+    },
+    {
+      "bucket": "pass",
+      "link": "https://vercel.com/github",
+      "name": "Vercel Preview Comments",
+      "state": "SUCCESS"
+    },
+    {
+      "bucket": "pass",
+      "link": "https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40677108477/job/122778349947",
+      "name": "SQL Schema Validation",
+      "state": "SUCCESS"
+    },
+    {
+      "bucket": "pass",
+      "link": "https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40677108477/job/122778350311",
+      "name": "Backend",
+      "state": "SUCCESS"
+    },
+    {
+      "bucket": "pass",
+      "link": "https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40677108477/job/122778350176",
+      "name": "Admin Frontend",
+      "state": "SUCCESS"
+    },
+    {
+      "bucket": "pass",
+      "link": "https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40677108477/job/122778350158",
+      "name": "Telephony Ingress Safety",
+      "state": "SUCCESS"
+    },
+    {
+      "bucket": "pass",
+      "link": "https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40677108477/job/122778350075",
+      "name": "Frontend",
+      "state": "SUCCESS"
+    },
+    {
+      "bucket": "pass",
+      "link": "https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40677108477/job/122778221863",
+      "name": "Secret Scan (gitleaks)",
+      "state": "SUCCESS"
+    },
+    {
+      "bucket": "pass",
+      "link": "https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40677108477/job/122778222281",
+      "name": "Secret Placeholder Guard",
+      "state": "SUCCESS"
+    },
+    {
+      "bucket": "pass",
+      "link": "https://vercel.com/allestateestimation-9391s-projects/talkleeai/772EvVMaaupUJZtafcL5wufBPetB",
+      "name": "Vercel",
+      "state": "SUCCESS"
+    }
+  ],
+  "customer_tests": {
+    "passed": 1331,
+    "failed": 0,
+    "existing_skips": 2
+  },
+  "customer_prod_audit_vulnerabilities": 0,
+  "admin_tests_passed": 943,
+  "backend_tests": {
+    "passed": 15628,
+    "skipped": 174,
+    "coverage_percent": 72.54
+  },
+  "admin_postgres_tests_passed": 701,
+  "production_release_verified": false
+}

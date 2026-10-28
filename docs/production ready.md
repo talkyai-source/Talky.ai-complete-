@@ -1,5 +1,20 @@
 # production ready
 
+**Verified Ubuntu and customer release — 28 October 2026:** The
+[blank Ubuntu acceptance](sessions/2026-10-28-blank-ubuntu-acceptance.md)
+passed actual installation, both frontend builds, service/source/identity and
+HTTPS checks, reboot and cleanup. Combined candidate `ce93fc6a` subsequently
+passed all six configured Linux workflows. The separately reviewed
+[customer-only release](sessions/2026-10-28-customer-first-paid-release-scope.md)
+is live at merge `80b52743`, with exact Vercel production source/alias identity
+and nine anonymous route checks. This deploys the accepted reseller-scope
+exclusion without claiming those capabilities are built. The new fresh-host
+update/rollback procedure is undergoing its own full VM qualification.
+Production database separation and privilege conversion, backend activation,
+failed real-model qualification and the remaining operating/customer/handover
+acceptance remain open. No paid-readiness sign-off or feature-freeze exit is
+implied by these results.
+
 **Paid-use completion instruction — 28 October 2026:** The user requested all
 required work completed with final Stripe account integration as the only
 intended handover item. This resumes the required CP05/CP06 work previously

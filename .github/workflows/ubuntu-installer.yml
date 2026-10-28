@@ -59,7 +59,7 @@ jobs:
       - name: Verify release publication with real root file permissions
         # Only this bounded test module: real files/Git/links stay in owned /tmp
         # fixtures, while systemd and database boundaries are explicitly mocked.
-        # Nonroot discovery above reports the 17 permission cases as skipped.
+        # Nonroot discovery above explicitly skips these root permission cases.
         run: |
           sudo --preserve-env=PYTHONDONTWRITEBYTECODE,PYTHON_DOTENV_DISABLED \
             python3 -m unittest discover -s scripts/installation -p test_fresh_release.py -v
