@@ -6,8 +6,9 @@ on:
     paths:
       - scripts/installation/**
       - scripts/database/**
-      - backend/systemd/**
-      - backend/requirements.txt
+      - backend/**
+      - Talk-Leee/**
+      - Admin/frontend/**
       - install_talklee.sh
       - .github/workflows/ubuntu-blank-host.yml
   workflow_dispatch:

@@ -47,7 +47,15 @@ def diagnose():
         if '=' in line:
             key, value = line.split('=', 1)
             if any(part in key for part in ('KEY', 'TOKEN', 'PASSWORD', 'SECRET', '_URL', 'EMAIL_PASS')):
-                secret_values.append(value.strip('"\''))
+                value = value.strip('"\'')
+                secret_values.append(value)
+                if key.endswith('_URL'):
+                    try:
+                        password = urlsplit(value).password
+                        if password:
+                            secret_values.extend((password, unquote(password)))
+                    except ValueError:
+                        pass
     result = {}
     for unit in UNITS:
         state = subprocess.run(['systemctl', 'show', unit, '--property=ActiveState,SubState,Result,ExecMainStatus,User,Group'],
