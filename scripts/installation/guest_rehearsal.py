@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""Configure ONLY the disposable VM created by blank_host_rehearsal.py.
+
+Generated credentials and disabled calls/billing qualify installation mechanics,
+never provider, payment, production DNS, customer or disaster-recovery outcomes.
+"""
+from __future__ import annotations
+
+import base64
+import importlib.util
+import json
+import os
+from pathlib import Path
+import secrets
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[2]
+INPUTS = Path('/root/talklee-rehearsal-inputs')
+MARKER = Path('/etc/talklee-disposable-installer-vm')
+
+
+def run(*args):
+    subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def private(path, content):
+    with path.open('x', encoding='utf-8') as handle:
+        path.chmod(0o600)
+        handle.write(content)
+
+
+def main():
+    if os.geteuid() != 0 or not MARKER.is_file():
+        raise RuntimeError('Only the explicitly marked disposable installer VM is accepted')
+    payload = json.loads((INPUTS / 'fixture.json').read_text())
+    if MARKER.read_text().strip() != payload['token']:
+        raise RuntimeError('Disposable VM identity mismatch')
+    config_path = INPUTS / 'prepared/install.json'
+    if config_path.exists():
+        raise RuntimeError('Rehearsal inputs already exist; refuse reuse')
+    run('apt-get', 'update', '-qq')
+    run(sys.executable, str(ROOT / 'scripts/installation/prepare.py'), '--source', str(ROOT),
+        '--output', str(config_path.parent))
+    config = json.loads(config_path.read_text())
+    config.update(api_domain='api.installer.test', dashboard_domain='app.installer.test',
+                  admin_domain='admin.installer.test', ssh_source_cidrs=['10.0.2.2/32'],
+                  sip_source_cidrs=['10.0.2.2/32'], media_source_cidrs=['10.0.2.2/32'],
+                  database_prepared=True, database_ca_file=str(INPUTS / 'ca.crt'),
+                  tls_certificate_file=str(INPUTS / 'web.crt'), tls_private_key_file=str(INPUTS / 'web.key'))
+    spec = importlib.util.spec_from_file_location('installer', ROOT / 'scripts/installation/install.py')
+    installer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(installer)
+    backend = Path(config['backend_env_file'])
+    env = installer.read_env(backend)
+    for key, value in env.items():
+        if value.startswith('REPLACE_'):
+            env[key] = secrets.token_urlsafe(40)
+    env.update(DATABASE_URL=payload['runtime_url'],
+               REDIS_URL='redis://:' + secrets.token_urlsafe(40) + '@127.0.0.1:6379/0',
+               SECRETS_MASTER_KEY=secrets.token_hex(32),
+               CONNECTOR_ENCRYPTION_KEY=base64.urlsafe_b64encode(os.urandom(32)).decode(),
+               TOTP_ENCRYPTION_KEY=base64.urlsafe_b64encode(os.urandom(32)).decode(),
+               FRONTEND_URL='https://app.installer.test', API_BASE_URL='https://api.installer.test',
+               CORS_ORIGINS='https://app.installer.test,https://admin.installer.test',
+               STRIPE_BILLING_DISABLED='1', TELEPHONY_ENABLED='false',
+               SMTP_HOST='127.0.0.1', SMTP_PORT='9', SMTP_USE_TLS='false',
+               SMTP_FROM_EMAIL='no-mail@installer.test',
+               DEEPGRAM_API_KEY='synthetic-disabled-' + secrets.token_hex(24),
+               GROQ_API_KEY='synthetic-disabled-' + secrets.token_hex(24),
+               CARTESIA_API_KEY='synthetic-disabled-' + secrets.token_hex(24))
+    env.pop('STRIPE_SECRET_KEY', None)
+    env.pop('STRIPE_WEBHOOK_SECRET', None)
+    backend.write_text(''.join(f'{key}={value}\n' for key, value in env.items()))
+    for name in ('dashboard_env_file', 'admin_env_file'):
+        path = Path(config[name])
+        path.write_text(path.read_text().replace('api.example.com', 'api.installer.test'))
+    asterisk = Path(config['asterisk_config_directory'])
+    configs = {
+        'asterisk.conf': '[directories]\nastetcdir=/etc/asterisk\nastmoddir=/usr/lib/asterisk/modules\n'
+                         'astvarlibdir=/var/lib/asterisk\nastdbdir=/var/lib/asterisk\nastkeydir=/var/lib/asterisk\n'
+                         'astdatadir=/usr/share/asterisk\nastagidir=/usr/share/asterisk/agi-bin\n'
+                         'astspooldir=/var/spool/asterisk\nastrundir=/var/run/asterisk\nastlogdir=/var/log/asterisk\n'
+                         '[options]\nrunuser=asterisk\nrungroup=asterisk\n'
+                         '[files]\nastctlpermissions=0660\nastctlowner=asterisk\nastctlgroup=asterisk\n',
+        'pjsip.conf': '[global]\ntype=global\n#include pjsip.d/*.conf\n',
+        'extensions.conf': '[general]\nstatic=yes\nwriteprotect=yes\n[default]\n',
+        'http.conf': '[general]\nenabled=yes\nbindaddr=127.0.0.1\nbindport=8088\n',
+        'ari.conf': '[general]\nenabled=yes\npretty=no\n[talky]\ntype=user\nread_only=no\n'
+                    'password=' + env['ASTERISK_ARI_PASSWORD'] + '\n',
+        'rtp.conf': f"[general]\nrtpstart={config['rtp_port_start']}\nrtpend={config['rtp_port_end']}\n",
+        'modules.conf': '[modules]\nautoload=yes\n',
+    }
+    for name, content in configs.items():
+        private(asterisk / name, content)
+    config_path.write_text(json.dumps(config, indent=2) + '\n')
+    run('cp', str(INPUTS / 'ca.crt'), '/usr/local/share/ca-certificates/talklee-rehearsal.crt')
+    run('update-ca-certificates')
+    installer.validate_config(config, inputs=True)
+    print('Disposable synthetic inputs prepared; calls, payments and email delivery disabled.')
+
+
+if __name__ == '__main__':
+    main()

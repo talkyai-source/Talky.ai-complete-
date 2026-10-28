@@ -1,0 +1,54 @@
+name: Blank Ubuntu installation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/installation/**
+      - scripts/database/**
+      - backend/systemd/**
+      - backend/requirements.txt
+      - install_talklee.sh
+      - .github/workflows/ubuntu-blank-host.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blank-ubuntu-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install-reboot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHON_DOTENV_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require an isolated hardware-accelerated VM
+        run: |
+          test -c /dev/kvm
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils postgresql-client-16 acl
+          sudo setfacl -m "u:$(id -un):rw" /dev/kvm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/installation/requirements-linux-py312.lock
+      - name: Install qualified fixture dependencies
+        run: python -m pip install --require-hashes -r scripts/installation/requirements-linux-py312.lock
+      - name: Apply the actual installer and reboot the blank VM
+        run: python scripts/installation/blank_host_rehearsal.py --output "$RUNNER_TEMP/blank-ubuntu-receipt.json"
+      - name: Preserve bounded acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blank-ubuntu-${{ github.sha }}
+          path: ${{ runner.temp }}/blank-ubuntu-receipt.json
+          if-no-files-found: warn
