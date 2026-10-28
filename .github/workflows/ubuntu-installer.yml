@@ -82,6 +82,23 @@ jobs:
             ${{ runner.temp }}/talklee-inputs/requirements-linux-py312.lock.provenance.json
           if-no-files-found: error
 
+      - name: Audit the exact hashed Linux runtime lock
+        # Keep audit tooling outside the already installed/checked runtime closure.
+        # A vulnerability or audit failure blocks this job; no automatic fixes or exclusions.
+        run: |
+          python -m venv "$RUNNER_TEMP/talklee-lock-audit"
+          "$RUNNER_TEMP/talklee-lock-audit/bin/python" -m pip install pip-audit==2.10.1
+          "$RUNNER_TEMP/talklee-lock-audit/bin/python" -m pip_audit \
+            --require-hashes -r scripts/installation/requirements-linux-py312.lock \
+            --progress-spinner off --format json --output "$RUNNER_TEMP/runtime-lock-audit.json"
+      - name: Retain the runtime lock audit result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-runtime-lock-audit-${{ github.sha }}
+          path: ${{ runner.temp }}/runtime-lock-audit.json
+          if-no-files-found: warn
+
   gateway:
     runs-on: ubuntu-24.04
     timeout-minutes: 20

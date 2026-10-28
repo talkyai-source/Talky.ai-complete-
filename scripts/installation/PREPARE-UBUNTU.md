@@ -184,10 +184,13 @@ archived SQL migrations, `fresh_schema.sql` or development seed scripts as
 additional installation steps. A failed bootstrap needs diagnosis and a new
 empty database; these instructions do not authorize dropping an existing one.
 
-The repository does not yet supply a complete, independently qualified grant
-script for distinct migration-owner and runtime roles. The DBA must record and
-apply the reviewed database/schema, table, sequence and function permissions,
-including how future migration-created objects receive the required grants.
+For the supported dedicated PostgreSQL 16 canonical-0082 profile, follow the
+[runtime-grants procedure](../database/RUNTIME_GRANTS.md): inspect with `plan`,
+apply the reviewed ACLs with `apply`, then retain a successful `verify` receipt
+from the actual runtime LOGIN. The tool checks database/schema, table, sequence
+and function permissions and keeps future objects inaccessible until their
+release is reviewed. Other database versions, extra schemas or mixed ownership
+require their own reviewed permission profile; they are not silently adopted.
 Do not replace this work by granting the runtime role superuser, BYPASSRLS or
 membership in the migration role. Run representative application reads and
 writes with the real runtime role and populated own/foreign-tenant fixtures to

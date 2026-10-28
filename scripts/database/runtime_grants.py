@@ -280,11 +280,17 @@ def execute(owner_service, runtime_service, mode):
     with connect(owner_service) as connection:
         with connection.cursor() as cursor:
             cursor.execute("SET TRANSACTION READ ONLY" if mode != "apply" else "SET TRANSACTION READ WRITE")
+            # Diagnose an unowned relation before attempting LOCK on it. The
+            # migration owner may have no SELECT privilege on a foreign-owned
+            # table, so locking first hides the actual ownership refusal.
+            state = inspect(cursor, owner, runtime)
             if mode == "apply":
                 cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended('talklee:runtime-grants',0))")
                 for table in PROFILE["tables"]:
                     cursor.execute("LOCK TABLE public." + ident(table) + " IN ACCESS SHARE MODE")
-            state = inspect(cursor, owner, runtime)
+                # Re-read after locks: preflight does not authorize a stale
+                # ownership/policy snapshot if DDL raced with acquisition.
+                state = inspect(cursor, owner, runtime)
             result.update(tables=len(PROFILE["tables"]), sequences=len(PROFILE["sequences"]),
                           policies_sha256=state["policy_hash"])
             if mode == "plan":

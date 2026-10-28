@@ -4,11 +4,11 @@
   "created_at": "2026-10-04",
   "plan_status": "in_progress",
   "plan_file": "docs/production ready.md",
-  "scope_policy": "Fixed to the October 2 assessment; no unrelated feature work. On 7 October the user explicitly revised AG02–AG05 implementation toward concise prompts, model-selected knowledge and model-interpreted contact tools. On 10 October the user explicitly authorized the AssemblyAI Universal-3.6 Pro STT integration, English only with its selectable controls; evidence and remaining live prerequisites are in docs/sessions/2026-10-10-assemblyai-integration.md. Unrelated scope remains frozen.",
+  "scope_policy": "Fixed to the October 2 assessment; no unrelated feature work. On 7 October the user explicitly revised AG02–AG05 implementation toward concise prompts, model-selected knowledge and model-interpreted contact tools. On 10 October the user explicitly authorized the AssemblyAI Universal-3.6 Pro STT integration, English only with its selectable controls; evidence and remaining live prerequisites are in docs/sessions/2026-10-10-assemblyai-integration.md. Unrelated scope remains frozen. On 28 October the user accepted the recommended first paid-release scope excluding reseller operations and staff invitations; retain them as future work, preserve cosmetic branding previews, and verify exclusion in deployed surfaces. Required non-Stripe work remains active; final Stripe account integration is the intended last handover step, not a readiness claim.",
   "feature_freeze": {
     "active": true,
     "source": "Explicit user instruction on 4 October 2026",
-    "exit": "Full-plan evidence-backed closure with no blocked, failed, contained_not_complete item or unrun required gate; otherwise only an explicit user scope revision. A narrow pilot does not lift the freeze."
+    "exit": "Full-plan evidence-backed closure with no blocked, failed, contained_not_complete item or unrun required gate; otherwise only an explicit user scope revision. A narrow pilot does not lift the freeze. Apply the user-approved 28 October first-release exclusions without counting excluded capabilities as built or closed."
   },
   "provenance": {
     "source_candidate": "d7b584050e9e45c6b8a1bf543636afd87437ab22",
@@ -299,9 +299,9 @@
       "id": "CP05",
       "title": "Complete existing white-label controls behind truthful containment",
       "owner_role": "Partner product lead with tenant platform owner",
-      "assigned_person": null,
+      "assigned_person": "Codex implementation team",
       "reviewer": null,
-      "status": "planned",
+      "status": "contained_not_complete",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -313,18 +313,24 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "cp05-complete-existing-white-label-controls-behind-truthful-containment",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Deferred for now at the user’s request on 4 October 2026. Leave unfinished and retain all existing findings and acceptance requirements; CP06 was also deferred and CP07 local implementation and its remaining delivery gap are now recorded.",
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-28-paid-readiness-followup.md",
+          "kind": "bounded_paid_readiness_followup",
+          "status": "implementation_and_acceptance_in_progress_not_release_closure"
+        }
+      ],
+      "blocker": "Excluded from the first paid release by the user on 28 October; retained as future work. Partner-scoped provisioning/billing and invitation contracts remain incomplete, not feature-complete. Verify the explicit exclusion in deployed surfaces and preserve cosmetic branding previews.",
+      "next_action": "Verify the user-approved first-paid-release exclusion in Linux/browser/deployed surfaces. Retain reseller functionality as future work without claiming it built; the accepted release scope does not require implementing it before launch.",
       "target_date": null
     },
     {
       "id": "CP06",
       "title": "Accessible cancellation and dependable billing communication",
       "owner_role": "Billing product experience and finance operations lead",
-      "assigned_person": null,
+      "assigned_person": "Codex implementation team",
       "reviewer": null,
-      "status": "planned",
+      "status": "in_progress",
       "start_after_milestone": "RG01 baseline recorded",
       "dependencies_and_tests": "See package text; coordination and final acceptance dependencies are distinct from entry milestones.",
       "finding_ids": [
@@ -339,9 +345,15 @@
       ],
       "architecture_ids": [],
       "plan_anchor": "cp06-accessible-cancellation-and-dependable-billing-communication",
-      "evidence": [],
-      "blocker": null,
-      "next_action": "Deferred for later at the user’s request on 4 October 2026. Leave unfinished and retain all existing findings and acceptance requirements; CP07 local implementation and its remaining delivery gap are now recorded.",
+      "evidence": [
+        {
+          "path": "docs/sessions/2026-10-28-paid-readiness-followup.md",
+          "kind": "bounded_paid_readiness_followup",
+          "status": "implementation_and_acceptance_in_progress_not_release_closure"
+        }
+      ],
+      "blocker": "Unique verified current tenant-administrator receipt selection is repaired locally; ambiguous recipients remain explicit. Native PostgreSQL/replay validation, designated inbox acceptance and authoritative portal/cancellation lifecycle remain required. Final live Stripe account integration is intentionally reserved for the user-requested last step.",
+      "next_action": "Resumed on 28 October: qualify the recipient repair and existing portal path, retain frozen delivery receipts, and complete the supported cancellation/access-period and communication outcomes with the designated resources. Provider account integration alone must not be counted as the lifecycle acceptance.",
       "target_date": null
     },
     {
@@ -366,8 +378,8 @@
         "docs/sessions/2026-10-04-cp07-delivery-contracts.md",
         "docs/sessions/artifacts/cp07/verification.json"
       ],
-      "blocker": "External background alerts have no suitable existing authorized durable delivery/receipt and HTTP egress contract. Browser routing is unavailable as containment, not completion. Deployed authenticated two-account/multitab acceptance remains unverified; CP06 billing recipients remain deferred.",
-      "next_action": "Review the bounded external-alert completion contract and designated receiver acceptance described in the CP07 delivery review. Keep the unsupported offer unavailable and retain the feature freeze. Validate the coordinated candidate in the designated environment before closing CP07; CP05 and CP06 remain deferred.",
+      "blocker": "External background alerts have no suitable existing authorized durable delivery/receipt and HTTP egress contract. Browser routing is unavailable as containment, not completion. Deployed authenticated two-account/multitab acceptance remains unverified; CP06 billing-recipient repair is now under qualification.",
+      "next_action": "Review the bounded external-alert completion contract and designated receiver acceptance described in the CP07 delivery review. Keep the unsupported offer unavailable and retain the feature freeze. Validate the coordinated candidate in the designated environment before closing CP07; CP05 and CP06 resumed on 28 October; required acceptance remains open.",
       "target_date": null
     },
     {
@@ -429,10 +441,15 @@
           "kind": "actual_react_lifecycle_auth_race_repair",
           "candidate_commit": "1bf6eaee",
           "status": "local_verified_not_browser_or_customer_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-28-paid-readiness-followup.md",
+          "kind": "bounded_paid_readiness_followup",
+          "status": "implementation_and_acceptance_in_progress_not_release_closure"
         }
       ],
-      "blocker": "Designated inbox/device/browser recovery, cross-tab cookie behavior, deployed compatibility, first authorized call and operator reconciliation remain unverified. The advertised staff invitation/acceptance journey is absent; assisted setup does not close F05.",
-      "next_action": "Complete designated recovery/first-call acceptance and obtain explicit disposition of absent invitation journey. Preserve the freeze, uncertainty warnings and legacy-route containment; continue eligible AG07 and operating repairs while keeping CP05/CP06 deferred; the user explicitly resumed the Admin portion of CP09.",
+      "blocker": "Designated inbox/device/browser recovery, cross-tab cookie behavior, deployed compatibility, first authorized call and operator reconciliation remain unverified. The user explicitly excluded staff invitations from the first paid release on 28 October; the missing invitation capability remains future work, not a completed feature.",
+      "next_action": "Qualify the protected first-administrator bootstrap and ordinary MFA login on the actual restricted TLS database. Complete designated customer recovery/device/first-call acceptance; staff invitations are explicitly excluded from the first paid release and retained as future work. Preserve the feature freeze and canonical identity boundaries; CP05/CP06 are resumed, not closed.",
       "target_date": null
     },
     {
@@ -2272,10 +2289,15 @@
         {
           "path": "docs/sessions/2026-10-28-production-deliverables-integration.md",
           "kind": "combined_candidate_tls_migration_recovery_and_monitoring_evidence_with_operating_limits"
+        },
+        {
+          "path": "docs/sessions/2026-10-28-paid-readiness-followup.md",
+          "kind": "bounded_paid_readiness_followup",
+          "status": "implementation_and_acceptance_in_progress_not_release_closure"
         }
       ],
       "blocker": "Real Ubuntu rehearsals on two TLS PostgreSQL containers passed for both the earlier 0075 source and combined 0082 candidate. The latter preserved all 113 public-table records and five sequence states, verified restricted runtime access, source invariance and cleanup. Both containers share one runner. The observed production database remains on the application server without TLS; a designated external database, off-host archive/restore target, retention/PITR policy, recovery objectives and operator are still required.",
-      "next_action": "Retain the exact-candidate canonical TLS recovery evidence, then execute the documented migration and recovery workflow on the designated external production-shaped targets. Prove runtime restrictions, application-server loss recovery, off-host durability and declared recovery objectives; synthetic two-container recovery is a separate evidence layer.",
+      "next_action": "Qualify the explicit runtime-grants profile and real login/tenant boundaries, retain canonical TLS recovery evidence, then execute migration and off-host recovery on the designated production-shaped infrastructure. Prove separate failure domains, retained encryption keys, durability and measured recovery objectives; CI containers remain a bounded layer.",
       "target_date": null
     },
     {
@@ -2323,10 +2345,15 @@
           "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
           "kind": "combined_selection_action_guard_and_audio_storage_regression",
           "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
+        },
+        {
+          "path": "docs/sessions/2026-10-28-paid-readiness-followup.md",
+          "kind": "bounded_paid_readiness_followup",
+          "status": "implementation_and_acceptance_in_progress_not_release_closure"
         }
       ],
       "blocker": "Supplier-cost ingestion/reconciliation is unavailable. Source permission inventory is complete, but approved deployment identity/topology, permission matrix and positive/negative host acceptance are outstanding.",
-      "next_action": "Obtain the designated deployment identity/permission matrix and supplier statements, then exercise exact host boundaries. Preserve unavailable costs, private persistent recordings and explicit direct Asterisk CLI authorization. Source inventory does not establish deployed privilege safety.",
+      "next_action": "Verify fresh-host runtime/operator service isolation and protected migration credentials on the actual Ubuntu VM; obtain privileged deployment access and exercise deployed host boundaries. Supplier statements and finance reconciliation remain required.",
       "target_date": null
     },
     {
@@ -2371,10 +2398,15 @@
         {
           "path": "docs/sessions/2026-10-28-production-deliverables-integration.md",
           "kind": "combined_candidate_tls_migration_recovery_and_monitoring_evidence_with_operating_limits"
+        },
+        {
+          "path": "docs/sessions/2026-10-28-paid-readiness-followup.md",
+          "kind": "bounded_paid_readiness_followup",
+          "status": "implementation_and_acceptance_in_progress_not_release_closure"
         }
       ],
       "blocker": "PR26 combines billing, Admin and Ubuntu work at schema 0082. Restricted-owner TLS upgrades and 55 incident-adoption cases passed; final Linux CI is tracked on the exact PR candidate. Privileged deployment access, a designated clean Ubuntu host and external database, required traffic-freeze/drain/operator attestations, coordinated activation and actual reboot/call/update/rollback/handover acceptance remain outstanding.",
-      "next_action": "Finish exact-candidate Linux CI, then use the known deployment and fresh-host installation procedures with the designated resources. Retain real operating, recovery and independent-operator demonstration evidence, including the requested videos. Current local builds and previews do not close the release gate.",
+      "next_action": "Resolve and retain actual blank-Ubuntu apply/reboot failure evidence, then complete exact-candidate Linux CI and the required compatible update/rollback path. Use designated live-host access, release/drain records and owned destinations for activation. Independent handover and videos remain separate acceptance; no local or CI pass lifts the freeze.",
       "target_date": null
     },
     {

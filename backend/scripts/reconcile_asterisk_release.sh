@@ -22,6 +22,7 @@ BACKEND_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${TALKY_BACKEND_ENV_FILE:-${BACKEND_DIR}/.env}"
 PYTHON_BIN="${TALKY_BACKEND_PYTHON:-${BACKEND_DIR}/venv/bin/python}"
 RECONCILER="${SCRIPT_DIR}/reconcile_pjsip_configs.py"
+ENV_RUNNER="${SCRIPT_DIR}/run_with_backend_env.py"
 
 if [ ! -r "${ENV_FILE}" ]; then
     echo "ERROR: backend environment file is not readable." >&2
@@ -32,14 +33,11 @@ if [ ! -x "${PYTHON_BIN}" ]; then
     exit 1
 fi
 
-set -a
-# shellcheck disable=SC1090 -- production env path is operator-configurable.
-. "${ENV_FILE}"
-set +a
+# Load literal dotenv values for each Python child; never source secrets as shell code.
 
 # Check returns 1 when drift exists; that is the expected input to apply.
 set +e
-CHECK_OUTPUT="$(cd -- "${BACKEND_DIR}" && "${PYTHON_BIN}" "${RECONCILER}")"
+CHECK_OUTPUT="$(cd -- "${BACKEND_DIR}" && "${PYTHON_BIN}" "${ENV_RUNNER}" "${ENV_FILE}" "${PYTHON_BIN}" "${RECONCILER}")"
 CHECK_STATUS=$?
 set -e
 if [ "${CHECK_STATUS}" -gt 1 ]; then
@@ -64,6 +62,6 @@ CANDIDATE_DIGEST="$(
 # holding the writer lock. Any assignment/config change between the two runs
 # changes the digest and blocks the mutation.
 cd -- "${BACKEND_DIR}"
-"${PYTHON_BIN}" "${RECONCILER}" \
+"${PYTHON_BIN}" "${ENV_RUNNER}" "${ENV_FILE}" "${PYTHON_BIN}" "${RECONCILER}" \
     --apply \
     --expected-digest "${CANDIDATE_DIGEST}"

@@ -229,21 +229,29 @@ def validate_config(config: dict, *, inputs: bool = False) -> dict:
         require(not re.search(r'^\s*#(?:exec|include|tryinclude)\s+[/~]', text, re.M),
                 'Asterisk includes must be relative to the supplied config directory')
         require(not re.search(r'^\s*#exec\b', text, re.M), 'Asterisk #exec is not accepted')
-        for include in re.findall(r'^\s*#(?:include|tryinclude)\s+(.+)', text, re.M):
+        for directive, include in re.findall(r'^\s*#(include|tryinclude)\s+(.+)', text, re.M):
             include = include.strip().strip('"')
             require(include == 'pjsip.d/*.conf' or
+                    (path.name == 'extensions.conf' and directive == 'tryinclude' and
+                     include == 'extensions.d/talky-inbound.conf') or
                     (re.fullmatch(r'[A-Za-z0-9_-]+\.conf', include) and (asterisk / include).is_file()),
-                    'Asterisk include must resolve inside the supplied config or generated pjsip.d')
+                    'Asterisk include must resolve inside the supplied config or the supported generated paths')
     http = (asterisk / 'http.conf').read_text()
     require(re.search(r'^\s*bindaddr\s*=\s*127\.0\.0\.1\s*(?:;.*)?$', http, re.M) is not None,
             'Asterisk HTTP/ARI must bind to 127.0.0.1')
     ast_main = (asterisk / 'asterisk.conf').read_text()
+    module_directories = re.findall(r'^\s*astmoddir\s*=\s*([^;\n]+)', ast_main, re.M)
+    require(all(value.strip() == '/usr/lib/x86_64-linux-gnu/asterisk/modules' for value in module_directories),
+            'Asterisk astmoddir must match the Ubuntu 24.04 amd64 package module directory')
     for key, value in (('astctlpermissions', '0660'), ('astctlowner', 'asterisk'),
                        ('astctlgroup', 'asterisk'), ('runuser', 'asterisk'), ('rungroup', 'asterisk')):
         require(re.search(r'^\s*' + key + r'\s*=\s*' + value + r'\s*(?:;.*)?$', ast_main, re.M) is not None,
                 f'Asterisk config must set {key}={value} for the service account')
     require('#include pjsip.d/*.conf' in (asterisk / 'pjsip.conf').read_text(),
             'pjsip.conf must include generated pjsip.d/*.conf')
+    require(re.search(r'^\s*#tryinclude\s+"?extensions\.d/talky-inbound\.conf"?\s*$',
+                      (asterisk / 'extensions.conf').read_text(), re.M) is not None,
+            'extensions.conf must tryinclude generated extensions.d/talky-inbound.conf')
     env = read_env(Path(config['backend_env_file']))
     require('MIGRATION_DATABASE_URL' not in env, 'Keep migration credentials out of the runtime environment')
     require(not env.get('READ_DATABASE_URL'),
@@ -509,6 +517,36 @@ def start_host_services(frontend_mode: str) -> None:
     # carrier synthetic-call schedule. Those require their own operating inputs.
 
 
+def install_redis_runtime(redis_image: str, password: str, etc: Path = Path('/etc')) -> None:
+    # This installer admits an empty host with no existing Docker state/config.
+    # Docker's automatic private bridges can shadow a valid external DB subnet.
+    write(etc / 'docker/daemon.json', json.dumps({
+        'bridge': 'none', 'iptables': False, 'ip6tables': False, 'ip-forward': False,
+    }) + '\n')
+    (etc / 'talky').mkdir(mode=0o700, exist_ok=True)
+    (etc / 'talky').chmod(0o700)
+    write(etc / 'talky/redis.conf', 'bind 127.0.0.1\nprotected-mode yes\nport 6379\n'
+          'appendonly yes\nappendfsync everysec\nmaxmemory-policy noeviction\n'
+          f'requirepass {password}\n', 0o444)
+    # The host's root-only directory protects this read-only container mount.
+    # Host networking creates no bridge route and Redis itself stays loopback-only.
+    write(etc / 'talky/compose.yml',
+          'name: talky-rebuild\nservices:\n  redis:\n    image: ' + redis_image + '\n'
+          '    restart: unless-stopped\n    network_mode: host\n'
+          '    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]\n'
+          '    volumes:\n      - /etc/talky/redis.conf:/usr/local/etc/redis/redis.conf:ro\n'
+          '      - talky_redis:/data\n'
+          '    healthcheck:\n      test: ["CMD-SHELL", "redis-cli ping | grep -q NOAUTH"]\n'
+          '      interval: 10s\n      timeout: 3s\n      retries: 5\n'
+          'volumes:\n  talky_redis:\n', 0o600)
+    write(etc / 'systemd/system/talky-redis.service',
+          '[Unit]\nDescription=Talky Redis\nRequires=docker.service\nAfter=docker.service\n'
+          '[Service]\nType=oneshot\nRemainAfterExit=yes\n'
+          'ExecStart=/usr/bin/docker compose -f /etc/talky/compose.yml up -d --wait\n'
+          'ExecStop=/usr/bin/docker compose -f /etc/talky/compose.yml stop\n'
+          '[Install]\nWantedBy=multi-user.target\n')
+
+
 def nginx_site(config: dict) -> str:
     domains = [config['api_domain']]
     if config['frontend_mode'] == 'linux':
@@ -592,7 +630,7 @@ def ensure_fresh_host(config: dict, source: Path) -> None:
             release.get('VERSION_ID', '').strip('"') == '24.04', 'Ubuntu 24.04 is required')
     require(Path('/run/systemd/system').is_dir(), 'A systemd VM/server is required')
     for path in (TARGET, STATE, Path('/etc/talky'), Path('/etc/systemd/system/talky-api.service'),
-                 Path('/etc/nginx'), Path('/etc/asterisk'), Path('/var/lib/docker'),
+                 Path('/etc/nginx'), Path('/etc/asterisk'), Path('/var/lib/docker'), Path('/etc/docker/daemon.json'),
                  Path('/usr/sbin/policy-rc.d')):
         require(not path.exists() and not path.is_symlink(), f'Refusing existing path: {path}')
     require_install_umask()
@@ -718,28 +756,7 @@ def apply(config: dict, source: Path) -> None:
     run(['chown', 'asterisk:asterisk', str(generated_sip)])
     generated_sip.chmod(0o2770)
     redis_password = urlsplit(env['REDIS_URL']).password
-    Path('/etc/talky').mkdir(mode=0o700, exist_ok=True)
-    Path('/etc/talky').chmod(0o700)
-    write(Path('/etc/talky/redis.conf'), 'bind 0.0.0.0\nprotected-mode yes\nport 6379\n'
-          'appendonly yes\nappendfsync everysec\nmaxmemory-policy noeviction\n'
-          f'requirepass {redis_password}\n', 0o444)
-    # The root-only host directory protects this file. The container's redis
-    # account must be able to read its read-only bind mount after dropping root.
-    write(Path('/etc/talky/compose.yml'),
-          'name: talky-rebuild\nservices:\n  redis:\n    image: ' + config['redis_image'] + '\n'
-          '    restart: unless-stopped\n    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]\n'
-          '    ports: ["127.0.0.1:6379:6379"]\n'
-          '    volumes:\n      - /etc/talky/redis.conf:/usr/local/etc/redis/redis.conf:ro\n'
-          '      - talky_redis:/data\n'
-          '    healthcheck:\n      test: ["CMD-SHELL", "redis-cli ping | grep -q NOAUTH"]\n'
-          '      interval: 10s\n      timeout: 3s\n      retries: 5\n'
-          'volumes:\n  talky_redis:\n', 0o600)
-    write(Path('/etc/systemd/system/talky-redis.service'),
-          '[Unit]\nDescription=Talky Redis\nRequires=docker.service\nAfter=docker.service\n'
-          '[Service]\nType=oneshot\nRemainAfterExit=yes\n'
-          'ExecStart=/usr/bin/docker compose -f /etc/talky/compose.yml up -d --wait\n'
-          'ExecStop=/usr/bin/docker compose -f /etc/talky/compose.yml stop\n'
-          '[Install]\nWantedBy=multi-user.target\n')
+    install_redis_runtime(config['redis_image'], redis_password)
     install_service_units(backend)
     # Loopback bind; nginx is the only public HTTP listener.
     write(Path('/etc/systemd/system/talky-api.service.d/20-loopback.conf'),

@@ -118,14 +118,20 @@ def main():
         path.write_text(path.read_text().replace('api.example.com', 'api.installer.test'))
     asterisk = Path(config['asterisk_config_directory'])
     configs = {
-        'asterisk.conf': '[directories]\nastetcdir=/etc/asterisk\nastmoddir=/usr/lib/asterisk/modules\n'
+        'asterisk.conf': '[directories]\nastetcdir=/etc/asterisk\nastmoddir=/usr/lib/x86_64-linux-gnu/asterisk/modules\n'
                          'astvarlibdir=/var/lib/asterisk\nastdbdir=/var/lib/asterisk\nastkeydir=/var/lib/asterisk\n'
                          'astdatadir=/usr/share/asterisk\nastagidir=/usr/share/asterisk/agi-bin\n'
                          'astspooldir=/var/spool/asterisk\nastrundir=/var/run/asterisk\nastlogdir=/var/log/asterisk\n'
                          '[options]\nrunuser=asterisk\nrungroup=asterisk\n'
                          '[files]\nastctlpermissions=0660\nastctlowner=asterisk\nastctlgroup=asterisk\n',
-        'pjsip.conf': '[global]\ntype=global\n#include pjsip.d/*.conf\n',
-        'extensions.conf': '[general]\nstatic=yes\nwriteprotect=yes\n[default]\n',
+        # An inert endpoint satisfies the existing managed-context contract.
+        # No transport, contact, registration or identify mapping can reach a carrier.
+        'pjsip.conf': '[global]\ntype=global\n#include pjsip.d/*.conf\n'
+                      '[blazedigitel-endpoint]\ntype=endpoint\ncontext=from-talky-inbound\n'
+                      'disallow=all\nallow=ulaw\naors=installer-inert-aor\n'
+                      '[installer-inert-aor]\ntype=aor\nmax_contacts=0\n',
+        'extensions.conf': '[general]\nstatic=yes\nwriteprotect=yes\n'
+                           '#tryinclude extensions.d/talky-inbound.conf\n[default]\n',
         'http.conf': '[general]\nenabled=yes\nbindaddr=127.0.0.1\nbindport=8088\n',
         'ari.conf': '[general]\nenabled=yes\npretty=no\n[talky]\ntype=user\nread_only=no\n'
                     'password=' + env['ASTERISK_ARI_PASSWORD'] + '\n',

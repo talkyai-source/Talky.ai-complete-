@@ -90,6 +90,7 @@ class InstallerTests(unittest.TestCase):
         (ast / 'http.conf').write_text('[general]\nenabled=yes\nbindaddr=127.0.0.1\nbindport=8088\n')
         (ast / 'ari.conf').write_text('[general]\nenabled=yes\n[talky]\nread_only=no\npassword=' + 'a' * 32 + '\n')
         (ast / 'pjsip.conf').write_text('#include pjsip.d/*.conf\n')
+        (ast / 'extensions.conf').write_text('#tryinclude extensions.d/talky-inbound.conf\n')
 
     def write_env(self):
         Path(self.config['backend_env_file']).write_text(''.join(f'{k}={v}\n' for k, v in self.env.items()))
@@ -573,6 +574,70 @@ class InstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(installer.InstallError, 'existing path'):
                 installer.ensure_fresh_host(self.config, self.path)
         run.assert_not_called()
+
+    def test_existing_docker_configuration_or_data_refused_before_commands(self):
+        for occupied in ('/etc/docker/daemon.json', '/var/lib/docker'):
+            with self.subTest(path=occupied), \
+                 patch.object(installer.sys, 'platform', 'linux'), \
+                 patch.object(installer.platform, 'machine', return_value='x86_64'), \
+                 patch.object(installer.os, 'geteuid', return_value=0, create=True), \
+                 patch.object(Path, 'read_text', return_value='ID=ubuntu\nVERSION_ID="24.04"\n'), \
+                 patch.object(Path, 'is_dir', return_value=True), \
+                 patch.object(Path, 'exists', autospec=True, side_effect=lambda path: path.as_posix() == occupied), \
+                 patch.object(Path, 'is_symlink', return_value=False), \
+                 patch.object(installer, 'run') as run:
+                with self.assertRaisesRegex(installer.InstallError, 'Refusing existing path'):
+                    installer.ensure_fresh_host(self.config, self.path)
+                run.assert_not_called()
+
+    def test_redis_host_network_avoids_bridge_routes_and_keeps_loopback_auth_and_data(self):
+        etc = self.path / 'etc'
+        installer.install_redis_runtime(self.config['redis_image'], 'synthetic-only-password', etc)
+        daemon = json.loads((etc / 'docker/daemon.json').read_text())
+        self.assertEqual(daemon, {'bridge': 'none', 'iptables': False, 'ip6tables': False, 'ip-forward': False})
+        redis = (etc / 'talky/redis.conf').read_text()
+        self.assertIn('bind 127.0.0.1\n', redis)
+        self.assertIn('protected-mode yes\n', redis)
+        self.assertIn('appendonly yes\nappendfsync everysec\n', redis)
+        self.assertIn('requirepass synthetic-only-password\n', redis)
+        compose = (etc / 'talky/compose.yml').read_text()
+        self.assertIn('network_mode: host\n', compose)
+        self.assertNotIn('ports:', compose)
+        self.assertNotIn('networks:', compose)
+        self.assertNotIn('synthetic-only-password', compose)
+        self.assertIn('/etc/talky/redis.conf:/usr/local/etc/redis/redis.conf:ro', compose)
+        self.assertIn('talky_redis:/data', compose)
+        self.assertIn('redis-cli ping | grep -q NOAUTH', compose)
+        if os.name == 'posix':
+            self.assertEqual(stat.S_IMODE((etc / 'talky').stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE((etc / 'talky/compose.yml').stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE((etc / 'talky/redis.conf').stat().st_mode), 0o444)
+
+    def test_explicit_asterisk_module_directory_matches_supported_ubuntu_package(self):
+        path = Path(self.config['asterisk_config_directory']) / 'asterisk.conf'
+        base = path.read_text()
+        path.write_text(base + 'astmoddir=/usr/lib/x86_64-linux-gnu/asterisk/modules\n')
+        installer.validate_config(self.config, inputs=True)
+        path.write_text(base + 'astmoddir=/usr/lib/asterisk/modules\n')
+        with patch.object(installer, 'run') as run:
+            with self.assertRaisesRegex(installer.InstallError, 'astmoddir must match'):
+                installer.validate_config(self.config, inputs=True)
+        run.assert_not_called()
+
+    def test_managed_dialplan_is_loaded_after_first_reconciliation(self):
+        path = Path(self.config['asterisk_config_directory']) / 'extensions.conf'
+        # Generated file is absent before Asterisk's first startup. Only the
+        # exact managed path may be optional; arbitrary directories stay denied.
+        path.write_text('#tryinclude "extensions.d/talky-inbound.conf"\n')
+        installer.validate_config(self.config, inputs=True)
+        for invalid in ('[default]\n', '#include extensions.d/talky-inbound.conf\n',
+                        '#tryinclude extensions.d/*.conf\n',
+                        '#tryinclude ../extensions.d/talky-inbound.conf\n'):
+            with self.subTest(value=invalid), patch.object(installer, 'run') as run:
+                path.write_text(invalid)
+                with self.assertRaises(installer.InstallError):
+                    installer.validate_config(self.config, inputs=True)
+                run.assert_not_called()
 
     def test_unsafe_firewall_and_proxy_inputs_rejected(self):
         for key, value in (('ssh_source_cidrs', ['0.0.0.0/0']),

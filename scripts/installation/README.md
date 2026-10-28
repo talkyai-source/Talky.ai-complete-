@@ -114,11 +114,19 @@ actual application production gate runs again after package installation.
 
 In `asterisk.conf`, configure `runuser=asterisk`, `rungroup=asterisk`,
 `astctlpermissions=0660`, `astctlowner=asterisk` and `astctlgroup=asterisk` in
-their appropriate Asterisk sections. The installer creates the dedicated
+their appropriate Asterisk sections.
+If `astmoddir` is explicitly supplied, it must be
+`/usr/lib/x86_64-linux-gnu/asterisk/modules`, matching the supported Ubuntu
+24.04 amd64 package. Omit it to use Asterisk's compiled package default.
+The installer creates the dedicated
 `pjsip.d` directory with group inheritance and adds `talky` to `asterisk` so
 existing trunk generation and CLI reload can work without running the entire
 backend as root. `pjsip.conf` must include `#include pjsip.d/*.conf` and define
-the transports needed by the real trunks. Existing generated configs must be
+the transports needed by the real trunks. `extensions.conf` must contain
+`#tryinclude extensions.d/talky-inbound.conf`; this exact managed file is absent
+on first startup and loaded after the guarded reconciler creates it. Other
+generated dialplan directories or wildcards are not accepted by this profile.
+Existing generated configs must be
 reconciled from the restored authoritative database through the application's
 supported lifecycle before controlled calls; the installer does not decrypt
 or fabricate customer trunks.
@@ -157,7 +165,13 @@ auto-start is inhibited until explicit configuration is installed.
 
 The script creates a `talky` system account; application processes run under
 it through systemd drop-ins. Redis binds only to host loopback and preserves
-data in its own Docker volume. Its credential is in a read-only container
+data in its own Docker volume. This fresh-host profile disables Docker's
+automatic bridge and firewall manipulation and runs only Redis with host
+networking, with Redis itself bound to `127.0.0.1`. It therefore does not add
+private bridge routes that could shadow an external database subnet. Existing
+Docker state or `/etc/docker/daemon.json` is refused before installation; this
+is not a reconfiguration path for an existing Docker host. Adding other
+containers needs a separate network/security review. Its credential is in a read-only container
 mount protected by the host's root-only `/etc/talky` directory, not in process
 arguments. PostgreSQL is never installed on this application host.
 

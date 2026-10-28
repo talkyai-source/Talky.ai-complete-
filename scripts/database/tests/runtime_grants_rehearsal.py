@@ -15,6 +15,7 @@ import re
 import shutil
 import sys
 import tempfile
+import traceback
 from unittest.mock import patch
 
 
@@ -51,10 +52,11 @@ def sql(service, statement, parameters=()):
     return result
 
 
-def checks(fixture, pg):
+def checks(fixture, pg, receipt):
     owner, runtime = fixture.service("source_migration"), fixture.service("source_runtime")
     admin = fixture.service("source_admin")
-    results = []
+    results = receipt["checks"]
+    receipt["stage"] = "initial grants plan/apply/verify"
     plan = grants.execute(owner, runtime, "plan")
     require(plan["status"] == "plan_ready" and not plan["grants_committed"], "Plan performed a mutation")
     reject(lambda: grants.execute(owner, runtime, "verify"), "ACL differs")
@@ -64,6 +66,7 @@ def checks(fixture, pg):
             "Reapplying grants changed tenant policies")
     require(grants.execute(owner, runtime, "verify")["status"] == "verified", "Independent verify failed")
     results.append("plan, apply, repeat apply and verify with real separate restricted TLS logins; RLS unchanged")
+    receipt["stage"] = "initial administrator acceptance"
 
     # Installer acceptance supplies its own real auth checks against this fresh
     # schema, using the same protected service objects and no retained databases.
@@ -75,6 +78,7 @@ def checks(fixture, pg):
 
     # Reuse populated tenant fixture setup, then replace its deliberately broad
     # recovery-only grants with the actual supported profile again.
+    receipt["stage"] = "populated tenant and system runtime operations"
     fixture_module.seed(pg, fixture)
     grants.execute(owner, runtime, "apply")
     fixture_module.runtime_checks(fixture, "source", grants.PROFILE["heads"])
@@ -110,6 +114,7 @@ def checks(fixture, pg):
         connection.rollback()
     results.append("trusted system scope works; DDL, TEMP, migration writes, TRUNCATE, SET ROLE, maintenance EXECUTE and setval refused")
 
+    receipt["stage"] = "future object default privileges"
     sql(owner, "CREATE TABLE public.future_grants_probe(id integer); CREATE SEQUENCE public.future_grants_probe_seq; "
                "CREATE FUNCTION public.future_grants_probe_fn() RETURNS integer LANGUAGE sql SECURITY DEFINER AS 'SELECT 1'")
     try:
@@ -122,6 +127,7 @@ def checks(fixture, pg):
         sql(owner, "DROP TABLE public.future_grants_probe; DROP SEQUENCE public.future_grants_probe_seq; DROP FUNCTION public.future_grants_probe_fn()")
     results.append("new tables, sequences and SECURITY DEFINER functions default closed; unknown inventory is refused")
 
+    receipt["stage"] = "unsafe role refusals"
     # Each negative mutation is limited to these generated fixture objects and
     # restored before the next case. Failed apply must not repair unsafe roles.
     for change, undo, message in (
@@ -136,12 +142,14 @@ def checks(fixture, pg):
             pg.sql(admin, undo, readonly=False)
     results.append("BYPASSRLS, NOLOGIN and migration-role membership refused before grants")
 
+    receipt["stage"] = "mixed table ownership refusal"
     # Table ownership change requires fixture superuser, never the grants tool.
     pg.sql(admin, "ALTER TABLE public.plans OWNER TO fixture_admin", database=fixture_module.SOURCE_DB, readonly=False)
     try:
         reject(lambda: grants.execute(owner, runtime, "apply"), "Mixed object ownership")
     finally:
         pg.sql(admin, "ALTER TABLE public.plans OWNER TO fixture_migration", database=fixture_module.SOURCE_DB, readonly=False)
+    receipt["stage"] = "application SECURITY DEFINER and overload refusal"
     sql(owner, "ALTER FUNCTION public.update_call_status(uuid,text,integer) SECURITY DEFINER")
     try:
         reject(lambda: grants.execute(owner, runtime, "apply"), "SECURITY DEFINER")
@@ -153,6 +161,7 @@ def checks(fixture, pg):
     finally:
         sql(owner, "DROP FUNCTION public.update_call_status(text)")
     results.append("mixed ownership, SECURITY DEFINER conversion and unexpected overload refused")
+    receipt["stage"] = "extension SECURITY DEFINER refusal"
     # A trusted extension's membership alone cannot excuse a privileged
     # function. Only fixture admin can change the extension member in this test.
     pg.sql(admin, "ALTER FUNCTION public.uuid_generate_v4() SECURITY DEFINER", database=fixture_module.SOURCE_DB, readonly=False)
@@ -161,6 +170,7 @@ def checks(fixture, pg):
     finally:
         pg.sql(admin, "ALTER FUNCTION public.uuid_generate_v4() SECURITY INVOKER", database=fixture_module.SOURCE_DB, readonly=False)
     results.append("SECURITY DEFINER on a trusted extension member is also refused")
+    receipt["stage"] = "RLS and migration head refusal"
     sql(owner, "ALTER TABLE public.campaigns NO FORCE ROW LEVEL SECURITY")
     try:
         reject(lambda: grants.execute(owner, runtime, "apply"), "enforced RLS")
@@ -173,6 +183,7 @@ def checks(fixture, pg):
         sql(owner, "UPDATE public.alembic_version SET version_num=%s", (grants.PROFILE["heads"][0],))
     results.append("missing forced RLS and wrong migration head refused without policy repair")
 
+    receipt["stage"] = "actual wrong-credential LOGIN refusal"
     # Bad credentials must be a real failed LOGIN, not a successful SET ROLE
     # probe. Verify is read-only; apply failure explicitly reports committed ACLs.
     badpass = fixture.work / "wrong-runtime-password"
@@ -185,6 +196,7 @@ def checks(fixture, pg):
     finally:
         runtime.passfile = previous
     results.append("wrong runtime password fails actual LOGIN and explicitly distinguishes already-committed apply")
+    receipt["stage"] = "actual redirected identity and endpoint refusal"
     # Model a user-dependent endpoint redirect with a controlled connector
     # substitution. Every connection remains a REAL verified-TLS LOGIN. This
     # independently proves that matching configured strings do not replace the
@@ -198,6 +210,7 @@ def checks(fixture, pg):
         with patch.object(grants, "connect", side_effect=redirect):
             reject(lambda: grants.execute(owner, runtime, "verify"), "Runtime LOGIN verification failed")
     results.append("actual runtime LOGIN is rejected when redirected to owner identity or the other real TLS server")
+    receipt["stage"] = "final privilege and policy verification"
     require(grants.execute(owner, runtime, "verify")["policies_sha256"] == result["policies_sha256"], "Final policy fingerprint drift")
     return results
 
@@ -228,10 +241,14 @@ def main():
         fixture.prepare()
         receipt["postgres_image_digests"] = fixture.image_digests
         fixture_module.bootstrap(pg, fixture)
-        receipt["checks"] = checks(fixture, pg)
+        checks(fixture, pg, receipt)
         receipt["status"] = "passed"
     except Exception as error:
         receipt["failure"] = str(error) if isinstance(error, grants.GrantsError) else "Fixture acceptance failed; inspect the bounded CI diagnostics"
+        receipt["exception_type"] = type(error).__name__
+        receipt["failure_locations"] = [f"{Path(frame.filename).name}:{frame.lineno}:{frame.name}"
+                                        for frame in traceback.extract_tb(error.__traceback__)[-6:]]
+        print(json.dumps({key: receipt.get(key) for key in ("stage", "checks", "exception_type", "failure_locations")}), file=sys.stderr)
         raise
     finally:
         try:

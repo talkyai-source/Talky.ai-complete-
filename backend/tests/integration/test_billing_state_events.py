@@ -122,7 +122,7 @@ async def test_billing_notice_uses_single_current_verified_tenant_admin_membersh
     _, subscription, _, invoice = await _paid(fixture)
     _user, email = await _recipient_profile(fixture, profile_role=profile_role)
     # An otherwise valid non-admin does not make the administrator ambiguous.
-    await _recipient_profile(fixture, membership_role="billing_user")
+    await _recipient_profile(fixture, membership_role="user")
     if event_type == "invoice.payment_failed":
         fixture.objects[("Subscription", subscription["id"])]["status"] = "past_due"
         fixture.objects[("Invoice", invoice["id"])].update(status="open", amount_paid=0)
@@ -141,7 +141,7 @@ async def test_billing_notice_uses_single_current_verified_tenant_admin_membersh
     {"membership_tenant": 1},
     {"profile_tenant": 1},
     {"profile_tenant": None},
-    {"membership_role": "billing_user"},
+    {"membership_role": "user"},
     {"membership_role": "platform_admin"},
     {"profile_role": "platform_admin"},
     {"email": "   "},

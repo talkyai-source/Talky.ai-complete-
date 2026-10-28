@@ -11,6 +11,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import importlib.util
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -167,7 +168,7 @@ def web_certificate(folder):
          '-extfile', str(folder / 'web.ext'), '-out', str(folder / 'web.crt')])
 
 
-def verify(vm, ca):
+def verify(vm, ca, database_host, database_route):
     states = {unit: vm.ssh('systemctl is-active ' + shlex.quote(unit)) for unit in UNITS}
     require(all(value == 'active' for value in states.values()), 'Not all installed services are active')
     identities = {unit: vm.ssh('systemctl show --property=User --value ' + shlex.quote(unit))
@@ -182,6 +183,14 @@ def verify(vm, ca):
                  'talky-inbound-synthetic.timer'):
         state = vm.ssh('systemctl show --property=UnitFileState --value ' + unit)
         require(state in ('static', 'disabled', ''), 'Unapproved schedule was enabled')
+    route = json.loads(vm.ssh('ip -json route get ' + str(ipaddress.ip_address(database_host))))[0]
+    require(route.get('dev') == database_route, 'Docker changed the external database route')
+    container = vm.ssh('docker compose -f /etc/talky/compose.yml ps --quiet redis')
+    require(re.fullmatch('[a-f0-9]{64}', container), 'Expected exactly one installed Redis container')
+    require(vm.ssh("docker inspect --format '{{.HostConfig.NetworkMode}}' " + container) == 'host',
+            'Redis must use the supported bridge-free host network')
+    require(vm.ssh("sed -n '/^bind /p' /etc/talky/redis.conf") == 'bind 127.0.0.1',
+            'Redis must bind only to host loopback')
     for endpoint in ('http://127.0.0.1:8000/health', 'http://127.0.0.1:8000/api/v1/healthz/ready',
                      'http://127.0.0.1:8000/api/v1/healthz/deep', 'http://127.0.0.1:18080/ready'):
         vm.ssh('curl --fail --silent --show-error --max-time 30 ' + shlex.quote(endpoint))
@@ -190,7 +199,7 @@ def verify(vm, ca):
              '--cacert', str(ca), '--resolve', f'{domain}:{vm.https_port}:127.0.0.1',
              f'https://{domain}:{vm.https_port}{path}'])
     return {'services': states, 'application_identities': identities, 'operator_identity_and_scheduling_verified': True,
-            'local_and_host_https_probes': True}
+            'local_and_host_https_probes': True, 'database_route_device': route['dev'], 'redis_host_loopback_verified': True}
 
 
 def main():
@@ -246,6 +255,8 @@ def main():
                 require(vm.ssh('git -C /root/source rev-parse HEAD') == sha, 'Guest source mismatch')
                 vm.ssh('install -d -m 0700 /root/talklee-rehearsal-inputs')
                 runtime = fixture.service('source_runtime').values
+                database_route = json.loads(vm.ssh('ip -json route get ' + str(ipaddress.ip_address(runtime['host']))))[0]['dev']
+                require(not database_route.startswith(('docker', 'br-')), 'Fixture database must initially route outside the guest')
                 query = urlencode({'sslmode': 'verify-full', 'sslrootcert': '/etc/ssl/certs/talky-db-ca.pem'})
                 tls.write_private(folder / 'fixture.json', json.dumps({'token': fixture.token,
                     'runtime_url': f"postgresql://fixture_runtime:{fixture.passwords['fixture_runtime']}@"
@@ -261,7 +272,7 @@ def main():
                 receipt['install'] = json.loads(vm.ssh('cat /var/lib/talky-install/receipt.json'))
                 require(receipt['install']['source_sha'] == sha and receipt['install']['status'] == 'installed_health_checked',
                         'Installer receipt did not prove the selected source')
-                receipt['before_reboot'] = verify(vm, folder / 'ca.crt')
+                receipt['before_reboot'] = verify(vm, folder / 'ca.crt', runtime['host'], database_route)
                 receipt['stage'] = 'reboot'
                 before = vm.ssh('cat /proc/sys/kernel/random/boot_id')
                 vm.ssh('systemctl reboot --no-block')
@@ -278,7 +289,7 @@ def main():
                 deadline = time.monotonic() + 180
                 while True:
                     try:
-                        receipt['after_reboot'] = verify(vm, folder / 'ca.crt')
+                        receipt['after_reboot'] = verify(vm, folder / 'ca.crt', runtime['host'], database_route)
                         break
                     except RuntimeError:
                         require(time.monotonic() < deadline, 'Installed services did not recover after reboot')
