@@ -227,9 +227,14 @@ operator action after rehearsals and a reviewed maintenance plan.
 The new host runs application services as `talky` and protects source/binaries
 with root ownership. The existing `deploy_to_server.sh` assumes the older
 `admins` deployment profile. Its unchanged update command must not be used on
-the new profile. The installer [update instructions](scripts/installation/README.md#updates-and-recovery)
-document the ownership boundary and bounded gateway publication. Qualify the
-complete operator update/rollback procedure on the new VM before handover.
+the new profile. The new [fresh-host release procedure](scripts/installation/FRESH-RELEASE.md)
+stages both frontends, the backend and gateway; binds their artifacts to the
+reviewed source; and preserves the private configuration and data directories.
+It reuses the existing freeze/drain contract, verifies a fresh database backup,
+and permits automatic code rollback only before a migration begins. Its full
+VM update/recovery acceptance is being qualified separately from the successful
+blank-host install and reboot. Follow that guide's recorded acceptance status
+before using it for a customer release.
 
 Keep the old database intact during cutover. Returning to it after writes begin
 on the new database is a data-reconciliation decision, not simply an endpoint

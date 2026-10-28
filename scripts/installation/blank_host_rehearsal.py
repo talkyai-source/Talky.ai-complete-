@@ -29,6 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 IMAGE_BASE = 'https://cloud-images.ubuntu.com/noble/current/'
 IMAGE_NAME = 'noble-server-cloudimg-amd64.img'
 REPOSITORY = 'https://github.com/talkyai-source/Talky.ai-complete-.git'
+QUALIFIED_BASE_SHA = '9c06d8c6510b288b190a20a6a17354259c8bb6b6'
 SPEC = importlib.util.spec_from_file_location('tls_fixture', ROOT / 'scripts/database/tests/tls_canonical_rehearsal.py')
 tls = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(tls)
@@ -211,9 +212,56 @@ def verify(vm, ca, database_host, database_route, sha):
             'api_process_and_gateway_source_sha': sha}
 
 
+def release_fixture_inputs(folder, fixture, runtime, query):
+    """Only the three owned source roles; never copy fixture administrator access."""
+    guest_inputs = '/root/talklee-rehearsal-inputs'
+    service_rows, password_rows = [], []
+    for name in ('source_runtime', 'source_migration', 'source_backup'):
+        values = fixture.service(name).values
+        service_rows.append(f"[{name}]\nhost={values['host']}\nport={values['port']}\n"
+                            f"dbname={values['dbname']}\nuser={values['user']}\nsslmode=verify-full\n"
+                            f"sslrootcert=/etc/ssl/certs/talky-db-ca.pem\npassfile={guest_inputs}/release.pgpass\n")
+        password_rows.append(f"{values['host']}:{values['port']}:{values['dbname']}:{values['user']}:"
+                             + fixture.passwords[values['user']])
+    tls.write_private(folder / 'release.pg_service.conf', '\n'.join(service_rows))
+    tls.write_private(folder / 'release.pgpass', '\n'.join(password_rows) + '\n')
+    return {'owner_url': f"postgresql://fixture_migration:{fixture.passwords['fixture_migration']}@"
+                         f"{runtime['host']}:5432/{tls.SOURCE_DB}?{query}",
+            'operator_passwords': {name: fixture.passwords[name] for name in ('fixture_migration', 'fixture_backup')}}
+
+
+def reboot_guest(vm):
+    before = vm.ssh('cat /proc/sys/kernel/random/boot_id')
+    vm.ssh('systemctl reboot --no-block')
+    deadline = time.monotonic() + 240
+    while time.monotonic() < deadline:
+        time.sleep(5)
+        try:
+            after = vm.ssh('cat /proc/sys/kernel/random/boot_id', timeout=15)
+            if after != before:
+                return
+        except (RuntimeError, subprocess.TimeoutExpired):
+            pass
+    raise RuntimeError('Guest boot identity did not change')
+
+
+def release_receipt(vm):
+    path = '/var/lib/talklee-release-rehearsal/receipt.json'
+    value = json.loads(vm.ssh('cat ' + path))
+    checksum = vm.ssh('sha256sum ' + path).split()[0]
+    require(re.fullmatch('[a-f0-9]{64}', checksum), 'Guest release receipt digest is invalid')
+    # Internal key/configuration fingerprints are used inside the guest for
+    # equality checks; published CI evidence does not need those values.
+    value.pop('baseline', None)
+    value.update(private_fingerprints_omitted=True, guest_receipt_sha256=checksum)
+    return value
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--update-from-sha', choices=[QUALIFIED_BASE_SHA],
+                        help='Also exercise update/recovery from the retained successful Ubuntu base')
     args = parser.parse_args()
     require(sys.platform == 'linux' and os.environ.get('GITHUB_ACTIONS') == 'true'
             and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted',
@@ -222,6 +270,7 @@ def main():
     require(not args.output.exists(), 'Refuse to overwrite a rehearsal receipt')
     sha = run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'])
     require(re.fullmatch('[a-f0-9]{40}', sha) and sha == os.environ['GITHUB_SHA'], 'Source identity mismatch')
+    install_sha = args.update_from_sha or sha
     require(not run(['git', '-C', str(ROOT), 'status', '--porcelain', '--untracked-files=all']), 'Source must be clean')
     for key in list(os.environ):
         if key.startswith('PG') or key in {'DATABASE_URL', 'MIGRATION_DATABASE_URL', 'READ_DATABASE_URL'}:
@@ -231,6 +280,8 @@ def main():
                'controlled_call_verified': False, 'live_provider_verified': False,
                'paid_billing_verified': False, 'offhost_recovery_verified': False,
                'public_dns_verified': False, 'independent_engineer_verified': False}
+    if args.update_from_sha:
+        receipt['installed_base_sha'] = install_sha
     try:
         with tempfile.TemporaryDirectory(prefix='talklee-blank-vm-') as temporary:
             folder = Path(temporary)
@@ -248,6 +299,10 @@ def main():
                 receipt.update(postgres_image_id=fixture.image_id, postgres_image_digests=fixture.image_digests)
                 pg = tls.recovery.Postgres(Path('/usr/lib/postgresql/16/bin'), timeout=180)
                 tls.bootstrap(pg, fixture)
+                if args.update_from_sha:
+                    # Synthetic completed calls/draft campaigns also prove the
+                    # release backup sees data. No runnable customer work exists.
+                    tls.seed(pg, fixture)
                 grants_spec = importlib.util.spec_from_file_location('vm_runtime_grants', ROOT / 'scripts/database/runtime_grants.py')
                 grants = importlib.util.module_from_spec(grants_spec)
                 grants_spec.loader.exec_module(grants)
@@ -259,18 +314,30 @@ def main():
                 receipt['guest_os'] = vm.ssh('cat /etc/os-release')
                 vm.ssh('apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y git python3 ca-certificates', timeout=300)
                 vm.ssh('git init -q /root/source && git -C /root/source remote add origin ' + shlex.quote(REPOSITORY)
-                       + ' && git -C /root/source fetch --quiet --depth=1 origin ' + sha
+                       + ' && git -C /root/source fetch --quiet --depth=1 origin ' + install_sha
                        + ' && git -C /root/source checkout --quiet --detach FETCH_HEAD', timeout=300)
-                require(vm.ssh('git -C /root/source rev-parse HEAD') == sha, 'Guest source mismatch')
+                require(vm.ssh('git -C /root/source rev-parse HEAD') == install_sha, 'Guest source mismatch')
+                if args.update_from_sha:
+                    vm.ssh('git init -q /root/update-source && git -C /root/update-source remote add origin '
+                           + shlex.quote(REPOSITORY)
+                           + ' && git -C /root/update-source fetch --quiet --depth=64 origin ' + sha
+                           + ' && git -C /root/update-source checkout --quiet --detach FETCH_HEAD', timeout=300)
+                    require(vm.ssh('git -C /root/update-source rev-parse HEAD') == sha, 'Update source mismatch')
+                    vm.ssh('git -C /root/update-source merge-base --is-ancestor ' + install_sha + ' ' + sha)
                 vm.ssh('install -d -m 0700 /root/talklee-rehearsal-inputs')
                 runtime = fixture.service('source_runtime').values
                 database_route = json.loads(vm.ssh('ip -json route get ' + str(ipaddress.ip_address(runtime['host']))))[0]['dev']
                 require(not database_route.startswith(('docker', 'br-')), 'Fixture database must initially route outside the guest')
                 query = urlencode({'sslmode': 'verify-full', 'sslrootcert': '/etc/ssl/certs/talky-db-ca.pem'})
-                tls.write_private(folder / 'fixture.json', json.dumps({'token': fixture.token,
+                payload = {'token': fixture.token,
                     'runtime_url': f"postgresql://fixture_runtime:{fixture.passwords['fixture_runtime']}@"
-                                   f"{runtime['host']}:5432/{tls.SOURCE_DB}?{query}"}))
-                for name in ('fixture.json', 'ca.crt', 'web.crt', 'web.key'):
+                                   f"{runtime['host']}:5432/{tls.SOURCE_DB}?{query}"}
+                copies = ['fixture.json', 'ca.crt', 'web.crt', 'web.key']
+                if args.update_from_sha:
+                    payload.update(release_fixture_inputs(folder, fixture, runtime, query))
+                    copies.extend(('release.pg_service.conf', 'release.pgpass'))
+                tls.write_private(folder / 'fixture.json', json.dumps(payload))
+                for name in copies:
                     vm.copy(folder / name, '/root/talklee-rehearsal-inputs/' + name)
                 receipt['stage'] = 'prepare'
                 vm.ssh('PYTHONDONTWRITEBYTECODE=1 python3 /root/source/scripts/installation/guest_rehearsal.py', timeout=300)
@@ -279,36 +346,52 @@ def main():
                 vm.ssh('umask 0022; cd /root/source && PYTHONDONTWRITEBYTECODE=1 bash install_talklee.sh apply '
                        '--config /root/talklee-rehearsal-inputs/prepared/install.json --source /root/source --confirm-new-host', timeout=3600)
                 receipt['install'] = json.loads(vm.ssh('cat /var/lib/talky-install/receipt.json'))
-                require(receipt['install']['source_sha'] == sha and receipt['install']['status'] == 'installed_health_checked',
+                require(receipt['install']['source_sha'] == install_sha and receipt['install']['status'] == 'installed_health_checked',
                         'Installer receipt did not prove the selected source')
-                receipt['before_reboot'] = verify(vm, folder / 'ca.crt', runtime['host'], database_route, sha)
+                receipt['before_reboot'] = verify(vm, folder / 'ca.crt', runtime['host'], database_route, install_sha)
                 receipt['stage'] = 'reboot'
-                before = vm.ssh('cat /proc/sys/kernel/random/boot_id')
-                vm.ssh('systemctl reboot --no-block')
-                deadline = time.monotonic() + 240
-                after = before
-                while time.monotonic() < deadline and after == before:
-                    time.sleep(5)
-                    try:
-                        after = vm.ssh('cat /proc/sys/kernel/random/boot_id', timeout=15)
-                    except (RuntimeError, subprocess.TimeoutExpired):
-                        pass
-                require(after != before, 'Guest boot identity did not change')
+                reboot_guest(vm)
                 # systemd may still be starting API/dashboard after SSH is up.
                 deadline = time.monotonic() + 180
                 while True:
                     try:
-                        receipt['after_reboot'] = verify(vm, folder / 'ca.crt', runtime['host'], database_route, sha)
+                        receipt['after_reboot'] = verify(vm, folder / 'ca.crt', runtime['host'], database_route, install_sha)
                         break
                     except RuntimeError:
                         require(time.monotonic() < deadline, 'Installed services did not recover after reboot')
                         time.sleep(5)
                 receipt.update(reboot_verified=True, stage='cleanup')
+                if args.update_from_sha:
+                    receipt['stage'] = 'update_rollback'
+                    helper = ('umask 0022; PYTHONDONTWRITEBYTECODE=1 PYTHON_DOTENV_DISABLED=1 '
+                              '/opt/talky/backend/venv/bin/python '
+                              '/root/update-source/scripts/installation/guest_release_rehearsal.py ')
+                    vm.ssh(helper + 'activate --candidate-sha ' + sha + ' --base-sha ' + install_sha, timeout=3600)
+                    reboot_guest(vm)
+                    vm.ssh(helper + 'verify-reboot --candidate-sha ' + sha, timeout=300)
+                    vm.ssh(helper + 'fault-rollback --candidate-sha ' + sha, timeout=3600)
+                    reboot_guest(vm)
+                    vm.ssh(helper + 'verify-rollback-reboot --candidate-sha ' + sha, timeout=300)
+                    vm.ssh(helper + 'migration-refusal --candidate-sha ' + sha, timeout=3600)
+                    release = release_receipt(vm)
+                    require(release.get('status') == 'passed' and release.get('candidate_sha') == sha
+                            and release.get('base_sha') == install_sha and release.get('production_accessed') is False
+                            and all(release.get(key) is True for key in ('update_reboot_verified',
+                                    'rollback_reboot_verified', 'migration_refusal_verified')),
+                            'Guest release receipt did not prove every required phase')
+                    receipt['release_rehearsal'] = release
             except Exception:
-                if receipt.get('stage') in {'apply', 'reboot'}:
+                if receipt.get('stage') == 'update_rollback':
                     try:
+                        receipt['release_rehearsal'] = release_receipt(vm)
+                    except Exception:
+                        receipt['release_receipt_unavailable'] = True
+                if receipt.get('stage') in {'apply', 'reboot', 'update_rollback'}:
+                    try:
+                        diagnosis_source = '/root/update-source' if args.update_from_sha else '/root/source'
                         receipt['diagnostics'] = json.loads(vm.ssh(
-                            'PYTHONDONTWRITEBYTECODE=1 python3 /root/source/scripts/installation/guest_rehearsal.py --diagnose'))
+                            'PYTHONDONTWRITEBYTECODE=1 python3 ' + diagnosis_source
+                            + '/scripts/installation/guest_rehearsal.py --diagnose'))
                     except Exception:
                         receipt['diagnostics_unavailable'] = True
                 raise

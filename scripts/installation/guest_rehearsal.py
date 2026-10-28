@@ -44,6 +44,9 @@ def diagnose():
         raise RuntimeError('Disposable VM identity mismatch')
     from urllib.parse import unquote, urlsplit
     secret_values = [payload['runtime_url'], unquote(urlsplit(payload['runtime_url']).password or '')]
+    if payload.get('owner_url'):
+        secret_values.extend((payload['owner_url'], unquote(urlsplit(payload['owner_url']).password or '')))
+    secret_values.extend(payload.get('operator_passwords', {}).values())
     for line in (INPUTS / 'prepared/backend.env').read_text().splitlines():
         if '=' in line:
             key, value = line.split('=', 1)
@@ -80,6 +83,24 @@ def diagnose():
             failures.append({key: sanitize(str(record.get(key, ''))[-16000:])
                              for key in ('binary', 'exit_code', 'stdout_tail', 'stderr_tail')})
     result['sanitized_install_failures'] = failures
+    release_failures = []
+    for path in sorted(Path('/var/lib/talky-release/private-command-logs').glob('failed-*.log'),
+                       key=lambda item: item.lstat().st_mtime_ns)[-5:]:
+        metadata = path.lstat()
+        if (stat.S_ISREG(metadata.st_mode) and metadata.st_uid == 0
+                and stat.S_IMODE(metadata.st_mode) == 0o600 and metadata.st_size < 1024 * 1024):
+            release_failures.append(sanitize(path.read_text(errors='replace')[-16000:]))
+    result['sanitized_release_failures'] = release_failures
+    helper_failures = []
+    for path in sorted(Path('/var/lib/talklee-release-rehearsal').glob('child-failure-*.json'),
+                       key=lambda item: item.lstat().st_mtime_ns)[-3:]:
+        metadata = path.lstat()
+        if (stat.S_ISREG(metadata.st_mode) and metadata.st_uid == 0
+                and stat.S_IMODE(metadata.st_mode) == 0o600 and metadata.st_size < 1024 * 1024):
+            record = json.loads(path.read_text())
+            helper_failures.append({key: sanitize(str(record.get(key, ''))[-8192:]) for key in (
+                'binary', 'return_code', 'expected_return_code', 'timed_out', 'stdout_tail', 'stderr_tail')})
+    result['sanitized_rehearsal_failures'] = helper_failures
     print(json.dumps(result))
 
 

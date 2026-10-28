@@ -56,6 +56,13 @@ jobs:
           python -m unittest discover -s backend/tests/unit -p test_alembic_database_connection.py -v
           bash -n install_talklee.sh
           bash install_talklee.sh plan > "$RUNNER_TEMP/installer-plan.json"
+      - name: Verify release publication with real root file permissions
+        # Only this bounded test module: real files/Git/links stay in owned /tmp
+        # fixtures, while systemd and database boundaries are explicitly mocked.
+        # Nonroot discovery above reports the 17 permission cases as skipped.
+        run: |
+          sudo --preserve-env=PYTHONDONTWRITEBYTECODE,PYTHON_DOTENV_DISABLED \
+            python3 -m unittest discover -s scripts/installation -p test_fresh_release.py -v
       - name: Verify Ubuntu package availability and prepare real input drafts
         run: |
           sudo apt-get update -qq

@@ -24,6 +24,10 @@ jobs:
   install-reboot:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [install-reboot, update-rollback]
     env:
       PYTHONDONTWRITEBYTECODE: '1'
       PYTHON_DOTENV_DISABLED: '1'
@@ -45,11 +49,18 @@ jobs:
       - name: Install qualified fixture dependencies
         run: python -m pip install --require-hashes -r scripts/installation/requirements-linux-py312.lock
       - name: Apply the actual installer and reboot the blank VM
+        if: matrix.scenario == 'install-reboot'
         run: python scripts/installation/blank_host_rehearsal.py --output "$RUNNER_TEMP/blank-ubuntu-receipt.json"
+      - name: Qualify a real update, rollback and migration-failure refusal
+        if: matrix.scenario == 'update-rollback'
+        run: |
+          python scripts/installation/blank_host_rehearsal.py \
+            --update-from-sha 9c06d8c6510b288b190a20a6a17354259c8bb6b6 \
+            --output "$RUNNER_TEMP/blank-ubuntu-receipt.json"
       - name: Preserve bounded acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: blank-ubuntu-${{ github.sha }}
+          name: blank-ubuntu-${{ matrix.scenario }}-${{ github.sha }}
           path: ${{ runner.temp }}/blank-ubuntu-receipt.json
           if-no-files-found: warn

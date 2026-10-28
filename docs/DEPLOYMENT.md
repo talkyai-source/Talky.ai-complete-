@@ -50,10 +50,12 @@ synthetic-call units retain the root operator identity, but their timers are
 not enabled by this installer; retention cleanup is also not enabled. Configure
 those operations separately with their required environment and policy inputs.
 
-This service contract does not qualify a complete update or rollback procedure
-for the fresh-host profile. The deployment script below still assumes the older
-`admins` host layout; do not use it on a fresh `talky` host until its source,
-dependency, frontend, migration, drain and recovery paths have been qualified.
+Use the separate [fresh-host release guide](../scripts/installation/FRESH-RELEASE.md)
+for the new `talky` profile. It covers staged backend/gateway/frontend builds,
+artifact identity, preserved configuration/data, the existing drain contract,
+backup, migration and rollback boundaries. Its full VM qualification is
+recorded separately from installation/reboot. The deployment script below
+continues to target the older `admins` host layout.
 
 ### Existing production host
 

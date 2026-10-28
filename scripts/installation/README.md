@@ -199,26 +199,13 @@ cleanup or unsafe rerun. Correct the input and repeat on another empty VM.
 
 This bootstrap command is never an update command. Preserve the established
 freeze/drain, backup, compatible-schema and exact-commit release procedure.
-The new service-user profile requires gateway publication as `root:talky`
-mode 0750 and retention of `/etc/systemd/system/*.service.d` overrides.
-The existing `deploy_to_server.sh` hardcodes `root:admins`; qualify that
-ownership boundary before using it with this new profile.
-
-The bounded publication commands for an already-built candidate in the
-existing accepted freeze/drain procedure are:
-
-```bash
-# Only after the release's source, migration, backup and zero-call gates.
-# gateway_candidate must be the output of build_voice_gateway_release.sh
-# from the exact reviewed checkout, not an arbitrary old binary.
-sudo install -d -o root -g talky -m 0750 /opt/talky/runtime/bin
-sudo install -o root -g talky -m 0750 "$gateway_candidate" /opt/talky/runtime/bin/.voice_gateway.next
-sudo mv -f /opt/talky/runtime/bin/.voice_gateway.next /opt/talky/runtime/bin/voice_gateway
-```
-
-These commands only publish the compatible binary; they do not authorize or
-replace the remaining release procedure. Do not run the unchanged old deploy
-script on this profile and try to repair ownership after its restart.
+The [fresh-host release guide](FRESH-RELEASE.md) provides the separate
+`fresh_release.py` prepare, activate, recover and resume-schedules commands.
+It binds actual builds to the selected source, preserves the `talky` identity
+and installed overrides, and keeps schema-safe rollback separate from
+post-migration recovery. Read its actual VM qualification status before using
+it for a customer release. The older `deploy_to_server.sh` continues to assume
+the `admins` host profile and must not be used unchanged on this host.
 
 Migrations use a required separate `/etc/talky/migration.env` file that the
 installer intentionally does not create. Before a later reviewed migration,
@@ -242,9 +229,12 @@ bash -n install_talklee.sh
 These checks cover plan isolation, destructive-entry guards, unsafe database
 URLs/roles, leaked migration credentials, dependency pins, network allow-list
 validation, Asterisk lab defaults/path traversal, secret-redacted errors,
-literal environment parsing and both proxy modes. Actual package installation,
-systemd startup, nginx/TLS, Docker volume permissions, Linux frontend builds,
-database access and calls still require the clean Ubuntu acceptance rehearsal.
+literal environment parsing and both proxy modes. The retained
+[blank Ubuntu acceptance](../../docs/sessions/2026-10-28-blank-ubuntu-acceptance.md)
+records actual package installation, Linux frontend builds, systemd startup,
+TLS, service identities, database routing and reboot for its exact source.
+Controlled calls, production recovery and independent operating handover remain
+separate acceptance requirements.
 
 Reference installation behavior was checked against the official
 [Docker Ubuntu installation documentation](https://docs.docker.com/engine/install/ubuntu/)
