@@ -1,25 +1,7 @@
-import { notFound } from "next/navigation";
-import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import { PartnerDashboard, getPartnerDashboardStats } from "@/components/dashboard/PartnerDashboard";
-import { getWhiteLabelBranding } from "@/lib/white-label/branding";
+import { unavailablePartnerPage } from "../../operational-page";
 
-type PageProps = {
+export default async function WhiteLabelPartnerDashboardPage(props: {
     params: Promise<{ partner: string }>;
-};
-
-export default async function WhiteLabelPartnerDashboardPage(props: PageProps) {
-    const { partner } = await props.params;
-    const branding = getWhiteLabelBranding(partner);
-    if (!branding) notFound();
-
-    const stats = getPartnerDashboardStats(partner);
-
-    return (
-        <DashboardLayout
-            title={`${branding.displayName} Partner Dashboard`}
-            description="Aggregated usage metrics across all sub-tenants."
-        >
-            <PartnerDashboard stats={stats} />
-        </DashboardLayout>
-    );
+}) {
+    return unavailablePartnerPage((await props.params).partner, "overview");
 }
