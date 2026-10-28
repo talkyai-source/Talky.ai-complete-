@@ -52,6 +52,9 @@ def test_release_wrapper_keeps_digest_and_apply_boundaries_with_literal_tls_env(
     profile.write_text('DATABASE_URL=postgresql://fixture:private@db.invalid/db?sslmode=verify-full&sslrootcert=/protected/ca.pem\n'
                        f'LITERAL_VALUE=$(touch {marker})\n')
     log = tmp_path / 'calls'
+    # The real root wrapper keeps umask 077. Precreate this synthetic log as
+    # the test runner so root appends without making it unreadable to the runner.
+    log.touch(mode=0o600)
     (fixture / 'reconcile_pjsip_configs.py').write_text(
         "import json,os,sys\nfrom pathlib import Path\n"
         "assert os.environ['DATABASE_URL'].endswith('&sslrootcert=/protected/ca.pem')\n"

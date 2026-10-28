@@ -125,7 +125,7 @@ async def test_billing_notice_uses_single_current_verified_tenant_admin_membersh
     await _recipient_profile(fixture, membership_role="user")
     if event_type == "invoice.payment_failed":
         fixture.objects[("Subscription", subscription["id"])]["status"] = "past_due"
-        fixture.objects[("Invoice", invoice["id"])].update(status="open", amount_paid=0)
+        fixture.objects[("Invoice", invoice["id"])].update({"status": "open", "amount_paid": 0})
     result = await _apply(fixture, event_type, invoice)
     assert result["notifications"][0]["recipient"] == email
     assert result["notifications"][0]["tenant_id"] == str(fixture.tenants[0])

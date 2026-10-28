@@ -50,6 +50,11 @@ The correction removes that conflicting clause; the existing capability and
 source policies remain authoritative. It adds no scripted response, model-answer
 rewrite, keyword judge or artificial source fact.
 
+The corrected support template is registered as `customer_support@17`, with
+canonical hash `a4239f70e04426d4`. The historical `customer_support@16` hash remains
+unchanged. This version correction preserves attribution; it does not change the
+failed model-quality assessment recorded below.
+
 The evaluator also built an inbound Alex/Fictional demonstration company guide
 without setting the session's actual identity or direction. Consequently the
 request's live-state block said `agent=unknown`, `company=unknown` and
