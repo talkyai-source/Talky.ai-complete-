@@ -55,7 +55,7 @@ jobs:
         if: matrix.scenario == 'update-rollback'
         run: |
           python scripts/installation/blank_host_rehearsal.py \
-            --update-from-sha 9c06d8c6510b288b190a20a6a17354259c8bb6b6 \
+            --update-from-sha b216774648537e2e25afa550f9b227fc3283e089 \
             --output "$RUNNER_TEMP/blank-ubuntu-receipt.json"
       - name: Preserve bounded acceptance evidence
         if: always()

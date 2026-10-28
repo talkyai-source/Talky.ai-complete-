@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 IMAGE_BASE = 'https://cloud-images.ubuntu.com/noble/current/'
 IMAGE_NAME = 'noble-server-cloudimg-amd64.img'
 REPOSITORY = 'https://github.com/talkyai-source/Talky.ai-complete-.git'
-PINNED_BASE_SHA = '9c06d8c6510b288b190a20a6a17354259c8bb6b6'
+PINNED_BASE_SHA = 'b216774648537e2e25afa550f9b227fc3283e089'
 SPEC = importlib.util.spec_from_file_location('tls_fixture', ROOT / 'scripts/database/tests/tls_canonical_rehearsal.py')
 tls = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(tls)
@@ -386,12 +386,15 @@ def main():
                     helper = ('umask 0022; PYTHONDONTWRITEBYTECODE=1 PYTHON_DOTENV_DISABLED=1 '
                               '/opt/talky/backend/venv/bin/python '
                               '/root/update-source/scripts/installation/guest_release_rehearsal.py ')
+                    print('Patched baseline installed and rebooted; exercising actual staged update...', flush=True)
                     vm.ssh(helper + 'activate --candidate-sha ' + sha + ' --base-sha ' + install_sha, timeout=3600)
                     reboot_guest(vm)
                     vm.ssh(helper + 'verify-reboot --candidate-sha ' + sha, timeout=300)
+                    print('Updated release survived reboot; exercising worker-failure recovery...', flush=True)
                     vm.ssh(helper + 'fault-rollback --candidate-sha ' + sha, timeout=3600)
                     reboot_guest(vm)
                     vm.ssh(helper + 'verify-rollback-reboot --candidate-sha ' + sha, timeout=300)
+                    print('Recovered release survived reboot; exercising migration-failure refusal...', flush=True)
                     vm.ssh(helper + 'migration-refusal --candidate-sha ' + sha, timeout=3600)
                     release = release_receipt(vm)
                     require(release.get('status') == 'passed' and release.get('candidate_sha') == sha

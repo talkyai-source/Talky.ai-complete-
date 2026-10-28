@@ -30,6 +30,8 @@ The correction requires the exact optional managed PJSIP include and makes the f
 
 A later [Node runtime security review](2026-10-28-node-runtime-security.md) identified the old 22.22.0 pin as affected by published security fixes. These old-runtime passes remain functional historical evidence. They do not qualify the corrected 22.23.4 runtime; a patched blank baseline and its descendant update require fresh VM evidence. The updater's guard against changing host runtimes remains intact.
 
+The corrected matrix pins baseline `b216774648537e2e25afa550f9b227fc3283e089`. It first installs that exact patched source on a blank VM and verifies its actual Node process, provider DNS confinement, loaded Asterisk endpoint, remaining services and real reboot. Only after those checks pass may it prepare and activate the descendant candidate. A second independent VM installs that candidate directly. This establishes the patched baseline within the run before update; it does not label it previously production-qualified or attempt to change Node through the application updater. Results remain pending.
+
 The two matrix jobs use independent blank official Ubuntu cloud-image overlays on KVM. The installation job applies the current candidate and performs a real reboot. The update job first installs previously qualified base `9c06d8c6510b288b190a20a6a17354259c8bb6b6`, then exercises:
 
 1. A real staged update, verified backup, source/process identity and HTTPS checks, followed by reboot without starting services from the verification helper.
