@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 IMAGE_BASE = 'https://cloud-images.ubuntu.com/noble/current/'
 IMAGE_NAME = 'noble-server-cloudimg-amd64.img'
 REPOSITORY = 'https://github.com/talkyai-source/Talky.ai-complete-.git'
-QUALIFIED_BASE_SHA = '9c06d8c6510b288b190a20a6a17354259c8bb6b6'
+PINNED_BASE_SHA = '9c06d8c6510b288b190a20a6a17354259c8bb6b6'
 SPEC = importlib.util.spec_from_file_location('tls_fixture', ROOT / 'scripts/database/tests/tls_canonical_rehearsal.py')
 tls = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(tls)
@@ -192,6 +192,10 @@ def verify(vm, ca, database_host, database_route, sha):
             'Redis must use the supported bridge-free host network')
     require(vm.ssh("sed -n '/^bind /p' /etc/talky/redis.conf") == 'bind 127.0.0.1',
             'Redis must bind only to host loopback')
+    endpoint = vm.ssh("asterisk -rx 'pjsip show endpoint blazedigitel-endpoint'")
+    require('blazedigitel-endpoint' in endpoint
+            and re.search(r'^\s*context\s*:\s*from-talky-inbound\s*$', endpoint, re.MULTILINE),
+            'Synthetic shared endpoint is not loaded in the managed inbound context')
     for endpoint in ('http://127.0.0.1:8000/health', 'http://127.0.0.1:8000/api/v1/healthz/ready',
                      'http://127.0.0.1:8000/api/v1/healthz/deep', 'http://127.0.0.1:18080/ready'):
         response = vm.ssh('curl --fail --silent --show-error --max-time 30 ' + shlex.quote(endpoint))
@@ -203,13 +207,29 @@ def verify(vm, ca, database_host, database_route, sha):
     require(re.fullmatch(r'[1-9][0-9]{0,9}', pid), 'API has no running process')
     vm.ssh('/opt/talky/backend/venv/bin/python /opt/talky/backend/scripts/set_release_version.py '
            '--candidate-sha ' + sha + ' --check-pid ' + pid)
+    expected_node = vm.ssh('python3 -c ' + shlex.quote(
+        "import json; print(json.load(open('/root/talklee-rehearsal-inputs/prepared/install.json'))['node_version'])"))
+    dashboard_pid = vm.ssh('systemctl show talky-dashboard.service --property=MainPID --value')
+    require(re.fullmatch(r'[1-9][0-9]{0,9}', dashboard_pid), 'Dashboard has no running process')
+    dashboard_node = vm.ssh('readlink -e /proc/' + dashboard_pid + '/exe')
+    installed_node = vm.ssh('readlink -e /usr/local/bin/node')
+    require(dashboard_node == installed_node, 'Dashboard is not using the installed Node executable')
+    node_version = vm.ssh('/proc/' + dashboard_pid + '/exe --version')
+    require(node_version == 'v' + expected_node, 'Running dashboard Node version differs from the reviewed pin')
+    require(vm.ssh('systemctl show talky-dashboard.service --property=MainPID --value') == dashboard_pid,
+            'Dashboard process changed during Node verification')
+    provider_dns = json.loads(vm.ssh('PYTHONDONTWRITEBYTECODE=1 python3 -c ' + shlex.quote(
+        "import json,sys; sys.path.insert(0, '/root/source/scripts/installation'); "
+        "from guest_rehearsal import provider_dns_check; print(json.dumps(provider_dns_check()))")))
     for domain, path in (('api.installer.test', '/health'), ('app.installer.test', '/'), ('admin.installer.test', '/')):
         run(['curl', '--fail', '--silent', '--show-error', '--max-time', '60', '--noproxy', '*',
              '--cacert', str(ca), '--resolve', f'{domain}:{vm.https_port}:127.0.0.1',
              f'https://{domain}:{vm.https_port}{path}'])
-    return {'services': states, 'application_identities': identities, 'operator_identity_and_scheduling_verified': True,
+    return {**provider_dns, 'services': states, 'application_identities': identities, 'operator_identity_and_scheduling_verified': True,
             'local_and_host_https_probes': True, 'database_route_device': route['dev'], 'redis_host_loopback_verified': True,
-            'api_process_and_gateway_source_sha': sha}
+            'api_process_and_gateway_source_sha': sha, 'asterisk_shared_endpoint_context_verified': True,
+            'dashboard_node_version': node_version,
+            'dashboard_node_executable': dashboard_node, 'dashboard_running_node_verified': True}
 
 
 def release_fixture_inputs(folder, fixture, runtime, query):
@@ -260,8 +280,8 @@ def release_receipt(vm):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--update-from-sha', choices=[QUALIFIED_BASE_SHA],
-                        help='Also exercise update/recovery from the retained successful Ubuntu base')
+    parser.add_argument('--update-from-sha', choices=[PINNED_BASE_SHA],
+                        help='Install and reboot this exact baseline before exercising update/recovery')
     args = parser.parse_args()
     require(sys.platform == 'linux' and os.environ.get('GITHUB_ACTIONS') == 'true'
             and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted',

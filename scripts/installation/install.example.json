@@ -22,7 +22,7 @@
   "python_requirements_lock": "/secure/talky/requirements-linux-py312.lock",
   "apt_versions_file": "/secure/talky/apt-versions.json",
   "redis_image": "redis:7.4-alpine@sha256:REPLACE_WITH_REVIEWED_IMAGE_DIGEST",
-  "node_version": "22.22.0",
+  "node_version": "22.23.4",
   "node_archive_sha256": "REPLACE_WITH_OFFICIAL_LINUX_X64_ARCHIVE_SHA256",
   "database_prepared": false
 }

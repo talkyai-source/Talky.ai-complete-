@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import ipaddress
 import json
 import os
 from pathlib import Path
 import secrets
 import re
+import socket
 import stat
 import subprocess
 import sys
@@ -20,6 +22,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 INPUTS = Path('/root/talklee-rehearsal-inputs')
 MARKER = Path('/etc/talklee-disposable-installer-vm')
+PROVIDER_HOSTS = ('api.groq.com', 'api.deepgram.com', 'api.cartesia.ai')
 UNITS = ('talky-api', 'talky-voice-gateway', 'talky-voice-worker', 'talky-dialer-worker',
          'talky-reminder-worker', 'talky-dashboard', 'talky-redis', 'asterisk', 'nginx',
          'talky-trunk-status', 'talky-asterisk-reconcile', 'talky-healthwatch')
@@ -33,6 +36,33 @@ def private(path, content):
     with path.open('x', encoding='utf-8') as handle:
         path.chmod(0o600)
         handle.write(content)
+
+
+def provider_dns_check():
+    """Prove the configured synthetic providers resolve only inside this VM."""
+    for hostname in PROVIDER_HOSTS:
+        addresses = {entry[4][0] for entry in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)}
+        if not addresses or not all(ipaddress.ip_address(address).is_loopback for address in addresses):
+            raise RuntimeError('Synthetic provider hostname is not confined to loopback')
+    return {'provider_hostnames': list(PROVIDER_HOSTS), 'provider_dns_confined_to_loopback': True,
+            'live_provider_verified': False}
+
+
+def confine_provider_hosts():
+    hosts = Path('/etc/hosts')
+    metadata = hosts.lstat()
+    if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0
+            or stat.S_IMODE(metadata.st_mode) & 0o022):
+        raise RuntimeError('Disposable VM hosts file must be a protected regular root-owned file')
+    original = hosts.read_text()
+    existing = {name for line in original.splitlines() for name in line.split('#', 1)[0].split()[1:]}
+    if existing.intersection(PROVIDER_HOSTS):
+        raise RuntimeError('Provider host override already exists; refuse ambiguous fixture DNS')
+    with hosts.open('a') as handle:
+        handle.write('\n# Disposable Talklee fixture: never contact configured AI providers.\n')
+        for address in ('127.0.0.1', '::1'):
+            handle.write(address + ' ' + ' '.join(PROVIDER_HOSTS) + '\n')
+    private(INPUTS / 'provider-dns.json', json.dumps(provider_dns_check(), sort_keys=True) + '\n')
 
 
 def diagnose():
@@ -113,6 +143,7 @@ def main():
     config_path = INPUTS / 'prepared/install.json'
     if config_path.exists():
         raise RuntimeError('Rehearsal inputs already exist; refuse reuse')
+    confine_provider_hosts()
     run('apt-get', 'update', '-qq')
     run(sys.executable, str(ROOT / 'scripts/installation/prepare.py'), '--source', str(ROOT),
         '--output', str(config_path.parent))
@@ -140,6 +171,7 @@ def main():
                STRIPE_BILLING_DISABLED='1', TELEPHONY_ENABLED='false',
                SMTP_HOST='127.0.0.1', SMTP_PORT='9', SMTP_USE_TLS='false',
                SMTP_FROM_EMAIL='no-mail@installer.test',
+               NO_PROXY=','.join((*PROVIDER_HOSTS, '127.0.0.1', 'localhost', '::1')),
                DEEPGRAM_API_KEY='synthetic-disabled-' + secrets.token_hex(24),
                GROQ_API_KEY='synthetic-disabled-' + secrets.token_hex(24),
                CARTESIA_API_KEY='synthetic-disabled-' + secrets.token_hex(24))
@@ -159,7 +191,7 @@ def main():
                          '[files]\nastctlpermissions=0660\nastctlowner=asterisk\nastctlgroup=asterisk\n',
         # An inert endpoint satisfies the existing managed-context contract.
         # No transport, contact, registration or identify mapping can reach a carrier.
-        'pjsip.conf': '[global]\ntype=global\n#include pjsip.d/*.conf\n'
+        'pjsip.conf': '[global]\ntype=global\n#tryinclude pjsip.d/*.conf\n'
                       '[blazedigitel-endpoint]\ntype=endpoint\ncontext=from-talky-inbound\n'
                       'disallow=all\nallow=ulaw\naors=installer-inert-aor\n'
                       '[installer-inert-aor]\ntype=aor\nmax_contacts=0\n',

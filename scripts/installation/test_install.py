@@ -89,7 +89,7 @@ class InstallerTests(unittest.TestCase):
         (ast / 'asterisk.conf').write_text('astctlpermissions=0660\nastctlowner=asterisk\nastctlgroup=asterisk\nrunuser=asterisk\nrungroup=asterisk\n')
         (ast / 'http.conf').write_text('[general]\nenabled=yes\nbindaddr=127.0.0.1\nbindport=8088\n')
         (ast / 'ari.conf').write_text('[general]\nenabled=yes\n[talky]\nread_only=no\npassword=' + 'a' * 32 + '\n')
-        (ast / 'pjsip.conf').write_text('#include pjsip.d/*.conf\n')
+        (ast / 'pjsip.conf').write_text('#tryinclude pjsip.d/*.conf\n')
         (ast / 'extensions.conf').write_text('#tryinclude extensions.d/talky-inbound.conf\n')
 
     def write_env(self):
@@ -98,6 +98,18 @@ class InstallerTests(unittest.TestCase):
     def test_valid_inputs(self):
         installer.validate_config(self.config, inputs=True)
         self.config['frontend_mode'] = 'external'
+        installer.validate_config(self.config, inputs=True)
+
+    def test_linux_frontends_refuse_old_or_unreviewed_node_before_reading_inputs(self):
+        for version in ('22.18.0', '22.22.0', '22.23.3', '22.23.5', '24.22.1'):
+            with self.subTest(version=version), patch.object(installer, 'secure_input') as inputs:
+                self.config['node_version'] = version
+                with self.assertRaisesRegex(installer.InstallError, 'reviewed Node 22.23.4'):
+                    installer.validate_config(self.config, inputs=True)
+                inputs.assert_not_called()
+
+    def test_external_frontends_do_not_require_a_local_node_archive(self):
+        self.config.update(frontend_mode='external', node_version='22.22.0', node_archive_sha256='')
         installer.validate_config(self.config, inputs=True)
 
     def test_valid_fixture_also_passes_actual_production_gate(self):
@@ -436,6 +448,34 @@ class InstallerTests(unittest.TestCase):
                              if command[:3] == ['systemctl', 'enable', '--now']
                              and 'talky-trunk-status.service' in command)
                 self.assertLess(disable, start)
+                reconcile = ['bash', str(installer.TARGET / 'backend/scripts/reconcile_asterisk_release.sh')]
+                guard = commands.index(reconcile)
+                timer_disable = commands.index(['systemctl', 'disable', '--now', 'talky-asterisk-reconcile.timer'])
+                pbx_start = commands.index(['systemctl', 'enable', '--now', 'docker', 'talky-redis', 'asterisk'])
+                gateway_start = commands.index(['systemctl', 'enable', '--now', 'talky-voice-gateway'])
+                self.assertLess(timer_disable, pbx_start)
+                self.assertLess(pbx_start, guard)
+                self.assertLess(guard, gateway_start)
+                self.assertLess(guard, start)
+                environment = run.call_args_list[guard].kwargs['env']
+                self.assertEqual(environment['HOME'], '/root')
+                self.assertEqual(environment['TALKY_BACKEND_ENV_FILE'], str(installer.TARGET / 'backend/.env'))
+                self.assertEqual(environment['TALKY_BACKEND_PYTHON'], str(installer.TARGET / 'backend/venv/bin/python'))
+                self.assertNotIn('BASH_ENV', environment)
+                self.assertNotIn('PYTHONPATH', environment)
+
+    def test_initial_reconciliation_failure_blocks_application_and_timer_activation(self):
+        def fail_guard(command, **kwargs):
+            if command[0] == 'bash':
+                raise installer.InstallError('synthetic guarded runtime verification failure')
+        with patch.object(installer, 'run', side_effect=fail_guard) as run:
+            with self.assertRaisesRegex(installer.InstallError, 'guarded runtime verification'):
+                installer.start_host_services('linux')
+        enabled = {unit for call in run.call_args_list
+                   if call.args[0][:3] == ['systemctl', 'enable', '--now'] for unit in call.args[0][3:]}
+        self.assertEqual(enabled, {'docker', 'talky-redis', 'asterisk'})
+        self.assertFalse(enabled & set(installer.SERVICES))
+        self.assertNotIn('talky-asterisk-reconcile.timer', enabled)
 
     def test_systemctl_failure_identifies_only_reviewed_installer_actions_and_units(self):
         result = types.SimpleNamespace(returncode=3, stdout='PRIVATE_STDOUT', stderr='PRIVATE_STDERR')
@@ -676,6 +716,22 @@ class InstallerTests(unittest.TestCase):
         for invalid in ('[default]\n', '#include extensions.d/talky-inbound.conf\n',
                         '#tryinclude extensions.d/*.conf\n',
                         '#tryinclude ../extensions.d/talky-inbound.conf\n'):
+            with self.subTest(value=invalid), patch.object(installer, 'run') as run:
+                path.write_text(invalid)
+                with self.assertRaises(installer.InstallError):
+                    installer.validate_config(self.config, inputs=True)
+                run.assert_not_called()
+
+    def test_empty_managed_pjsip_directory_requires_exact_optional_include(self):
+        directory = Path(self.config['asterisk_config_directory'])
+        self.assertFalse((directory / 'pjsip.d').exists())
+        path = directory / 'pjsip.conf'
+        for valid in ('#tryinclude pjsip.d/*.conf\n', '#tryinclude "pjsip.d/*.conf"\n'):
+            path.write_text(valid)
+            installer.validate_config(self.config, inputs=True)
+        for invalid in ('[global]\n', '; #tryinclude pjsip.d/*.conf\n',
+                        '#include pjsip.d/*.conf\n', '#tryinclude pjsip.d/*.conf\n#include pjsip.d/*.conf\n',
+                        '#tryinclude pjsip.d/*\n', '#tryinclude ../pjsip.d/*.conf\n'):
             with self.subTest(value=invalid), patch.object(installer, 'run') as run:
                 path.write_text(invalid)
                 with self.assertRaises(installer.InstallError):

@@ -11,6 +11,12 @@ Set `frontend_mode` to `linux` to install the dashboard and Admin on this host.
 The `external` mode skips their builds and hosting. Neither choice changes an
 existing production deployment or its DNS automatically.
 
+The current preparation helper selects Node 22.23.4 from the existing 22 LTS
+line for [published runtime security fixes](../../docs/sessions/2026-10-28-node-runtime-security.md).
+Regenerate version/checksum inputs together. Qualification of the new runtime
+is pending its matching Linux builds and actual VM checks; historical Node
+22.22.0 receipts do not establish acceptance for this change.
+
 ## Files the release needs
 
 The full checkout must include the following matching source at one reviewed

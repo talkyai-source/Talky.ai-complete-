@@ -361,6 +361,25 @@ def preactivation_rejections(release, candidate):
             'activating_oneshot_refused_before_runtime_stop': True, 'original_application_pids_preserved': True}
 
 
+def dashboard_node_runtime():
+    expected = json.loads((CURRENT / 'scripts/installation/install.example.json').read_text(
+        encoding='utf-8-sig'))['node_version']
+    require(isinstance(expected, str) and re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', expected),
+            'Candidate Node version pin is invalid')
+    pid = command(['systemctl', 'show', '--property=MainPID', '--value', 'talky-dashboard']).decode().strip()
+    require(re.fullmatch(r'[1-9][0-9]*', pid), 'Expected a running dashboard process')
+    executable = Path('/proc', pid, 'exe')
+    installed = Path('/usr/local/bin/node').resolve(strict=True)
+    require(executable.resolve(strict=True) == installed,
+            'Dashboard process is not using the installed Node executable')
+    version = command([executable, '--version'], timeout=10).decode().strip()
+    require(version == 'v' + expected, 'Running dashboard Node version differs from the candidate pin')
+    require(command(['systemctl', 'show', '--property=MainPID', '--value', 'talky-dashboard']).decode().strip() == pid,
+            'Dashboard process changed during Node verification')
+    return {'dashboard_node_version': version, 'dashboard_node_executable': str(installed),
+            'dashboard_running_node_verified': True}
+
+
 def health(release, sha, baseline, transaction):
     require(CURRENT.is_symlink() and CURRENT.resolve() == Path('/opt/talky-releases') / sha,
             'Published release link does not select the expected candidate')
@@ -413,7 +432,9 @@ def health(release, sha, baseline, transaction):
     require(hashlib.sha256(fetch(DOMAINS[1], asset_url)).hexdigest() == digest(asset), 'Dashboard HTTPS serves another build')
     current = json.loads(Path('/var/lib/talky-release/current.json').read_text())
     require(current['candidate_sha'] == sha and current['journal'] == transaction['journal'], 'Current release receipt differs')
-    return {'services': states, 'service_users_and_protections': True, 'backend_process_versions': sha,
+    provider_dns = module('release_fixture_provider_dns', SOURCE / 'scripts/installation/guest_rehearsal.py').provider_dns_check()
+    return {**dashboard_node_runtime(), **provider_dns, 'services': states,
+            'service_users_and_protections': True, 'backend_process_versions': sha,
             'gateway_source_protocol_ready': True, 'three_https_hosts_checked': True,
             'admin_served_sha256': digest(admin), 'dashboard_served_manifest_sha256': digest(asset),
             'configuration_keys_host_and_data_identity_preserved': True, 'schedules_still_frozen': True}

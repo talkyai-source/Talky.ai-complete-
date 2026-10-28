@@ -128,15 +128,24 @@ If `astmoddir` is explicitly supplied, it must be
 The installer creates the dedicated
 `pjsip.d` directory with group inheritance and adds `talky` to `asterisk` so
 existing trunk generation and CLI reload can work without running the entire
-backend as root. `pjsip.conf` must include `#include pjsip.d/*.conf` and define
-the transports needed by the real trunks. `extensions.conf` must contain
+backend as root. `pjsip.conf` must contain `#tryinclude pjsip.d/*.conf` and
+the reviewed shared endpoint and transports needed by the real carrier profile.
+The managed directory can legitimately be empty at first startup; a mandatory
+`#include` of that empty wildcard aborts Asterisk's PJSIP configuration load.
+Missing managed includes or arbitrary generated paths are refused.
+`extensions.conf` must contain
 `#tryinclude extensions.d/talky-inbound.conf`; this exact managed file is absent
 on first startup and loaded after the guarded reconciler creates it. Other
 generated dialplan directories or wildcards are not accepted by this profile.
-Existing generated configs must be
-reconciled from the restored authoritative database through the application's
-supported lifecycle before controlled calls; the installer does not decrypt
-or fabricate customer trunks.
+After Redis/Asterisk start, the installer synchronously runs the existing
+`reconcile_asterisk_release.sh` before starting application workers and enabling
+the periodic reconciler. Its candidate digest, writer lock, zero-active-channel
+check, runtime endpoint/dialplan proof and failure restoration remain intact.
+A refusal stops installation before a health-checked receipt; an active timer
+or Asterisk process alone is not acceptance. Desired trunks and routes come
+from the prepared authoritative database and reviewed carrier inventory;
+the installer does not fabricate customer trunks. Controlled calls remain a
+separate acceptance step.
 
 Writable application paths are `/opt/talky/backend/recordings`,
 `audio_files/storage`, `feedback_audio`, `logs`, `tmp`, `uploads`, and
@@ -238,6 +247,10 @@ separate acceptance requirements.
 
 Reference installation behavior was checked against the official
 [Docker Ubuntu installation documentation](https://docs.docker.com/engine/install/ubuntu/)
-and [Node release archive](https://nodejs.org/en/download/archive/v22.22.0).
+and [Node release archive](https://nodejs.org/en/download/archive/v22.23.4).
+The preparation helper now pins Node 22.23.4 for published security fixes.
+See the [runtime security assessment](../../docs/sessions/2026-10-28-node-runtime-security.md);
+the changed runtime needs its own build and VM qualification, and old receipts
+retain their original source/version scope.
 Ubuntu's `docker.io` / `docker-compose-v2` distribution packages are used here;
 do not mix them with Docker's separate `docker-ce` repository package family.

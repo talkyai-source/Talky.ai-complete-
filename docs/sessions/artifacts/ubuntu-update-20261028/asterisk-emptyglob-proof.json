@@ -1,0 +1,61 @@
+{
+  "time": "2026-10-28T12:44:13.228870+00:00",
+  "asterisk_version": "Asterisk 20.6.0~dfsg+~cs6.13.40431414-2build5",
+  "scope": "Isolated PJSIP parser and endpoint loading; existing service untouched; not full VM release acceptance",
+  "private_network_namespace": true,
+  "network_interfaces": [
+    "lo"
+  ],
+  "cases": [
+    {
+      "directive": "#include",
+      "empty_generated_directory": true,
+      "configuration_sha256": "e364c2baa40a6dc080ce261e5e938390e1e2f528d41e40854cccc3d939bf3c2e",
+      "startup_complete": true,
+      "pjsip_module_running": true,
+      "endpoint_present": false,
+      "managed_context_present": false,
+      "mandatory_include_missing_error": true,
+      "internet_socket_count": 2,
+      "internet_socket_types": [
+        "udp",
+        "udp6"
+      ],
+      "no_configured_sip_transports": true,
+      "diagnostic_lines": [
+        "[Oct 28 17:44:11] ERROR[8437]: config.c:2119 process_text_line: The file 'pjsip.d/*.conf' was listed as a #include but it does not exist.",
+        "[Oct 28 17:44:11] ERROR[8437]: config.c:2119 process_text_line: The file 'pjsip.d/*.conf' was listed as a #include but it does not exist.",
+        "[Oct 28 17:44:11] ERROR[8437]: config.c:2119 process_text_line: The file 'pjsip.d/*.conf' was listed as a #include but it does not exist.",
+        "[Oct 28 17:44:11] ERROR[8437]: config.c:2119 process_text_line: The file 'pjsip.d/*.conf' was listed as a #include but it does not exist.",
+        "[Oct 28 17:44:11] ERROR[8437]: config.c:2119 process_text_line: The file 'pjsip.d/*.conf' was listed as a #include but it does not exist.",
+        "[Oct 28 17:44:11] ERROR[8437]: config.c:2119 process_text_line: The file 'pjsip.d/*.conf' was listed as a #include but it does not exist."
+      ],
+      "startup_failure_tail": [],
+      "process_exit_before_cleanup": null,
+      "owned_process_stopped": true,
+      "owned_files_removed": true
+    },
+    {
+      "directive": "#tryinclude",
+      "empty_generated_directory": true,
+      "configuration_sha256": "ceac9dd464ec5b1f1def191717891182bec94fef4353d290fce6c87367189804",
+      "startup_complete": true,
+      "pjsip_module_running": true,
+      "endpoint_present": true,
+      "managed_context_present": true,
+      "mandatory_include_missing_error": false,
+      "internet_socket_count": 2,
+      "internet_socket_types": [
+        "udp",
+        "udp6"
+      ],
+      "no_configured_sip_transports": true,
+      "diagnostic_lines": [],
+      "startup_failure_tail": [],
+      "process_exit_before_cleanup": null,
+      "owned_process_stopped": true,
+      "owned_files_removed": true
+    }
+  ],
+  "status": "passed"
+}

@@ -187,8 +187,8 @@ def validate_config(config: dict, *, inputs: bool = False) -> dict:
              'python_requirements_lock', 'apt_versions_file']
     if config['frontend_mode'] == 'linux':
         paths += ['dashboard_env_file', 'admin_env_file']
-        require(re.fullmatch(r'22\.(?:1[89]|[2-9][0-9])\.\d+', config['node_version']) is not None,
-                'Linux frontends require a pinned Node 22 version >=22.18')
+        require(config['node_version'] == '22.23.4',
+                'Linux frontends require the reviewed Node 22.23.4 runtime pin')
         require(re.fullmatch(r'[a-f0-9]{64}', config['node_archive_sha256']) is not None,
                 'Pin the official Node Linux x64 archive SHA256')
     for name in paths:
@@ -232,7 +232,7 @@ def validate_config(config: dict, *, inputs: bool = False) -> dict:
         require(not re.search(r'^\s*#exec\b', text, re.M), 'Asterisk #exec is not accepted')
         for directive, include in re.findall(r'^\s*#(include|tryinclude)\s+(.+)', text, re.M):
             include = include.strip().strip('"')
-            require(include == 'pjsip.d/*.conf' or
+            require((path.name == 'pjsip.conf' and directive == 'tryinclude' and include == 'pjsip.d/*.conf') or
                     (path.name == 'extensions.conf' and directive == 'tryinclude' and
                      include == 'extensions.d/talky-inbound.conf') or
                     (re.fullmatch(r'[A-Za-z0-9_-]+\.conf', include) and (asterisk / include).is_file()),
@@ -248,8 +248,9 @@ def validate_config(config: dict, *, inputs: bool = False) -> dict:
                        ('astctlgroup', 'asterisk'), ('runuser', 'asterisk'), ('rungroup', 'asterisk')):
         require(re.search(r'^\s*' + key + r'\s*=\s*' + value + r'\s*(?:;.*)?$', ast_main, re.M) is not None,
                 f'Asterisk config must set {key}={value} for the service account')
-    require('#include pjsip.d/*.conf' in (asterisk / 'pjsip.conf').read_text(),
-            'pjsip.conf must include generated pjsip.d/*.conf')
+    require(re.search(r'^\s*#tryinclude\s+(?:"pjsip\.d/\*\.conf"|pjsip\.d/\*\.conf)\s*$',
+                      (asterisk / 'pjsip.conf').read_text(), re.M) is not None,
+            'pjsip.conf must tryinclude generated pjsip.d/*.conf for empty first startup')
     require(re.search(r'^\s*#tryinclude\s+"?extensions\.d/talky-inbound\.conf"?\s*$',
                       (asterisk / 'extensions.conf').read_text(), re.M) is not None,
             'extensions.conf must tryinclude generated extensions.d/talky-inbound.conf')
@@ -534,7 +535,16 @@ def start_host_services(frontend_mode: str) -> None:
     run(['systemctl', 'daemon-reload'])
     # The service owns its loop; this compatibility timer must stay disabled.
     run(['systemctl', 'disable', '--now', 'talky-trunk-status.timer'])
+    # First startup must complete the guarded apply/runtime proof itself;
+    # merely scheduling a retrying timer is not installation acceptance.
+    run(['systemctl', 'disable', '--now', 'talky-asterisk-reconcile.timer'])
     run(['systemctl', 'enable', '--now', 'docker', 'talky-redis', 'asterisk'])
+    backend = TARGET / 'backend'
+    run(['bash', str(backend / 'scripts/reconcile_asterisk_release.sh')], cwd=backend,
+        env={'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+             'HOME': '/root', 'PYTHONNOUSERSITE': '1', 'PYTHON_DOTENV_DISABLED': '1',
+             'PYTHONDONTWRITEBYTECODE': '1', 'TALKY_BACKEND_ENV_FILE': str(backend / '.env'),
+             'TALKY_BACKEND_PYTHON': str(backend / 'venv/bin/python')})
     run(['systemctl', 'enable', '--now', 'talky-voice-gateway'])
     run(['systemctl', 'enable', '--now', *SERVICES[:-1], 'talky-healthwatch.timer',
          'talky-trunk-status.service', 'talky-asterisk-reconcile.timer', 'nginx'])

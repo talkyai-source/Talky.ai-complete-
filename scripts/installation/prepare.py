@@ -16,7 +16,7 @@ import sys
 from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
-NODE_VERSION = '22.22.0'
+NODE_VERSION = '22.23.4'
 REDIS_TAG = 'redis:7.4-alpine'
 LOCK_NAME = 'requirements-linux-py312.lock'
 PROVENANCE_NAME = LOCK_NAME + '.provenance.json'
@@ -201,7 +201,7 @@ def prepare(source: Path, output: Path, *, node_sha256: str | None = None,
         'source': str(source), 'python_lock_sha256': hashlib.sha256(lock).hexdigest(),
         'python_lock_provenance': PROVENANCE_NAME,
         'apt_metadata': 'Existing local apt-cache policy candidates; no apt update or installation performed',
-        'node_checksum_source': 'operator flag' if node_sha256 else 'https://nodejs.org/dist/v22.22.0/SHASUMS256.txt',
+        'node_checksum_source': 'operator flag' if node_sha256 else f'https://nodejs.org/dist/v{NODE_VERSION}/SHASUMS256.txt',
         'redis_digest_source': 'operator flag' if redis else 'Docker Hub library/redis:7.4-alpine manifest',
         'remaining_inputs': ['real domains and network allow-lists', 'prepared external database and runtime credentials',
                              'retained encryption and authentication keys', 'approved provider and SMTP credentials',
@@ -224,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--source', type=Path, default=ROOT)
-    parser.add_argument('--node-sha256', help='Reviewed Node 22.22.0 Linux x64 tar.xz checksum; skips public lookup')
+    parser.add_argument('--node-sha256', help=f'Reviewed Node {NODE_VERSION} Linux x64 tar.xz checksum; skips public lookup')
     parser.add_argument('--redis-image', help='Reviewed redis:7.4-alpine@sha256:...; skips public lookup')
     args = parser.parse_args(argv)
     try:

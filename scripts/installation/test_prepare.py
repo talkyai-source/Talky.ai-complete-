@@ -59,6 +59,8 @@ class PreparationTests(unittest.TestCase):
         self.assertFalse(config['database_prepared'])
         self.assertEqual(config['api_domain'], 'api.example.com')
         self.assertEqual(config['node_archive_sha256'], self.node)
+        self.assertEqual(config['node_version'], '22.23.4')
+        self.assertEqual(receipt['node_checksum_source'], 'https://nodejs.org/dist/v22.23.4/SHASUMS256.txt')
         self.assertEqual(config['redis_image'], self.redis)
         self.assertEqual(config['backend_env_file'], str(self.output.resolve() / 'backend.env'))
         self.assertEqual((self.output / prepare.LOCK_NAME).read_bytes(), self.lock)
@@ -145,13 +147,16 @@ class MetadataTests(unittest.TestCase):
                 prepare.apt_candidates(('one',))
 
     def test_node_metadata_selects_only_exact_archive(self):
-        text = ('a' * 64 + '  node-v22.22.0-linux-arm64.tar.xz\n' +
-                'b' * 64 + '  node-v22.22.0-linux-x64.tar.xz\n').encode()
-        with patch.object(prepare, 'fetch', return_value=(text, {})):
+        stale = 'c' * 64 + '  node-v22.22.0-linux-x64.tar.xz\n'
+        exact = 'b' * 64 + '  node-v22.23.4-linux-x64.tar.xz\n'
+        text = ('a' * 64 + '  node-v22.23.4-linux-arm64.tar.xz\n' + stale + exact).encode()
+        with patch.object(prepare, 'fetch', return_value=(text, {})) as fetch:
             self.assertEqual(prepare.node_checksum(), 'b' * 64)
-        with patch.object(prepare, 'fetch', return_value=(b'', {})):
-            with self.assertRaises(prepare.PreparationError):
-                prepare.node_checksum()
+            fetch.assert_called_once_with('https://nodejs.org/dist/v22.23.4/SHASUMS256.txt')
+        for invalid in (b'', stale.encode(), (exact + exact).encode()):
+            with self.subTest(metadata=invalid), patch.object(prepare, 'fetch', return_value=(invalid, {})):
+                with self.assertRaises(prepare.PreparationError):
+                    prepare.node_checksum()
 
     def test_redis_digest_is_tied_to_manifest_with_linux_amd64(self):
         body = json.dumps({'manifests': [{'platform': {'os': 'linux', 'architecture': 'amd64'}}]}).encode()
