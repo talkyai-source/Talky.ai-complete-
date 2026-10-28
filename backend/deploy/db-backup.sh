@@ -16,7 +16,10 @@
 #      it sets row_security=off, which Postgres refuses on a FORCE RLS table
 #      ("query would be affected by row-level security policy" — the first
 #      prod run, 2026-09-10). With it the policies run, and the bypass GUC
-#      makes them return every row.
+#      admits tenant rows. Saved acknowledgements additionally require an active,
+#      verified platform administrator. The helper validates the explicit UUID
+#      in the exact exported read-only snapshot consumed by pg_dump, preventing
+#      concurrent deactivation from silently filtering those receipts.
 #   2. Nothing scheduled these. Every backup so far was a hand-run
 #      pre-migration dump (Sep 6, Sep 8). A 2.3 GB database with no nightly
 #      backup is not production.
@@ -33,6 +36,11 @@ DB_NAME="${TALKY_PG_DB:-talkyai}"
 backup_dir="${TALKY_BACKUP_DIR:-/var/backups/talky}"
 keep_days="${TALKY_BACKUP_KEEP_DAYS:-30}"
 min_table_data="${TALKY_BACKUP_MIN_TABLE_DATA:-50}"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -z "${TALKY_BACKUP_PRINCIPAL_ID:-}" ]]; then
+    echo "DB-BACKUP CRITICAL: TALKY_BACKUP_PRINCIPAL_ID is required" >&2
+    exit 1
+fi
 
 install -d -m 0700 "${backup_dir}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -55,11 +63,11 @@ cleanup_partial() {
 }
 trap cleanup_partial EXIT
 trap 'exit 130' INT
-trap 'exit 143' TERM
+trap 'exit 143' TERM HUP
 
-# --- dump (bypass RLS on the dump connection; see header) --------------------
-docker exec -e PGOPTIONS='-c app.bypass_rls=true' "$CONTAINER" \
-    pg_dump -U "$DB_USER" -d "$DB_NAME" --no-owner --format=custom --compress=6 --enable-row-security \
+# --- validated snapshot dump; no publication before keeper completion --------
+python3 "${script_dir}/backup_snapshot.py" \
+    --container "$CONTAINER" --user "$DB_USER" --database "$DB_NAME" \
     > "${partial}"
 test -s "${partial}"
 
@@ -92,7 +100,7 @@ digest="$(sha256sum "${partial}" | cut -d ' ' -f1)"
 mv -- "${partial}" "${dump}"
 printf '%s  %s\n' "$digest" "$dump" > "${checksum_file}"
 sha256sum --check --quiet "${checksum_file}"
-trap - EXIT INT TERM
+trap - EXIT INT TERM HUP
 
 # --- retention ----------------------------------------------------------------
 find "${backup_dir}" -maxdepth 1 -type f \( -name 'talky-*.dump' -o -name 'talky-*.dump.sha256' \) \

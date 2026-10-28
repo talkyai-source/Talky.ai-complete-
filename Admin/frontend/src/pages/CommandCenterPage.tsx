@@ -7,7 +7,6 @@ import { Incidents } from '../components/Incidents';
 import { TopTenantsList } from '../components/TopTenantsList';
 import { TopTenantsPanel } from '../components/TopTenantsPanel';
 import { QuotaUsage } from '../components/QuotaUsage';
-import { Footer } from '../components/Footer';
 
 export function CommandCenterPage() {
     return (
@@ -35,7 +34,6 @@ export function CommandCenterPage() {
                     </div>
                 </div>
 
-                <Footer />
             </main>
         </div>
     );

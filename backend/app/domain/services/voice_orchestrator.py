@@ -1144,13 +1144,17 @@ class VoiceOrchestrator:
         failover_on = _failover_enabled("STT_FAILOVER_ENABLED")
         resolver = get_credential_resolver()
         api_key = None
+        observation_context = None
         if not is_assemblyai or failover_on:
-            api_key = await resolver.resolve("deepgram", tenant_id=config.tenant_id)
+            credential = await resolver.resolve_with_metadata("deepgram", tenant_id=config.tenant_id)
+            api_key = credential.secret if credential is not None else None
+            observation_context = credential.observation_context if credential is not None else None
 
         def _build_flux(model: str):
             from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
             init = {
                 "api_key": api_key,
+                "observation_context": observation_context,
                 "model": model,
                 "sample_rate": config.stt_sample_rate,
                 "encoding": config.stt_encoding,
@@ -1173,6 +1177,7 @@ class VoiceOrchestrator:
             from app.infrastructure.stt.deepgram_nova import DeepgramNovaSTTProvider
             init = {
                 "api_key": api_key,
+                "observation_context": observation_context,
                 "model": model,
                 "sample_rate": config.stt_sample_rate,
                 "encoding": config.stt_encoding,
@@ -1196,8 +1201,10 @@ class VoiceOrchestrator:
             from app.infrastructure.stt.assemblyai import AssemblyAISTTProvider
 
             primary = AssemblyAISTTProvider()
+            credential = await resolver.resolve_with_metadata("assemblyai", tenant_id=config.tenant_id)
             primary_init = {
-                "api_key": await resolver.resolve("assemblyai", tenant_id=config.tenant_id),
+                "api_key": credential.secret if credential is not None else None,
+                "observation_context": credential.observation_context if credential is not None else None,
                 "model": "universal-3-6-pro",
                 "sample_rate": config.stt_sample_rate,
                 "encoding": config.stt_encoding,
@@ -1381,7 +1388,7 @@ class VoiceOrchestrator:
         # silently invoke an unrelated secondary model.
         validate_traditional_llm_selection(provider_type, config.llm_model)
         api_key_env = self._LLM_API_KEY_ENV.get(provider_type)
-        api_key = await get_credential_resolver().resolve(
+        credential = await get_credential_resolver().resolve_with_metadata(
             provider_type,
             tenant_id=config.tenant_id,
             env_var=api_key_env,
@@ -1389,7 +1396,8 @@ class VoiceOrchestrator:
 
         provider = LLMFactory.create(provider_type, config={})
         init_config: dict = {
-            "api_key": api_key,
+            "api_key": credential.secret if credential is not None else None,
+            "observation_context": credential.observation_context if credential is not None else None,
             "model": config.llm_model,
             "temperature": config.llm_temperature,
             "max_tokens": config.llm_max_tokens,
@@ -1499,14 +1507,15 @@ class VoiceOrchestrator:
                 get_credential_resolver,
             )
 
-            api_key = await get_credential_resolver().resolve(
+            credential = await get_credential_resolver().resolve_with_metadata(
                 sec_provider,
                 tenant_id=config.tenant_id,
                 env_var=self._LLM_API_KEY_ENV.get(sec_provider),
             )
             secondary = LLMFactory.create(sec_provider, config={})
             sec_init: dict = {
-                "api_key": api_key,
+                "api_key": credential.secret if credential is not None else None,
+                "observation_context": credential.observation_context if credential is not None else None,
                 "model": sec_model,
                 "temperature": config.llm_temperature,
                 "max_tokens": config.llm_max_tokens,
@@ -1538,11 +1547,12 @@ class VoiceOrchestrator:
         if config.tts_provider_type == "cartesia":
             from app.infrastructure.tts.cartesia import CartesiaTTSProvider
 
-            api_key = await resolver.resolve("cartesia", tenant_id=config.tenant_id)
+            credential = await resolver.resolve_with_metadata("cartesia", tenant_id=config.tenant_id)
             provider = CartesiaTTSProvider()
             await provider.initialize(
                 {
-                    "api_key": api_key,
+                    "api_key": credential.secret if credential is not None else None,
+                    "observation_context": credential.observation_context if credential is not None else None,
                     "voice_id": config.voice_id,
                     "model_id": config.tts_model or "sonic-3",
                     "sample_rate": config.tts_sample_rate,
@@ -1551,11 +1561,12 @@ class VoiceOrchestrator:
         elif config.tts_provider_type == "deepgram":
             from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
 
-            api_key = await resolver.resolve("deepgram", tenant_id=config.tenant_id)
+            credential = await resolver.resolve_with_metadata("deepgram", tenant_id=config.tenant_id)
             provider = DeepgramTTSProvider()
             await provider.initialize(
                 {
-                    "api_key": api_key,
+                    "api_key": credential.secret if credential is not None else None,
+                    "observation_context": credential.observation_context if credential is not None else None,
                     "voice_id": config.voice_id,
                     "sample_rate": config.tts_sample_rate,
                 }
@@ -1579,11 +1590,12 @@ class VoiceOrchestrator:
                         "catalog_unavailable", "Voice eligibility is temporarily unavailable", 503
                     ) from exc
                 raise
-            api_key = await resolver.resolve("elevenlabs", tenant_id=config.tenant_id)
+            credential = await resolver.resolve_with_metadata("elevenlabs", tenant_id=config.tenant_id)
             provider = ElevenLabsTTSProvider()
             await provider.initialize(
                 {
-                    "api_key": api_key,
+                    "api_key": credential.secret if credential is not None else None,
+                    "observation_context": credential.observation_context if credential is not None else None,
                     "voice_id": config.voice_id,
                     "model_id": config.tts_model or "eleven_flash_v2_5",
                     "sample_rate": config.tts_sample_rate,
@@ -1658,7 +1670,7 @@ class VoiceOrchestrator:
             return None
 
         resolver = get_credential_resolver()
-        api_key = await resolver.resolve(
+        credential = await resolver.resolve_with_metadata(
             secondary_provider_name, tenant_id=config.tenant_id,
         )
 
@@ -1667,7 +1679,8 @@ class VoiceOrchestrator:
                 from app.infrastructure.tts.cartesia import CartesiaTTSProvider
                 provider = CartesiaTTSProvider()
                 await provider.initialize({
-                    "api_key": api_key,
+                    "api_key": credential.secret if credential is not None else None,
+                    "observation_context": credential.observation_context if credential is not None else None,
                     "voice_id": secondary_voice,
                     "model_id": "sonic-3",
                     "sample_rate": config.tts_sample_rate,
@@ -1680,7 +1693,8 @@ class VoiceOrchestrator:
                 await require_elevenlabs_voice_eligible(getattr(self._db_client, "pool", None), config.tenant_id, secondary_voice)
                 provider = ElevenLabsTTSProvider()
                 await provider.initialize({
-                    "api_key": api_key,
+                    "api_key": credential.secret if credential is not None else None,
+                    "observation_context": credential.observation_context if credential is not None else None,
                     "voice_id": secondary_voice,
                     "model_id": "eleven_flash_v2_5",
                     "sample_rate": config.tts_sample_rate,
@@ -1689,7 +1703,8 @@ class VoiceOrchestrator:
                 from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
                 provider = DeepgramTTSProvider()
                 await provider.initialize({
-                    "api_key": api_key,
+                    "api_key": credential.secret if credential is not None else None,
+                    "observation_context": credential.observation_context if credential is not None else None,
                     "voice_id": secondary_voice,
                     "sample_rate": config.tts_sample_rate,
                 })

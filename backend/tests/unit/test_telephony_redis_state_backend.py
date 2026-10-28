@@ -844,6 +844,12 @@ async def test_ownership_loss_closes_answered_inbound_handoff_gap(
     adapter = AsteriskAdapter()
     adapter._connected_flag = True
     adapter._inbound_cleanup_retry_s = 0
+    info = {
+        "system": {"entity_id": "owned-inbound-fixture"},
+        "status": {"startup_time": "2026-10-26T00:00:00Z"},
+    }
+    adapter._control_backend_system = info["system"]["entity_id"]
+    adapter._control_backend_startup = info["status"]["startup_time"]
 
     class FakeSession:
         async def close(self):
@@ -858,6 +864,7 @@ async def test_ownership_loss_closes_answered_inbound_handoff_gap(
         "call_id": "durable-inbound-gap",
         "provider": "asterisk",
         "provider_call_id": "inbound-gap",
+        "_control_backend": adapter.control_backend_identity,
     }
     adapter._active_sessions["inbound-gap"] = {
         "session_id": "gateway-gap",
@@ -888,6 +895,8 @@ async def test_ownership_loss_closes_answered_inbound_handoff_gap(
 
     async def ari(method, path, **_kwargs):
         actions.append(f"ari:{method}:{path}")
+        if method == "GET" and path == "/asterisk/info":
+            return info
         if method == "GET" and path == "/channels":
             return []
         if method == "DELETE" and _kwargs.get("return_status"):
@@ -926,11 +935,13 @@ async def test_ownership_loss_closes_answered_inbound_handoff_gap(
     assert "inbound-gap" not in adapter._inbound_cleanup_pending
     assert "inbound-gap" not in adapter._inbound_admissions
     assert actions == [
+        "ari:GET:/asterisk/info",
         "gateway:POST:/v1/sessions/stop",
         "ari:DELETE:/channels/external-gap",
         "ari:DELETE:/channels/inbound-gap",
         "ari:GET:/channels",
         "ari:DELETE:/bridges/bridge-gap",
+        "ari:GET:/asterisk/info",
         "release:32000",
         "finalize",
     ]

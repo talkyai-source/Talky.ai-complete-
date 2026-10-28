@@ -155,6 +155,11 @@ ssh -t -i "$KEY" "$PROD" "
         echo \"!! Gateway still owns \$active_sessions active session(s); deploy is blocked.\" >&2
         exit 1
     fi
+    echo '--> preserving the exact API-web unit before checkout'
+    sudo install -d -o root -g root -m 0700 /var/backups/talky/deploy-unit-recovery
+    web_unit_backup=\"\$(sudo mktemp -d /var/backups/talky/deploy-unit-recovery/api-web.${DEPLOY_SHA}.XXXXXX)\"
+    sudo cp -a -- /etc/systemd/system/talky-api-web.service \"\$web_unit_backup/talky-api-web.service\"
+    echo \"    retained private unit recovery directory: \$web_unit_backup\"
     # Anything that aborts between the checkout and a SUCCESSFUL migration puts
     # the previous commit and its unit definitions back, so a later crash-restart
     # cannot load new code against the un-migrated schema. Disarmed (rollback_sha
@@ -169,7 +174,16 @@ ssh -t -i "$KEY" "$PROD" "
         cleanup_candidate
         if [ \"\$exit_code\" -ne 0 ] && [ -n \"\$rollback_sha\" ]; then
             echo \"!! deploy aborted before migrations completed; restoring checkout \$rollback_sha and its unit definitions\" >&2
-            if git checkout --detach \"\$rollback_sha\" && sudo bash backend/systemd/install-services.sh; then
+            rollback_ok=1
+            if ! { git checkout --detach \"\$rollback_sha\" && sudo bash backend/systemd/install-services.sh; }; then
+                rollback_ok=0
+            fi
+            # The old installer cannot reproduce an independently pinned web
+            # unit. Restore its exact previous file/link even if reinstall fails.
+            if ! { sudo cp -a --remove-destination -- \"\$web_unit_backup/talky-api-web.service\" /etc/systemd/system/talky-api-web.service && sudo systemctl daemon-reload; }; then
+                rollback_ok=0
+            fi
+            if [ \"\$rollback_ok\" -eq 1 ]; then
                 echo '!! previous checkout restored; no service was restarted by the rollback.' >&2
             else
                 echo '!! ROLLBACK FAILED: reconcile /opt/talky and the systemd units by hand (docs/DEPLOYMENT.md).' >&2
@@ -223,22 +237,41 @@ ssh -t -i "$KEY" "$PROD" "
     fi
     echo '--> restarting the matching gateway first'
     sudo systemctl restart talky-voice-gateway
-    gateway_stats=\"\$(curl -fsS --max-time 10 http://127.0.0.1:18080/stats)\"
+    # Type=exec confirms exec, not that the new listener is accepting requests.
+    # Retry transport/HTTP startup failures only; validate each successful
+    # response below so malformed/nonzero/wrong-build results still fail closed.
+    wait_gateway_probe() {
+        local probe_url=\"\$1\" probe_attempt=0 probe_payload=''
+        until probe_payload=\"\$(curl -fsS --max-time 5 \"\$probe_url\")\"; do
+            probe_attempt=\$((probe_attempt + 1))
+            if [ \"\$probe_attempt\" -ge 30 ]; then
+                echo \"!! gateway probe did not become healthy after \$probe_attempt attempts: \$probe_url\" >&2
+                return 1
+            fi
+            sleep 1
+        done
+        printf '%s' \"\$probe_payload\"
+    }
+    gateway_stats=\"\$(wait_gateway_probe http://127.0.0.1:18080/stats)\"
     active_sessions=\"\$(printf '%s' \"\$gateway_stats\" | backend/venv/bin/python -c 'import json,sys; value=json.load(sys.stdin).get(\"active_sessions\"); assert isinstance(value, int) and not isinstance(value, bool); print(value)')\"
     if [ \"\$active_sessions\" -ne 0 ]; then
         echo '!! Restarted gateway did not return an exact zero-session health proof.' >&2
         exit 1
     fi
-    gateway_ready=\"\$(curl -fsS --max-time 10 http://127.0.0.1:18080/ready)\"
+    gateway_ready=\"\$(wait_gateway_probe http://127.0.0.1:18080/ready)\"
     printf '%s' \"\$gateway_ready\" | backend/venv/bin/python -c 'import json,sys; p=json.load(sys.stdin); assert p.get(\"ready\") is True; assert p.get(\"protocol_version\") == 2; assert \"pcmu\" in p.get(\"codecs\", []); assert p.get(\"build_sha\") == sys.argv[1]' '${DEPLOY_SHA}'
     cleanup_candidate
     gateway_candidate=''
     echo '--> applying database migrations (service restart is blocked on failure)'
     sudo systemctl start talky-migrate.service
     rollback_sha=''
-    backend/venv/bin/python backend/scripts/verify_alembic_current_heads.py
+    sudo env -u DATABASE_URL -u READ_DATABASE_URL backend/venv/bin/python backend/scripts/verify_alembic_current_heads.py
+    echo '--> verifying the application runtime database privileges'
+    sudo env -u DATABASE_URL -u READ_DATABASE_URL backend/venv/bin/python backend/scripts/verify_admin_runtime_privileges.py
     echo '--> reconciling repository-owned Asterisk configuration'
     sudo bash backend/scripts/reconcile_asterisk_release.sh
+    echo '--> publishing the exact backend release version'
+    sudo backend/venv/bin/python backend/scripts/set_release_version.py --env-file /opt/talky/backend/.env --candidate-sha '${DEPLOY_SHA}'
     echo '--> restarting backend services after the authenticated gateway is healthy'
     sudo systemctl restart talky-api talky-dialer-worker talky-voice-worker talky-reminder-worker talky-api-web
     sudo systemctl restart talky-inbound-synthetic.timer
@@ -292,5 +325,14 @@ ssh -t -i "$KEY" "$PROD" "
     echo '    dependency readiness OK'
     retry_probe dashboard-liveness curl -fsS --max-time 10 http://127.0.0.1:8001/health
     echo '    dashboard API liveness OK'
+    echo '--> verifying the running API process versions'
+    for version_unit in talky-api talky-api-web; do
+        version_pid=\"\$(systemctl show \"\$version_unit\" --property=MainPID --value)\"
+        sudo backend/venv/bin/python backend/scripts/set_release_version.py --check-pid \"\$version_pid\" --candidate-sha '${DEPLOY_SHA}'
+        if [ \"\$(systemctl show \"\$version_unit\" --property=MainPID --value)\" != \"\$version_pid\" ]; then
+            echo \"!! \$version_unit changed process during version verification.\" >&2
+            exit 1
+        fi
+    done
 "
 echo "==> Deploy complete."

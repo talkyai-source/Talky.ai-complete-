@@ -76,6 +76,11 @@ class FakeConn:
         # instead of teaching each endpoint responder about connection setup.
         if method == "execute" and sql.lstrip().upper().startswith("SET LOCAL "):
             return "SET"
+        if method == "execute" and "platform-admin-authority" in sql:
+            return None
+        if "up.role AS profile_role" in sql:
+            return {"id": PLATFORM_ADMIN.id, "tenant_id": PLATFORM_ADMIN.tenant_id,
+                    "profile_role": "platform_admin", "is_active": True, "is_verified": True}
         return self._responder(method, sql, args)
 
     async def fetch(self, sql, *args):
@@ -136,6 +141,12 @@ class FakeAuditLogger:
         self.events.append(kwargs)
         return "00000000-0000-0000-0000-00000000000e"
 
+    async def lock_transaction(self, conn):
+        pass
+
+    async def log_in_transaction(self, conn, **kwargs):
+        return await self.log(**kwargs)
+
 
 def make_client(responder, *, user: CurrentUser | None = PLATFORM_ADMIN):
     """Mount the tenants router on a bare app with a recording fake pool."""
@@ -168,6 +179,7 @@ def tenant_row(idx: int, *, status: str = "active", tid: str | None = None) -> d
         "subscription_status": status,
         "calling_rules": dict(DEFAULT_CALLING_RULES),
         "created_at": "2026-08-29T00:00:00+00:00",
+        "updated_at": "2026-08-29T00:00:00+00:00",
         "user_count": 1,
         "campaign_count": 2,
     }
@@ -193,7 +205,7 @@ def list_responder(total: int, page_size_cap: int = 10_000):
 NEW_TENANT_ID = "00000000-0000-0000-0000-0000000f0001"
 
 
-def create_responder(*, existing: dict | None = None, plan_minutes: int = 30):
+def create_responder(*, existing: dict | None = None, plan_minutes: int = 30, plan_concurrency: int = 3):
     """Answers the statements POST /tenants issues."""
 
     def _respond(method, sql, args):
@@ -203,7 +215,7 @@ def create_responder(*, existing: dict | None = None, plan_minutes: int = 30):
                 "id": args[0],
                 "name": "Free",
                 "minutes": plan_minutes,
-                "concurrent_calls": 3,
+                "concurrent_calls": plan_concurrency,
             }
         if "pg_advisory_xact_lock" in low:
             return None
@@ -219,11 +231,12 @@ def create_responder(*, existing: dict | None = None, plan_minutes: int = 30):
                 "subscription_status": args[3],
                 "calling_rules": dict(DEFAULT_CALLING_RULES),
                 "created_at": "2026-08-29T00:00:00+00:00",
+                "updated_at": "2026-08-29T00:00:00+00:00",
             }
         if "update tenants" in low:
             rules = dict(DEFAULT_CALLING_RULES)
             rules["max_concurrent_calls"] = args[1]
-            return {"calling_rules": rules}
+            return {"calling_rules": rules, "updated_at": "2026-08-29T00:00:01+00:00"}
         if "insert into tenant_quotas" in low:
             return None
         raise AssertionError(f"unexpected statement: {method} {sql}")
@@ -240,9 +253,9 @@ def archive_responder(*, found: bool = True, status: str = "active"):
         if low.startswith("select"):
             if not found:
                 return None
-            return {"id": ARCHIVE_ID, "subscription_status": status}
+            return tenant_row(1, tid=ARCHIVE_ID, status=status)
         if "update tenants" in low:
-            return {"id": ARCHIVE_ID, "subscription_status": "cancelled"}
+            return tenant_row(1, tid=ARCHIVE_ID, status="cancelled")
         raise AssertionError(f"unexpected statement: {method} {sql}")
 
     return _respond
@@ -252,25 +265,25 @@ def archive_responder(*, found: bool = True, status: str = "active"):
 # 1. Create
 # ===========================================================================
 
-def test_create_tenant_returns_usable_tenant_with_defaults():
-    """POST /admin/tenants creates a tenant on the default plan with quota."""
+@pytest.mark.parametrize("plan_fields", [{}, {"plan_id": None}], ids=["omitted-plan", "null-plan"])
+def test_create_tenant_defaults_to_no_plan_and_zero_minutes(plan_fields):
+    """Admin provisioning must not silently grant the retired free allowance."""
     client, conn, audit = make_client(create_responder())
 
-    r = client.post("/api/v1/admin/tenants", json={"business_name": "Acme Ltd"})
+    r = client.post("/api/v1/admin/tenants", json={"business_name": "Acme Ltd", **plan_fields})
 
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["id"] == NEW_TENANT_ID
     assert body["business_name"] == "Acme Ltd"
     assert body["created"] is True
-    # default plan + quota derived from the plan row, not invented here
-    assert body["plan_id"] == "free"
-    assert body["plan_name"] == "Free"
-    assert body["minutes_allocated"] == 30
+    assert body["plan_id"] is None
+    assert body["plan_name"] is None
+    assert body["minutes_allocated"] == 0
     assert body["minutes_used"] == 0
     assert body["status"] == "active"
-    # concurrency limit falls back to the plan's concurrent_calls
-    assert body["max_concurrent_calls"] == 3
+    assert body["max_concurrent_calls"] == DEFAULT_CALLING_RULES["max_concurrent_calls"]
+    assert not conn.statements_matching("FROM plans")
 
     sql = conn.sql_text().lower()
     assert "insert into tenants" in sql
@@ -281,6 +294,40 @@ def test_create_tenant_returns_usable_tenant_with_defaults():
     )
     assert audit.events, "tenant creation must be audited (goals.md §12)"
     assert audit.events[0]["event_type"].value == "tenant_created"
+    assert audit.events[0]["after_state"]["plan_id"] is None
+    assert audit.events[0]["after_state"]["minutes_allocated"] == 0
+
+
+def test_create_planless_tenant_honours_explicit_admin_quota():
+    client, conn, audit = make_client(create_responder())
+    response = client.post("/api/v1/admin/tenants", json={
+        "business_name": "Operator allowance", "minutes_allocated": 80,
+        "max_concurrent_calls": 4,
+    })
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["plan_id"] is None and body["plan_name"] is None
+    assert body["minutes_allocated"] == 80 and body["max_concurrent_calls"] == 4
+    assert not conn.statements_matching("FROM plans")
+    assert audit.events[0]["after_state"]["minutes_allocated"] == 80
+
+
+@pytest.mark.parametrize("quota_fields", [{}, {"minutes_allocated": 0}])
+@pytest.mark.parametrize("plan_id, plan_minutes, plan_concurrency", [
+    ("basic", 300, 3), ("free", 300, 3), ("payment_test", 2, 1),
+])
+def test_explicit_plan_keeps_plan_allowance_and_accepts_explicit_zero(
+    quota_fields, plan_id, plan_minutes, plan_concurrency,
+):
+    # Explicit legacy selection is an admin decision, not a public catalog offer.
+    client, _, _ = make_client(create_responder(plan_minutes=plan_minutes, plan_concurrency=plan_concurrency))
+    response = client.post("/api/v1/admin/tenants", json={
+        "business_name": "Selected plan", "plan_id": plan_id, **quota_fields,
+    })
+    assert response.status_code == 201, response.text
+    assert response.json()["plan_id"] == plan_id
+    assert response.json()["minutes_allocated"] == quota_fields.get("minutes_allocated", plan_minutes)
+    assert response.json()["max_concurrent_calls"] == plan_concurrency
 
 
 def test_create_tenant_honours_explicit_plan_and_limits():
@@ -314,8 +361,9 @@ def test_create_tenant_is_idempotent_on_business_name():
         "subscription_status": "active",
         "calling_rules": dict(DEFAULT_CALLING_RULES),
         "created_at": "2026-08-01T00:00:00+00:00",
+        "updated_at": "2026-08-01T00:00:00+00:00",
     }
-    client, conn, _ = make_client(create_responder(existing=already))
+    client, conn, audit = make_client(create_responder(existing=already))
 
     r = client.post("/api/v1/admin/tenants", json={"business_name": "Acme Ltd"})
 
@@ -323,6 +371,10 @@ def test_create_tenant_is_idempotent_on_business_name():
     body = r.json()
     assert body["created"] is False
     assert body["id"] == already["id"]
+    assert body["plan_id"] == "free" and body["minutes_allocated"] == 30
+    assert body["minutes_used"] == 7
+    assert audit.events == []
+    assert not conn.statements_matching("UPDATE tenants")
     assert not conn.statements_matching("INSERT INTO tenants"), (
         "idempotent replay must not insert a second tenant row"
     )
@@ -380,6 +432,15 @@ def test_list_limit_offset_are_validated():
     assert client.get("/api/v1/admin/tenants", params={"limit": 0}).status_code == 422
     assert client.get("/api/v1/admin/tenants", params={"offset": -1}).status_code == 422
     assert client.get("/api/v1/admin/tenants", params={"limit": 100000}).status_code == 422
+    assert client.get("/api/v1/admin/tenants", params={"sort_by": "untrusted-sql"}).status_code == 422
+
+
+def test_global_tenant_ranking_orders_in_sql_before_limit():
+    client, conn, _ = make_client(list_responder(total=200))
+    result = client.get("/api/v1/admin/tenants", params={"sort_by": "minutes_used", "limit": 5})
+    assert result.status_code == 200
+    query = next(sql for method, sql, args in conn.queries if method == "fetch")
+    assert "ORDER BY t.minutes_used DESC NULLS LAST, t.id LIMIT" in query
 
 
 def test_list_row_shape_is_unchanged():
@@ -391,7 +452,7 @@ def test_list_row_shape_is_unchanged():
     assert set(item) == {
         "id", "business_name", "plan_id", "plan_name", "minutes_used",
         "minutes_allocated", "status", "user_count", "campaign_count",
-        "max_concurrent_calls", "created_at",
+        "max_concurrent_calls", "created_at", "updated_at",
     }
     assert item["user_count"] == 1
     assert item["campaign_count"] == 2
@@ -409,7 +470,7 @@ def test_list_query_count_is_bounded_regardless_of_tenant_count(n):
     r = client.get("/api/v1/admin/tenants", params={"limit": 1000})
     assert r.status_code == 200, r.text
     assert len(r.json()) == n
-    assert len(conn.queries) == 2, (
+    assert len([q for q in conn.queries if not q[1].startswith("SET LOCAL")]) == 2, (
         f"list_tenants issued {len(conn.queries)} queries for {n} tenants: "
         f"{[q[1][:60] for q in conn.queries]}"
     )
@@ -433,7 +494,7 @@ def test_list_does_not_issue_per_tenant_count_queries():
 
 def test_archive_tenant_marks_it_cancelled_and_audits():
     client, conn, audit = make_client(archive_responder())
-    r = client.post(f"/api/v1/admin/tenants/{ARCHIVE_ID}/archive")
+    r = client.post(f"/api/v1/admin/tenants/{ARCHIVE_ID}/archive", json={"expected_updated_at": "2026-08-29T00:00:00+00:00"})
     assert r.status_code == 200, r.text
     body = r.json()
     # 'cancelled' (two Ls) is the spelling CallGuard blocks on, so an
@@ -451,7 +512,7 @@ def test_archive_tenant_marks_it_cancelled_and_audits():
 
 def test_archive_is_idempotent():
     client, conn, _ = make_client(archive_responder(status="cancelled"))
-    r = client.post(f"/api/v1/admin/tenants/{ARCHIVE_ID}/archive")
+    r = client.post(f"/api/v1/admin/tenants/{ARCHIVE_ID}/archive", json={"expected_updated_at": "2026-08-29T00:00:00+00:00"})
     assert r.status_code == 200
     assert r.json()["status"] == "cancelled"
     assert not conn.statements_matching("UPDATE tenants")
@@ -459,7 +520,7 @@ def test_archive_is_idempotent():
 
 def test_archive_unknown_tenant_is_404():
     client, conn, _ = make_client(archive_responder(found=False))
-    r = client.post(f"/api/v1/admin/tenants/{ARCHIVE_ID}/archive")
+    r = client.post(f"/api/v1/admin/tenants/{ARCHIVE_ID}/archive", json={"expected_updated_at": "2026-08-29T00:00:00+00:00"})
     assert r.status_code == 404
     assert not conn.statements_matching("UPDATE tenants")
 
@@ -471,14 +532,14 @@ def test_archive_is_reversible_through_the_existing_resume_verb():
     def _respond(method, sql, args):
         low = " ".join(sql.lower().split())
         if low.startswith("select"):
-            return {"id": ARCHIVE_ID, "subscription_status": "cancelled"}
+            return tenant_row(1, tid=ARCHIVE_ID, status="cancelled")
         if "update tenants" in low:
             seen["update"] = low
-            return {"id": ARCHIVE_ID, "subscription_status": "active"}
+            return tenant_row(1, tid=ARCHIVE_ID, status="active")
         raise AssertionError(sql)
 
     client, conn, _ = make_client(_respond)
-    r = client.post(f"/api/v1/admin/tenants/{ARCHIVE_ID}/resume")
+    r = client.post(f"/api/v1/admin/tenants/{ARCHIVE_ID}/resume", json={"expected_updated_at": "2026-08-29T00:00:00+00:00"})
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "active"
 
@@ -539,3 +600,52 @@ def test_new_routes_carry_the_platform_admin_gate():
             stack.extend(dep.dependencies)
         assert "require_platform_admin" in names, f"{route.path} is not gated"
         assert "require_admin" not in names, f"{route.path} uses the weak gate"
+
+
+@pytest.mark.parametrize("suffix,method", [("suspend", "post"), ("resume", "post"), ("archive", "post"), ("quota", "patch")])
+def test_operator_writes_require_explicit_reviewed_version(suffix, method):
+    client, conn, _ = make_client(archive_responder())
+    response = getattr(client, method)(f"/api/v1/admin/tenants/{ARCHIVE_ID}/{suffix}", json={})
+    assert response.status_code == 422
+    assert conn.queries == []
+
+
+def test_conflict_keeps_current_state_and_does_not_audit():
+    client, conn, audit = make_client(archive_responder())
+    response = client.post(f"/api/v1/admin/tenants/{ARCHIVE_ID}/archive", json={"expected_updated_at": None})
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "tenant_changed"
+    assert not conn.statements_matching("UPDATE tenants") and not audit.events
+
+
+@pytest.mark.parametrize("body", [
+    {"minutes_allocated": -1}, {"max_concurrent_calls": 0},
+    {"minutes_allocated": 2147483648},
+    {"max_concurrent_calls": 1001}, {"expected_updated_at": "2026-10-21T00:00:00"},
+])
+def test_invalid_quota_or_naive_version_never_reaches_database(body):
+    client, conn, _ = make_client(archive_responder())
+    response = client.patch(f"/api/v1/admin/tenants/{ARCHIVE_ID}/quota",
+                            json={"expected_updated_at": None, **body})
+    assert response.status_code == 422
+    assert conn.queries == []
+
+
+def test_tenant_detail_database_error_is_unavailable_not_missing_or_empty():
+    def fail(*args):
+        raise RuntimeError("synthetic read failure")
+    client, _, _ = make_client(fail)
+    response = client.get(f"/api/v1/admin/tenants/{ARCHIVE_ID}")
+    assert response.status_code == 503
+
+
+def test_int4_minutes_boundaries_for_create_and_quota():
+    from pydantic import ValidationError
+    for minutes in (0, 2147483647):
+        assert tenants_module.QuotaUpdateRequest(expected_updated_at=None, minutes_allocated=minutes).minutes_allocated == minutes
+        assert tenants_module.TenantCreateRequest(business_name="Synthetic", minutes_allocated=minutes).minutes_allocated == minutes
+    for minutes in (-1, 2147483648):
+        with pytest.raises(ValidationError):
+            tenants_module.QuotaUpdateRequest(expected_updated_at=None, minutes_allocated=minutes)
+        with pytest.raises(ValidationError):
+            tenants_module.TenantCreateRequest(business_name="Synthetic", minutes_allocated=minutes)

@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Manrope } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { SuspensionStateProvider } from "@/components/admin/suspension-state-provider";
 import { AppProviders } from "@/components/providers/app-providers";
@@ -10,8 +10,11 @@ import { sharedMetadata } from "@/lib/site-metadata";
 // inline) and the navbar renders on every public page, so the variable has to be
 // in scope for the whole document, not only the homepage's <main id="home">.
 // `.variable` defines the custom property only; body's own font-family is unchanged.
-const manrope = Manrope({
-  subsets: ["latin"],
+const manrope = localFont({
+  src: "../fonts/manrope/Manrope-Variable.ttf",
+  weight: "200 800",
+  style: "normal",
+  display: "swap",
   variable: "--font-manrope",
 });
 

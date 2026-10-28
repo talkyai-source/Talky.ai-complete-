@@ -1,0 +1,25 @@
+# Explicit production override; combine with docker-compose.observability.yml.
+# No destinations or credential values belong in this tracked file.
+services:
+  alertmanager:
+    group_add:
+      - ${ALERTMANAGER_SECRET_GID:?set the numeric group allowed to read the approved Alertmanager files}
+    volumes:
+      - type: bind
+        source: ${ALERTMANAGER_CONFIG_FILE:?set the absolute path to the rendered and validated production configuration}
+        target: /etc/alertmanager/alertmanager.yml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ALERTMANAGER_INGEST_TOKEN_FILE:?set the absolute dedicated incident-ingestion token file}
+        target: /etc/alertmanager/secrets/ingest_token
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ALERTMANAGER_EXTERNAL_SECRETS_DIR:?set the absolute directory containing approved external receiver secret files}
+        target: /etc/alertmanager/external
+        read_only: true
+        bind:
+          create_host_path: false

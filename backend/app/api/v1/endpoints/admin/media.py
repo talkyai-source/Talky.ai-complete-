@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
 import os
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, Field, field_validator, model_validator
 
 from app.api.v1.dependencies import (
     CurrentUser,
@@ -25,6 +27,7 @@ from app.api.v1.dependencies import (
 from app.api.v1.endpoints.recordings import _ranged_file_response
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
+from app.core.security.platform_admin_guard import require_platform_admin_mutation
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.call_feedback_service import (
     CallFeedbackService,
@@ -118,6 +121,165 @@ class AdminMediaDeleteRequest(BaseModel):
         if len(normalized) < 8 or not any(char.isalpha() for char in normalized):
             raise ValueError("reason must be a meaningful explanation of at least 8 characters")
         return normalized
+
+
+MediaResourceType = Literal["recording", "call_feedback"]
+MediaDeletionStage = Literal["intent_committed", "object_deleted", "failed", "completed"]
+
+
+class AdminMediaDeleteReceipt(BaseModel):
+    detail: str
+    resource_type: MediaResourceType
+    resource_id: UUID
+    outcome: Literal["completed", "absent"]
+    deletion_intent_id: UUID | None
+
+    @model_validator(mode="after")
+    def require_exact_outcome(self):
+        if (self.outcome == "completed") != (self.deletion_intent_id is not None):
+            raise ValueError("Completed deletion requires an intent; absence has no intent")
+        return self
+
+
+class AdminMediaDeletionItem(BaseModel):
+    """Saved stage only; neither a live storage probe nor an audit delivery claim."""
+    id: UUID
+    resource_type: MediaResourceType
+    resource_id: UUID
+    tenant_id: UUID
+    call_id: UUID
+    original_actor_id: UUID
+    reason: str
+    status: MediaDeletionStage
+    attempt_count: int = Field(ge=1)
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
+    object_deleted_at: AwareDatetime | None
+    completed_at: AwareDatetime | None
+
+
+class AdminMediaDeletionList(BaseModel):
+    items: list[AdminMediaDeletionItem]
+    has_more: bool
+    next_cursor: str | None
+
+
+_MEDIA_DELETION_COLUMNS = """id,resource_type,resource_id,tenant_id,call_id,
+    actor_id AS original_actor_id,reason,status,attempt_count,created_at,
+    updated_at,object_deleted_at,completed_at"""
+_MEDIA_HISTORY_TIMEOUT_SECONDS = 5
+
+
+def _deletion_receipt(
+    resource_type: MediaResourceType, resource_id: UUID, intent_id: UUID | None,
+    saved_detail: str | None = None,
+) -> dict[str, Any]:
+    label = "Recording" if resource_type == "recording" else "Feedback note"
+    detail = (
+        saved_detail if isinstance(saved_detail, str) and saved_detail.strip()
+        else f"{label} permanently deleted"
+    ) if intent_id else f"{label} is absent; no saved deletion outcome is available"
+    return AdminMediaDeleteReceipt(
+        detail=detail,
+        resource_type=resource_type, resource_id=resource_id,
+        outcome="completed" if intent_id else "absent", deletion_intent_id=intent_id,
+    ).model_dump(mode="json")
+
+
+def _media_history_position(cursor: str | None, filters: list[str | None]):
+    if cursor is None:
+        return None
+    try:
+        if not 1 <= len(cursor) <= 1024 or any(
+            char not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-" for char in cursor
+        ):
+            raise ValueError("Invalid cursor encoding")
+        data = json.loads(base64.b64decode(cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True))
+        if not isinstance(data, dict) or set(data) != {"v", "filters", "created_at", "id"}:
+            raise ValueError("Invalid cursor fields")
+        if type(data["v"]) is not int or data["v"] != 1 or data["filters"] != filters:
+            raise ValueError("Cursor does not match filters")
+        if not isinstance(data["created_at"], str) or not isinstance(data["id"], str):
+            raise ValueError("Invalid cursor position")
+        created_at = datetime.fromisoformat(data["created_at"].replace("Z", "+00:00"))
+        identity = UUID(data["id"])
+        if created_at.tzinfo is None or created_at.utcoffset() is None or str(identity) != data["id"]:
+            raise ValueError("Invalid cursor timestamp or UUID")
+        return created_at, identity
+    except (ValueError, TypeError, OverflowError, binascii.Error) as exc:
+        raise HTTPException(status_code=422, detail={"code": "invalid_media_deletion_cursor",
+            "message": "Invalid deletion history cursor. Refresh the selected filters."}) from exc
+
+
+def _media_history_cursor(item: AdminMediaDeletionItem, filters: list[str | None]) -> str:
+    payload = {"v": 1, "filters": filters, "created_at": item.created_at.isoformat(), "id": str(item.id)}
+    return base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
+
+
+async def _read_media_deletions(db_client: Client, query: str, *values: Any):
+    try:
+        async with asyncio.timeout(_MEDIA_HISTORY_TIMEOUT_SECONDS):
+            async with acquire_with_tenant(db_client.pool, None) as conn:
+                await conn.execute("SET TRANSACTION READ ONLY")
+                return await conn.fetch(query, *values)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Media deletion history unavailable type=%s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail={"code": "media_deletion_history_unavailable",
+            "message": "Saved media deletion history is temporarily unavailable."}) from exc
+
+
+@router.get("/media-deletions", response_model=AdminMediaDeletionList)
+async def list_admin_media_deletions(
+    resource_type: MediaResourceType | None = None,
+    resource_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+    call_id: UUID | None = None,
+    status: Literal["all", "intent_committed", "object_deleted", "failed", "completed"] = "all",
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor: str | None = Query(default=None, min_length=1, max_length=1024),
+    admin_user: CurrentUser = Depends(require_platform_admin),
+    db_client: Client = Depends(get_db_client),
+):
+    """Read saved deletion stages with live keyset pagination, including removed media."""
+    filters = [resource_type, str(resource_id) if resource_id else None,
+               str(tenant_id) if tenant_id else None, str(call_id) if call_id else None, status]
+    position = _media_history_position(cursor, filters)
+    predicates, values = [], []
+    for column, value in (("resource_type", resource_type), ("resource_id", resource_id),
+                          ("tenant_id", tenant_id), ("call_id", call_id),
+                          ("status", None if status == "all" else status)):
+        if value is not None:
+            values.append(value)
+            predicates.append(f"{column}=${len(values)}")
+    if position:
+        values.extend(position)
+        predicates.append(f"(created_at,id)<(${len(values)-1},${len(values)})")
+    where = " WHERE " + " AND ".join(predicates) if predicates else ""
+    values.append(limit + 1)
+    rows = await _read_media_deletions(db_client,
+        "SELECT " + _MEDIA_DELETION_COLUMNS + " FROM admin_media_deletion_intents" + where
+        + f" ORDER BY created_at DESC,id DESC LIMIT ${len(values)}", *values)
+    items = [AdminMediaDeletionItem.model_validate(dict(row)) for row in rows[:limit]]
+    has_more = len(rows) > limit
+    return AdminMediaDeletionList(items=items, has_more=has_more,
+        next_cursor=_media_history_cursor(items[-1], filters) if has_more else None)
+
+
+@router.get("/media-deletions/{intent_id}", response_model=AdminMediaDeletionItem)
+async def get_admin_media_deletion(
+    intent_id: UUID,
+    admin_user: CurrentUser = Depends(require_platform_admin),
+    db_client: Client = Depends(get_db_client),
+):
+    """Read an original saved intent; never retry erasure or probe object storage."""
+    rows = await _read_media_deletions(db_client, "SELECT " + _MEDIA_DELETION_COLUMNS
+        + " FROM admin_media_deletion_intents WHERE id=$1", intent_id)
+    if not rows:
+        raise HTTPException(status_code=404, detail={"code": "media_deletion_not_found",
+            "message": "Saved media deletion was not found."})
+    return AdminMediaDeletionItem.model_validate(dict(rows[0]))
 
 
 @dataclass(frozen=True)
@@ -451,7 +613,7 @@ async def _recording_storage_row(db_client: Client, recording_id: UUID):
 async def _feedback_storage_row(db_client: Client, feedback_id: UUID):
     async with acquire_with_tenant(db_client.pool, None) as conn:
         return await conn.fetchrow(
-            """
+            f"""
             SELECT f.*, c.phone_number, c.campaign_id, c.direction,
                    c.caller_ani, c.caller_ani_private, c.called_did,
                    t.business_name AS tenant_name,
@@ -620,6 +782,8 @@ async def retry_admin_feedback_transcription(
         await service.retry_transcription(
             tenant_id=str(row["tenant_id"]),
             call_id=str(row["call_id"]),
+            admin_actor_id=admin_user.id,
+            expected_feedback_id=str(feedback_id),
         )
     except FeedbackTranscriptionInProgressError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -790,6 +954,7 @@ async def _claim_media_deletion(
     idempotency_key: str,
     reason: str,
     expected_tenant_id: UUID | None = None,
+    require_admin: bool = False,
 ) -> _DeletionClaim | None:
     """Commit the durable deletion intent before callers may touch storage."""
 
@@ -799,6 +964,10 @@ async def _claim_media_deletion(
         raise HTTPException(status_code=422, detail="Idempotency-Key must be 8-255 characters")
 
     async with acquire_with_tenant(db_client.pool, None) as conn:
+        if require_admin:
+            # Authorize the durable admission, including replay/resumption,
+            # before media/key locks. This transaction ends before storage I/O.
+            await require_platform_admin_mutation(conn, actor_uuid)
         key_locked = await conn.fetchval(
             """
             SELECT pg_try_advisory_xact_lock(
@@ -808,7 +977,7 @@ async def _claim_media_deletion(
                 )
             )
             """,
-            actor_uuid,
+            str(actor_uuid),
             key,
         )
         if not key_locked:
@@ -996,6 +1165,34 @@ async def _claim_media_deletion(
         return _claim_from_row(intent, actor_uuid)
 
 
+async def _claim_admin_media_deletion(
+    db_client: Client,
+    *,
+    resource_type: str,
+    resource_id: UUID,
+    actor_id: str,
+    idempotency_key: str,
+    reason: str,
+) -> _DeletionClaim | None:
+    """Bound Admin admission waiting; never extend the authority lock to storage."""
+    try:
+        async with asyncio.timeout(5):
+            return await _claim_media_deletion(
+                db_client,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                actor_id=actor_id,
+                idempotency_key=idempotency_key,
+                reason=reason,
+                require_admin=True,
+            )
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Media deletion admission timed out; deletion is not confirmed. Retry with the same request key.",
+        ) from exc
+
+
 async def _mark_deletion_stage(
     db_client: Client,
     intent_id: UUID,
@@ -1077,7 +1274,7 @@ async def _serialized_media_deletion(db_client: Client, claim: _DeletionClaim):
                 hashtextextended('talky:media-hold:' || $1::text, 0)
             )
             """,
-            tenant_id,
+            str(tenant_id),
         )
         if not locked:
             raise HTTPException(
@@ -1303,7 +1500,7 @@ async def _complete_feedback_deletion(
         )
 
 
-@router.delete("/recordings/{recording_id}")
+@router.delete("/recordings/{recording_id}", response_model=AdminMediaDeleteReceipt)
 async def delete_admin_recording(
     recording_id: UUID,
     payload: AdminMediaDeleteRequest,
@@ -1318,7 +1515,7 @@ async def delete_admin_recording(
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Permanently remove recording bytes and metadata after a durable intent."""
-    claim = await _claim_media_deletion(
+    claim = await _claim_admin_media_deletion(
         db_client,
         resource_type="recording",
         resource_id=recording_id,
@@ -1327,12 +1524,12 @@ async def delete_admin_recording(
         reason=payload.reason,
     )
     if not claim:
-        return {"detail": "Recording already deleted"}
+        return _deletion_receipt("recording", recording_id, None)
     if claim.status == "completed":
-        return claim.cached_response or {
-            "detail": "Recording permanently deleted",
-            "deletion_intent_id": str(claim.intent_id),
-        }
+        # Legacy cached payloads are not the current response schema. The
+        # claim has already bound this exact resource to the durable intent.
+        return _deletion_receipt("recording", recording_id, claim.intent_id,
+            (claim.cached_response or {}).get("detail"))
 
     row = claim.snapshot
     if claim.status != "object_deleted":
@@ -1363,10 +1560,7 @@ async def delete_admin_recording(
                 status_code=503,
                 detail="Could not delete recording audio; the durable deletion intent and metadata were preserved",
             ) from storage_error
-    response_body = {
-        "detail": "Recording permanently deleted",
-        "deletion_intent_id": str(claim.intent_id),
-    }
+    response_body = _deletion_receipt("recording", recording_id, claim.intent_id)
     await _complete_recording_deletion(
         db_client,
         claim=claim,
@@ -1394,7 +1588,7 @@ async def delete_admin_recording(
     return response_body
 
 
-@router.delete("/feedback/{feedback_id}")
+@router.delete("/feedback/{feedback_id}", response_model=AdminMediaDeleteReceipt)
 async def delete_admin_feedback(
     feedback_id: UUID,
     payload: AdminMediaDeleteRequest,
@@ -1409,7 +1603,7 @@ async def delete_admin_feedback(
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Permanently remove feedback audio/transcript after a durable intent."""
-    claim = await _claim_media_deletion(
+    claim = await _claim_admin_media_deletion(
         db_client,
         resource_type="call_feedback",
         resource_id=feedback_id,
@@ -1418,12 +1612,10 @@ async def delete_admin_feedback(
         reason=payload.reason,
     )
     if not claim:
-        return {"detail": "Feedback note already deleted"}
+        return _deletion_receipt("call_feedback", feedback_id, None)
     if claim.status == "completed":
-        return claim.cached_response or {
-            "detail": "Feedback note permanently deleted",
-            "deletion_intent_id": str(claim.intent_id),
-        }
+        return _deletion_receipt("call_feedback", feedback_id, claim.intent_id,
+            (claim.cached_response or {}).get("detail"))
 
     row = claim.snapshot
     if claim.status != "object_deleted":
@@ -1447,10 +1639,7 @@ async def delete_admin_feedback(
                 detail="Could not delete feedback audio; the durable deletion intent and metadata were preserved",
             ) from storage_error
 
-    response_body = {
-        "detail": "Feedback note permanently deleted",
-        "deletion_intent_id": str(claim.intent_id),
-    }
+    response_body = _deletion_receipt("call_feedback", feedback_id, claim.intent_id)
     await _complete_feedback_deletion(
         db_client,
         claim=claim,

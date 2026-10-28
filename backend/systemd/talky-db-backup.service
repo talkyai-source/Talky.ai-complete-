@@ -11,6 +11,9 @@ Type=oneshot
 WorkingDirectory=/opt/talky/backend
 Environment=TALKY_BACKUP_DIR=/var/backups/talky
 Environment=TALKY_BACKUP_KEEP_DAYS=30
+# Root-owned file containing TALKY_BACKUP_PRINCIPAL_ID=<existing active verified
+# platform-admin UUID>. Missing/invalid configuration fails before publication.
+EnvironmentFile=-/etc/talky/db-backup.env
 ExecStart=/bin/bash /opt/talky/backend/deploy/db-backup.sh
 StandardOutput=journal
 StandardError=journal

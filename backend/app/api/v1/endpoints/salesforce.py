@@ -230,32 +230,17 @@ def _require_active_row(db_client: Client, tenant_id: str) -> dict:
     return row
 
 
-def _update_config(db_client: Client, connector_id: str, tenant_id: str, patch: Dict[str, Any]) -> Dict[str, Any]:
-    current = (
-        db_client.table("connectors")
-        .select("config")
-        .eq("id", connector_id)
-        .eq("tenant_id", tenant_id)
-        .execute()
-    )
-    if getattr(current, "error", None) or not current.data:
-        raise HTTPException(status_code=404, detail="Salesforce connector not found")
-    merged = _coerce_config(current.data[0].get("config"))
-    for key, value in patch.items():
-        if value is None:
-            merged.pop(key, None)
-        else:
-            merged[key] = value
-    resp = (
-        db_client.table("connectors")
-        .update({"config": merged, "updated_at": datetime.now(timezone.utc).isoformat()})
-        .eq("id", connector_id)
-        .eq("tenant_id", tenant_id)
-        .execute()
-    )
-    if getattr(resp, "error", None) or not resp.data:
-        raise HTTPException(status_code=503, detail="Salesforce settings could not be saved")
-    return merged
+async def _update_config(db_client: Client, connector_id: str, tenant_id: str, patch: Dict[str, Any], *, current_user, request: Request) -> Dict[str, Any]:
+    from app.services.connector_lifecycle import ConnectorActor, ConnectorLifecycle, ConnectorLifecycleError
+    try:
+        return await ConnectorLifecycle(db_client, actor=ConnectorActor.human(
+            current_user, "salesforce_settings", request=request)).update_config(
+            tenant_id, connector_id, patch, provider="salesforce"
+        )
+    except ConnectorLifecycleError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Salesforce settings could not be saved") from exc
 
 
 def _api_base(request: Request) -> str:
@@ -406,7 +391,7 @@ async def update_salesforce_settings(
     if body.callback_priority is not None:
         patch["callback_priority"] = int(body.callback_priority)
     if patch:
-        _update_config(db_client, str(row["id"]), current_user.tenant_id, patch)
+        await _update_config(db_client, str(row["id"]), current_user.tenant_id, patch, current_user=current_user, request=request)
     rows = _salesforce_rows(db_client, current_user.tenant_id)
     return _settings_response(request, current_user.tenant_id, rows)
 
@@ -442,13 +427,14 @@ async def rotate_webhook_token(
     update the Salesforce Flow / Outbound Message endpoint URL."""
     row = _require_active_row(db_client, current_user.tenant_id)
     token = secrets.token_urlsafe(32)
-    _update_config(
+    await _update_config(
         db_client, str(row["id"]), current_user.tenant_id,
         {
             "webhook_token_hash": _hash_token(token),
             "webhook_token_encrypted": get_encryption_service().encrypt(token),
             "webhook_token_rotated_at": datetime.now(timezone.utc).isoformat(),
         },
+        current_user=current_user, request=request,
     )
     rows = _salesforce_rows(db_client, current_user.tenant_id)
     return _settings_response(request, current_user.tenant_id, rows, reveal=True)

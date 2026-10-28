@@ -12,10 +12,11 @@ import pytest
 
 from app.domain.services.call_guard import CallGuard, GuardCheck
 from tests.unit.test_subscription_status_vocabulary import TENANT_ID, _FakeConn, _FakePool, _FakeRow
+from tests.unit.test_call_guard_formal_authority import authority_row
 
 
 def _guard(status):
-    row = _FakeRow(id=TENANT_ID, subscription_status="active", status=status)
+    row = _FakeRow(authority_row(id=TENANT_ID, status=status))
     return CallGuard(db_pool=_FakePool(_FakeConn(row)), redis_client=None)
 
 

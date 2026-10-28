@@ -64,6 +64,25 @@ test("request-option decoder passes credential IDs as bytes without mutating the
     assert.equal(requestOptions.allowCredentials[0].id, "-_8");
 });
 
+test("cancelled request refuses to open a native credential prompt", async () => {
+    const seen = installCredentials();
+    const controller = new AbortController(); controller.abort();
+    await assert.rejects(getWebAuthnCredential(
+        requestOptions as unknown as Parameters<typeof getWebAuthnCredential>[0], controller.signal,
+    ), { name: "AbortError" });
+    assert.equal(seen.length, 0);
+});
+
+test("credential request forwards its AbortSignal without changing server options", async () => {
+    const seen = installCredentials();
+    const controller = new AbortController();
+    await getWebAuthnCredential(
+        requestOptions as unknown as Parameters<typeof getWebAuthnCredential>[0], controller.signal,
+    );
+    assert.equal((seen[0] as CredentialRequestOptions).signal, controller.signal);
+    assert.equal((seen[0] as CredentialRequestOptions).publicKey?.timeout, 42000);
+});
+
 test("registration decodes excluded existing keys and preserves server requirements", async () => {
     const seen = installCredentials();
     const input = { challenge: "AQI", rp: { id: "example.com", name: "Talky" },

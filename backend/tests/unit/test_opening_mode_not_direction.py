@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.domain.services.credential_resolver import ResolvedCredential
 from app.domain.services.voice_orchestrator import (
     Direction,
     VoiceOrchestrator,
@@ -146,7 +147,8 @@ async def test_realtime_callee_first_outbound_bridge_is_outbound_and_waits():
         pipeline_mode="realtime",
         gateway_sample_rate=8000,
     )
-    resolver = SimpleNamespace(resolve=AsyncMock(return_value="test-api-key"))
+    credential = ResolvedCredential("test-api-key", source="platform")
+    resolver = SimpleNamespace(resolve_with_metadata=AsyncMock(return_value=credential))
     realtime_session = SimpleNamespace(
         connect=AsyncMock(return_value=True), close=AsyncMock()
     )

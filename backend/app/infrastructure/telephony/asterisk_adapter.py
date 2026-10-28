@@ -33,6 +33,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 from urllib.parse import quote
@@ -41,6 +42,9 @@ import aiohttp
 
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
 from app.domain.services.telephony.config import AUDIO_CALLBACK_BATCH_FRAMES
+from app.domain.services.telephony.control_backend_identity import (
+    ControlBackendIdentityError, asterisk_control_backend, control_backend_error,
+)
 from app.infrastructure.telephony.browser_media_gateway import SessionGoneError
 
 # How long after an interrupt an ACCEPTED TTS chunk is still attributed to the
@@ -304,6 +308,10 @@ class AsteriskAdapter(CallControlAdapter):
         # Bearer token, so it needs a session with no default credentials.
         self._gateway_session: Optional[aiohttp.ClientSession] = None
         self._connected_flag: bool = False
+        self._control_backend_operations = 0
+        self._control_backend_reconfiguring = False
+        self._control_backend_system: str | None = None
+        self._control_backend_startup: str | None = None
         self._ws_task: Optional[asyncio.Task] = None
         self._stop_event: asyncio.Event = asyncio.Event()
 
@@ -727,6 +735,21 @@ class AsteriskAdapter(CallControlAdapter):
     # ------------------------------------------------------------------
 
     async def connect(self, config: Optional[Dict[str, Any]] = None) -> None:
+        # Checks and acquisition happen before the first await on this event
+        # loop. Independent calls remain concurrent; reconfiguration refuses
+        # to replace a transport/account that a bound operation is using.
+        if self._control_backend_operations or self._control_backend_reconfiguring:
+            raise ControlBackendIdentityError("control_backend_reconfiguration_busy")
+        self._control_backend_reconfiguring = True
+        try:
+            await self._connect_control_backend(config)
+        finally:
+            self._control_backend_reconfiguring = False
+
+    async def _connect_control_backend(self, config: Optional[Dict[str, Any]] = None) -> None:
+        self._connected_flag = False
+        self._control_backend_system = None
+        self._control_backend_startup = None
         if config:
             self._ari_host = config.get("ari_host", self._ari_host)
             self._ari_port = int(config.get("ari_port", self._ari_port))
@@ -748,6 +771,13 @@ class AsteriskAdapter(CallControlAdapter):
             ) as resp:
                 if resp.status not in (200, 201):
                     raise RuntimeError(f"ARI info returned {resp.status}")
+                info = await resp.json(content_type=None)
+                system = info.get("system", {}) if isinstance(info, dict) else {}
+                status = info.get("status", {}) if isinstance(info, dict) else {}
+                self._control_backend_system = system.get("entity_id") if isinstance(system, dict) else None
+                self._control_backend_startup = status.get("startup_time") if isinstance(status, dict) else None
+                if self.control_backend_identity is None:
+                    raise RuntimeError("ARI control backend identity unavailable")
         except Exception as exc:
             await self._session.close()
             raise RuntimeError(f"AsteriskAdapter: cannot reach ARI: {exc}") from exc
@@ -761,6 +791,44 @@ class AsteriskAdapter(CallControlAdapter):
             f"AsteriskAdapter connected to ARI at {self._ari_host}:{self._ari_port} "
             f"app={self._app_name}"
         )
+
+    @property
+    def control_backend_identity(self) -> str | None:
+        return asterisk_control_backend(
+            host=self._ari_host, port=self._ari_port, account=self._ari_username,
+            application=self._app_name, system=self._control_backend_system,
+            startup=self._control_backend_startup,
+        )
+
+    async def _verify_control_backend(self, expected: str) -> None:
+        error = control_backend_error(self, expected)
+        if error:
+            raise ControlBackendIdentityError(error)
+        info = await self._ari("GET", "/asterisk/info")
+        system = info.get("system", {}) if isinstance(info, dict) else {}
+        status = info.get("status", {}) if isinstance(info, dict) else {}
+        observed = asterisk_control_backend(
+            host=self._ari_host, port=self._ari_port, account=self._ari_username,
+            application=self._app_name,
+            system=system.get("entity_id") if isinstance(system, dict) else None,
+            startup=status.get("startup_time") if isinstance(status, dict) else None,
+        )
+        if observed != expected:
+            raise ControlBackendIdentityError("control_backend_identity_mismatch" if observed else "adapter_backend_identity_unconfirmed")
+
+    @asynccontextmanager
+    async def control_backend_guard(self, expected: str):
+        # Two cheap info reads share the caller's whole-operation deadline.
+        # Never infer original ownership from channel absence on a new PBX.
+        if self._control_backend_reconfiguring:
+            raise ControlBackendIdentityError("control_backend_reconfiguration_busy")
+        self._control_backend_operations += 1
+        try:
+            await self._verify_control_backend(expected)
+            yield
+            await self._verify_control_backend(expected)
+        finally:
+            self._control_backend_operations -= 1
 
     def owned_call_ids(self) -> set[str]:
         """Snapshot every locally-owned human-call root known to this adapter.
@@ -3595,8 +3663,13 @@ class AsteriskAdapter(CallControlAdapter):
             )
             return denied(missing)
         try:
+            binding = self.control_backend_identity
+            async def admit_from_bound_backend():
+                async with self.control_backend_guard(binding):
+                    return await callback(channel_id, {**meta, "control_backend": binding})
+
             raw = await asyncio.wait_for(
-                callback(channel_id, dict(meta)),
+                admit_from_bound_backend(),
                 timeout=self._inbound_admission_timeout_s,
             )
             decision = self._normalise_admission_decision(
@@ -3604,6 +3677,8 @@ class AsteriskAdapter(CallControlAdapter):
                 channel_id=channel_id,
                 meta=meta,
             )
+            # Private server-owned binding, never supplied by the callback.
+            decision["_control_backend"] = binding
         except asyncio.TimeoutError:
             logger.error(
                 "inbound_admission_denied channel=%s reason=timeout timeout_s=%.1f",
@@ -3975,6 +4050,34 @@ class AsteriskAdapter(CallControlAdapter):
             return False
 
     async def _attempt_failed_inbound_setup_cleanup(
+        self,
+        channel_id: str,
+        *,
+        session_id: str = "",
+        ext_channel_id: str = "",
+        bridge_id: str = "",
+    ) -> bool:
+        """Keep failed setup cleanup on the backend that admitted this channel."""
+        admission = self._inbound_admissions.get(channel_id) or {}
+        expected = admission.get("_control_backend")
+        if not expected:
+            from app.domain.services.telephony.control_backend_identity import saved_control_backend
+            expected = saved_control_backend(admission.get("config_snapshot"))
+        if not expected:
+            return False  # Unknown original ownership is not PBX absence.
+        try:
+            async with asyncio.timeout(5.0):
+                async with self.control_backend_guard(expected):
+                    return await self._attempt_bound_inbound_setup_cleanup(
+                        channel_id, session_id=session_id,
+                        ext_channel_id=ext_channel_id, bridge_id=bridge_id,
+                    )
+        except Exception as exc:
+            logger.warning("inbound_setup_backend_unconfirmed channel=%s err_type=%s",
+                           channel_id[:12], type(exc).__name__)
+            return False
+
+    async def _attempt_bound_inbound_setup_cleanup(
         self,
         channel_id: str,
         *,
@@ -4632,12 +4735,15 @@ class AsteriskAdapter(CallControlAdapter):
 
             # Explicit ARI answer only after the admission service committed
             # the durable row + reservations and returned its pinned snapshot.
+            from app.domain.services.telephony.lifecycle import _require_call_authority
+            answer_dispatched = False
             try:
-                await self._ari(
-                    "POST",
-                    f"/channels/{channel_id}/answer",
-                    ok=(200, 204),
-                )
+                async with self.control_backend_guard(admission.get("_control_backend")):
+                    await _require_call_authority(str(admission.get("tenant_id") or ""))
+                    answer_dispatched = True
+                    await self._ari(
+                        "POST", f"/channels/{channel_id}/answer", ok=(200, 204),
+                    )
             except _AriResponseError as exc:
                 if exc.status in _DEFINITIVE_ANSWER_REJECTION_STATUSES:
                     # This response proves Answer was rejected. Keep the Redis
@@ -4657,15 +4763,23 @@ class AsteriskAdapter(CallControlAdapter):
             except asyncio.CancelledError:
                 # Cancellation while the HTTP request is in flight provides no
                 # evidence about whether Asterisk committed Answer.
-                setup_failure_reason = "process_restart_answer_ambiguous"
+                setup_failure_reason = "process_restart_answer_ambiguous" if answer_dispatched else "account_authority_denied"
                 raise
             except Exception:
                 # Timeout, disconnect, and response-parse failures are likewise
                 # ambiguous.  PBX deletion is still required, but billing must
                 # remain held for carrier/CDR reconciliation rather than being
                 # automatically finalized or released.
-                setup_failure_reason = "process_restart_answer_ambiguous"
+                setup_failure_reason = "process_restart_answer_ambiguous" if answer_dispatched else "account_authority_denied"
                 raise
+            finally:
+                if not answer_dispatched:
+                    # The authority/backend guard rejected before Answer I/O.
+                    # Durable cleanup intent stays; local billing is not guessed.
+                    for answer_view in (admission, cached_admission):
+                        if isinstance(answer_view, dict):
+                            answer_view.pop("_answer_intent_at_monotonic", None)
+                            answer_view.pop("_answer_intent_at_utc", None)
 
             # Provider Answer is already billable when the HTTP request
             # returns. Capture both clocks synchronously, then require the
@@ -4713,141 +4827,154 @@ class AsteriskAdapter(CallControlAdapter):
                 if cached_admission is not None:
                     cached_admission["_answered_at_utc"] = persisted_text
 
-            listen_port = await self._alloc_rtp_port()
-            session_id = f"asterisk-{uuid.uuid4().hex}"
-
-            # 1. Pre-assign a deterministic ID before the network create. If
-            # Asterisk commits the bridge but the response times out, cleanup
-            # can still delete the exact resource instead of leaking an
-            # unknowable server-generated ID.
-            bridge_id = f"talky-inbound-bridge-{uuid.uuid4().hex[:20]}"
-            from app.infrastructure.telephony.media_reconciliation import media_bridge_name
-
-            bridge = await self._ari(
-                "POST",
-                "/bridges",
-                params={"type": "mixing", "bridgeId": bridge_id, "name": media_bridge_name(self._app_name, channel_id)},
-            )
-            returned_bridge_id = str((bridge or {}).get("id") or "").strip()
-            if returned_bridge_id:
-                bridge_id = returned_bridge_id
-
-            # 2. Add caller channel to bridge
-            await self._ari(
-                "POST",
-                f"/bridges/{bridge_id}/addChannel",
-                params={"channel": channel_id},
-                ok=(200, 204, 209),
-            )
-
-            # 3. Create ExternalMedia channel pointing at C++ Gateway RTP listener
-            # As with bridges, channelId is chosen before POST so an ambiguous
-            # timeout-after-create remains recoverable.
-            ext_channel_id = f"talky-inbound-media-{uuid.uuid4().hex[:20]}"
-            ext_data = await self._ari(
-                "POST",
-                "/channels/externalMedia",
-                params={
-                    "app": self._app_name,
-                    "external_host": f"{self._gateway_rtp_ip}:{listen_port}",
-                    "format": "ulaw",
-                    "encapsulation": "rtp",
-                    "transport": "udp",
-                    "connection_type": "client",
-                    "direction": "both",
-                    "channelId": ext_channel_id,
-                },
-                json_body={"variables": {"TALKY_MEDIA_OWNER": self._app_name, "TALKY_MEDIA_PARENT": channel_id}},
-            )
-            returned_ext_channel_id = str((ext_data or {}).get("id") or "").strip()
-            if returned_ext_channel_id:
-                ext_channel_id = returned_ext_channel_id
-
-            # 4/5. addChannel + two UNICASTRTP_LOCAL_* GETs are independent of
-            # each other (share only ext_channel_id), so run them concurrently.
-            # Mirrors the same optimisation in _on_outbound_answered.
-            add_coro = self._ari(
-                "POST",
-                f"/bridges/{bridge_id}/addChannel",
-                params={"channel": ext_channel_id},
-                ok=(200, 204, 209),
-            )
-            _, (remote_ip, remote_port) = await asyncio.gather(
-                add_coro,
-                self._resolve_unicastrtp_local(channel_id=ext_channel_id, channel=ext_data),
-            )
-
-            # 6. Start C++ Gateway session (AI mode: echo_enabled=False once TTS hooked in)
-            await self._start_gateway_session(
-                {
-                    "session_id": session_id,
-                    "listen_ip": self._gateway_rtp_ip,
-                    "listen_port": listen_port,
-                    "remote_ip": remote_ip,
-                    "remote_port": remote_port,
-                    "codec": "pcmu",
-                    "ptime_ms": 20,
-                    "echo_enabled": False,
-                    # Increase timeouts for AI pipeline initialization
-                    "startup_no_rtp_timeout_ms": 30000,  # 30 seconds (was 5s default)
-                    "active_no_rtp_timeout_ms": 15000,  # 15 seconds (was 8s default)
-                    # Maximum call lifetime (two hours by default).
-                    "session_final_timeout_ms": _SESSION_FINAL_TIMEOUT_MS,
-                    # Loopback has no jitter; one frame is 20ms (formerly 3).
-                    "jitter_buffer_prefetch_frames": 1,
-                    # 2 frames = 40ms = Deepgram Flux's optimal chunk size. Was 4 (80ms) when
-                    # we re-batched downstream; now we hand off frames at Flux's native rate so
-                    # there's no re-chunking jitter and per-call resamples drop by 50%.
-                    # Sourced from telephony.config so the gap detector, which
-                    # derives its threshold from the same constant, cannot drift
-                    # out of step with it again (it did: this went 4 -> 2 while
-                    # the detector kept assuming 80ms).
-                    "audio_callback_batch_frames": AUDIO_CALLBACK_BATCH_FRAMES,
-                    "enforce_rtp_source": True,
-                    # VG-01 sequence-ordered STT tap (see _stt_reorder_config).
-                    **self._stt_reorder_config(),
-                    # Optional TTS queue cap (see _tts_queue_config).
-                    **self._tts_queue_config(),
-                    # Tell the gateway to POST audio chunks to our backend callback
-                    "audio_callback_url": (
-                        f"{os.getenv('BACKEND_INTERNAL_URL', 'http://127.0.0.1:8000')}"
-                        f"/api/v1/sip/telephony/audio/{session_id}"
-                    ),
-                }
-            )
-
-            # Track the session
-            self._active_sessions[channel_id] = {
-                "session_id": session_id,
-                "listen_port": listen_port,
-                "bridge_id": bridge_id,
-                "direction": "inbound",
-                "answered_at_monotonic": answered_at_monotonic,
-                "first_agent_audio_recorded": False,
-            }
-            self._ext_channels[channel_id] = ext_channel_id
-            self._bridges[channel_id] = bridge_id
-            self._gateway_sessions[channel_id] = session_id
-
-            logger.info(
-                f"AsteriskAdapter: session started channel={channel_id[:12]} "
-                f"session={session_id} rtp_port={listen_port} remote={remote_ip}:{remote_port}"
-            )
-
-            # 7. Notify any registered callback for this call_id
-            cb = self._call_arrived_callbacks.get(channel_id)
-            if cb:
-                asyncio.create_task(cb(channel_id))
-            elif self._on_new_call:
-                # The admission object is passed directly as well as cached so
-                # lifecycle startup never performs a second route lookup and a
-                # very fast hangup cannot race the hand-off.
-                self._schedule_inbound_handoff(channel_id, admission)
-            else:
-                self.reject_pending_inbound_handoff(
-                    channel_id,
-                    reason="lifecycle_callback_unavailable",
+            # Persistence deliberately runs outside the provider guard. Reacquire
+            # the original binding before subsequent media effects so a changed
+            # configuration cannot redirect setup to a replacement PBX.
+            async with self.control_backend_guard(admission.get("_control_backend")):
+                # A hold can commit during Answer. Persist actual billable evidence
+                # first, then converge through existing proof-aware cleanup before
+                # allocating media. A proved pre-hold Answer may retain the explicit
+                # non-immediate exception; an intent timestamp cannot supply it.
+                await _require_call_authority(
+                    str(admission.get("tenant_id") or ""),
+                    existing_call_id=str(admission.get("call_id") or ""),
                 )
+
+                listen_port = await self._alloc_rtp_port()
+                session_id = f"asterisk-{uuid.uuid4().hex}"
+
+                # 1. Pre-assign a deterministic ID before the network create. If
+                # Asterisk commits the bridge but the response times out, cleanup
+                # can still delete the exact resource instead of leaking an
+                # unknowable server-generated ID.
+                bridge_id = f"talky-inbound-bridge-{uuid.uuid4().hex[:20]}"
+                from app.infrastructure.telephony.media_reconciliation import media_bridge_name
+
+                bridge = await self._ari(
+                    "POST",
+                    "/bridges",
+                    params={"type": "mixing", "bridgeId": bridge_id, "name": media_bridge_name(self._app_name, channel_id)},
+                )
+                returned_bridge_id = str((bridge or {}).get("id") or "").strip()
+                if returned_bridge_id:
+                    bridge_id = returned_bridge_id
+
+                # 2. Add caller channel to bridge
+                await self._ari(
+                    "POST",
+                    f"/bridges/{bridge_id}/addChannel",
+                    params={"channel": channel_id},
+                    ok=(200, 204, 209),
+                )
+
+                # 3. Create ExternalMedia channel pointing at C++ Gateway RTP listener
+                # As with bridges, channelId is chosen before POST so an ambiguous
+                # timeout-after-create remains recoverable.
+                ext_channel_id = f"talky-inbound-media-{uuid.uuid4().hex[:20]}"
+                ext_data = await self._ari(
+                    "POST",
+                    "/channels/externalMedia",
+                    params={
+                        "app": self._app_name,
+                        "external_host": f"{self._gateway_rtp_ip}:{listen_port}",
+                        "format": "ulaw",
+                        "encapsulation": "rtp",
+                        "transport": "udp",
+                        "connection_type": "client",
+                        "direction": "both",
+                        "channelId": ext_channel_id,
+                    },
+                    json_body={"variables": {"TALKY_MEDIA_OWNER": self._app_name, "TALKY_MEDIA_PARENT": channel_id}},
+                )
+                returned_ext_channel_id = str((ext_data or {}).get("id") or "").strip()
+                if returned_ext_channel_id:
+                    ext_channel_id = returned_ext_channel_id
+
+                # 4/5. addChannel + two UNICASTRTP_LOCAL_* GETs are independent of
+                # each other (share only ext_channel_id), so run them concurrently.
+                # Mirrors the same optimisation in _on_outbound_answered.
+                add_coro = self._ari(
+                    "POST",
+                    f"/bridges/{bridge_id}/addChannel",
+                    params={"channel": ext_channel_id},
+                    ok=(200, 204, 209),
+                )
+                _, (remote_ip, remote_port) = await asyncio.gather(
+                    add_coro,
+                    self._resolve_unicastrtp_local(channel_id=ext_channel_id, channel=ext_data),
+                )
+
+                # 6. Start C++ Gateway session (AI mode: echo_enabled=False once TTS hooked in)
+                await self._start_gateway_session(
+                    {
+                        "session_id": session_id,
+                        "listen_ip": self._gateway_rtp_ip,
+                        "listen_port": listen_port,
+                        "remote_ip": remote_ip,
+                        "remote_port": remote_port,
+                        "codec": "pcmu",
+                        "ptime_ms": 20,
+                        "echo_enabled": False,
+                        # Increase timeouts for AI pipeline initialization
+                        "startup_no_rtp_timeout_ms": 30000,  # 30 seconds (was 5s default)
+                        "active_no_rtp_timeout_ms": 15000,  # 15 seconds (was 8s default)
+                        # Maximum call lifetime (two hours by default).
+                        "session_final_timeout_ms": _SESSION_FINAL_TIMEOUT_MS,
+                        # Loopback has no jitter; one frame is 20ms (formerly 3).
+                        "jitter_buffer_prefetch_frames": 1,
+                        # 2 frames = 40ms = Deepgram Flux's optimal chunk size. Was 4 (80ms) when
+                        # we re-batched downstream; now we hand off frames at Flux's native rate so
+                        # there's no re-chunking jitter and per-call resamples drop by 50%.
+                        # Sourced from telephony.config so the gap detector, which
+                        # derives its threshold from the same constant, cannot drift
+                        # out of step with it again (it did: this went 4 -> 2 while
+                        # the detector kept assuming 80ms).
+                        "audio_callback_batch_frames": AUDIO_CALLBACK_BATCH_FRAMES,
+                        "enforce_rtp_source": True,
+                        # VG-01 sequence-ordered STT tap (see _stt_reorder_config).
+                        **self._stt_reorder_config(),
+                        # Optional TTS queue cap (see _tts_queue_config).
+                        **self._tts_queue_config(),
+                        # Tell the gateway to POST audio chunks to our backend callback
+                        "audio_callback_url": (
+                            f"{os.getenv('BACKEND_INTERNAL_URL', 'http://127.0.0.1:8000')}"
+                            f"/api/v1/sip/telephony/audio/{session_id}"
+                        ),
+                    }
+                )
+
+                # Track the session
+                self._active_sessions[channel_id] = {
+                    "session_id": session_id,
+                    "listen_port": listen_port,
+                    "bridge_id": bridge_id,
+                    "direction": "inbound",
+                    "answered_at_monotonic": answered_at_monotonic,
+                    "first_agent_audio_recorded": False,
+                }
+                self._ext_channels[channel_id] = ext_channel_id
+                self._bridges[channel_id] = bridge_id
+                self._gateway_sessions[channel_id] = session_id
+
+                logger.info(
+                    f"AsteriskAdapter: session started channel={channel_id[:12]} "
+                    f"session={session_id} rtp_port={listen_port} remote={remote_ip}:{remote_port}"
+                )
+
+                # 7. Notify any registered callback for this call_id
+                cb = self._call_arrived_callbacks.get(channel_id)
+                if cb:
+                    asyncio.create_task(cb(channel_id))
+                elif self._on_new_call:
+                    # The admission object is passed directly as well as cached so
+                    # lifecycle startup never performs a second route lookup and a
+                    # very fast hangup cannot race the hand-off.
+                    self._schedule_inbound_handoff(channel_id, admission)
+                else:
+                    self.reject_pending_inbound_handoff(
+                        channel_id,
+                        reason="lifecycle_callback_unavailable",
+                    )
 
         except asyncio.CancelledError:
             self._schedule_failed_inbound_setup_cleanup(

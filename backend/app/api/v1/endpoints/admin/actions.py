@@ -359,9 +359,17 @@ async def get_admin_actions(
         query = query.range(offset, offset + page_size - 1)
         
         response = query.execute()
+        # The PostgreSQL adapter reports dependency failures in its envelope.
+        # Only a complete observation can establish an empty action history.
+        if (getattr(response, "error", None)
+                or not isinstance(response.data, list)
+                or isinstance(response.count, bool)
+                or not isinstance(response.count, int)
+                or response.count < 0):
+            raise RuntimeError("Action list observation unavailable")
         
         items = []
-        for action in response.data or []:
+        for action in response.data:
             tenant = action.get("tenants", {})
             lead = action.get("leads") or {}
             
@@ -388,7 +396,7 @@ async def get_admin_actions(
         
         return ActionListResponse(
             items=items,
-            total=response.count or 0,
+            total=response.count,
             page=page,
             page_size=page_size
         )
@@ -397,9 +405,9 @@ async def get_admin_actions(
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch actions: {str(e)}"
-        )
+            status_code=503,
+            detail="Action records are unavailable. Please retry."
+        ) from e
 
 
 @router.get("/actions/{action_id}", response_model=ActionDetail)
@@ -746,23 +754,44 @@ async def retry_action(
 async def cancel_action(
     action_id: str,
     admin_user: CurrentUser = Depends(require_admin),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
+    *,
+    request: Request,
 ):
     """Cancel only before the owned executor/outbox has reserved dispatch."""
     try:
         scope = _admin_tenant(admin_user)
         action_id = str(UUID(action_id))
+        actor_id = str(admin_user.id)
+        session_id = getattr(request.state, "authenticated_session_id", None)
+        if getattr(request.state, "authenticated_user_id", None) != actor_id or not session_id:
+            raise HTTPException(status_code=401, detail="Current authenticated session required")
         # Only platform admins use the existing bypass; all other accepted
         # Admin roles stay tenant scoped. This lock is shared with claim and
         # callback preparation; updates also pin the row's authoritative tenant.
         async with asyncio.timeout(5):
-            async with acquire_with_tenant(db_client.pool, scope) as conn:
+            async with acquire_with_tenant(db_client.pool, scope, user_id=actor_id) as conn:
+                if await conn.fetchval("SHOW transaction_isolation") != "read committed":
+                    raise HTTPException(status_code=503, detail="Current administrator authority requires a fresh transaction snapshot.")
                 row = await conn.fetchrow(
                     "SELECT * FROM assistant_actions WHERE id=$1::uuid "
                     "AND ($2::uuid IS NULL OR tenant_id=$2::uuid) FOR UPDATE", action_id, scope,
                 )
                 if row is None:
                     raise HTTPException(status_code=404, detail="Action not found")
+                # The resource lock may have waited behind another transaction.
+                # Recheck the verified session and current canonical role/scope
+                # before using the authority captured by the HTTP dependency.
+                principal = await load_session_principal(conn, {
+                    "sub": actor_id, "sid": session_id,
+                    "tenant_id": getattr(admin_user, "tenant_id", None),
+                })
+                current_role = normalize_role(principal["role"])
+                if current_role not in {UserRole.PLATFORM_ADMIN, UserRole.PARTNER_ADMIN, UserRole.TENANT_ADMIN}:
+                    raise HTTPException(status_code=403, detail="Current admin authority required")
+                if (current_role != UserRole.PLATFORM_ADMIN
+                        and str(principal["tenant_id"]) != str(row["tenant_id"])):
+                    raise HTTPException(status_code=403, detail="Current tenant authority required")
                 if not _cancellation_owned(row) or await _callback_reserved(conn, row):
                     raise HTTPException(status_code=409, detail={
                         "code": "action_not_cancellable", "action_id": action_id,
@@ -776,7 +805,7 @@ async def cancel_action(
                     action_id, str(row["tenant_id"]), row["status"], json.dumps({
                         "success": False, "status": "cancelled", "confirmation_allowed": False,
                         "message": "Cancelled before dispatch was reserved.",
-                        "cancelled_by_user_id": str(admin_user.id),
+                        "cancelled_by_user_id": actor_id,
                     }),
                 )
                 if result is None:
@@ -786,6 +815,8 @@ async def cancel_action(
     
     except HTTPException:
         raise
+    except PrincipalUnavailable as exc:
+        raise HTTPException(status_code=401, detail="Current account or session is unavailable") from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="Invalid action ID") from exc
     except Exception as exc:

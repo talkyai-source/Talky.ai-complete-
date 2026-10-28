@@ -29,6 +29,7 @@ def _request():
 
 def _setup(monkeypatch, *, mfa_enabled):
     conn = SimpleNamespace(
+        is_in_transaction=lambda: True,
         fetchrow=AsyncMock(return_value={
             "id": USER_ID, "email": "u@example.com", "name": "U", "role": "tenant_admin",
             "password_hash": "h", "tenant_id": uuid4(), "is_active": True, "is_verified": True,
@@ -76,3 +77,13 @@ async def test_non_mfa_user_still_records_success_before_session(monkeypatch):
     with pytest.raises(RuntimeError, match="stop-after-success"):
         await _login()
     assert len(_success_rows(attempts)) == 1
+
+
+async def test_mfa_enabled_during_password_work_is_read_again_under_the_profile_fence(monkeypatch):
+    attempts = _setup(monkeypatch, mfa_enabled=False)
+    monkeypatch.setattr(login_mod, "lock_user_credential_issuance", AsyncMock(return_value={
+        "id": USER_ID, "password_hash": "h", "mfa_enabled": True}))
+    response = await _login()
+    assert b"mfa_challenge_token" in response.body
+    assert _success_rows(attempts) == []
+    login_mod.create_session.assert_not_awaited()

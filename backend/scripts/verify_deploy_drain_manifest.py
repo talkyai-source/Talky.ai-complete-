@@ -128,6 +128,12 @@ def verify_and_consume_manifest(
     if not hmac.compare_digest(actual_digest, expected_sha256):
         raise ManifestError("supplied manifest SHA-256 does not match the manifest bytes")
 
+    schema_version = root.get("schema_version")
+    if type(schema_version) is not int or schema_version not in (1, 2):
+        raise ManifestError("manifest.schema_version must be integer 1 or 2")
+    approval_keys = (
+        {"approval_mode", "owner_authorization_ref"} if schema_version == 2 else set()
+    )
     root = _exact_keys(
         root,
         {
@@ -140,11 +146,13 @@ def verify_and_consume_manifest(
             "traffic",
             "evidence",
             "approvers",
-        },
+        } | approval_keys,
         "manifest",
     )
-    if type(root["schema_version"]) is not int or root["schema_version"] != 1:
-        raise ManifestError("manifest.schema_version must be integer 1")
+    if schema_version == 2:
+        if root["approval_mode"] != "single-owner":
+            raise ManifestError("manifest.approval_mode must be exactly single-owner")
+        _safe_ref(root["owner_authorization_ref"], "manifest.owner_authorization_ref")
     manifest_id = _manifest_id(root["manifest_id"])
     if root["candidate_sha"] != candidate_sha:
         raise ManifestError("manifest candidate_sha does not equal the frozen deploy candidate")
@@ -193,7 +201,9 @@ def verify_and_consume_manifest(
         raise ManifestError("topology_ref and change_ref must be independent evidence references")
 
     approvers = root["approvers"]
-    if not isinstance(approvers, list) or len(approvers) < 2:
+    if schema_version == 2 and (not isinstance(approvers, list) or len(approvers) != 1):
+        raise ManifestError("single-owner manifest.approvers must contain exactly one platform owner")
+    if schema_version == 1 and (not isinstance(approvers, list) or len(approvers) < 2):
         raise ManifestError("manifest.approvers must contain at least two independent approvers")
     principals: set[str] = set()
     roles: set[str] = set()
@@ -205,6 +215,8 @@ def verify_and_consume_manifest(
         approval_ref = _safe_ref(
             approver["approval_ref"], f"approvers[{index}].approval_ref"
         ).casefold()
+        if schema_version == 2 and approver["role"] != "platform-owner":
+            raise ManifestError("single-owner approver role must be exactly platform-owner")
         if principal in principals or role in roles or approval_ref in approval_refs:
             raise ManifestError("approvers must have distinct principals, roles, and approval refs")
         principals.add(principal)

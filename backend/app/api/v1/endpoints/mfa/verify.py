@@ -19,6 +19,7 @@ from app.core.jwt_security import encode_access_token as _encode_access_token
 from app.core.postgres_adapter import Client
 from app.core.security.lockout import check_account_locked, record_login_attempt
 from app.core.security.principal import load_current_principal, PrincipalUnavailable, assert_expected_identity
+from app.core.security.credential_issuance import lock_user_credential_issuance
 from app.core.security.recovery import (
     mark_recovery_code_used,
     verify_recovery_code_returning_id,
@@ -96,7 +97,7 @@ async def verify_mfa_challenge(
     # The signed challenge must be resolved before its tenant is known.
     async with _verification_transaction(db_client.pool) as conn:
         # --- Resolve and validate the challenge token -------------------------
-        challenge = await resolve_mfa_challenge(conn, body.challenge_token)
+        challenge = await resolve_mfa_challenge(conn, body.challenge_token, for_update=False)
 
         if not challenge:
             raise HTTPException(
@@ -108,6 +109,12 @@ async def verify_mfa_challenge(
 
         # --- Load user and MFA record -----------------------------------------
         try:
+            await lock_user_credential_issuance(conn, user_id)
+            # Ownership was only a lookup. Re-read after the profile fence so
+            # a hold that burned this challenge cannot be bypassed on restore.
+            challenge = await resolve_mfa_challenge(conn, body.challenge_token)
+            if not challenge or str(challenge["user_id"]) != user_id:
+                raise PrincipalUnavailable("authentication_ceremony_ended")
             user_row = await load_current_principal(conn, user_id)
             assert_expected_identity(request, user_row)
         except PrincipalUnavailable as exc:

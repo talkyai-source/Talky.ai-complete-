@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link2, CheckCircle, XCircle, Clock, RefreshCw } from 'lucide-react';
 import { Sidebar } from '../components/Sidebar';
 import { Header } from '../components/Header';
@@ -6,40 +6,53 @@ import { ConnectorsTable } from '../components/ConnectorsTable';
 import { ConnectorDetailDrawer } from '../components/ConnectorDetailDrawer';
 import { UsageBreakdownCard } from '../components/UsageBreakdownCard';
 import { api } from '../lib/api';
-import type { AdminConnectorItem } from '../lib/api';
+import type { AdminConnectorItem, AdminConnectorListResponse } from '../lib/api';
+import { useAuthGeneration } from '../lib/use-auth-generation';
 
 export function ConnectorsPage() {
+    const generation = useAuthGeneration();
+    return <OwnedConnectorsPage key={generation} generation={generation} />;
+}
+
+function OwnedConnectorsPage({ generation }: { generation: number }) {
     const [selectedConnector, setSelectedConnector] = useState<AdminConnectorItem | null>(null);
-    const [stats, setStats] = useState({
-        total: 0,
-        active: 0,
-        expired: 0,
-        error: 0
-    });
+    const [stats, setStats] = useState<AdminConnectorListResponse['summary']>(undefined);
+    const [statsError, setStatsError] = useState<string | null>(null);
+    const [statsLoading, setStatsLoading] = useState(true);
     const [refreshKey, setRefreshKey] = useState(0);
+    const [statsVersion, setStatsVersion] = useState(0);
+    const sequence = useRef(0);
+    const mounted = useRef(false);
+    useEffect(() => {
+        mounted.current = true;
+        return () => { mounted.current = false; sequence.current += 1; };
+    }, []);
 
     const fetchStats = useCallback(async () => {
+        if (!mounted.current || generation !== api.getAuthGeneration()) return;
+        const request = ++sequence.current;
+        const owns = () => mounted.current && request === sequence.current && generation === api.getAuthGeneration();
+        setStatsLoading(true);
         try {
-            const response = await api.getConnectors({ page_size: 100 });
-            if (response.data) {
-                const connectors = response.data.items;
-                setStats({
-                    total: response.data.total,
-                    active: connectors.filter(c => c.status === 'active').length,
-                    expired: connectors.filter(c => c.token_status === 'expired' || c.token_status === 'expiring_soon').length,
-                    error: connectors.filter(c => c.status === 'error').length
-                });
-            }
+            const response = await api.getConnectors({ page_size: 1 });
+            if (!owns()) return;
+            if (response.error) throw new Error(response.error.message);
+            const summary = response.data?.summary;
+            if (!summary || summary.scope !== 'all_connectors'
+                || [summary.total, summary.active, summary.expiring_or_expired, summary.error].some(value => !Number.isSafeInteger(value) || value < 0))
+                throw new Error('Complete connector totals are unavailable.');
+            setStats(summary); setStatsError(null);
         } catch (error) {
-            console.error('Failed to fetch connector stats:', error);
+            if (owns()) { setStats(undefined); setStatsError(error instanceof Error ? error.message : 'Connector totals are unavailable.'); }
+        } finally {
+            if (owns()) setStatsLoading(false);
         }
-    }, []);
+    }, [generation]);
 
     useEffect(() => {
         // Fetching external connector data is the synchronization performed here.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
         void fetchStats();
-    }, [fetchStats, refreshKey]);
+    }, [fetchStats, refreshKey, statsVersion]);
 
     const handleRefresh = () => {
         setRefreshKey(k => k + 1);
@@ -79,7 +92,7 @@ export function ConnectorsPage() {
                                 <Link2 size={20} />
                             </div>
                             <div className="stat-content">
-                                <span className="stat-value">{stats.total}</span>
+                                <span className="stat-value">{statsLoading ? 'Loading…' : stats?.total ?? 'Unavailable'}</span>
                                 <span className="stat-label">Total Connectors</span>
                             </div>
                         </div>
@@ -88,8 +101,8 @@ export function ConnectorsPage() {
                                 <CheckCircle size={20} />
                             </div>
                             <div className="stat-content">
-                                <span className="stat-value">{stats.active}</span>
-                                <span className="stat-label">Active</span>
+                                <span className="stat-value">{statsLoading ? 'Loading…' : stats?.active ?? 'Unavailable'}</span>
+                                <span className="stat-label">Active status</span>
                             </div>
                         </div>
                         <div className="stat-card stat-warning">
@@ -97,8 +110,8 @@ export function ConnectorsPage() {
                                 <Clock size={20} />
                             </div>
                             <div className="stat-content">
-                                <span className="stat-value">{stats.expired}</span>
-                                <span className="stat-label">Expiring/Expired</span>
+                                <span className="stat-value">{statsLoading ? 'Loading…' : stats?.expiring_or_expired ?? 'Unavailable'}</span>
+                                <span className="stat-label">Token expiry due</span>
                             </div>
                         </div>
                         <div className="stat-card stat-danger">
@@ -106,19 +119,22 @@ export function ConnectorsPage() {
                                 <XCircle size={20} />
                             </div>
                             <div className="stat-content">
-                                <span className="stat-value">{stats.error}</span>
-                                <span className="stat-label">Errors</span>
+                                <span className="stat-value">{statsLoading ? 'Loading…' : stats?.error ?? 'Unavailable'}</span>
+                                <span className="stat-label">Needs attention</span>
                             </div>
                         </div>
                     </div>
+                    <p>Totals cover all connectors. Token expiry includes expired tokens and those due within 24 hours. Needs attention includes connection errors or uncertain refreshes; categories can overlap.</p>
+                    {statsError && <div className="error-banner" role="alert">{statsError}<button onClick={() => void fetchStats()}>Retry totals</button></div>}
 
                     {/* Two Column Layout */}
                     <div className="connectors-layout">
                         {/* Connectors Table */}
                         <div className="connectors-main">
                             <ConnectorsTable
-                                key={refreshKey}
+                                refreshVersion={refreshKey}
                                 onSelectConnector={setSelectedConnector}
+                                onChanged={() => setStatsVersion(value => value + 1)}
                             />
                         </div>
 

@@ -2,14 +2,17 @@
 Admin Connectors Endpoints
 Connector management: list, detail, reconnect, revoke
 """
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from uuid import UUID
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, require_platform_admin, CurrentUser
 from ._serialization import AdminResponseModel
+from app.services.connector_lifecycle import ConnectorActor, ConnectorLifecycle, ConnectorLifecycleError, revoke_token_at_provider
 
 router = APIRouter()
 
@@ -32,13 +35,23 @@ class AdminConnectorItem(AdminResponseModel):
     token_status: str  # valid, expiring_soon, expired, unknown
     last_refreshed_at: Optional[str] = None
     created_at: str
+    refresh_state: str = "idle"
+    provider_revocation_status: str = "not_requested"
+    error_message: Optional[str] = None
 
 
 class AdminConnectorDetail(AdminConnectorItem):
     """Detailed connector info for admin"""
     scopes: List[str] = []
-    error_message: Optional[str] = None
     refresh_count: int = 0
+
+
+class AdminConnectorSummary(BaseModel):
+    scope: str = "all_connectors"
+    total: int
+    active: int
+    expiring_or_expired: int
+    error: int
 
 
 class AdminConnectorListResponse(BaseModel):
@@ -47,6 +60,7 @@ class AdminConnectorListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+    summary: AdminConnectorSummary
 
 
 # =============================================================================
@@ -61,7 +75,9 @@ def _get_token_status(token_expires_at: Optional[str], status: str) -> str:
         return "unknown"
     try:
         expires = datetime.fromisoformat(token_expires_at.replace("Z", "+00:00"))
-        now = datetime.utcnow().replace(tzinfo=expires.tzinfo)
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         if expires < now:
             return "expired"
         elif expires < now + timedelta(hours=24):
@@ -91,84 +107,59 @@ async def list_admin_connectors(
     
     Returns paginated list with token expiry status.
     """
+    filters, args = [], []
+    for column, value in (("tenant_id", tenant_id), ("status", status), ("type", type), ("provider", provider)):
+        if value is not None:
+            try:
+                value = UUID(value) if column == "tenant_id" else value
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail="Invalid tenant ID") from exc
+            args.append(value)
+            filters.append(f"c.{column}=${len(args)}")
+    where = " WHERE " + " AND ".join(filters) if filters else ""
+    # The same current account rule as lifecycle/resolver; refreshing an old
+    # account never promotes its identity. Summary is unfiltered platform scope.
+    account_join = """ LEFT JOIN LATERAL (
+        SELECT account_email,token_expires_at,last_refreshed_at,refresh_state,
+               count(*) OVER(PARTITION BY created_at) AS creation_ties
+        FROM connector_accounts WHERE connector_id=c.id AND tenant_id=c.tenant_id AND status='active'
+        ORDER BY created_at DESC,id DESC LIMIT 1
+    ) a ON TRUE """
     try:
-        # Build query with tenant join
-        query = db_client.table("connectors").select(
-            "id, tenant_id, type, provider, name, status, created_at, "
-            "tenants(business_name)"
-        )
-        
-        if tenant_id:
-            query = query.eq("tenant_id", tenant_id)
-        if status:
-            query = query.eq("status", status)
-        if type:
-            query = query.eq("type", type)
-        if provider:
-            query = query.eq("provider", provider)
-        
-        # Get total count
-        count_response = query.execute()
-        total = len(count_response.data) if count_response.data else 0
-        
-        # Apply pagination
-        offset = (page - 1) * page_size
-        query = db_client.table("connectors").select(
-            "id, tenant_id, type, provider, name, status, created_at, "
-            "tenants(business_name)"
-        )
-        
-        if tenant_id:
-            query = query.eq("tenant_id", tenant_id)
-        if status:
-            query = query.eq("status", status)
-        if type:
-            query = query.eq("type", type)
-        if provider:
-            query = query.eq("provider", provider)
-        
-        response = query.order("created_at", desc=True).range(offset, offset + page_size - 1).execute()
-        
+        async with acquire_with_tenant(db_client.pool, None) as conn:
+            await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            summary_row = await conn.fetchrow("""SELECT count(*) AS total,
+                count(*) FILTER (WHERE c.status='active') AS active,
+                count(*) FILTER (WHERE c.status='active' AND a.refresh_state='idle' AND a.creation_ties=1
+                    AND a.token_expires_at < NOW()+INTERVAL '24 hours') AS expiring_or_expired,
+                count(*) FILTER (WHERE c.status='error' OR a.refresh_state='uncertain' OR a.creation_ties>1) AS error
+                FROM connectors c""" + account_join)
+            total = await conn.fetchval("SELECT count(*) FROM connectors c" + where, *args)
+            rows = await conn.fetch("""SELECT c.id,c.tenant_id,c.type,c.provider,c.name,c.status,c.created_at,
+                    c.provider_revocation_status,t.business_name AS tenant_name,
+                    a.account_email,a.token_expires_at,a.last_refreshed_at,a.refresh_state,a.creation_ties
+                FROM connectors c JOIN tenants t ON t.id=c.tenant_id""" + account_join + where +
+                f" ORDER BY c.created_at DESC,c.id DESC LIMIT ${len(args)+1} OFFSET ${len(args)+2}",
+                *args, page_size, (page-1)*page_size)
         items = []
-        for conn in response.data or []:
-            # Get account info (token expiry, email)
-            acc_response = db_client.table("connector_accounts").select(
-                "account_email, token_expires_at, last_refreshed_at"
-            ).eq("connector_id", conn["id"]).eq("status", "active").limit(1).execute()
-            
-            account = acc_response.data[0] if acc_response.data else {}
-            tenant = conn.get("tenants") or {}
-            
-            token_expires = account.get("token_expires_at")
-            token_status = _get_token_status(token_expires, conn["status"])
-            
-            items.append(AdminConnectorItem(
-                id=conn["id"],
-                tenant_id=conn["tenant_id"],
-                tenant_name=tenant.get("business_name", "Unknown"),
-                type=conn["type"],
-                provider=conn["provider"],
-                name=conn.get("name"),
-                status=conn["status"],
-                account_email=account.get("account_email"),
-                token_expires_at=token_expires,
-                token_status=token_status,
-                last_refreshed_at=account.get("last_refreshed_at"),
-                created_at=conn["created_at"]
-            ))
-        
-        return AdminConnectorListResponse(
-            items=items,
-            total=total,
-            page=page,
-            page_size=page_size
-        )
-    
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to list connectors: {str(e)}"
-        )
+        for row in rows:
+            item = dict(row)
+            item["id"], item["tenant_id"] = str(item["id"]), str(item["tenant_id"])
+            expires = item["token_expires_at"]
+            token_status = _get_token_status(expires.isoformat() if expires else None, item["status"])
+            item["refresh_state"] = item["refresh_state"] or "idle"
+            item["token_status"] = token_status if item["refresh_state"] == "idle" else "unknown"
+            if (item.pop("creation_ties") or 0) > 1:
+                item["token_status"] = "unknown"
+                item["account_email"] = None
+                item["error_message"] = "Current authorization is ambiguous. Reauthorize the connector."
+            items.append(AdminConnectorItem(**item))
+        return AdminConnectorListResponse(items=items,total=total,page=page,page_size=page_size,
+                                          summary=AdminConnectorSummary(**dict(summary_row)))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Connector list is temporarily unavailable") from exc
 
 
 @router.get("/connectors/{connector_id}", response_model=AdminConnectorDetail)
@@ -183,9 +174,11 @@ async def get_admin_connector_detail(
     try:
         # Get connector with tenant
         response = db_client.table("connectors").select(
-            "id, tenant_id, type, provider, name, status, created_at, "
+            "id, tenant_id, type, provider, name, status, created_at, provider_revocation_status, "
             "tenants(business_name)"
         ).eq("id", connector_id).single().execute()
+        if getattr(response, "error", None):
+            raise HTTPException(status_code=503, detail="Connector details are temporarily unavailable")
         
         if not response.data:
             raise HTTPException(status_code=404, detail="Connector not found")
@@ -194,17 +187,25 @@ async def get_admin_connector_detail(
         tenant = conn.get("tenants") or {}
         
         # Get account details
-        acc_response = db_client.table("connector_accounts").select(
-            "account_email, token_expires_at, last_refreshed_at, scopes, status"
-        ).eq("connector_id", connector_id).limit(1).execute()
+        account_query = db_client.table("connector_accounts").select(
+            "account_email, token_expires_at, last_refreshed_at, scopes, status, rotation_count, refresh_state, refresh_error, created_at"
+        ).eq("connector_id", connector_id).eq("tenant_id", conn["tenant_id"])
+        if conn["status"] == "active":
+            account_query = account_query.eq("status", "active")
+        acc_response = account_query.order("created_at", desc=True).limit(2).execute()
+        if getattr(acc_response, "error", None):
+            raise HTTPException(status_code=503, detail="Connector credentials could not be checked")
         
         account = acc_response.data[0] if acc_response.data else {}
+        ambiguous = bool(acc_response.data and len(acc_response.data) > 1
+                         and acc_response.data[0].get("created_at") == acc_response.data[1].get("created_at"))
         
         token_expires = account.get("token_expires_at")
         token_status = _get_token_status(token_expires, conn["status"])
+        if account.get("refresh_state", "idle") != "idle" or ambiguous:
+            token_status = "unknown"
         
-        # Count refreshes (placeholder - would need refresh_log table)
-        refresh_count = 0
+        refresh_count = account.get("rotation_count") or 0
         
         return AdminConnectorDetail(
             id=conn["id"],
@@ -214,14 +215,16 @@ async def get_admin_connector_detail(
             provider=conn["provider"],
             name=conn.get("name"),
             status=conn["status"],
-            account_email=account.get("account_email"),
+            account_email=None if ambiguous else account.get("account_email"),
             token_expires_at=token_expires,
             token_status=token_status,
             last_refreshed_at=account.get("last_refreshed_at"),
             created_at=conn["created_at"],
             scopes=account.get("scopes") or [],
-            error_message=None,
-            refresh_count=refresh_count
+            error_message="Current authorization is ambiguous. Reauthorize the connector." if ambiguous else account.get("refresh_error"),
+            refresh_count=refresh_count,
+            refresh_state=account.get("refresh_state") or "idle",
+            provider_revocation_status=conn.get("provider_revocation_status") or "not_requested",
         )
     
     except HTTPException:
@@ -237,7 +240,9 @@ async def get_admin_connector_detail(
 async def force_reconnect_connector(
     connector_id: str,
     admin_user: CurrentUser = Depends(require_platform_admin),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
+    *,
+    request: Request,
 ):
     """
     Force token refresh for a connector.
@@ -245,91 +250,33 @@ async def force_reconnect_connector(
     Admin-initiated refresh when tokens are expired or failing.
     """
     try:
-        # Get connector
-        conn_response = db_client.table("connectors").select(
-            "id, provider, tenant_id, status"
-        ).eq("id", connector_id).single().execute()
-        
-        if not conn_response.data:
+        response = db_client.table("connectors").select("id,tenant_id").eq("id", connector_id).single().execute()
+        if getattr(response, "error", None):
+            raise HTTPException(status_code=503, detail="Could not check connector")
+        if not response.data:
             raise HTTPException(status_code=404, detail="Connector not found")
-        
-        conn = conn_response.data
-        
-        if conn["status"] not in ("active", "error", "expired"):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Cannot reconnect connector with status: {conn['status']}"
-            )
-        
-        # Get account with refresh token
-        acc_response = db_client.table("connector_accounts").select(
-            "id, refresh_token_encrypted"
-        ).eq("connector_id", connector_id).limit(1).execute()
-        
-        if not acc_response.data:
-            raise HTTPException(status_code=400, detail="No account found for connector")
-        
-        account = acc_response.data[0]
-        
-        if not account.get("refresh_token_encrypted"):
-            raise HTTPException(status_code=400, detail="No refresh token available")
-        
-        # Import required services
-        from app.infrastructure.connectors.base import ConnectorFactory
-        from app.infrastructure.connectors.encryption import get_encryption_service
-        
-        # Decrypt refresh token
-        encryption = get_encryption_service()
-        refresh_token = encryption.decrypt(account["refresh_token_encrypted"])
-        
-        # Create connector and refresh tokens
-        connector = ConnectorFactory.create(
-            provider=conn["provider"],
-            tenant_id=conn["tenant_id"],
-            connector_id=connector_id
+        _, account = await ConnectorLifecycle(db_client, actor=ConnectorActor.human(
+            admin_user, "admin_reconnect", request=request, platform_admin=True)).refresh(
+            str(response.data["tenant_id"]), connector_id, allow_expired=True,
         )
-        
-        new_tokens = await connector.refresh_tokens(refresh_token)
-        
-        # Update stored tokens
-        new_access_encrypted = encryption.encrypt(new_tokens.access_token)
-        new_refresh_encrypted = encryption.encrypt(new_tokens.refresh_token or refresh_token)
-        
-        now = datetime.utcnow().isoformat()
-        db_client.table("connector_accounts").update({
-            "access_token_encrypted": new_access_encrypted,
-            "refresh_token_encrypted": new_refresh_encrypted,
-            "token_expires_at": new_tokens.expires_at.isoformat() if new_tokens.expires_at else None,
-            "last_refreshed_at": now,
-            "status": "active"
-        }).eq("id", account["id"]).execute()
-        
-        # Update connector status to active
-        db_client.table("connectors").update({
-            "status": "active"
-        }).eq("id", connector_id).execute()
-        
-        return {
-            "success": True,
-            "message": "Connector tokens refreshed successfully",
-            "connector_id": connector_id,
-            "refreshed_at": now
-        }
-    
+        return {"success": True, "message": "Connector tokens refreshed successfully",
+                "connector_id": connector_id, "refreshed_at": account["last_refreshed_at"].isoformat(),
+                "audit_event_id": account["audit_event_id"], "operation_id": account["operation_id"]}
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to reconnect connector: {str(e)}"
-        )
+    except ConnectorLifecycleError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Refresh could not be confirmed. Check connection status; reauthorize if its outcome is unknown.") from exc
 
 
 @router.post("/connectors/{connector_id}/revoke")
 async def revoke_connector(
     connector_id: str,
     admin_user: CurrentUser = Depends(require_platform_admin),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
+    *,
+    request: Request,
 ):
     """
     Revoke connector access.
@@ -337,38 +284,20 @@ async def revoke_connector(
     Marks connector as disconnected and invalidates tokens.
     """
     try:
-        # Get connector
-        conn_response = db_client.table("connectors").select(
-            "id, status"
-        ).eq("id", connector_id).single().execute()
-        
-        if not conn_response.data:
+        response = db_client.table("connectors").select("id,tenant_id").eq("id", connector_id).single().execute()
+        if getattr(response, "error", None):
+            raise HTTPException(status_code=503, detail="Could not check connector")
+        if not response.data:
             raise HTTPException(status_code=404, detail="Connector not found")
-        
-        # Update connector status
-        now = datetime.utcnow().isoformat()
-        db_client.table("connectors").update({
-            "status": "disconnected"
-        }).eq("id", connector_id).execute()
-        
-        # Revoke account tokens
-        db_client.table("connector_accounts").update({
-            "status": "revoked",
-            "access_token_encrypted": None,
-            "refresh_token_encrypted": None
-        }).eq("connector_id", connector_id).execute()
-        
-        return {
-            "success": True,
-            "message": "Connector access revoked",
-            "connector_id": connector_id,
-            "revoked_at": now
-        }
-    
+        result = await ConnectorLifecycle(db_client, actor=ConnectorActor.human(
+            admin_user, "admin_revoke", request=request, platform_admin=True)).disable(
+            str(response.data["tenant_id"]), connector_id, revoke_token=revoke_token_at_provider,
+        )
+        return {"success": True, "message": "Connector disabled locally",
+                "connector_id": connector_id, **result.receipt()}
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to revoke connector: {str(e)}"
-        )
+    except ConnectorLifecycleError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Could not confirm connector disconnect. Check its current status before trying again.") from exc

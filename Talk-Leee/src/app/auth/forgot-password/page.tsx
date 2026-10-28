@@ -58,7 +58,7 @@ function ForgotPasswordInner() {
         const normalizedEmail = email.trim().toLowerCase();
         const result = emailSchema.safeParse(normalizedEmail);
         if (!result.success) {
-            setEmailError(result.error.errors[0]?.message ?? "Invalid email");
+            setEmailError(result.error.issues[0]?.message ?? "Invalid email");
             return;
         }
         setEmailError("");

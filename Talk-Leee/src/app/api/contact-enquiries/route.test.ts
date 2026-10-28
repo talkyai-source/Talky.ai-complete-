@@ -4,18 +4,24 @@ import { POST } from "./route";
 const originalFetch = globalThis.fetch;
 const originalBase = process.env.NEXT_PUBLIC_API_BASE_URL;
 const originalOrigin = process.env.CONTACT_ENQUIRY_PUBLIC_ORIGIN;
+const originalServerBase = process.env.CONTACT_ENQUIRY_API_BASE_URL;
 const body = { request_id: "e060104a-883d-4f68-a2ca-73c091baef8a", name: " Visitor ", email: "visitor@example.com", company: "", message: "Hello" };
 const receipt = { status: "accepted", receipt_id: body.request_id, accepted_at: "2026-10-04T00:00:00Z" };
 function request(extraHeaders: Record<string, string> = {}, raw = JSON.stringify(body)) {
   return new Request("https://app.example/api/contact-enquiries", { method: "POST", headers: { Origin: "https://app.example", "Content-Type": "application/json", ...extraHeaders }, body: raw });
 }
-beforeEach(() => { process.env.CONTACT_ENQUIRY_PUBLIC_ORIGIN = "https://app.example"; });
+beforeEach(() => {
+  process.env.CONTACT_ENQUIRY_PUBLIC_ORIGIN = "https://app.example";
+  delete process.env.CONTACT_ENQUIRY_API_BASE_URL;
+});
 afterEach(() => {
   globalThis.fetch = originalFetch;
   if (originalBase === undefined) delete process.env.NEXT_PUBLIC_API_BASE_URL;
   else process.env.NEXT_PUBLIC_API_BASE_URL = originalBase;
   if (originalOrigin === undefined) delete process.env.CONTACT_ENQUIRY_PUBLIC_ORIGIN;
   else process.env.CONTACT_ENQUIRY_PUBLIC_ORIGIN = originalOrigin;
+  if (originalServerBase === undefined) delete process.env.CONTACT_ENQUIRY_API_BASE_URL;
+  else process.env.CONTACT_ENQUIRY_API_BASE_URL = originalServerBase;
 });
 
 it("accepts configured public origin behind an internal Next URL without trusting forwarded host", async () => {

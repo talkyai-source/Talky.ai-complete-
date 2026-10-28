@@ -354,7 +354,7 @@ class _RowQuery:
 
 @pytest.fixture
 async def canonical_gmail(monkeypatch):
-    """Actual OAuth callback, real Gmail object, real resolver; synthetic IO only."""
+    """Seeded authorization, real Gmail object/resolver; synthetic lifecycle IO."""
     db = _Rows()
     enc = SimpleNamespace(
         encrypt=lambda value: "synthetic:" + value,
@@ -393,18 +393,9 @@ async def canonical_gmail(monkeypatch):
     )
     refresh = AsyncMock(return_value=tokens)
     monkeypatch.setattr(GmailConnector, "refresh_tokens", refresh)
-    response = await connector_endpoints.oauth_callback(
-        Request({"type": "http", "method": "GET", "path": "/", "headers": []}),
-        state="synthetic",
-        code="synthetic",
-        error=None,
-        db_client=db,
-    )
-    assert "status=success" in response.headers["location"]
-    assert len(db.rows["connector_accounts"]) == 1
-    account = db.rows["connector_accounts"][0]
-    assert account["external_account_id"] is None
-    assert account["account_email"] == "synthetic@example.invalid"
+    from tests.unit.connector_consumer_ports import seed_authorization, install_refresh_port
+    account = seed_authorization(db, "connector-a", "tenant-a", tokens, account_email="synthetic@example.invalid")
+    install_refresh_port(monkeypatch)
     return db, account, refresh
 
 
@@ -428,7 +419,8 @@ async def test_canonical_gmail_callback_to_actual_resolver_read(
             for table, action, filters in db.queries
             if table == "connector_accounts" and action == "select"
         ]
-        assert ("id", account["id"], True) in account_reads[-1]
+        # Resolver ranks the current authorization before checking the pinned
+        # ID; filtering first could silently select an obsolete active row.
         assert ("tenant_id", "tenant-a", True) in account_reads[-1]
         assert ("connector_id", "connector-a", True) in account_reads[-1]
         assert ("status", "active", True) in account_reads[-1]

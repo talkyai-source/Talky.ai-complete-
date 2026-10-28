@@ -89,9 +89,10 @@ async def list_contact_enquiries(
     pool: asyncpg.Pool = Depends(get_db_pool),
     status: service.EnquiryStatus | None = None,
     limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
+    enquiry_id: UUID | None = None,
 ):
     try:
-        return await service.list_enquiries(pool, status=status, limit=limit, offset=offset)
+        return await service.list_enquiries(pool, status=status, limit=limit, offset=offset, enquiry_id=enquiry_id)
     except (asyncpg.PostgresError, OSError, TimeoutError, RuntimeError) as exc:
         raise _unavailable(exc) from exc
 
@@ -103,7 +104,11 @@ async def change_contact_enquiry_status(
     pool: asyncpg.Pool = Depends(get_db_pool),
 ):
     try:
-        result = await service.update_enquiry_status(pool, enquiry_id, body.status, UUID(current_user.id))
+        result = await service.update_enquiry_status(pool, enquiry_id, body.status, UUID(current_user.id),
+                                                     expected_revision=body.expected_revision)
+    except service.EnquiryRevisionConflict as exc:
+        raise ApiError(status=409, code="enquiry_revision_conflict",
+                       message="This enquiry changed after you reviewed it. Refresh its saved state before another decision.") from exc
     except (asyncpg.PostgresError, OSError, TimeoutError, RuntimeError) as exc:
         raise _unavailable(exc) from exc
     if result is None:

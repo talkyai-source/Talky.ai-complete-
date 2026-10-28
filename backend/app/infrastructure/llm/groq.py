@@ -27,6 +27,7 @@ from app.infrastructure.providers.key_pool import KeyPool, parse_keys_csv
 from app.infrastructure.providers.provider_concurrency import get_provider_guard
 from app.utils.resilience import CircuitBreaker, CircuitOpenError
 from app.infrastructure.llm.request_profile import record_traditional_request
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
 
 from app.infrastructure.llm.streaming import (
     stream_with_timeout, stream_tool_turn, close_stream,
@@ -365,6 +366,7 @@ class GroqLLMProvider(LLMProvider):
     async def initialize(self, config: dict) -> None:
         """Initialize Groq client with configuration"""
         self._config = config
+        self._observation_context = dict(config.get("observation_context") or {})
 
         # Multi-key pool path overrides single-key when GROQ_API_KEYS is set
         # *and* no tenant-scoped api_key was supplied.
@@ -379,6 +381,8 @@ class GroqLLMProvider(LLMProvider):
 
         if not primary_key:
             raise ValueError("Groq API key not found in config or environment")
+
+        self._api_key = primary_key
 
         # httpx timeout shared by every per-key client.
         # read=timeout bounds TTFT — if Groq takes longer than this to produce
@@ -426,14 +430,23 @@ class GroqLLMProvider(LLMProvider):
             return
         _t0 = asyncio.get_event_loop().time()
         try:
-            await self._client.chat.completions.create(
-                model=self._model,
-                messages=[{"role": "user", "content": "hi"}],
-                max_tokens=1,
-                temperature=0.0,
-                stream=False,
-                timeout=1.5,
-            )
+            with ProviderAttempt("llm", self.name, getattr(self, "_api_key", None), getattr(self, "_observation_context", None)) as observation:
+                response = await self._client.chat.completions.create(
+                    model=self._model,
+                    messages=[{"role": "user", "content": "hi"}],
+                    max_tokens=1,
+                    temperature=0.0,
+                    stream=False,
+                    timeout=1.5,
+                )
+                observation.accepted()
+                choice = (getattr(response, "choices", None) or [None])[0]
+                message = getattr(choice, "message", None)
+                content = getattr(message, "content", None)
+                if (isinstance(content, str) and content.strip()) or getattr(message, "tool_calls", None):
+                    observation.first_output()
+                if getattr(choice, "finish_reason", None) in {"stop", "tool_calls"}:
+                    observation.complete()
             elapsed_ms = (asyncio.get_event_loop().time() - _t0) * 1000.0
             logger.info(
                 "groq_warmup_ok model=%s warmup_ms=%.0f",
@@ -698,116 +711,128 @@ class GroqLLMProvider(LLMProvider):
                                     configured_temperature=configured_temperature,
                                     configured_max_tokens=max_tokens,
                                 )
-                                stream = await chosen_client.chat.completions.create(
-                                    **request_kwargs
-                                )
+                                with ProviderAttempt("llm", self.name, _lease.key or getattr(self, "_api_key", None), getattr(self, "_observation_context", None)) as observation:
+                                    stream = await chosen_client.chat.completions.create(
+                                        **request_kwargs
+                                    )
 
-                                # Yield tokens as they arrive. Normal Groq
-                                # streaming usage arrives on the Groq-specific
-                                # chunk.x_groq.usage field (chunk.usage is only
-                                # populated when stream_options.include_usage is
-                                # set, which Groq rejects — see NOTE above);
-                                # _extract_stream_usage checks both, getattr-safe.
-                                token_count = 0
-                                terminal_seen = False
-                                final_usage = None
-                                tc_acc: Dict[int, dict] = {}
-                                # Client-side timing for telemetry only — never
-                                # gates yielding. dispatch = right before we
-                                # start consuming the stream; first_content_t =
-                                # the moment the first content token is ready.
-                                _t_dispatch = asyncio.get_event_loop().time()
-                                _first_content_t: Optional[float] = None
-                                try:
-                                    async for chunk in stream:
-                                        if chunk.choices:
-                                            choice = chunk.choices[0]
-                                            reason = getattr(choice, "finish_reason", None)
-                                            if reason and reason not in {"stop", "tool_calls"}:
-                                                # A provider-declared truncation is not a
-                                                # complete answer or a completed tool decision.
-                                                raise LLMStreamStalled(f"Groq response incomplete: {reason}")
-                                            if reason in {"stop", "tool_calls"}:
-                                                terminal_seen = True
-                                            delta = choice.delta
-                                            if delta.content:
-                                                if _first_content_t is None:
-                                                    _first_content_t = asyncio.get_event_loop().time()
-                                                token_count += 1
-                                                tokens_yielded += 1
-                                                yield delta.content
-                                            # Assemble streamed tool-call fragments
-                                            # (name + arguments arrive in pieces).
-                                            if tool_calls_sink is not None:
+                                    observation.accepted()
+
+                                    # Yield tokens as they arrive. Normal Groq
+                                    # streaming usage arrives on the Groq-specific
+                                    # chunk.x_groq.usage field (chunk.usage is only
+                                    # populated when stream_options.include_usage is
+                                    # set, which Groq rejects — see NOTE above);
+                                    # _extract_stream_usage checks both, getattr-safe.
+                                    token_count = 0
+                                    terminal_seen = False
+                                    final_usage = None
+                                    tc_acc: Dict[int, dict] = {}
+                                    # Client-side timing for telemetry only — never
+                                    # gates yielding. dispatch = right before we
+                                    # start consuming the stream; first_content_t =
+                                    # the moment the first content token is ready.
+                                    _t_dispatch = asyncio.get_event_loop().time()
+                                    _first_content_t: Optional[float] = None
+                                    try:
+                                        async for chunk in stream:
+                                            if chunk.choices:
+                                                choice = chunk.choices[0]
+                                                reason = getattr(choice, "finish_reason", None)
+                                                if reason and reason not in {"stop", "tool_calls"}:
+                                                    # A provider-declared truncation is not a
+                                                    # complete answer or a completed tool decision.
+                                                    raise LLMStreamStalled(f"Groq response incomplete: {reason}")
+                                                if reason in {"stop", "tool_calls"}:
+                                                    terminal_seen = True
+                                                delta = choice.delta
+                                                if delta.content:
+                                                    if _first_content_t is None:
+                                                        _first_content_t = asyncio.get_event_loop().time()
+                                                    token_count += 1
+                                                    tokens_yielded += 1
+                                                    if isinstance(delta.content, str) and delta.content.strip():
+                                                        observation.first_output()
+                                                    yield delta.content
+                                                # Assemble streamed tool-call fragments
+                                                # (name + arguments arrive in pieces).
                                                 frags = getattr(delta, "tool_calls", None)
                                                 if frags:
+                                                    observation.first_output()
                                                     _accumulate_tool_call_frags(tc_acc, frags)
-                                        chunk_usage = _extract_stream_usage(chunk)
-                                        if chunk_usage is not None:
-                                            final_usage = chunk_usage
-                                    # The SDK permits clean SSE/HTTP EOF without a
-                                    # final choice. Only a provider completion marker
-                                    # authorizes publishing the accumulated tool calls.
-                                    # Consumer cancellation exits via finally instead.
-                                    if not terminal_seen:
-                                        raise LLMStreamStalled("Groq stream ended without a terminal reason")
-                                finally:
-                                    await close_stream(stream)
-                                    # Fail-soft telemetry tail. Runs on normal
-                                    # stream completion AND on early close —
-                                    # e.g. barge-in causes the consumer
-                                    # (stream_chat_with_timeout) to call
-                                    # gen.aclose(), which raises GeneratorExit at
-                                    # our current `yield` above; this `finally`
-                                    # still runs so we log what we captured
-                                    # instead of nothing. Never let a telemetry
-                                    # bug break the token stream or propagate
-                                    # past the exception that triggered us here.
-                                    try:
-                                        client_ttft_ms = (
-                                            (_first_content_t - _t_dispatch) * 1000.0
-                                            if _first_content_t is not None else None
-                                        )
-                                        client_total_ms = (
-                                            asyncio.get_event_loop().time() - _t_dispatch
-                                        ) * 1000.0
-                                        if final_usage is not None:
-                                            _emit_usage_log(
-                                                final_usage, model=model,
-                                                client_ttft_ms=client_ttft_ms,
-                                                client_total_ms=client_total_ms,
+                                            chunk_usage = _extract_stream_usage(chunk)
+                                            if chunk_usage is not None:
+                                                final_usage = chunk_usage
+                                        # The SDK permits clean SSE/HTTP EOF without a
+                                        # final choice. Only a provider completion marker
+                                        # authorizes publishing the accumulated tool calls.
+                                        # Consumer cancellation exits via finally instead.
+                                        if not terminal_seen:
+                                            raise LLMStreamStalled("Groq stream ended without a terminal reason")
+                                    finally:
+                                        await close_stream(stream)
+                                        # Fail-soft telemetry tail. Runs on normal
+                                        # stream completion AND on early close —
+                                        # e.g. barge-in causes the consumer
+                                        # (stream_chat_with_timeout) to call
+                                        # gen.aclose(), which raises GeneratorExit at
+                                        # our current `yield` above; this `finally`
+                                        # still runs so we log what we captured
+                                        # instead of nothing. Never let a telemetry
+                                        # bug break the token stream or propagate
+                                        # past the exception that triggered us here.
+                                        try:
+                                            client_ttft_ms = (
+                                                (_first_content_t - _t_dispatch) * 1000.0
+                                                if _first_content_t is not None else None
                                             )
-                                        elif token_count > 0:
-                                            # No final usage chunk arrived — most
-                                            # likely a barge-in closed the stream
-                                            # before Groq emitted one (or this
-                                            # model/SDK path never sends it).
-                                            # Content was demonstrably yielded and
-                                            # TTS'd, so log what's available
-                                            # rather than staying silent.
-                                            _emit_usage_log(
-                                                None, model=model,
-                                                client_ttft_ms=client_ttft_ms,
-                                                client_total_ms=client_total_ms,
-                                                partial=True,
+                                            client_total_ms = (
+                                                asyncio.get_event_loop().time() - _t_dispatch
+                                            ) * 1000.0
+                                            if final_usage is not None:
+                                                _emit_usage_log(
+                                                    final_usage, model=model,
+                                                    client_ttft_ms=client_ttft_ms,
+                                                    client_total_ms=client_total_ms,
+                                                )
+                                            elif token_count > 0:
+                                                # No final usage chunk arrived — most
+                                                # likely a barge-in closed the stream
+                                                # before Groq emitted one (or this
+                                                # model/SDK path never sends it).
+                                                # Content was demonstrably yielded and
+                                                # TTS'd, so log what's available
+                                                # rather than staying silent.
+                                                _emit_usage_log(
+                                                    None, model=model,
+                                                    client_ttft_ms=client_ttft_ms,
+                                                    client_total_ms=client_total_ms,
+                                                    partial=True,
+                                                )
+                                        except Exception as _telemetry_exc:  # noqa: BLE001
+                                            logger.debug(
+                                                "groq_usage_telemetry_failed err=%s",
+                                                _telemetry_exc,
                                             )
-                                    except Exception as _telemetry_exc:  # noqa: BLE001
-                                        logger.debug(
-                                            "groq_usage_telemetry_failed err=%s",
-                                            _telemetry_exc,
-                                        )
 
-                                # Surface any assembled tool calls to the caller.
-                                # Only reached on a fully-successful stream, so a
-                                # retry (tokens_yielded==0) can never double-fill.
-                                if tool_calls_sink is not None and tc_acc:
-                                    tool_calls_sink.extend(_finalize_tool_calls(tc_acc))
+                                    # Surface any assembled tool calls to the caller.
+                                    # Only reached on a fully-successful stream, so a
+                                    # retry (tokens_yielded==0) can never double-fill.
+                                    finalized_calls = _finalize_tool_calls(tc_acc)
+                                    if tool_calls_sink is not None and tc_acc:
+                                        tool_calls_sink.extend(finalized_calls)
 
-                                logger.debug(
-                                    f"Stream completed, yielded {token_count} tokens"
-                                )
-                                if token_count == 0 and not (tool_calls_sink is not None and tc_acc):
-                                    logger.warning("Zero tokens received from Groq")
+                                    logger.debug(
+                                        f"Stream completed, yielded {token_count} tokens"
+                                    )
+                                    if token_count == 0 and not (tool_calls_sink is not None and tc_acc):
+                                        logger.warning("Zero tokens received from Groq")
+                                    # A terminal frame does not validate malformed
+                                    # or nameless structured output. Keep the
+                                    # existing tool-runtime result, but do not
+                                    # certify a tool-only or mixed turn as healthy.
+                                    if len(finalized_calls) == len(tc_acc) and all(call["arguments_valid"] for call in finalized_calls):
+                                        observation.complete()
                             _lease.report_success()
                             return  # success — exit retry loop AND generator
 

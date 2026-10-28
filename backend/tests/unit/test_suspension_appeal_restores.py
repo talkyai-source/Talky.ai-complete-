@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import uuid
 from unittest.mock import AsyncMock
+from types import SimpleNamespace
 
 from app.domain.services.suspension_service import SuspensionService
 
@@ -65,18 +66,26 @@ class _Pool:
 async def test_a_granted_tenant_appeal_restores_the_tenant():
     tenant, admin = uuid.uuid4(), uuid.uuid4()
     service = SuspensionService(db_pool=_Pool({"target_type": "tenant", "target_id": tenant}))
-    service.restore_tenant, service.restore_user = AsyncMock(), AsyncMock()
+    service.restore_tenant = AsyncMock(return_value=SimpleNamespace(model_dump=lambda: {"audit_event_id":str(uuid.uuid4())}))
+    service.restore_user = AsyncMock()
 
-    result = await service.review_appeal(uuid.uuid4(), admin, "granted", "Reviewed, reinstated")
+    hold_id=uuid.uuid4()
+    result = await service.review_appeal(hold_id, admin, "granted", "Reviewed, reinstated")
 
     assert result["decision"] == "granted"
     service.restore_tenant.assert_awaited_once()
     assert service.restore_tenant.await_args.args[0] == tenant
+    assert service.restore_tenant.await_args.kwargs["expected_suspension_id"] == hold_id
     service.restore_user.assert_not_awaited()
 
 
-async def test_a_denied_appeal_restores_nothing():
-    service = SuspensionService(db_pool=_Pool({"target_type": "tenant", "target_id": uuid.uuid4()}))
+async def test_a_denied_appeal_restores_nothing(monkeypatch):
+    from app.domain.services import suspension_service as module
+    monkeypatch.setattr(module,"require_current_platform_admin",AsyncMock())
+    audit=SimpleNamespace(lock_transaction=AsyncMock(),log_in_transaction=AsyncMock(return_value=uuid.uuid4()))
+    service = SuspensionService(db_pool=_Pool({"target_type": "user", "target_id": uuid.uuid4(),
+        "is_active":True,"appeal_decision":None,"appeal_response":None,"audit_log_id":None}),audit_logger=audit)
     service.restore_tenant, service.restore_user = AsyncMock(), AsyncMock()
     await service.review_appeal(uuid.uuid4(), uuid.uuid4(), "denied", "Upheld")
     service.restore_tenant.assert_not_awaited()
+    audit.log_in_transaction.assert_awaited_once()

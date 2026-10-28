@@ -15,12 +15,13 @@ import asyncpg
 import httpx
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
 from app.api.v1.endpoints import contact_enquiries as api
 from app.core.db_utils import acquire_with_tenant
 from app.core.error_handlers import register_error_handlers
+from app.core.security.platform_admin_guard import lock_user_administration
 from app.domain.services import contact_enquiry_service as service
 
 pytestmark = pytest.mark.integration
@@ -31,9 +32,13 @@ async def enquiry_db():
     dsn = os.getenv("TEST_DATABASE_URL")
     if not dsn:
         pytest.skip("Explicit TEST_DATABASE_URL is required")
-    if not urlparse(dsn).path.removeprefix("/").endswith("_test"):
+    if urlparse(dsn).hostname not in {"127.0.0.1", "localhost"} or not urlparse(dsn).path.removeprefix("/").endswith("_test"):
         pytest.fail("Contact enquiry integration requires an explicit disposable *_test database")
-    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=6, timeout=5, command_timeout=10)
+    owner = await asyncpg.connect(dsn, timeout=5)
+    role = "enquiry_app_" + uuid4().hex
+    operator = uuid4()
+    pool = None
+    role_created = False
     request_ids = []
 
     def body(**changes):
@@ -42,15 +47,31 @@ async def enquiry_db():
         return service.ContactEnquiryInput(request_id=request_id, name="Synthetic Buyer",
             email="buyer@example.com", company="Example", message="An intake fixture.", **changes)
 
-    fixture = SimpleNamespace(pool=pool, body=body, operator=uuid4())
     try:
-        yield fixture
+        await owner.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER NOBYPASSRLS')
+        role_created = True
+        await owner.execute(f'GRANT USAGE ON SCHEMA public TO "{role}"')
+        await owner.execute(f'GRANT SELECT,INSERT,UPDATE ON public_contact_enquiries TO "{role}"')
+        await owner.execute(f'GRANT SELECT ON user_profiles,tenants,tenant_users,roles,white_label_partners TO "{role}"')
+        await owner.execute("INSERT INTO user_profiles(id,email,role,is_active,is_verified,email_verified_at) "
+                            "VALUES($1,$2,'platform_admin',TRUE,TRUE,NOW())", operator, f"{operator}@example.invalid")
+        async def setup(conn):
+            await conn.execute(f'SET ROLE "{role}"')
+            await conn.execute("SET statement_timeout = '10s'")
+        pool = await asyncpg.create_pool(dsn, min_size=1, max_size=6, timeout=5, command_timeout=10, setup=setup)
+        async with pool.acquire() as conn:
+            flags = await conn.fetchrow("SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user")
+            assert tuple(flags.values()) == (False, False)
+        yield SimpleNamespace(pool=pool, body=body, operator=operator, owner=owner)
     finally:
-        try:
-            async with acquire_with_tenant(pool, None) as conn:
-                await conn.execute("DELETE FROM public_contact_enquiries WHERE id=ANY($1::uuid[])", request_ids)
-        finally:
+        if pool:
             await pool.close()
+        await owner.execute("DELETE FROM public_contact_enquiries WHERE id=ANY($1::uuid[])", request_ids)
+        await owner.execute("DELETE FROM user_profiles WHERE id=$1", operator)
+        if role_created:
+            await owner.execute(f'DROP OWNED BY "{role}"')
+            await owner.execute(f'DROP ROLE "{role}"')
+        await owner.close()
 
 
 async def test_http_submit_commit_admin_list_and_status_round_trip(enquiry_db, monkeypatch):
@@ -77,7 +98,8 @@ async def test_http_submit_commit_admin_list_and_status_round_trip(enquiry_db, m
         assert listed.status_code == 200
         item = next(item for item in listed.json()["items"] if item["id"] == str(body.request_id))
         assert item["message"] == body.message and item["status"] == "new"
-        handled = await client.patch(f"/api/v1/admin/contact-enquiries/{body.request_id}", json={"status": "handled"})
+        handled = await client.patch(f"/api/v1/admin/contact-enquiries/{body.request_id}",
+                                    json={"status": "handled", "expected_revision": item["revision"]})
         assert handled.status_code == 200
         assert handled.json()["handled_at"]
         after = await client.get("/api/v1/admin/contact-enquiries?status=handled")
@@ -140,15 +162,16 @@ async def test_admin_status_filter_pagination_and_handled_timestamp(enquiry_db):
     assert page1["total"] == page2["total"] == 3
     assert {item["id"] for item in page1["items"] + page2["items"]} == expected
     receipt = receipts[0]
-    item = await service.update_enquiry_status(fixture.pool, receipt["receipt_id"], "handled", fixture.operator)
+    item = await service.update_enquiry_status(fixture.pool, receipt["receipt_id"], "handled", fixture.operator, expected_revision=0)
     assert item["status"] == "handled" and item["handled_at"] is not None
-    replay = await service.update_enquiry_status(fixture.pool, receipt["receipt_id"], "handled", uuid4())
+    replay = await service.update_enquiry_status(fixture.pool, receipt["receipt_id"], "handled", fixture.operator, expected_revision=1)
     assert replay["handled_at"] == item["handled_at"]
     handled = await service.list_enquiries(fixture.pool, status="handled", limit=50, offset=0)
     assert [item["id"] for item in handled["items"]] == [receipt["receipt_id"]]
-    reopened = await service.update_enquiry_status(fixture.pool, receipt["receipt_id"], "new", fixture.operator)
+    reopened = await service.update_enquiry_status(fixture.pool, receipt["receipt_id"], "new", fixture.operator, expected_revision=1)
     assert reopened["handled_at"] is None
-    assert await service.update_enquiry_status(fixture.pool, uuid4(), "handled", fixture.operator) is None
+    assert reopened["revision"] == 2
+    assert await service.update_enquiry_status(fixture.pool, uuid4(), "handled", fixture.operator, expected_revision=0) is None
 
 
 async def test_force_rls_denies_real_non_bypass_role(enquiry_db):
@@ -157,7 +180,8 @@ async def test_force_rls_denies_real_non_bypass_role(enquiry_db):
     receipt, _ = await service.submit_enquiry(fixture.pool, body)
     # Generated identifier only; never interpolate user input into role SQL.
     role = "enquiry_test_" + uuid4().hex
-    async with fixture.pool.acquire() as conn:
+    conn = fixture.owner
+    async with conn.transaction():
         await conn.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER NOBYPASSRLS')
         try:
             await conn.execute(f'GRANT USAGE ON SCHEMA public TO "{role}"')
@@ -178,5 +202,79 @@ async def test_force_rls_denies_real_non_bypass_role(enquiry_db):
             flags = await conn.fetchrow("SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE oid='public_contact_enquiries'::regclass")
             assert flags["relrowsecurity"] and flags["relforcerowsecurity"]
         finally:
+            await conn.execute("RESET ROLE")
             await conn.execute(f'DROP OWNED BY "{role}"')
             await conn.execute(f'DROP ROLE "{role}"')
+
+
+async def test_two_reviewed_writes_have_one_commit_and_one_conflict(enquiry_db):
+    db = enquiry_db
+    body = db.body()
+    await service.submit_enquiry(db.pool, body)
+    results = await asyncio.gather(*(
+        service.update_enquiry_status(db.pool, body.request_id, "handled", db.operator, expected_revision=0)
+        for _ in range(2)
+    ), return_exceptions=True)
+    assert sum(isinstance(result, service.EnquiryRevisionConflict) for result in results) == 1
+    winner = next(result for result in results if isinstance(result, dict))
+    assert winner["revision"] == 1 and winner["status"] == "handled"
+    saved = await db.owner.fetchrow("SELECT revision,handled_at,handled_by FROM public_contact_enquiries WHERE id=$1", body.request_id)
+    assert saved["revision"] == 1 and saved["handled_at"] == winner["handled_at"]
+    assert saved["handled_by"] == db.operator
+
+
+async def test_lost_response_then_reopen_cannot_be_overwritten_by_old_review(enquiry_db):
+    db = enquiry_db
+    body = db.body()
+    await service.submit_enquiry(db.pool, body)
+    # Treat the first committed result as lost in transport. Another operator
+    # then deliberately reopens using the version it actually read.
+    await service.update_enquiry_status(db.pool, body.request_id, "handled", db.operator, expected_revision=0)
+    current = await service.list_enquiries(db.pool, status=None, limit=1, offset=0, enquiry_id=body.request_id)
+    assert current["total"] == 1 and current["items"][0]["revision"] == 1
+    await service.update_enquiry_status(db.pool, body.request_id, "new", db.operator, expected_revision=1)
+    with pytest.raises(service.EnquiryRevisionConflict):
+        await service.update_enquiry_status(db.pool, body.request_id, "handled", db.operator, expected_revision=0)
+    saved = await db.owner.fetchrow("SELECT revision,status,handled_at,handled_by FROM public_contact_enquiries WHERE id=$1", body.request_id)
+    assert dict(saved) == {"revision": 2, "status": "new", "handled_at": None, "handled_by": None}
+
+
+async def test_same_current_status_acknowledgement_does_not_change_version_or_actor(enquiry_db):
+    db = enquiry_db
+    body = db.body()
+    await service.submit_enquiry(db.pool, body)
+    unchanged = await service.update_enquiry_status(db.pool, body.request_id, "new", db.operator, expected_revision=0)
+    assert unchanged["revision"] == 0 and unchanged["handled_at"] is None
+    first = await service.update_enquiry_status(db.pool, body.request_id, "handled", db.operator, expected_revision=0)
+    repeated = await service.update_enquiry_status(db.pool, body.request_id, "handled", db.operator, expected_revision=1)
+    assert first == repeated
+
+
+async def test_waiting_operator_loses_authority_before_write(enquiry_db):
+    db = enquiry_db
+    body = db.body()
+    await service.submit_enquiry(db.pool, body)
+    task = None
+    try:
+        async with db.owner.transaction():
+            await lock_user_administration(db.owner)
+            task = asyncio.create_task(service.update_enquiry_status(
+                db.pool, body.request_id, "handled", db.operator, expected_revision=0))
+            # Wait for the real PostgreSQL advisory-lock waiter, not a mock
+            # scheduler or an assumed duration, before changing authority.
+            async with asyncio.timeout(3):
+                while not await db.owner.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted "
+                    "AND pid<>pg_backend_pid())"
+                ):
+                    await asyncio.sleep(0.01)
+            await db.owner.execute("UPDATE user_profiles SET is_active=FALSE WHERE id=$1", db.operator)
+        with pytest.raises(HTTPException) as result:
+            await task
+        assert result.value.status_code == 403
+        saved = await db.owner.fetchrow("SELECT revision,status FROM public_contact_enquiries WHERE id=$1", body.request_id)
+        assert dict(saved) == {"revision": 0, "status": "new"}
+    finally:
+        if task and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)

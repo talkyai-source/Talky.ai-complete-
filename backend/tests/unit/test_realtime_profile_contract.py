@@ -23,7 +23,8 @@ async def assemble(monkeypatch, config, *, mock_connect=True, db_pool=None):
     from app.domain.services import credential_resolver
     from app.domain.services.voice_pipeline import action_execution
     from app.core import container
-    monkeypatch.setattr(credential_resolver, "get_credential_resolver", lambda: SimpleNamespace(resolve=AsyncMock(return_value="synthetic-key")))
+    monkeypatch.setattr(credential_resolver, "get_credential_resolver", lambda: SimpleNamespace(resolve=AsyncMock(return_value="synthetic-key"),
+        resolve_with_metadata=AsyncMock(return_value=SimpleNamespace(secret="synthetic-key", observation_context={}))))
     monkeypatch.setattr(container, "get_container", lambda: SimpleNamespace(
         is_initialized=db_pool is not None, db_client=SimpleNamespace(pool=db_pool)))
     async def context(session):
@@ -291,7 +292,7 @@ async def test_campaign_prompt_precedence_on_nested_update_and_explicit_alias():
 async def test_invalid_xai_voice_fails_before_credentials_or_transport(monkeypatch):
     from app.domain.services import credential_resolver
     resolver = AsyncMock(return_value="synthetic-key")
-    monkeypatch.setattr(credential_resolver, "get_credential_resolver", lambda: SimpleNamespace(resolve=resolver))
+    monkeypatch.setattr(credential_resolver, "get_credential_resolver", lambda: SimpleNamespace(resolve_with_metadata=resolver))
     owner = VoiceOrchestrator(db_client=None)
     gateway = AsyncMock()
     monkeypatch.setattr(owner, "_create_media_gateway", gateway)
@@ -353,7 +354,8 @@ async def test_all_offered_native_voices_and_hidden_xai_have_sanitized_wire_evid
     async def acquire(*args):
         yield storage
     monkeypatch.setattr(endpoint, "acquire_with_tenant", acquire)
-    monkeypatch.setattr(credential_resolver, "get_credential_resolver", lambda: SimpleNamespace(resolve=AsyncMock(return_value="synthetic-key")))
+    monkeypatch.setattr(credential_resolver, "get_credential_resolver", lambda: SimpleNamespace(resolve=AsyncMock(return_value="synthetic-key"),
+        resolve_with_metadata=AsyncMock(return_value=SimpleNamespace(secret="synthetic-key", observation_context={}))))
     user, db = SimpleNamespace(tenant_id="synthetic-tenant"), SimpleNamespace(pool=object())
     class Accept(Handshake):
         async def send(self, value):

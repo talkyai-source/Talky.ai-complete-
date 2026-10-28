@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict
 from functools import lru_cache
 from urllib.parse import urlsplit, urlunsplit
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -88,6 +88,9 @@ class Settings(BaseSettings):
     kms_provider: str = "local"
     jwt_secret: str | None = None
     secret_key: str | None = None
+    # Dedicated write-only Alertmanager ingestion credential; not user/internal auth.
+    alertmanager_ingest_token: SecretStr | None = None
+    alertmanager_source_id: str = "platform-alertmanager"
     # AH-Phase-C: previous signing key during graceful rotation.
     # When the operator rotates `JWT_SECRET`, the previous value is
     # moved into `JWT_SECRET_PREVIOUS` for one window of (access TTL

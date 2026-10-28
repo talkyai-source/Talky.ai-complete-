@@ -120,12 +120,52 @@ def test_admin_list_bounds_and_missing_update(client, monkeypatch):
     response = client.get("/api/v1/admin/contact-enquiries?status=new&limit=20&offset=3")
     assert response.status_code == 200
     assert response.json() == {"items": [], "total": 0, "limit": 20, "offset": 3}
-    assert listing.await_args.kwargs == {"status": "new", "limit": 20, "offset": 3}
+    assert listing.await_args.kwargs == {"status": "new", "limit": 20, "offset": 3, "enquiry_id": None}
     for query in ("status=deleted", "limit=0", "limit=101", "offset=-1"):
         assert client.get("/api/v1/admin/contact-enquiries?" + query).status_code == 422
     monkeypatch.setattr(service, "update_enquiry_status", AsyncMock(return_value=None))
-    assert client.patch(f"/api/v1/admin/contact-enquiries/{uuid4()}", json={"status": "handled"}).status_code == 404
+    assert client.patch(f"/api/v1/admin/contact-enquiries/{uuid4()}", json={"status": "handled", "expected_revision": 0}).status_code == 404
     assert client.patch(f"/api/v1/admin/contact-enquiries/{uuid4()}", json={"status": "deleted"}).status_code == 422
+
+
+@pytest.mark.parametrize("revision", [None, -1, True, "0", 0.0, 2_147_483_648])
+def test_status_write_requires_exact_reviewed_integer_revision(client, monkeypatch, revision):
+    client.app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        id=str(uuid4()), email="operator@example.com", role="platform_admin")
+    write = AsyncMock()
+    monkeypatch.setattr(service, "update_enquiry_status", write)
+    body = {"status": "handled"}
+    if revision is not None:
+        body["expected_revision"] = revision
+    result = client.patch(f"/api/v1/admin/contact-enquiries/{uuid4()}", json=body)
+    assert result.status_code == 422
+    write.assert_not_called()
+
+
+def test_stale_review_is_explicit_conflict_without_receipt(client, monkeypatch):
+    actor, target = uuid4(), uuid4()
+    client.app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        id=str(actor), email="operator@example.com", role="platform_admin")
+    write = AsyncMock(side_effect=service.EnquiryRevisionConflict)
+    monkeypatch.setattr(service, "update_enquiry_status", write)
+    result = client.patch(f"/api/v1/admin/contact-enquiries/{target}",
+                          json={"status": "handled", "expected_revision": 7})
+    assert result.status_code == 409
+    assert result.json()["error"]["code"] == "enquiry_revision_conflict"
+    assert write.await_count == 1
+    assert write.await_args.args[1:] == (target, "handled", actor)
+    assert write.await_args.kwargs == {"expected_revision": 7}
+
+
+def test_exact_reference_reconciliation_does_not_require_status_filter(client, monkeypatch):
+    target = uuid4()
+    client.app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        id=str(uuid4()), email="operator@example.com", role="platform_admin")
+    read = AsyncMock(return_value={"items": [], "total": 0, "limit": 1, "offset": 0})
+    monkeypatch.setattr(service, "list_enquiries", read)
+    result = client.get(f"/api/v1/admin/contact-enquiries?enquiry_id={target}&limit=1")
+    assert result.status_code == 200
+    assert read.await_args.kwargs == {"status": None, "limit": 1, "offset": 0, "enquiry_id": target}
 
 
 async def test_commit_failure_cannot_return_receipt(monkeypatch):

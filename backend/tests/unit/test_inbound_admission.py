@@ -262,6 +262,14 @@ class _AllowedConn:
     async def fetchrow(self, query, *args):
         if "replay_state_live" in query:
             return None
+        if "authority_scope_ok" in query:
+            return {
+                "id": TENANT, "status": self.route_overrides.get("tenant_status", "active"),
+                "subscription_status": self.route_overrides.get("subscription_status", "active"),
+                "suspended_at": None, "suspended_by": None, "suspension_reason": None,
+                "white_label_partner_id": None, "formal_partner_id": None,
+                "formal_partner_status": None, "active_holds": [], "authority_scope_ok": True,
+            }
         if "FROM platform_runtime_controls" in query:
             return {
                 "inbound_enabled": True,

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
     Phone,
     Search,
@@ -18,7 +18,10 @@ import {
     PhoneOutgoing,
 } from 'lucide-react';
 import { api } from '../lib/api';
-import type { CallHistoryItem, CallHistoryParams, TenantListItem } from '../lib/api';
+import { useAuthGeneration } from '../lib/use-auth-generation';
+import { TenantFilter } from './TenantFilter';
+import { useOperationOwner } from '../lib/use-operation-owner';
+import type { CallHistoryItem, CallHistoryParams } from '../lib/api';
 
 interface CallHistoryTableProps {
     onCallSelect: (callId: string) => void;
@@ -73,7 +76,12 @@ function CallStatusBadge({ status, outcome }: { status: string; outcome: string 
     );
 }
 
-export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
+export function CallHistoryTable(props: CallHistoryTableProps) {
+    const generation = useAuthGeneration();
+    return <OwnedCallHistoryTable key={generation} {...props} generation={generation} />;
+}
+
+function OwnedCallHistoryTable({ onCallSelect, generation }: CallHistoryTableProps & { generation: number }) {
     const [calls, setCalls] = useState<CallHistoryItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -86,8 +94,12 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
     const [directionFilter, setDirectionFilter] = useState('');
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
-    const [tenants, setTenants] = useState<TenantListItem[]>([]);
     const [debouncedSearch, setDebouncedSearch] = useState('');
+
+    const query = JSON.stringify([page, debouncedSearch, statusFilter, tenantFilter, directionFilter, fromDate, toDate]);
+    const capture = useOperationOwner(generation, query);
+    const request = useRef(0);
+    const [loadedQuery, setLoadedQuery] = useState('');
 
     // Debounce search
     useEffect(() => {
@@ -99,6 +111,10 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
     }, [search]);
 
     const fetchCalls = useCallback(async () => {
+        const owns = capture();
+        if (!owns()) return;
+        const sequence = ++request.current;
+        const current = () => owns() && sequence === request.current;
         setLoading(true);
         try {
             const params: CallHistoryParams = {
@@ -115,6 +131,9 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
             if (toDate) params.to_date = toDate;
 
             const response = await api.getCallHistory(params);
+            if (!current()) return;
+            setLoadedQuery(query);
+            if (!response.error && (!response.data || !Array.isArray(response.data.items) || !Number.isSafeInteger(response.data.total))) throw new Error('The list response is incomplete.');
             if (response.error) throw new Error(response.error.message);
             if (response.data) {
                 setCalls(response.data.items);
@@ -122,21 +141,19 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
             }
             setError(null);
         } catch (err) {
+            if (!current()) return;
+            setLoadedQuery(query);
             setError(err instanceof Error ? err.message : 'Failed to fetch call history');
         } finally {
-            setLoading(false);
+            if (current()) setLoading(false);
         }
-    }, [page, pageSize, debouncedSearch, statusFilter, tenantFilter, directionFilter, fromDate, toDate]);
+    }, [page, pageSize, debouncedSearch, statusFilter, tenantFilter, directionFilter, fromDate, toDate, capture, query]);
 
     useEffect(() => {
         fetchCalls();
     }, [fetchCalls]);
 
-    useEffect(() => {
-        api.getTenants().then((response) => {
-            if (response.data) setTenants(response.data);
-        });
-    }, []);
+
 
     const totalPages = Math.ceil(total / pageSize);
 
@@ -188,20 +205,7 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
                     <option value="inbound">Inbound</option>
                     <option value="outbound">Outbound</option>
                 </select>
-                <select
-                    value={tenantFilter}
-                    onChange={(event) => {
-                        setTenantFilter(event.target.value);
-                        setPage(1);
-                    }}
-                    className="filter-select"
-                    aria-label="Filter by tenant"
-                >
-                    <option value="">All Tenants</option>
-                    {tenants.map((tenant) => (
-                        <option key={tenant.id} value={tenant.id}>{tenant.business_name}</option>
-                    ))}
-                </select>
+                <TenantFilter includeArchived value={tenantFilter} onChange={value => { setTenantFilter(value); setPage(1); }} />
                 <div className="date-filter-group">
                     <CalendarDays size={16} />
                     <input
@@ -249,7 +253,7 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
 
             {/* Table */}
             <div className="table-container">
-                {loading ? (
+                {loading || loadedQuery !== query ? (
                     <div className="table-loading">
                         <div className="loading-spinner"></div>
                         <p>Loading call history...</p>
@@ -283,17 +287,17 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
                             {calls.map((call) => (
                                 <tr
                                     key={call.id}
-                                    onClick={() => onCallSelect(call.id)}
+                                    onClick={() => { if (capture()()) onCallSelect(call.id); }}
                                     onKeyDown={(event) => {
                                         if (event.key === 'Enter' || event.key === ' ') {
                                             event.preventDefault();
-                                            onCallSelect(call.id);
+                                            if (capture()()) onCallSelect(call.id);
                                         }
                                     }}
                                     className="clickable-row"
                                     role="button"
                                     tabIndex={0}
-                                    aria-label={`Open ${call.direction || 'outbound'} call ${call.id}`}
+                                    aria-label={`Open ${call.direction || 'unknown'} call ${call.id}`}
                                 >
                                     <td>{formatDate(call.created_at)}</td>
                                     <td>
@@ -304,9 +308,9 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
                                     </td>
                                     <td className="phone-cell">{call.phone_number}</td>
                                     <td>
-                                        <span className={`direction-badge direction-${call.direction || 'outbound'}`}>
-                                            {call.direction === 'inbound' ? <PhoneIncoming size={13} /> : <PhoneOutgoing size={13} />}
-                                            {call.direction || 'outbound'}
+                                        <span className={`direction-badge direction-${call.direction || 'unknown'}`}>
+                                            {call.direction === 'inbound' ? <PhoneIncoming size={13} /> : call.direction === 'outbound' ? <PhoneOutgoing size={13} /> : null}
+                                            {call.direction || 'unknown'}
                                         </span>
                                         {call.called_did && <span className="called-did">DID {call.called_did}</span>}
                                     </td>
@@ -316,12 +320,12 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
                                     </td>
                                     <td>
                                         <div className="media-indicators">
-                                            {call.has_recording && (
+                                            {call.has_recording === true && (
                                                 <span className="media-indicator" title="Call recording available">
                                                     <AudioLines size={13} /> Recording
                                                 </span>
                                             )}
-                                            {call.has_feedback && (
+                                            {call.has_feedback === true && (
                                                 <span
                                                     className={`media-indicator transcript-${call.feedback_transcript_status || 'pending'}`}
                                                     title={`Feedback transcription: ${call.feedback_transcript_status || 'pending'}`}
@@ -329,7 +333,13 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
                                                     <Mic2 size={13} /> Feedback
                                                 </span>
                                             )}
-                                            {!call.has_recording && !call.has_feedback && <span className="no-data-inline">—</span>}
+                                            {call.has_recording !== true && call.has_recording !== false && (
+                                                <span className="media-indicator" title="Recording metadata could not be checked">Recording status unavailable</span>
+                                            )}
+                                            {call.has_feedback !== true && call.has_feedback !== false && (
+                                                <span className="media-indicator" title="Feedback metadata could not be checked">Feedback status unavailable</span>
+                                            )}
+                                            {call.has_recording === false && call.has_feedback === false && <span className="no-data-inline">—</span>}
                                         </div>
                                     </td>
                                     <td>
@@ -346,7 +356,7 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
             </div>
 
             {/* Pagination */}
-            {!loading && calls.length > 0 && (
+            {!loading && loadedQuery === query && !error && calls.length > 0 && (
                 <div className="pagination">
                     <span className="pagination-info">
                         Showing {((page - 1) * pageSize) + 1} - {Math.min(page * pageSize, total)} of {total}

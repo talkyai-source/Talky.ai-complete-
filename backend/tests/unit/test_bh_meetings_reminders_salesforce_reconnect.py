@@ -1,4 +1,4 @@
-"""campaigns-contacts-crm-7: reconnecting Salesforce keeps the webhook token and the saved settings."""
+"""Salesforce callback lifecycle contract; actual settings preservation has real PostgreSQL coverage."""
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock
@@ -58,25 +58,27 @@ def row(db, connector_id):
     return next(r for r in db.rows['connectors'] if r['id'] == connector_id)
 
 
-async def test_reconnect_carries_webhook_token_and_toggles_to_the_new_row(monkeypatch):
+async def test_reconnect_passes_only_approved_carry_keys_and_fresh_identity(monkeypatch):
     db = callback_world(monkeypatch)
+    activate = AsyncMock(return_value={'id': 'new-account'})
+    monkeypatch.setattr(ce, 'ConnectorLifecycle', lambda _db, **_context: NS(activate=activate, begin_oauth=AsyncMock()))
     response = await run_callback(db)
     assert 'status=success' in response.headers['location']
-    config = row(db, 'sf-new')['config']
-    assert config['webhook_token_hash'] == 'hash-of-token'
-    assert config['webhook_token_encrypted'] == 'enc-token'
-    assert config['callback_campaign_id'] == 'campaign-1' and config['callback_priority'] == 3
-    assert config['log_calls'] is False and config['create_leads'] is False and config['sync_inbound'] is False
-    # the fresh identity wins, and token material is never copied across
-    assert config['instance_url'] == 'https://new.example.invalid' and config['org_id'] == 'new-org'
-    assert 'access_token' not in config
-    assert row(db, 'sf-old')['status'] == 'revoked' and row(db, 'sf-new')['status'] == 'active'
+    activate.assert_awaited_once()
+    args, kwargs = activate.await_args
+    assert args[:4] == (TENANT, 'sf-new', 'salesforce', 'crm')
+    assert args[4]['external_account_id'] == 'ext'
+    assert args[5] == {'instance_url': 'https://new.example.invalid', 'org_id': 'new-org'}
+    assert set(kwargs['carry_keys']) == set(ce._SALESFORCE_RECONNECT_KEYS)
+    assert 'access_token' not in kwargs['carry_keys'] and 'instance_url' not in kwargs['carry_keys']
 
 
-async def test_first_connect_without_a_previous_row_is_unchanged(monkeypatch):
+async def test_first_connect_uses_same_atomic_activation(monkeypatch):
     db = callback_world(monkeypatch)
     db.rows['connectors'] = [r for r in db.rows['connectors'] if r['id'] == 'sf-new']
     db.rows['connector_accounts'] = []
-    await run_callback(db)
-    config = row(db, 'sf-new')['config']
-    assert config == {'instance_url': 'https://new.example.invalid', 'org_id': 'new-org'}
+    activate = AsyncMock(return_value={'id': 'new-account'})
+    monkeypatch.setattr(ce, 'ConnectorLifecycle', lambda _db, **_context: NS(activate=activate, begin_oauth=AsyncMock()))
+    response = await run_callback(db)
+    assert 'status=success' in response.headers['location']
+    activate.assert_awaited_once()

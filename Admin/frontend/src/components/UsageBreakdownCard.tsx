@@ -9,6 +9,7 @@ import {
 import { api } from '../lib/api';
 import type { UsageSummaryResponse } from '../lib/api';
 import { formatLegacyEstimate, formatRecordedCount } from '../lib/usage-evidence';
+import { useAuthGeneration } from '../lib/use-auth-generation';
 
 interface UsageBreakdownCardProps {
     tenantId?: string;
@@ -17,7 +18,8 @@ interface UsageBreakdownCardProps {
 }
 
 export function UsageBreakdownCard({ tenantId, fromDate, toDate }: UsageBreakdownCardProps) {
-    const requestKey = JSON.stringify([tenantId, fromDate, toDate]);
+    const generation = useAuthGeneration();
+    const requestKey = JSON.stringify([generation, tenantId, fromDate, toDate]);
     const [result, setResult] = useState<{
         key: string; summary: UsageSummaryResponse | null; error: string | null;
     } | null>(null);
@@ -28,17 +30,20 @@ export function UsageBreakdownCard({ tenantId, fromDate, toDate }: UsageBreakdow
         let cancelled = false;
         void api.getUsageSummary({ tenant_id: tenantId, from_date: fromDate, to_date: toDate })
             .then((response) => {
-                if (cancelled) return;
-                const unavailable = Boolean(response.error || !response.data);
+                if (cancelled || generation !== api.getAuthGeneration()) return;
+                const data = response.data;
+                const unavailable = Boolean(response.error || !data
+                    || typeof data.period_start !== 'string' || typeof data.period_end !== 'string'
+                    || typeof data.monetary_note !== 'string');
                 setResult({ key: requestKey, summary: unavailable ? null : response.data ?? null,
                     error: unavailable ? 'Usage data is unavailable. Please retry.' : null });
             })
             .catch(() => {
-                if (!cancelled) setResult({ key: requestKey, summary: null,
+                if (!cancelled && generation === api.getAuthGeneration()) setResult({ key: requestKey, summary: null,
                     error: 'Usage data is unavailable. Please retry.' });
             });
         return () => { cancelled = true; };
-    }, [tenantId, fromDate, toDate, requestKey]);
+    }, [tenantId, fromDate, toDate, requestKey, generation]);
 
     if (loading) {
         return (

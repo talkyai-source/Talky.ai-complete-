@@ -18,6 +18,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from app.domain.services.credential_resolver import ResolvedCredential
 
 from app.domain.services.voice_orchestrator import (
     VoiceOrchestrator,
@@ -31,7 +32,7 @@ from app.domain.services.resilient_tts import ResilientTTSProvider
 
 def _resolver(value: str = "k") -> MagicMock:
     fake = MagicMock()
-    fake.resolve = AsyncMock(return_value=value)
+    fake.resolve_with_metadata = AsyncMock(side_effect=lambda _provider, **kw: ResolvedCredential(value, source="platform", tenant_id=kw.get("tenant_id")) if value else None)
     return fake
 
 

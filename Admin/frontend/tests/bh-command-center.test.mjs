@@ -17,7 +17,7 @@ test.afterEach(() => {
 });
 const tick = async () => { await act(async () => { for (const fn of [...ticks]) await fn(); }); };
 
-const STATS = { active_calls: 7, error_rate_24h: '3.2%', active_tenants: 12, api_errors_24h: 41 };
+const STATS = { active_calls: 7, failed_call_rate_24h: '3.2%', active_tenants: 12, failed_calls_24h: 41, total_calls_24h: 1281, observed_at: '2026-10-21T00:00:00Z' };
 
 // admin-frontend-gateway-4: StatsGrid ----------------------------------------
 
@@ -42,7 +42,7 @@ test('stats success renders the real values with no alert', async () => {
 
 test('a later stats failure flags the previous numbers as stale', async () => {
     let ok = true;
-    state.route = () => (ok ? response(STATS) : response({ detail: 'unauthorised' }, 401));
+    state.route = () => (ok ? response(STATS) : response({ detail: 'database unavailable' }, 503));
     await render(el(C.StatsGrid));
     await settle();
     ok = false;
@@ -61,16 +61,42 @@ test('incidents API failure says unavailable, never "No open incidents."', async
 });
 
 test('a genuinely empty incident list still says "No open incidents."', async () => {
-    state.route = () => response({ items: [], total: 0, page: 1, page_size: 5 });
+    state.route = () => response({ items: [], total: 0, page: 1, page_size: 5, open_count: 0, critical_count: 0 });
     await render(el(C.Incidents));
     await settle();
     assert.match(text(), /No open incidents/);
     assert.equal(find('[role="alert"]'), null);
 });
 
+for (const [name, body] of [
+    ['null', null], ['missing fields', {}],
+    ['non-array rows', { items: {}, total: 0, page: 1, page_size: 5, open_count: 0, critical_count: 0 }],
+    ['missing counts', { items: [], total: 0, page: 1, page_size: 5 }],
+]) {
+    test(`malformed successful incident summary (${name}) cannot claim no incidents`, async () => {
+        state.route = () => response(body);
+        await render(el(C.Incidents));
+        assert.match(find('[role="alert"]').textContent, /unexpected response/);
+        assert.doesNotMatch(text(), /No open incidents/);
+    });
+}
+
+test('malformed incident refresh preserves the last valid records as stale', async () => {
+    const incident = { id: 'one', title: 'Recorded incident', severity: 'warning', status: 'open',
+        triggered_at: '2026-10-21T00:00:00Z', description: null, acknowledged_at: null,
+        acknowledged_by: null, resolved_at: null, resolved_by: null };
+    state.route = () => response({ items: [incident], total: 1, page: 1, page_size: 5, open_count: 1, critical_count: 0 });
+    await render(el(C.Incidents));
+    state.route = () => response({});
+    await tick();
+    assert.match(text(), /Recorded incident/);
+    assert.match(find('[role="alert"]').textContent, /stale/);
+    assert.doesNotMatch(text(), /No open incidents/);
+});
+
 // admin-frontend-gateway-4: SystemHealth -------------------------------------
 
-const health = (status) => ({ providers: [{ name: 'Groq', status, latency_ms: 120, latency_display: '120ms' }] });
+const health = (status) => ({ providers: [{ name: 'Groq', status, latency_ms: 120, latency_display: '120ms', last_check: '2026-10-21T00:00:00Z', scope: 'fixture account', detail: 'synthetic observation' }] });
 
 test('health API failure on first load shows unavailable, not an empty card', async () => {
     state.route = () => response({ detail: 'health backend down' }, 500);

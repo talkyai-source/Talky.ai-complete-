@@ -39,6 +39,21 @@ ACTOR = "22222222-2222-2222-2222-222222222222"
 CONFIG = "33333333-3333-3333-3333-333333333333"
 
 
+@pytest.fixture(autouse=True)
+def _synthetic_admin_policy_port(monkeypatch):
+    """Existing SQL policy doubles are not current-authority acceptance.
+
+    Keep their business assertions intact with an explicit admitted-actor port;
+    real current-principal/fence behavior is tested by the normal-auth PG suite.
+    """
+    async def admitted(conn, actor_id):
+        assert actor_id == ACTOR
+        if not hasattr(conn, "execute"):
+            conn.execute = AsyncMock(return_value="SET")
+
+    monkeypatch.setattr(campaign_module, "require_platform_admin_mutation", admitted)
+
+
 def _ready_bundle(**overrides):
     values = {
         "tenant_id": TENANT,

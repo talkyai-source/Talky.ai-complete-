@@ -17,6 +17,7 @@ import asyncpg
 from pydantic import BaseModel, field_validator
 
 from app.core.db_utils import acquire_with_tenant
+from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -260,14 +261,16 @@ class AuditLogger:
         flush_interval_seconds: int = 5
     ):
         self.db_pool = db_pool
+        settings = get_settings()
         resolved_signing_key = (
             signing_key
             or os.getenv("AUDIT_LOG_SIGNING_KEY")
             or os.getenv("APP_AUDIT_LOG_SIGNING_KEY")
             or os.getenv("JWT_SECRET")
             or os.getenv("SECRET_KEY")
+            or settings.effective_jwt_secret
         )
-        environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+        environment = (os.getenv("ENVIRONMENT") or settings.environment).strip().lower()
         if not resolved_signing_key:
             if environment == "production":
                 raise RuntimeError("AUDIT_LOG_SIGNING_KEY must be configured in production")
@@ -490,6 +493,110 @@ class AuditLogger:
             self._ensure_flush_task()
 
         return event_id
+
+    @staticmethod
+    async def lock_transaction(conn) -> None:
+        """Reserve the existing chain before authority or business row locks.
+
+        Administrative writes that require a durable receipt must acquire this
+        first, then their authority lock, then target rows. The background
+        flusher also takes the chain lock before audit foreign-key row locks.
+        The caller must keep the transaction open through the business write
+        and ``log_in_transaction``; commit publishes both or neither.
+        """
+        if not conn.is_in_transaction():
+            raise RuntimeError("Transactional audit requires an open transaction")
+        await conn.execute(
+            f"SET LOCAL lock_timeout = {_CHAIN_LOCK_TIMEOUT_MS}; "
+            f"SELECT pg_advisory_xact_lock({_CHAIN_LOCK_KEY}); "
+            "SET LOCAL lock_timeout TO DEFAULT"
+        )
+
+    async def log_in_transaction(
+        self, conn, *, event_type: AuditEvent, action: str,
+        actor_id=None, actor_role=None, tenant_id=None,
+        resource_type=None, resource_id=None, description=None,
+        before_state=None, after_state=None, metadata=None,
+        actor_type="user", compliance_tags=None,
+    ) -> UUID:
+        """Append an existing-format audit row in the caller's transaction.
+
+        Unlike ``log``, this never buffers or suppresses failures. Its ID is
+        durable only after the surrounding transaction commits. Call
+        ``lock_transaction`` *before* acquiring authority/target row locks;
+        this check also prevents a caller from accidentally forking the chain.
+        """
+        if not conn.is_in_transaction():
+            raise RuntimeError("Transactional audit requires an open transaction")
+        owns_lock = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' "
+            "AND pid=pg_backend_pid() AND granted AND classid=$1::oid "
+            "AND objid=$2::oid AND objsubid=1)",
+            _CHAIN_LOCK_KEY >> 32, _CHAIN_LOCK_KEY & 0xFFFFFFFF,
+        )
+        if not owns_lock:
+            raise RuntimeError("Acquire the audit chain lock before business row locks")
+
+        def identifier(value):
+            return UUID(str(value)) if value is not None else None
+
+        def document(value):
+            # Hash precisely what is stored, including UUID/datetime metadata.
+            return json.loads(json.dumps(value, default=str)) if value else None
+
+        category = self._get_category(event_type)
+        now = datetime.now(timezone.utc)
+        entry = {
+            "event_id": uuid4(), "event_time": now,
+            "event_type": event_type.value, "event_category": category.value,
+            "severity": self._get_severity(event_type).value,
+            "actor_id": identifier(actor_id), "actor_type": actor_type,
+            "actor_role": actor_role, "tenant_id": identifier(tenant_id),
+            "resource_type": resource_type, "resource_id": identifier(resource_id),
+            "action": action, "description": description,
+            "before_state": document(before_state), "after_state": document(after_state),
+            "metadata": document(metadata), "compliance_tags": compliance_tags or [],
+            "retention_until": now + timedelta(days=RETENTION_PERIODS.get(category, 365)),
+        }
+        # This chain is global even when the business transaction is tenant
+        # scoped. Read only its tail through the existing service context;
+        # restore that context before the tenant-bound INSERT below. A savepoint
+        # restores the GUC on SQL errors too, without committing any caller work.
+        async with conn.transaction():
+            previous_bypass = await conn.fetchval(
+                "SELECT current_setting('app.bypass_rls', true)"
+            )
+            await conn.execute("SELECT set_config('app.bypass_rls', 'on', true)")
+            tail = await conn.fetchrow(
+                "SELECT entry_hash,event_time FROM audit_logs "
+                "ORDER BY event_time DESC,created_at DESC LIMIT 1"
+            )
+            await conn.execute(
+                "SELECT set_config('app.bypass_rls', $1, true)", previous_bypass or ""
+            )
+        (entry,) = self._chain(
+            [entry], tail["entry_hash"] if tail else "0" * 64,
+            tail["event_time"] if tail else None,
+        )
+        columns = (
+            "event_id", "event_time", "event_type", "event_category", "severity",
+            "actor_id", "actor_type", "actor_role", "tenant_id", "resource_type",
+            "resource_id", "action", "description", "before_state", "after_state",
+            "metadata", "previous_hash", "entry_hash", "signature", "compliance_tags",
+            "retention_until",
+        )
+        values = [entry[key] for key in columns]
+        for index in (13, 14, 15):
+            values[index] = json.dumps(values[index]) if values[index] is not None else None
+        saved = await conn.fetchval(
+            "INSERT INTO audit_logs (" + ",".join(columns) + ") VALUES (" +
+            ",".join(f"${i + 1}::text::jsonb" if i in (13, 14, 15) else f"${i + 1}"
+                     for i in range(len(columns))) + ") RETURNING event_id",
+            *values,
+        )
+        if saved != entry["event_id"]:
+            raise RuntimeError("Audit receipt was not persisted")
+        return saved
 
     async def log_admin_action(
         self,
@@ -836,6 +943,12 @@ class AuditLogger:
         limit: int = 100,
         offset: int = 0,
         event_id: Optional[UUID | str] = None,
+        event_group: Optional[str] = None,
+        user_query: Optional[str] = None,
+        partner_id: Optional[UUID | str] = None,
+        before_time: Optional[datetime] = None,
+        before_id: Optional[UUID | str] = None,
+        platform_read: bool = False,
     ) -> list[AuditLogEntry]:
         """
         Query audit logs with filters.
@@ -896,19 +1009,55 @@ class AuditLogger:
             params.append(event_uuid)
             param_idx += 1
 
+        # Named operator groups are explicit producer contracts. Exact
+        # event_type remains an independent AND predicate above.
+        if event_group:
+            groups = {
+                "login": "event_type IN ('login_success','login_failure')",
+                "billing_change": "event_type = 'billing_updated'",
+                "role_change": """(event_type IN ('role_assigned','role_removed') OR
+                    (resource_type='user' AND (action IN ('role_updated','user_primary_membership_configured')
+                    OR (action='user_updated' AND jsonb_typeof(metadata->'new_role')='string'
+                        AND NULLIF(btrim(metadata->>'new_role'),'') IS NOT NULL))))""",
+                "suspension": """(event_type IN ('user_suspended','user_restored','tenant_suspended','tenant_restored')
+                    OR (resource_type='suspension' AND action IN ('appeal_submitted','appeal_reviewed')))""",
+            }
+            conditions.append(groups[event_group])
+        if user_query and user_query.strip():
+            literal = user_query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            conditions.append(f"""(a.actor_id::text ILIKE ${param_idx} OR EXISTS (
+                SELECT 1 FROM user_profiles p WHERE p.id=a.actor_id
+                AND (p.name ILIKE ${param_idx} OR p.email ILIKE ${param_idx})))""")
+            params.append("%" + literal + "%")
+            param_idx += 1
+        if partner_id:
+            partner_uuid = UUID(partner_id) if isinstance(partner_id, str) else partner_id
+            conditions.append(f"""(EXISTS (SELECT 1 FROM tenants t WHERE t.id=a.tenant_id
+                AND t.white_label_partner_id=${param_idx})
+                OR (a.resource_type='partner' AND a.resource_id=${param_idx}))""")
+            params.append(partner_uuid)
+            param_idx += 1
+        if before_time is not None and before_id is not None:
+            cursor_id = UUID(before_id) if isinstance(before_id, str) else before_id
+            conditions.append(f"(event_time,event_id) < (${param_idx},${param_idx + 1})")
+            params.extend([before_time, cursor_id])
+            param_idx += 2
+
         where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
 
         query = f"""
-            SELECT * FROM audit_logs
+            SELECT a.* FROM audit_logs a
             {where_clause}
-            ORDER BY event_time DESC
+            ORDER BY event_time DESC,event_id DESC
             LIMIT ${param_idx} OFFSET ${param_idx + 1}
         """
         params.extend([limit, offset])
 
-        # A missing tenant is an explicit platform-audit query across tenants.
+        # Only the canonical list opts into platform_read after current-role
+        # validation. Keep event tenant/partner predicates even when current
+        # actor profiles belong elsewhere; detail/export retain their defaults.
         async with acquire_with_tenant(
-            self.db_pool, str(tenant_id) if tenant_id is not None else None
+            self.db_pool, None if platform_read else str(tenant_id) if tenant_id is not None else None
         ) as conn:
             rows = await conn.fetch(query, *params)
 

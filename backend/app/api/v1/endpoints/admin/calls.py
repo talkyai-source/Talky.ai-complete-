@@ -35,8 +35,49 @@ from app.domain.services.telephony.termination import (
     request_confirmed_hangup,
 )
 
+from app.domain.services.telephony.termination_receipts import (
+    _TERMINATION_RECEIPT_EVENT,
+    _TERMINATION_RECEIPT_SOURCE,
+    persist_termination_receipt as _persist_admin_termination_receipt,
+    receipt_matches as _receipt_matches,
+)
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+def _admin_termination_projection(db_client: Client, call: Mapping[str, Any]) -> dict:
+    projection = {
+        "termination_status": "requested" if call.get("status") == "termination_pending" else "none",
+        "termination_requested_at": call.get("updated_at") if call.get("status") == "termination_pending" else None,
+        "provider_hangup_requested": None, "provider_hangup_confirmed": False,
+        "termination_confirmed_at": None,
+        "termination_reconciliation_error": "No saved all-leg termination confirmation is available.",
+    }
+    try:
+        events = db_client.table("call_events").select("call_id, event_data").eq("call_id", str(call["id"])).eq(
+            "event_type", _TERMINATION_RECEIPT_EVENT).eq("source", _TERMINATION_RECEIPT_SOURCE).order("created_at", desc=True).limit(1).execute()
+        if getattr(events, "error", None) or not isinstance(events.data, list):
+            raise RuntimeError("termination receipt read failed")
+        if not events.data:
+            return projection
+        event = events.data[0]
+        receipt = event.get("event_data")
+        if isinstance(receipt, str):
+            receipt = json.loads(receipt)
+        if str(event.get("call_id")) != str(call["id"]) or not isinstance(receipt, dict):
+            raise ValueError("termination receipt identity invalid")
+        legs = db_client.table("call_legs").select("id, provider, provider_leg_id, status, created_at").eq("call_id", str(call["id"])).execute()
+        if getattr(legs, "error", None) or not isinstance(legs.data, list):
+            raise RuntimeError("termination leg read failed")
+        if not _receipt_matches(call, legs.data, receipt):
+            projection["termination_reconciliation_error"] = "Saved confirmation does not cover the current call and leg identities."
+            return projection
+        projection.update(termination_status="confirmed", provider_hangup_confirmed=True,
+                          provider_hangup_requested=receipt.get("provider_hangup_requested") is True,
+                          termination_confirmed_at=receipt["confirmed_at"], termination_reconciliation_error=None)
+    except Exception:
+        projection["termination_reconciliation_error"] = "Saved termination confirmation could not be read."
+    return projection
 
 
 def _live_duration_seconds(started_at) -> int:
@@ -125,7 +166,7 @@ def _admin_call_money_projection(
 # =============================================================================
 
 
-class TimelineEvent(BaseModel):
+class TimelineEvent(AdminResponseModel):
     """Timeline event for call detail"""
 
     event: str
@@ -169,8 +210,8 @@ class CallHistoryItem(AdminResponseModel):
     started_at: Optional[str] = None
     ended_at: Optional[str] = None
     created_at: str
-    has_recording: bool = False
-    has_feedback: bool = False
+    has_recording: Optional[bool] = None
+    has_feedback: Optional[bool] = None
     feedback_transcript_status: Optional[str] = None
     direction: str = "outbound"
     caller_ani: Optional[str] = None
@@ -292,6 +333,12 @@ class AdminCallDetail(AdminResponseModel):
     campaign_name: Optional[str] = None
     lead_id: Optional[str] = None
     status: str
+    termination_status: Literal["none", "requested", "confirmed", "failed"] = "none"
+    termination_requested_at: Optional[str] = None
+    provider_hangup_requested: Optional[bool] = None
+    provider_hangup_confirmed: bool = False
+    termination_confirmed_at: Optional[str] = None
+    termination_reconciliation_error: Optional[str] = None
     outcome: Optional[str] = None
     goal_achieved: bool = False
     started_at: Optional[str] = None
@@ -543,12 +590,12 @@ async def get_call_history(
                 campaign_map[c["id"]] = c["name"]
 
         # Media/review indicators let an operator find calls that actually
-        # need attention without opening every drawer. They are additive and
-        # fail soft during a rolling migration where either table may not yet
-        # exist on one deployment.
+        # need attention without opening every drawer. Each metadata failure
+        # remains unknown independently; it must not hide the call or establish
+        # that no recording/reviewer feedback exists.
         call_ids = [str(call["id"]) for call in response.data]
-        recording_call_ids: set[str] = set()
-        feedback_status_by_call: dict[str, str] = {}
+        recording_call_ids: Optional[set[str]] = None
+        feedback_status_by_call: Optional[dict[str, str]] = None
         try:
             recordings_response = (
                 db_client.table("recordings_s3")
@@ -557,11 +604,11 @@ async def get_call_history(
                 .eq("status", "uploaded")
                 .execute()
             )
-            if getattr(recordings_response, "error", None):
-                raise RuntimeError(recordings_response.error)
+            if getattr(recordings_response, "error", None) or not isinstance(recordings_response.data, list):
+                raise RuntimeError("Recording indicators unavailable")
             recording_call_ids = {
                 str(row["call_id"])
-                for row in (recordings_response.data or [])
+                for row in recordings_response.data
                 if row.get("call_id")
             }
         except Exception as exc:
@@ -573,11 +620,11 @@ async def get_call_history(
                 .in_("call_id", call_ids)
                 .execute()
             )
-            if getattr(feedback_response, "error", None):
-                raise RuntimeError(feedback_response.error)
+            if getattr(feedback_response, "error", None) or not isinstance(feedback_response.data, list):
+                raise RuntimeError("Feedback indicators unavailable")
             feedback_status_by_call = {
                 str(row["call_id"]): str(row.get("transcript_status") or "pending")
-                for row in (feedback_response.data or [])
+                for row in feedback_response.data
                 if row.get("call_id")
             }
         except Exception as exc:
@@ -599,9 +646,12 @@ async def get_call_history(
                     started_at=call.get("started_at"),
                     ended_at=call.get("ended_at"),
                     created_at=call.get("created_at", ""),
-                    has_recording=str(call["id"]) in recording_call_ids,
-                    has_feedback=str(call["id"]) in feedback_status_by_call,
-                    feedback_transcript_status=feedback_status_by_call.get(str(call["id"])),
+                    has_recording=(str(call["id"]) in recording_call_ids
+                                   if recording_call_ids is not None else None),
+                    has_feedback=(str(call["id"]) in feedback_status_by_call
+                                  if feedback_status_by_call is not None else None),
+                    feedback_transcript_status=(feedback_status_by_call.get(str(call["id"]))
+                                                if feedback_status_by_call is not None else None),
                     direction=call.get("direction") or "outbound",
                     caller_ani=_display_caller_ani(call),
                     called_did=call.get("called_did"),
@@ -774,6 +824,7 @@ async def get_admin_call_detail(
             crm_deliveries = []
 
         return AdminCallDetail(
+            **_admin_termination_projection(db_client, call),
             id=call["id"],
             tenant_id=call.get("tenant_id", ""),
             tenant_name=tenant_name,
@@ -905,6 +956,7 @@ async def terminate_call(
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Terminate a live call only after provider/PBX absence is proven."""
+    confirmed_result: dict | None = None
     try:
         async with acquire_with_tenant(db_client.pool, None) as conn:
             call = await conn.fetchrow(
@@ -963,6 +1015,8 @@ async def terminate_call(
             telephony_bridge._adapter,
             str(termination_context.provider_call_id or external_call_id or ""),
             expected_provider=termination_context.provider,
+            expected_backend=termination_context.control_backend,
+            require_backend_identity=True,
             provider_legs=termination_context.provider_legs,
             provider_leg_ids=termination_context.provider_leg_ids,
         )
@@ -1003,6 +1057,39 @@ async def terminate_call(
                 },
             )
 
+        receipt_result = await _persist_admin_termination_receipt(
+            db_client.pool, termination_context, requested=proof.requested,
+        )
+        if not receipt_result.current_identity_verified:
+            # Old channels were proved absent, but that proof cannot authorize
+            # release of a changed or unreadable current call/leg inventory.
+            raise HTTPException(status_code=503, detail={
+                "error": "termination_identity_unverified", "reason": receipt_result.code,
+                "call_id": call_id,
+                "call_status": "termination_pending" if current_status not in terminal_statuses else current_status,
+                "termination_status": "requested", "settlement_deferred": True,
+                "provider_hangup_requested": proof.requested,
+                "provider_hangup_confirmed": False,
+                "prior_identity_hangup_confirmed": True,
+                "termination_receipt_saved": False,
+                "termination_reconciliation_error": (
+                    "Previously checked provider channels were absent; current call identities could not be verified. "
+                    "Call finalization remains pending."
+                ),
+            })
+        receipt_saved = receipt_result.saved
+        receipt_fields = {
+            "termination_receipt_saved": receipt_saved,
+            "termination_reconciliation_error": None if receipt_saved else "Confirmed provider hangup; durable confirmation could not be saved.",
+        }
+        confirmed_result = {
+            **receipt_fields, "status": "confirmed", "call_id": call_id,
+            "previous_status": current_status, "termination_status": "confirmed",
+            "provider_hangup_requested": proof.requested, "provider_hangup_confirmed": True,
+            "provider_hangup_error": None, "settlement_deferred": True,
+            "detail": "Provider hangup confirmed; durable call finalization needs reconciliation.",
+        }
+
         # Replay the shared idempotent finalizer even for a terminal parent:
         # persisted transfer legs and global capacity can remain active after a
         # crash despite the parent row's terminal-looking label.
@@ -1038,6 +1125,7 @@ async def terminate_call(
         # absent. It is idempotent only after proof plus shared settlement.
         if current_status in terminal_statuses:
             return {
+                **receipt_fields,
                 "status": "already_terminal",
                 "detail": "Call was already terminal and PBX absence was confirmed",
                 "call_id": call_id,
@@ -1070,6 +1158,7 @@ async def terminate_call(
             except Exception as exc:  # pragma: no cover - best effort
                 logger.warning("admin deferred-settlement audit failed: %s", exc)
             return {
+                **receipt_fields,
                 "status": "confirmed",
                 "detail": "Provider confirmed; call settlement is retrying",
                 "call_id": call_id,
@@ -1151,6 +1240,7 @@ async def terminate_call(
             logger.warning("admin call termination audit failed: %s", exc)
 
         return {
+            **receipt_fields,
             "status": "confirmed",
             "detail": "Provider/PBX termination confirmed and call closed",
             "call_id": call_id,
@@ -1165,9 +1255,13 @@ async def terminate_call(
         }
 
     except HTTPException:
+        if confirmed_result is not None:
+            return confirmed_result
         raise
     except Exception as e:
         logger.exception("admin call termination failed call=%s", call_id)
+        if confirmed_result is not None:
+            return confirmed_result
         raise HTTPException(
             status_code=500,
             detail=f"Failed to terminate call: {str(e)}",

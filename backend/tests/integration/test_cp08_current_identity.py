@@ -18,13 +18,15 @@ import asyncpg
 import httpx
 import pytest
 import pytest_asyncio
-from fastapi import Depends, FastAPI, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Request, WebSocketDisconnect
 
 from app.api.v1 import dependencies as dep
 from app.api.v1.endpoints.rbac import tenant_users
 from app.core import container
+from app.core.security import assistant_runtime as runtime_api
 from app.core.security.rbac import Permission, require_permission, get_user_permissions
 from app.core.security.refresh_tokens import REFRESH_REUSE_GRACE_SECONDS, issue_initial_refresh_token
+from app.domain.services.audit_logger import AuditLogger
 
 login_ep = importlib.import_module("app.api.v1.endpoints.auth.login")
 refresh_ep = importlib.import_module("app.api.v1.endpoints.auth.refresh")
@@ -32,6 +34,7 @@ sessions_ep = importlib.import_module("app.api.v1.endpoints.auth.sessions")
 registration_ep = importlib.import_module("app.api.v1.endpoints.auth.registration")
 signup_ep = importlib.import_module("app.api.v1.endpoints.auth.signup")
 admin_users = importlib.import_module("app.api.v1.endpoints.admin.users")
+admin_user_operations = importlib.import_module("app.api.v1.endpoints.admin.user_operations")
 
 pytestmark = pytest.mark.integration
 
@@ -55,8 +58,9 @@ async def identity_db(monkeypatch):
         await admin.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER NOBYPASSRLS')
         await admin.execute(f'GRANT USAGE ON SCHEMA public TO "{role}"')
         await admin.execute(
-            f'GRANT SELECT ON tenants,user_profiles,tenant_users,roles,permissions,role_permissions,user_permissions,calls,call_legs TO "{role}"'
+            f'GRANT SELECT ON tenants,user_profiles,tenant_users,roles,permissions,role_permissions,user_permissions,calls,call_legs,white_label_partners,suspension_events,audit_logs TO "{role}"'
         )
+        await admin.execute(f'GRANT INSERT ON audit_logs TO "{role}"')
         await admin.execute(
             f'GRANT SELECT,INSERT,UPDATE ON security_sessions,refresh_tokens,login_attempts TO "{role}"'
         )
@@ -111,13 +115,23 @@ async def identity_db(monkeypatch):
             lambda token: {"sub": str(users[int(token)]), "sid": str(sessions[int(token)])},
         )
         app = FastAPI()
-        audit = SimpleNamespace(log=AsyncMock(), log_security_event=AsyncMock())
-        app.dependency_overrides[login_ep.get_audit_logger] = lambda: audit
+        audit = SimpleNamespace(signing_key="synthetic-cp08-audit-key-only",
+                                log=AsyncMock(), log_security_event=AsyncMock(),
+                                lock_transaction=AsyncMock(), log_in_transaction=AsyncMock(return_value=uuid4()))
+        admin_audit = AuditLogger(pool, signing_key="synthetic-cp08-audit-key-only")
+
+        def audit_for_route(request: Request):
+            # Prepared Users operations require retained real audit rows. The
+            # original authentication JWT/password/audit adapter stays synthetic.
+            return admin_audit if request.url.path.startswith("/admin/users") else audit
+
+        app.dependency_overrides[login_ep.get_audit_logger] = audit_for_route
         for module in (login_ep, refresh_ep, sessions_ep, registration_ep, signup_ep):
             app.include_router(module.router, prefix="/auth")
         monkeypatch.setattr(refresh_ep, "encode_access_token", lambda **kw: "synthetic-access")
         app.dependency_overrides[tenant_users.get_db_client] = lambda: db.client
         app.include_router(tenant_users.router, prefix="/rbac")
+        app.include_router(admin_user_operations.router, prefix="/admin")
         app.include_router(admin_users.router, prefix="/admin")
 
         @app.get("/identity")
@@ -140,6 +154,11 @@ async def identity_db(monkeypatch):
     finally:
         if pool:
             await pool.close()
+        await admin.execute(
+            "DELETE FROM audit_logs WHERE tenant_id=ANY($1::uuid[]) AND resource_type=$2",
+            tenants, runtime_api.RESOURCE_TYPE,
+        )
+        await admin.execute("DELETE FROM audit_logs WHERE actor_id=ANY($1::uuid[]) OR resource_id=ANY($1::uuid[])", users)
         await admin.execute("DELETE FROM user_permissions WHERE user_id=ANY($1::uuid[])", users)
         await admin.execute("DELETE FROM refresh_tokens WHERE user_id=ANY($1::uuid[])", users)
         await admin.execute("DELETE FROM login_attempts WHERE user_id=ANY($1::uuid[])", users)
@@ -156,6 +175,23 @@ async def identity_db(monkeypatch):
 
 def auth(kind="cookie"):
     return {"cookie": "talky_at=0"} if kind == "cookie" else {"authorization": "Bearer 0"}
+
+
+async def prepare_admin_write(db, kind, body, target=None):
+    """Explicit actual operation preparation; negative route calls remain raw."""
+    body = dict(body)
+    intent = {key: value for key, value in body.items() if key not in {"request_id", "operation_id", "password"}}
+    if kind == "create":
+        intent.setdefault("tenant_id", None)
+    payload = {"kind": kind, "target_user_id": str(target) if target else None, "intent": intent}
+    if kind == "create":
+        payload["password"] = body["password"]
+    result = await db.http.post("/admin/users/operations", headers=auth(), json=payload)
+    assert result.status_code == 201, result.text
+    body["operation_id"] = result.json()["operation_id"]
+    if kind == "create":
+        body["request_id"] = body["operation_id"]
+    return body
 
 
 @pytest.mark.parametrize("kind", ["cookie", "bearer"])
@@ -482,6 +518,17 @@ async def test_assistant_socket_admission_uses_current_session_and_membership(
         await voice.assistant_voice(socket, token=None, conversation_id=None)
         admitted = run.await_count == 1
     assert admitted is (state == "active")
+    receipts = await db.admin.fetch(
+        "SELECT * FROM audit_logs WHERE tenant_id=$1 AND resource_type=$2 ORDER BY event_time",
+        db.tenants[0], runtime_api.RESOURCE_TYPE,
+    )
+    if engine == "text" and state == "active":
+        assert len(receipts) == 2
+        assert runtime_api.stop_receipt_matches(*receipts)
+    else:
+        # The voice admission case replaces its entire runtime with `run` above;
+        # required voice registration is covered by the runtime receipt suite.
+        assert not receipts
     if state != "active":
         assert socket.closed == 1008
     from app.core.security.principal import assistant_session_context
@@ -512,6 +559,11 @@ async def test_open_socket_rechecks_authority_before_accepting_next_message(
             self.closed = code
 
         async def receive_json(self):
+            assert any(row.get("type") == "connected" for row in self.messages)
+            assert await db.admin.fetchval(
+                "SELECT count(*) FROM audit_logs WHERE tenant_id=$1 AND resource_type=$2 AND action=$3",
+                db.tenants[0], runtime_api.RESOURCE_TYPE, runtime_api.REGISTER_ACTION,
+            ) == 1
             await db.admin.execute(
                 "UPDATE security_sessions SET revoked=TRUE,revoked_at=NOW() WHERE id=$1",
                 db.sessions[0],
@@ -531,6 +583,15 @@ async def test_open_socket_rechecks_authority_before_accepting_next_message(
     assert socket.closed == 1008
     pop.assert_not_called()
     assert not any(row.get("type") == "proposal_result" for row in socket.messages)
+    assert await db.admin.fetchval(
+        "SELECT revoked FROM security_sessions WHERE id=$1", db.sessions[0]
+    )
+    receipts = await db.admin.fetch(
+        "SELECT * FROM audit_logs WHERE tenant_id=$1 AND resource_type=$2 ORDER BY event_time",
+        db.tenants[0], runtime_api.RESOURCE_TYPE,
+    )
+    assert len(receipts) == 2
+    assert runtime_api.stop_receipt_matches(*receipts)
 
 
 @pytest.mark.parametrize("change", ["none", "revoked", "removed", "demoted"])
@@ -797,16 +858,19 @@ async def test_admin_created_tenant_user_can_sign_in_with_current_membership(
         created = await db.http.post(
             "/admin/users",
             headers=auth(),
-            json={
+            json=await prepare_admin_write(db, "create", {
+                "request_id": str(uuid4()),
                 "name": "Synthetic staff",
                 "email": email,
                 "password": "Synthetic-Password-42!",
                 "role": "user",
                 "tenant_id": str(db.tenants[0]),
-            },
+            }),
         )
         assert created.status_code == 201, created.text
-        new_user = created.json()["id"]
+        assert created.json()["state"] == "created"
+        new_user = created.json()["user_id"]
+        assert created.json()["user"]["id"] == new_user
         membership = await db.admin.fetchrow(
             "SELECT tu.status,r.name FROM tenant_users tu JOIN roles r ON r.id=tu.role_id WHERE user_id=$1 AND tenant_id=$2",
             new_user,
@@ -838,8 +902,12 @@ async def test_admin_role_edit_changes_effective_membership_not_just_profile(ide
     await db.admin.execute(
         "UPDATE user_profiles SET role='platform_admin' WHERE id=$1", db.users[0]
     )
+    reviewed = await db.http.get(f"/admin/users/{db.users[1]}", headers=auth())
+    assert reviewed.status_code == 200
     edited = await db.http.patch(
-        f"/admin/users/{db.users[1]}", headers=auth(), json={"role": "readonly"}
+        f"/admin/users/{db.users[1]}", headers=auth(),
+        json=await prepare_admin_write(db, "update", {
+            "role": "readonly", "expected_review_token": reviewed.json()["review_token"]}, db.users[1]),
     )
     assert edited.status_code == 200, edited.text
     actual = await db.http.get("/identity", headers={"authorization": "Bearer 1"})
@@ -859,13 +927,14 @@ async def test_admin_create_membership_failure_rolls_back_new_profile(identity_d
             await db.http.post(
                 "/admin/users",
                 headers=auth(),
-                json={
+                json=await prepare_admin_write(db, "create", {
+                    "request_id": str(uuid4()),
                     "name": "Synthetic staff",
                     "email": email,
                     "password": "Synthetic-Password-42!",
                     "role": "user",
                     "tenant_id": str(db.tenants[0]),
-                },
+                }),
             )
         assert not await db.admin.fetchval("SELECT id FROM user_profiles WHERE email=$1", email)
     finally:
@@ -880,8 +949,12 @@ async def test_admin_role_edit_does_not_create_missing_legacy_membership(identit
         "UPDATE user_profiles SET role='platform_admin' WHERE id=$1", db.users[0]
     )
     await db.admin.execute("DELETE FROM tenant_users WHERE user_id=$1", db.users[1])
+    reviewed = await db.http.get(f"/admin/users/{db.users[1]}", headers=auth())
+    assert reviewed.status_code == 200
     result = await db.http.patch(
-        f"/admin/users/{db.users[1]}", headers=auth(), json={"role": "readonly"}
+        f"/admin/users/{db.users[1]}", headers=auth(),
+        json=await prepare_admin_write(db, "update", {
+            "role": "readonly", "expected_review_token": reviewed.json()["review_token"]}, db.users[1]),
     )
     assert result.status_code == 409
     assert not await db.admin.fetchval(
@@ -896,10 +969,13 @@ async def test_admin_role_edit_does_not_create_missing_legacy_membership(identit
 async def test_tenant_admin_cannot_use_platform_user_creation(identity_db):
     db = identity_db
     email = f"{uuid4()}@example.com"
+    unprepared_id = str(uuid4())
     result = await db.http.post(
         "/admin/users",
         headers=auth(),
         json={
+            "request_id": unprepared_id,
+            "operation_id": unprepared_id,
             "name": "Synthetic",
             "email": email,
             "password": "Synthetic-Password-42!",
@@ -919,12 +995,13 @@ async def test_admin_create_requires_tenant_for_nonplatform_role(identity_db):
     result = await db.http.post(
         "/admin/users",
         headers=auth(),
-        json={
+        json=await prepare_admin_write(db, "create", {
+            "request_id": str(uuid4()),
             "name": "Synthetic",
             "email": email,
             "password": "Synthetic-Password-42!",
             "role": "user",
-        },
+        }),
     )
     assert result.status_code == 400
     assert not await db.admin.fetchval("SELECT id FROM user_profiles WHERE email=$1", email)

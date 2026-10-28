@@ -1,33 +1,18 @@
-import { Search, Bell, MessageSquare, ChevronDown } from 'lucide-react';
+import { LogOut } from 'lucide-react';
+import { useAuth } from '../lib/auth';
 
 export function Header() {
-    return (
-        <header className="header">
-            <div className="header-search">
-                <Search />
-                <input type="text" placeholder="Search..." />
+    const { user, logout, isLoading } = useAuth();
+    return <header className="header">
+        <span>Admin workspace</span>
+        <div className="header-right">
+            <div className="header-user">
+                <span>{user?.name || user?.email || 'Verifying identity'}</span>
+                {user && <small>{user.email} · {user.role.replace(/_/g, ' ')}</small>}
             </div>
-
-            <div className="header-right">
-                <div className="header-env">
-                    <span className="header-env-dot"></span>
-                    <span>Prod</span>
-                    <ChevronDown size={14} />
-                </div>
-
-                <button className="header-icon-btn">
-                    <Bell />
-                    <span className="header-badge">5</span>
-                </button>
-
-                <button className="header-icon-btn">
-                    <MessageSquare />
-                </button>
-
-                <div className="header-user">
-                    <span>Admin</span>
-                </div>
-            </div>
-        </header>
-    );
+            <button type="button" className="btn btn-secondary btn-sm" disabled={isLoading} onClick={() => void logout()}>
+                <LogOut size={16} /> Sign out
+            </button>
+        </div>
+    </header>;
 }

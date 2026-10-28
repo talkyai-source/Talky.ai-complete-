@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './lib/auth';
+import { AuthProvider, useAuth } from './lib/auth';
+import { adminLanding } from './lib/admin-routes';
 import { AdminRouteGuard } from './components/AdminRouteGuard';
 import { LoginPage } from './pages/LoginPage';
 import { CommandCenterPage } from './pages/CommandCenterPage';
@@ -16,6 +17,12 @@ import { ContactEnquiriesPage } from './pages/ContactEnquiriesPage';
 import './index.css';
 
 const PLATFORM_ROLES = ['platform_admin', 'super_admin'];
+
+function HomeRoute() {
+  const { user, isAuthenticated } = useAuth();
+  if (isAuthenticated && adminLanding(user?.role) !== '/') return <Navigate to={adminLanding(user?.role)} replace />;
+  return <AdminRouteGuard><CommandCenterPage /></AdminRouteGuard>;
+}
 
 function App() {
   return (
@@ -34,9 +41,7 @@ function App() {
           <Route
             path="/"
             element={
-              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
-                <CommandCenterPage />
-              </AdminRouteGuard>
+              <HomeRoute />
             }
           />
           <Route

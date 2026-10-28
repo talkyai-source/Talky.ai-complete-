@@ -10,6 +10,7 @@ import { notificationsStore } from "@/lib/notifications";
 // Contains no token or account data. Cookie-only sessions also need an explicit
 // cross-tab boundary because removing an absent bearer key emits no event.
 export const AUTH_IDENTITY_EVENT_KEY = "talklee.auth.identity.v1";
+const FOREIGN_IDENTITY_EVENT_KEY = "talky.admin.identity.v1";
 function publishIdentityChange(kind: "changed" | "logout", channel: BroadcastChannel | null) {
     const message = { kind, nonce: crypto.randomUUID() };
     let delivered = false;
@@ -145,6 +146,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const accessTokenRef = useRef(accessToken);
     const identityEpoch = useRef(0);
     const profileRead = useRef(0);
+    // Local intent must survive in-flight logout and unavailable persistence.
+    // Only an owned successful sign-in may reopen this mounted provider.
+    const logoutIntent = useRef(false);
     // Explicit logout closes admission as well as invalidating earlier reads:
     // a timer that starts afterward must not rediscover the still-valid cookie
     // while the logout request is in flight.
@@ -191,7 +195,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setUser(null);
             const epoch = ++identityEpoch.current;
             const read = ++profileRead.current;
-            if (kind === "logout") {
+            try {
+                if (window.localStorage.getItem("talky.logout.pending")) logoutIntent.current = true;
+            } catch { /* Keep the volatile intent when storage is unavailable. */ }
+            // A notification is not confirmation of an earlier local logout.
+            // Only an explicit successful sign-in clears that durable fence.
+            if (kind === "logout" || logoutIntent.current) {
                 profileReadsAllowed.current = false;
                 notificationsStore.setIdentity(null);
                 accessTokenRef.current = null;
@@ -218,14 +227,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 if (current()) { notificationsStore.setIdentity(null); setUser(null); setLoading(false); }
             });
         }
-        function receiveMarker(value: unknown) {
+        function receiveMarker(value: unknown, foreign = false) {
             if (!value || typeof value !== "object") return;
             const message = value as { kind?: unknown; nonce?: unknown };
             if ((message.kind !== "changed" && message.kind !== "logout") || typeof message.nonce !== "string" || !message.nonce || message.nonce.length > 200) return;
             if (seen.has(message.nonce)) return;
             seen.add(message.nonce);
             if (seen.size > 100) seen.delete(seen.values().next().value!);
-            if (message.kind === "changed") {
+            if (foreign) {
+                // Foreign cookie changes invalidate this app's old bearer; it
+                // must not accompany the canonical cookie-only identity check.
+                accessTokenRef.current = null;
+                setAccessTokenState(null);
+                setBrowserAuthToken(null);
+            } else if (message.kind === "changed") {
                 accessTokenRef.current = getBrowserAuthToken();
                 setAccessTokenState(accessTokenRef.current);
             }
@@ -238,8 +253,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 accessTokenRef.current = next;
                 setAccessTokenState(next);
                 handleIdentityChange(next ? "changed" : "logout");
-            } else if (e.key === AUTH_IDENTITY_EVENT_KEY) {
-                try { receiveMarker(JSON.parse(e.newValue ?? "null")); } catch { /* Ignore malformed markers. */ }
+            } else if (e.key === AUTH_IDENTITY_EVENT_KEY || e.key === FOREIGN_IDENTITY_EVENT_KEY) {
+                try { receiveMarker(JSON.parse(e.newValue ?? "null"), e.key === FOREIGN_IDENTITY_EVENT_KEY); } catch { /* Ignore malformed markers. */ }
             } else if (e.key === null) handleIdentityChange("logout");
         }
         let storageAvailable = false;
@@ -249,12 +264,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             storageAvailable = true;
         } catch { /* Storage can be blocked or full while cookies remain usable. */ }
         let channel: BroadcastChannel | null = null;
+        let foreignChannel: BroadcastChannel | null = null;
         try {
             if (typeof window.BroadcastChannel !== "undefined") {
                 channel = new window.BroadcastChannel(AUTH_IDENTITY_EVENT_KEY);
                 channel.onmessage = event => receiveMarker(event.data);
             }
         } catch { /* Notifications remain unscoped if both transports fail. */ }
+        try {
+            if (typeof window.BroadcastChannel !== "undefined") {
+                foreignChannel = new window.BroadcastChannel(FOREIGN_IDENTITY_EVENT_KEY);
+                foreignChannel.onmessage = event => receiveMarker(event.data, true);
+            }
+        } catch { /* The existing foreign storage marker remains the fallback. */ }
         identityChannel.current = channel;
         // Capability depends on successfully opening browser transports, which
         // must happen after mount rather than during render or on the server.
@@ -265,47 +287,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             window.removeEventListener("storage", onStorage);
             identityChannel.current = null;
             channel?.close();
+            foreignChannel?.close();
         };
     }, [setUser]);
 
     // A failed logout has an unknown server outcome. Do not replay a timestamp
     // against current cookies: they may now belong to a different session.
 
-    // Bootstrap auth state from the server.
-    //
-    // Two gating strategies depending on the deploy mode:
-    //
-    //   Bearer-fallback ON (default): skip /auth/me when there's no Bearer
-    //   token in localStorage. The Bearer's presence is the proxy signal
-    //   that "we have a session." Without it, calling /auth/me on a cold
-    //   anonymous visit fires a 401 → trips the session-expired latch →
-    //   tears down sibling API calls. The protective behaviour we want
-    //   for visitors who land on /auth/login without a session.
-    //
-    //   Bearer-fallback OFF (Phase F+F2 cookie-only mode): the JWT is
-    //   never written to localStorage anymore. The HttpOnly `talky_at`
-    //   cookie IS the session and JS can't read it. So we MUST call
-    //   /auth/me unconditionally on mount — if the cookie's valid the
-    //   server returns the user; if not we get a 401 and present a
-    //   logged-out shell. The latch-tearing-down concern is mitigated
-    //   by the fresh-login grace window and by the fact that nothing
-    //   in localStorage is at risk of being wiped anymore.
-    //
-    // Hotfix 2026-05-21: the previous gate only checked the Bearer path,
-    // so after the Phase F flip every page reload bounced the user to
-    // /auth/login even with a valid cookie. The branch on
-    // isBearerFallbackEnabled() restores the correct cookie-mode
-    // behaviour.
-    //
-    // Dependencies: this effect deliberately runs ONCE, on mount, and reads
-    // the token through `accessTokenRef` instead of listing `accessToken` as a
-    // dependency. Listing it would re-run the whole bootstrap on every token
-    // write — login, refresh rotation, cross-tab sync — each one firing a
-    // fresh /auth/me and flipping `loading` back on under the user, and the
-    // in-effect retry path (`loadMe`) can itself trigger a refresh, so the
-    // re-runs would feed each other. The ref keeps the value current without
-    // making it a trigger; at mount it is exactly the lazily-initialised
-    // localStorage token anyway.
+    // Verify the session on mount using existing cookies and any saved bearer.
+    // A missing bearer says nothing about the HttpOnly cookie. getMe suppresses
+    // the global expiry redirect; an anonymous response settles this provider.
+    // Token changes stay outside the dependency list so rotation cannot restart
+    // bootstrap. The HTTP client reads the live token ref when needed.
     useEffect(() => {
         let cancelled = false;
         const epoch = identityEpoch.current;
@@ -313,6 +306,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const current = () => !cancelled && identityEpoch.current === epoch && profileRead.current === read;
         try {
             if (window.localStorage.getItem("talky.logout.pending")) {
+                logoutIntent.current = true;
                 profileReadsAllowed.current = false;
                 // Settle the client-only bootstrap after reading its persisted receipt.
                 // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -320,22 +314,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 return;
             }
         } catch { /* Continue the usual bootstrap when storage is unavailable. */ }
-        const legacyToken = accessTokenRef.current ?? getBrowserAuthToken();
-        const inCookieOnlyMode = !isBearerFallbackEnabled();
-        if (!legacyToken && !inCookieOnlyMode) {
-            // Bearer mode + no Bearer = anonymous cold visit. Don't
-            // call /auth/me, just present the logged-out shell.
-            setLoading(false);
-            return;
-        }
-
-        // Retry once with backoff if /auth/me fails during a fresh-login
-        // race. The login handler seeds `user` via flushSync BEFORE this
-        // effect typically runs again, but if AuthProvider remounts (e.g.
-        // a Suspense boundary swaps), this bootstrap fires fresh and can
-        // race the cookie commit. One 1.5s retry inside the grace window
-        // resolves >99% of those races; outside the window we fail open
-        // and let the user re-login explicitly.
+        // Retain the existing single retry during fresh-login grace. Current
+        // ownership checks reject reads superseded by logout or another login.
         async function loadMe(attempt: number): Promise<void> {
             if (!current()) return;
             try {
@@ -360,8 +340,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     }
                     return;
                 }
-                // Real failure — http-client already cleared the token via
-                // its 401 path; we just sync our user state.
+                // The canonical check failed; leave this provider anonymous.
                 setUser(null);
             } finally {
                 if (current()) setLoading(false);
@@ -395,6 +374,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             throw new ApiClientError({ code: "mfa_required", message: "Complete two-factor authentication on the sign-in page.",
                 url: "/auth/login", method: "POST" });
         }
+        logoutIntent.current = false;
         clearUnconfirmedLogout();
         profileReadsAllowed.current = true;
         profileRead.current += 1;
@@ -418,6 +398,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const logout = useCallback(async () => {
         const expectedIdentity = user ? { userId: user.id, tenantId: user.tenant_id } : undefined;
+        logoutIntent.current = true;
+        // Persist before a cross-app hint can retire this operation's epoch.
+        // A failed write still leaves the mounted provider fenced in memory.
+        try { window.localStorage.setItem("talky.logout.pending", String(Date.now())); } catch { /* Keep volatile intent. */ }
         const epoch = invalidateIdentity();
         setUser(null);
         setLoading(false);
@@ -570,6 +554,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         access_token?: string;
     }) => {
         invalidateIdentity();
+        logoutIntent.current = false;
         clearUnconfirmedLogout();
         profileReadsAllowed.current = true;
         // When a caller passes the access_token, we commit it through the

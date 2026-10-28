@@ -8,12 +8,13 @@ from uuid import UUID
 from app.api.v1.dependencies import CurrentUser
 from app.api.v1.endpoints import telephony_bridge
 from app.api.v1.endpoints.admin import calls
-from app.domain.services.telephony import termination
+from app.domain.services.telephony import termination, termination_receipts
 from app.infrastructure.telephony.asterisk_adapter import AsteriskAdapter
 import pytest
 from fastapi import HTTPException
 from unittest.mock import AsyncMock
 from app.domain.services.telephony import lifecycle
+from tests.unit.pbx_identity_helpers import INFO, BINDING, bind_test_adapter
 
 
 class Conn:
@@ -30,9 +31,15 @@ class Conn:
             campaign_id=None,
             answered_at=datetime(2026, 10, 5, tzinfo=timezone.utc),
         )
+        fixture_adapter = AsteriskAdapter()
+        fixture_adapter._control_backend_system = INFO["system"]["entity_id"]
+        fixture_adapter._control_backend_startup = INFO["status"]["startup_time"]
+        self.row["route_snapshot"] = {"control_backend": fixture_adapter.control_backend_identity}
         self.writes = []
 
     async def fetchrow(self, sql, *args):
+        if "SELECT id, tenant_id, provider, provider_call_id" in sql:
+            return dict(self.row)
         if "SELECT id, tenant_id, external_call_uuid" in sql or "SELECT external_call_uuid" in sql:
             return dict(self.row)
         if "SELECT id::text AS call_id" in sql:
@@ -52,6 +59,9 @@ class Conn:
         return self.legs
 
     async def execute(self, sql, *args):
+        if "INSERT INTO call_events" in sql:
+            self.writes.append("termination_receipt")
+            return "INSERT 0 1"
         assert "SET status='termination_pending'" in sql
         self.row["status"] = "termination_pending"
         self.writes.append("termination_pending")
@@ -83,8 +93,10 @@ async def test_admin_absence_proof_requires_saved_provider_family(monkeypatch, p
         return 404, {}
 
     adapter._ari = ari
+    bind_test_adapter(adapter)
     monkeypatch.setattr(calls, "acquire_with_tenant", acquire)
     monkeypatch.setattr(termination, "acquire_with_tenant", acquire)
+    monkeypatch.setattr(termination_receipts, "acquire_with_tenant", acquire)
     monkeypatch.setattr(telephony_bridge, "_adapter", adapter)
     params = dict(
         admin_user=CurrentUser(
@@ -130,6 +142,7 @@ async def test_actual_context_retains_all_leg_authority_before_any_io(monkeypatc
     )
     adapter = AsteriskAdapter()
     adapter._ari = AsyncMock(return_value=(404, {}))
+    bind_test_adapter(adapter)
     proof = await termination.request_confirmed_hangup(
         adapter,
         context.provider_call_id,
@@ -156,8 +169,10 @@ async def test_inbound_lease_loss_does_not_settle_with_unrelated_adapter(monkeyp
         yield conn
 
     monkeypatch.setattr(termination, "acquire_with_tenant", acquire)
+    monkeypatch.setattr(termination_receipts, "acquire_with_tenant", acquire)
     adapter = AsteriskAdapter()
     adapter._ari = AsyncMock(return_value=(404, {}))
+    bind_test_adapter(adapter)
     monkeypatch.setattr(lifecycle, "get_adapter", lambda: adapter)
     monkeypatch.setattr(
         lifecycle, "_state", lambda: SimpleNamespace(register_cleanup_obligation=AsyncMock())
@@ -186,6 +201,7 @@ async def test_durable_entrypoints_use_saved_identity(monkeypatch, provider, end
     conn = Conn(provider)
     adapter = AsteriskAdapter()
     adapter._ari = AsyncMock(return_value=(404, {}))
+    bind_test_adapter(adapter)
 
     @asynccontextmanager
     async def acquire(*_args, **_kwargs):
@@ -283,6 +299,7 @@ async def test_campaign_batch_holds_entire_mismatched_call(monkeypatch, parent, 
                         "durable_call_id": "saved-call",
                         "provider_call_id": "parent",
                         "provider": parent,
+                        "route_snapshot": {"control_backend": adapter.control_backend_identity},
                     }
                 ]
             assert "FROM call_legs" in query
@@ -293,6 +310,7 @@ async def test_campaign_batch_holds_entire_mismatched_call(monkeypatch, parent, 
     conn = BatchConn()
     adapter = AsteriskAdapter()
     adapter._ari = AsyncMock(return_value=(404, {}))
+    bind_test_adapter(adapter)
     monkeypatch.setattr(
         container_module, "get_container", lambda: SimpleNamespace(db_pool=_Pool(conn))
     )
@@ -343,6 +361,7 @@ async def test_concrete_matching_family_can_request_its_own_proof(family):
 @pytest.mark.asyncio
 async def test_missing_linked_metadata_is_not_an_omission_bypass():
     adapter = SimpleNamespace(name="asterisk", hangup_many_confirmed=AsyncMock(return_value=True))
+    bind_test_adapter(adapter)
     proof = await termination.request_confirmed_hangup(
         adapter, "parent", expected_provider="asterisk", provider_leg_ids=("child",)
     )
@@ -364,20 +383,30 @@ async def test_takeover_candidate_rehydrates_leg_provenance_before_proof(
 
     class RecoveryConn:
         async def fetchrow(self, query, *_args):
-            assert "recovery_match_count" in query
+            assert "recovery_match_count" in query or "AS call_id" in query or "SELECT id, tenant_id, provider" in query
             return {
                 "id": durable,
+                "call_id": durable,
                 "tenant_id": "00000000-0000-4000-8000-000000000002",
                 "provider": "asterisk",
                 "provider_call_id": "recovered-parent",
                 "direction": "inbound",
                 "status": "termination_pending",
                 "recovery_match_count": 1,
+                "route_snapshot": {"control_backend": BINDING},
+                "campaign_id": None,
+                "answered_at": None,
             }
 
         async def fetch(self, query, *_args):
             assert "FROM call_legs" in query
-            return [{"provider_leg_id": "persisted-child", "provider": child_provider}]
+            return [{"id": "00000000-0000-4000-8000-000000000003", "provider_leg_id": "persisted-child", "provider": child_provider}]
+
+        async def execute(self, query, *_args):
+            if "INSERT INTO call_events" in query:
+                return "INSERT 0 1"
+            assert "UPDATE calls" in query
+            return "UPDATE 1"
 
     @asynccontextmanager
     async def acquire(*_args, **_kwargs):
@@ -418,7 +447,10 @@ async def test_takeover_candidate_rehydrates_leg_provenance_before_proof(
         lambda: SimpleNamespace(is_initialized=True, db_pool=object()),
     )
     monkeypatch.setattr(db_utils, "acquire_with_tenant", acquire)
+    monkeypatch.setattr(termination, "acquire_with_tenant", acquire)
+    monkeypatch.setattr(termination_receipts, "acquire_with_tenant", acquire)
     adapter = SimpleNamespace(name="asterisk", hangup_many_confirmed=AsyncMock(return_value=True))
+    bind_test_adapter(adapter)
     monkeypatch.setattr(lifecycle, "get_adapter", lambda: adapter)
     ended = AsyncMock(return_value=True)
     monkeypatch.setattr(lifecycle, "_on_call_ended", ended)
@@ -426,7 +458,7 @@ async def test_takeover_candidate_rehydrates_leg_provenance_before_proof(
     claim_takeovers.assert_awaited_once()
     if child_provider == "asterisk":
         adapter.hangup_many_confirmed.assert_awaited_once_with(
-            ["recovered-parent", "persisted-child"]
+            ("recovered-parent", "persisted-child")
         )
         ended.assert_awaited_once()
     else:

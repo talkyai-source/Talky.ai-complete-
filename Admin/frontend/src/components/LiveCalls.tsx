@@ -4,6 +4,8 @@ import { api } from '../lib/api';
 import type { LiveCallItem } from '../lib/api';
 import { CallTerminationAction } from './CallTerminationAction';
 import { getTerminationPhase, mergePolledLiveCalls } from '../lib/call-termination';
+import { useAuthGeneration } from '../lib/use-auth-generation';
+import { useOperationOwner } from '../lib/use-operation-owner';
 
 function formatDuration(seconds: number): string {
     if (!Number.isFinite(seconds) || seconds <= 0) return '-';
@@ -50,7 +52,13 @@ function StatusBadge({ call }: { call: LiveCallItem }) {
 }
 
 export function LiveCalls() {
+    const generation = useAuthGeneration();
+    return <OwnedLiveCalls key={generation} generation={generation} />;
+}
+
+function OwnedLiveCalls({ generation }: { generation: number }) {
     const [calls, setCalls] = useState<LiveCallItem[]>([]);
+    const [callsLoading, setCallsLoading] = useState(true);
     const [isPaused, setIsPaused] = useState(false);
     const [pauseLoading, setPauseLoading] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
@@ -60,29 +68,47 @@ export function LiveCalls() {
     // isPaused alone cannot say "unknown": it would read as "not paused".
     const [pauseStatusError, setPauseStatusError] = useState<string | null>(null);
     const [actionError, setActionError] = useState<string | null>(null);
+    const [pauseStatusKnown, setPauseStatusKnown] = useState(false);
+    const captureOwner = useOperationOwner(generation, 'live-calls');
+    const callsReadSeq = useRef(0);
+    const pauseReadSeq = useRef(0);
+    const callsPending = useRef<object | null>(null);
+    const pausePending = useRef<object | null>(null);
+    const pauseBusy = useRef(false);
     // Bumped by every pause/resume write so a status read that started before
     // the write cannot overwrite the newer answer.
     const pauseWriteSeq = useRef(0);
 
     const refreshPauseStatus = useCallback(async () => {
+        const ownsView = captureOwner();
+        if (!ownsView() || pauseBusy.current || pausePending.current) return;
+        const ticket = {};
+        pausePending.current = ticket;
         const seq = pauseWriteSeq.current;
+        const read = ++pauseReadSeq.current;
+        const owns = () => ownsView() && seq === pauseWriteSeq.current && read === pauseReadSeq.current;
         try {
             const response = await api.getPauseStatus();
+            if (!owns()) return;
             if (response.error) throw new Error(response.error.message);
-            if (seq !== pauseWriteSeq.current) return;
+            if (typeof response.data?.paused !== 'boolean') throw new Error('The pause status could not be verified.');
             if (response.data) {
                 setIsPaused(response.data.paused);
                 // Only adopt the server's reason while paused: when not paused
                 // the field doubles as the operator's draft for the next pause.
                 if (response.data.paused) setPauseReason(response.data.reason || '');
                 setPauseStatusError(null);
+                setPauseStatusKnown(true);
             }
         } catch (err) {
             console.warn('Failed to fetch pause status:', err);
-            if (seq !== pauseWriteSeq.current) return;
+            if (!owns()) return;
+            setPauseStatusKnown(false);
             setPauseStatusError(err instanceof Error ? err.message : 'Could not read the pause status.');
+        } finally {
+            if (pausePending.current === ticket) pausePending.current = null;
         }
-    }, []);
+    }, [captureOwner]);
 
     // Fetch pause status on mount
     useEffect(() => {
@@ -95,19 +121,32 @@ export function LiveCalls() {
     useEffect(() => {
         let cancelled = false;
         const fetchOnce = async () => {
+            const ownsView = captureOwner();
+            if (!ownsView() || cancelled || callsPending.current) return;
+            const ticket = {};
+            callsPending.current = ticket;
+            const read = ++callsReadSeq.current;
+            const owns = () => ownsView() && !cancelled && read === callsReadSeq.current;
             try {
                 const response = await api.getLiveCalls();
+                if (!owns()) return;
                 if (response.error) throw new Error(response.error.message);
-                if (cancelled) return;
-                const items = response.data ?? [];
+                if (!Array.isArray(response.data) || response.data.some(item => !item
+                    || typeof item.id !== 'string' || !item.id || typeof item.status !== 'string' || !item.status)) {
+                    throw new Error('The live-call response was incomplete or invalid.');
+                }
+                const items = response.data;
                 setCalls((current) => mergePolledLiveCalls(current, items));
                 setPollError(null);
             } catch (error) {
-                if (!cancelled) {
+                if (owns()) {
                     setPollError(error instanceof Error
                         ? error.message
                         : 'Live-call refresh failed. Existing statuses may be stale.');
                 }
+            } finally {
+                if (callsPending.current === ticket) callsPending.current = null;
+                if (owns()) setCallsLoading(false);
             }
         };
         void fetchOnce();
@@ -119,53 +158,83 @@ export function LiveCalls() {
         const id = window.setInterval(tick, 5_000);
         return () => {
             cancelled = true;
+            callsPending.current = null;
+            pausePending.current = null;
             window.clearInterval(id);
         };
-    }, [refreshPauseStatus]);
+    }, [captureOwner, refreshPauseStatus]);
 
     const patchCall = useCallback((callId: string, patch: Partial<LiveCallItem>) => {
+        if (!captureOwner()()) return;
+        callsReadSeq.current += 1;
         setCalls((current) => current.map((call) => (
             call.id === callId ? { ...call, ...patch } : call
         )));
-    }, []);
+    }, [captureOwner]);
 
     const confirmCallEnded = useCallback((callId: string) => {
+        if (!captureOwner()()) return;
+        callsReadSeq.current += 1;
         setCalls((current) => current.filter((call) => call.id !== callId));
-    }, []);
+    }, [captureOwner]);
 
     const handlePauseToggle = useCallback(async () => {
+        const owns = captureOwner();
+        if (!owns() || pauseBusy.current || !pauseStatusKnown) return;
+        if (showConfirm && isPaused) {
+            setShowConfirm(false);
+            setActionError('Calls are already paused. Review the current status before another action.');
+            return;
+        }
         if (!isPaused && !showConfirm) {
             // Show confirmation before pausing
             setShowConfirm(true);
             return;
         }
 
+        pauseBusy.current = true;
         setPauseLoading(true);
         setActionError(null);
         pauseWriteSeq.current += 1;
+        pausePending.current = null;
+        let rejected = false;
         try {
             const shouldPause = !isPaused;
             const response = await api.setPauseAllCalls(
                 shouldPause,
                 shouldPause ? (pauseReason || 'Paused from Admin Command Center') : undefined,
             );
-            if (response.error) throw new Error(response.error.message);
+            if (!owns()) return;
+            if (response.error) {
+                rejected = [400, 401, 403, 422].includes(response.error.status ?? 0);
+                throw new Error(response.error.message);
+            }
+            if (response.data?.paused !== shouldPause) throw new Error('The requested pause status was not confirmed.');
             if (response.data) {
                 setIsPaused(response.data.paused);
                 setPauseReason(response.data.reason || '');
                 setPauseStatusError(null);
+                setPauseStatusKnown(true);
             }
             setShowConfirm(false);
         } catch (err) {
+            if (!owns()) return;
             console.error('Failed to toggle pause:', err);
-            // Leave the confirm open: the emergency stop was NOT applied.
-            setActionError(err instanceof Error
-                ? err.message
-                : 'The request failed. Calls were not paused or resumed.');
+            const message = err instanceof Error ? err.message : 'The request could not be confirmed.';
+            setActionError(rejected ? `Request rejected: ${message}`
+                : `${message} The pause/resume outcome is unconfirmed; check current status before another request.`);
+            if (!rejected) {
+                setPauseStatusKnown(false);
+                setPauseStatusError('The latest pause/resume outcome is unconfirmed.');
+            }
         } finally {
-            setPauseLoading(false);
+            if (owns()) {
+                pauseBusy.current = false;
+                pauseWriteSeq.current += 1;
+                setPauseLoading(false);
+            }
         }
-    }, [isPaused, showConfirm, pauseReason]);
+    }, [captureOwner, isPaused, showConfirm, pauseReason, pauseStatusKnown]);
 
     const handleCancelConfirm = useCallback(() => {
         setShowConfirm(false);
@@ -191,13 +260,14 @@ export function LiveCalls() {
                             <button
                                 className="btn btn-confirm-yes"
                                 onClick={handlePauseToggle}
-                                disabled={pauseLoading}
+                                disabled={pauseLoading || !pauseStatusKnown}
                             >
                                 Yes
                             </button>
                             <button
                                 className="btn btn-confirm-no"
                                 onClick={handleCancelConfirm}
+                                disabled={pauseLoading}
                             >
                                 No
                             </button>
@@ -206,7 +276,7 @@ export function LiveCalls() {
                         <button
                             className={`btn ${isPaused ? 'btn-resume' : 'btn-pause'}`}
                             onClick={handlePauseToggle}
-                            disabled={pauseLoading}
+                            disabled={pauseLoading || !pauseStatusKnown}
                         >
                             {pauseLoading ? (
                                 <Loader2 className="animate-spin" size={14} />
@@ -229,7 +299,7 @@ export function LiveCalls() {
             {actionError && (
                 <div className="error-banner inline" role="alert">
                     <p>
-                        {isPaused ? 'Calls were NOT resumed' : 'Calls were NOT paused'}: {actionError}
+                        {actionError}
                     </p>
                 </div>
             )}
@@ -244,7 +314,9 @@ export function LiveCalls() {
 
             {isPaused && (
                 <div className="pause-banner">
-                    New outbound calls are paused across all workers.
+                    {pauseStatusKnown
+                        ? 'New outbound calls are paused across all workers.'
+                        : 'Last observed: new outbound calls were paused.'}
                     {pauseReason && <span> Reason: {pauseReason}</span>}
                 </div>
             )}
@@ -288,7 +360,7 @@ export function LiveCalls() {
                         ))}
                         {calls.length === 0 && (
                             <tr>
-                                <td className="table-empty-row" colSpan={6}>No active calls</td>
+                                <td className="table-empty-row" colSpan={6}>{pollError ? 'Live calls unavailable' : callsLoading ? 'Loading live calls…' : 'No active calls'}</td>
                             </tr>
                         )}
                     </tbody>

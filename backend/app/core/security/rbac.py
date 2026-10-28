@@ -596,7 +596,8 @@ async def get_user_permissions(
         except ValueError:
             logger.warning(f"Unknown permission '{row['name']}' for user {user_id}")
 
-    # Query 2: Direct user permissions
+    # Query 2: Direct user permissions. A recheck after a lock wait must use
+    # actual time, not NOW() frozen at the start of the transaction.
     user_perms = await conn.fetch(
         """
         SELECT p.name
@@ -605,7 +606,7 @@ async def get_user_permissions(
         JOIN permissions p ON p.id = up.permission_id
         WHERE up.user_id = $1
           AND (up.tenant_id IS NULL OR up.tenant_id = $2)
-          AND (up.expires_at IS NULL OR up.expires_at > NOW())
+          AND (up.expires_at IS NULL OR up.expires_at > clock_timestamp())
           AND ($2::uuid IS NULL OR EXISTS (
               SELECT 1 FROM tenant_users member WHERE member.user_id=up.user_id
                 AND member.tenant_id=$2::uuid AND member.status='active'

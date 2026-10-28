@@ -14,6 +14,28 @@ class PrincipalUnavailable(ValueError):
         super().__init__(code)
 
 
+async def _require_formal_account_access(conn, tenant_id):
+    """Read the verified member's formal account authority, excluding billing.
+
+    Connector transactions retain tenant RLS scope. The formal parent lives in
+    another tenant, so only this exact-tenant read uses the existing internal
+    bypass. A savepoint restores its prior scope on either success or failure;
+    subsequent connector writes keep their original tenant boundary.
+    """
+    from app.domain.services.telephony.call_authority import read_formal_account_authority
+
+    previous = await conn.fetchval("SELECT current_setting('app.bypass_rls', TRUE)")
+    if previous == "on":
+        authority = await read_formal_account_authority(conn, tenant_id)
+    else:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.bypass_rls', $1, TRUE)", "on")
+            authority = await read_formal_account_authority(conn, tenant_id)
+            await conn.execute("SELECT set_config('app.bypass_rls', $1, TRUE)", previous or "")
+    if not authority.allowed:
+        raise PrincipalUnavailable("account_restricted")
+
+
 async def load_current_principal(conn, user_id, *, tenant_id=None):
     row = await conn.fetchrow(
         """SELECT up.id,up.email,up.name,up.role AS profile_role,up.tenant_id,
@@ -48,6 +70,7 @@ async def load_current_principal(conn, user_id, *, tenant_id=None):
             or effective_role == "platform_admin"
         ):
             raise PrincipalUnavailable("membership_role_unavailable")
+        await _require_formal_account_access(conn, actual_tenant)
     result.update(id=str(row["id"]), tenant_id=actual_tenant, role=effective_role)
     return result
 

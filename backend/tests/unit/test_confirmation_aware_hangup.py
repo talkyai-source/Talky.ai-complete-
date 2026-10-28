@@ -353,6 +353,10 @@ async def test_termination_context_fences_before_snapshotting_linked_legs(monkey
 
         async def fetch(self, query, *_args):
             assert "FROM call_legs" in query
+            if "SELECT id::text AS id" in query:
+                events.append("inventory")
+                return [{"id": f"leg-row-{n}", "provider": "asterisk", "provider_leg_id": leg}
+                        for n, leg in enumerate(("talky-xfer-one", "talky-xfer-one", "talky-xfer-two"))]
             events.append("legs")
             return [
                 {"provider_leg_id": "talky-xfer-one", "provider": "asterisk"},
@@ -376,7 +380,8 @@ async def test_termination_context_fences_before_snapshotting_linked_legs(monkey
         tenant_id="00000000-0000-0000-0000-000000000001",
     )
 
-    assert events == ["lock", "fence", "legs"]
+    assert events == ["lock", "fence", "legs", "inventory"]
+    assert len(context.leg_inventory) == 3
     assert context.provider_call_id == "parent-provider"
     assert context.previous_status == "in_call"
     assert context.provider_leg_ids == ("talky-xfer-one", "talky-xfer-two")

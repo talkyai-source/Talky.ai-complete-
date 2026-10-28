@@ -7,7 +7,9 @@ export function formatRecordedCount(value: number | null | undefined): string {
 }
 
 export function formatLegacyEstimate(value: LegacyOutboundEstimate | null | undefined): string {
-    if (!value || value.recorded_total === null || !Number.isFinite(value.recorded_total)) {
+    if (!value || value.recorded_total === null || !Number.isFinite(value.recorded_total)
+        || typeof value.currency !== 'string'
+        || !Number.isFinite(value.covered_call_count) || !Number.isFinite(value.missing_call_count)) {
         return 'Unavailable';
     }
     return `${formatCurrencyAmount(value.recorded_total, value.currency, 2)}; `

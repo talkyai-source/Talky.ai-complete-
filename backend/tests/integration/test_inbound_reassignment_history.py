@@ -12,17 +12,42 @@ import pytest
 
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services.inbound_campaign_service import InboundCampaignService
+from tests.integration.test_inbound_hold_resolution import reviewed_inbound_database
+
+
+async def _delete_owned_policy_events(conn, tenant_ids, trunk_ids):
+    """Test-owner cleanup only, after owned trunks emit their final DELETE logs.
+
+    Never weaken application audit retention. The reviewed disposable database
+    owner removes exact fixture records with replication restored before any
+    user/tenant foreign-key cleanup. Unexpected policy rows abort cleanup.
+    """
+    rows = await conn.fetch(
+        "SELECT id,tenant_id,table_name,record_id FROM tenant_policy_audit_log "
+        "WHERE tenant_id=ANY($1::uuid[])", tenant_ids,
+    )
+    assert all(row["table_name"] == "tenant_sip_trunks" and row["record_id"] in trunk_ids
+               for row in rows), "Unexpected owned policy evidence requires explicit cleanup review"
+    previous = await conn.fetchval("SHOW session_replication_role")
+    await conn.execute("SET LOCAL session_replication_role='replica'")
+    await conn.execute(
+        "DELETE FROM tenant_policy_audit_log WHERE id=ANY($1::uuid[]) "
+        "AND tenant_id=ANY($2::uuid[]) AND table_name='tenant_sip_trunks' "
+        "AND record_id=ANY($3::uuid[])",
+        [row["id"] for row in rows], tenant_ids, trunk_ids,
+    )
+    await conn.execute("SELECT set_config('session_replication_role',$1,TRUE)", previous)
+    assert await conn.fetchval("SHOW session_replication_role") == previous
+    assert not await conn.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM tenant_policy_audit_log WHERE tenant_id=ANY($1::uuid[]))",
+        tenant_ids,
+    )
 
 
 @pytest.mark.asyncio
 async def test_cross_tenant_reassignment_keeps_historical_call_on_source_assignment():
-    dsn = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
-    if not dsn:
-        pytest.skip("TEST_DATABASE_URL or DATABASE_URL is required")
-    try:
-        pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3, timeout=3)
-    except Exception as exc:
-        pytest.skip(f"PostgreSQL not reachable: {exc}")
+    dsn = reviewed_inbound_database(os.getenv("TEST_DATABASE_URL"), os.getenv("GITHUB_ACTIONS", ""))
+    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3, timeout=3)
 
     ids = {
         name: uuid.uuid4()
@@ -70,13 +95,16 @@ async def test_cross_tenant_reassignment_keeps_historical_call_on_source_assignm
             )
             await conn.execute(
                 """
-                INSERT INTO user_profiles (id,email,role)
-                VALUES ($1,$3,'platform_admin'),($2,$4,'platform_admin')
+                INSERT INTO user_profiles (id,email,role,tenant_id,is_active,is_verified,email_verified_at)
+                VALUES ($1,$3,'platform_admin',$5,TRUE,TRUE,NOW()),
+                       ($2,$4,'platform_admin',$6,TRUE,TRUE,NOW())
                 """,
                 ids["requester"],
                 ids["approver"],
                 f"requester-{ids['requester']}@example.test",
                 f"approver-{ids['approver']}@example.test",
+                ids["source_tenant"],
+                ids["target_tenant"],
             )
             await conn.execute(
                 """
@@ -243,7 +271,11 @@ async def test_cross_tenant_reassignment_keeps_historical_call_on_source_assignm
                 )
                 await conn.execute("DELETE FROM calls WHERE id=$1", ids["historical_call"])
                 await conn.execute(
-                    "DELETE FROM inbound_did_assignments WHERE canonical_did=$1", did
+                    "DELETE FROM inbound_did_assignments WHERE tenant_id=ANY($1::uuid[]) "
+                    "AND config_id=ANY($2::uuid[]) AND canonical_did=$3",
+                    [ids["source_tenant"], ids["target_tenant"]],
+                    [ids["source_config"], ids["target_config"]],
+                    did,
                 )
                 await conn.execute(
                     "DELETE FROM inbound_campaign_configs WHERE id=ANY($1::uuid[])",
@@ -265,17 +297,18 @@ async def test_cross_tenant_reassignment_keeps_historical_call_on_source_assignm
                     "DELETE FROM inbound_operation_idempotency WHERE actor_id=ANY($1::uuid[])",
                     [ids["requester"], ids["approver"]],
                 )
+                await _delete_owned_policy_events(
+                    conn, [ids["source_tenant"], ids["target_tenant"]],
+                    [ids["source_trunk"], ids["target_trunk"]],
+                )
                 await conn.execute(
                     "DELETE FROM user_profiles WHERE id=ANY($1::uuid[])",
                     [ids["requester"], ids["approver"]],
                 )
-                # tenant_sip_trunks is covered by the product's immutable
-                # tenant_policy_audit_log trigger. Deleting these tenants
-                # would cascade into that log and correctly be rejected by
-                # its DELETE guard, rolling back every cleanup statement.
-                # Leave the two random, now-empty tenant tombstones so the
-                # shared-DB test honors the audit-retention invariant. Fully
-                # ephemeral CI databases are dropped wholesale by the runner.
+                await conn.execute(
+                    "DELETE FROM tenants WHERE id=ANY($1::uuid[])",
+                    [ids["source_tenant"], ids["target_tenant"]],
+                )
         finally:
             await pool.close()
 
@@ -283,13 +316,8 @@ async def test_cross_tenant_reassignment_keeps_historical_call_on_source_assignm
 @pytest.mark.asyncio
 async def test_concurrent_paused_assignments_cannot_claim_the_same_did():
     """The partial unique index, not a read-before-write check, wins the race."""
-    dsn = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
-    if not dsn:
-        pytest.skip("TEST_DATABASE_URL or DATABASE_URL is required")
-    try:
-        pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3, timeout=3)
-    except Exception as exc:
-        pytest.skip(f"PostgreSQL not reachable: {exc}")
+    dsn = reviewed_inbound_database(os.getenv("TEST_DATABASE_URL"), os.getenv("GITHUB_ACTIONS", ""))
+    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3, timeout=3)
 
     tenant_id = uuid.uuid4()
     campaign_ids = [uuid.uuid4(), uuid.uuid4()]
@@ -399,5 +427,7 @@ async def test_concurrent_paused_assignments_cannot_claim_the_same_did():
                 await conn.execute("DELETE FROM tenant_phone_numbers WHERE id=$1", phone_id)
                 await conn.execute("DELETE FROM tenant_sip_trunks WHERE id=$1", trunk_id)
                 await conn.execute("DELETE FROM campaigns WHERE id=ANY($1::uuid[])", campaign_ids)
+                await _delete_owned_policy_events(conn, [tenant_id], [trunk_id])
+                await conn.execute("DELETE FROM tenants WHERE id=$1", tenant_id)
         finally:
             await pool.close()

@@ -20,6 +20,20 @@ from app.domain.services.telephony.inbound_transfer import (
 )
 
 
+def reviewed_inbound_database(configured: str | None, github_actions: str) -> str:
+    """Only explicit disposable targets used by the local and existing CI gates."""
+    local = "postgresql://talky@127.0.0.1:55434/admin_premortem_20261021_test"
+    ci_targets = {
+        "postgresql://talky:testpassword@localhost:5432/talky_preserved_baseline_test",
+        "postgresql://talky:testpassword@localhost:5432/talky_alembic_test",
+    }
+    if not configured:
+        pytest.skip("Explicit disposable TEST_DATABASE_URL is required")
+    if configured == local or (github_actions == "true" and configured in ci_targets):
+        return configured
+    raise ValueError("Refuse database outside the exact reviewed disposable targets")
+
+
 class _SameConnectionAcquire:
     def __init__(self, connection: asyncpg.Connection):
         self._connection = connection
@@ -80,15 +94,10 @@ def _request(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_manual_hold_resolution_is_atomic_idempotent_and_quota_exact():
-    dsn = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
-    if not dsn:
-        pytest.skip("TEST_DATABASE_URL or DATABASE_URL is required")
-    try:
-        connection = await asyncpg.connect(dsn, timeout=3)
-    except Exception as exc:
-        pytest.skip(f"PostgreSQL not reachable: {exc}")
+    dsn = reviewed_inbound_database(os.getenv("TEST_DATABASE_URL"), os.getenv("GITHUB_ACTIONS", ""))
+    connection = await asyncpg.connect(dsn, timeout=3)
 
-    outer = connection.transaction()
+    outer = connection.transaction(isolation="read_committed")
     await outer.start()
     try:
         await connection.execute("SET LOCAL app.bypass_rls = 'on'")
@@ -109,6 +118,7 @@ async def test_manual_hold_resolution_is_atomic_idempotent_and_quota_exact():
             pytest.skip("database is not at the current inbound billing schema")
 
         tenant_id = uuid.uuid4()
+        admin_tenant_id = uuid.uuid4()
         actor_id = uuid.uuid4()
         approver_id = uuid.uuid4()
         release_call_id = uuid.uuid4()
@@ -116,19 +126,23 @@ async def test_manual_hold_resolution_is_atomic_idempotent_and_quota_exact():
         await connection.execute(
             """
             INSERT INTO tenants (id,business_name,subscription_status,status)
-            VALUES ($1,'Hold resolution integration','active','active')
+            VALUES ($1,'Hold resolution integration','active','active'),
+                   ($2,'Hold administrators integration','active','active')
             """,
             tenant_id,
+            admin_tenant_id,
         )
         await connection.execute(
             """
-            INSERT INTO user_profiles (id,email,role)
-            VALUES ($1,$2,'platform_admin'),($3,$4,'platform_admin')
+            INSERT INTO user_profiles (id,email,role,tenant_id,is_active,is_verified,email_verified_at)
+            VALUES ($1,$2,'platform_admin',$5,TRUE,TRUE,NOW()),
+                   ($3,$4,'platform_admin',$5,TRUE,TRUE,NOW())
             """,
             actor_id,
             f"hold-resolution-{actor_id}@example.test",
             approver_id,
             f"hold-approval-{approver_id}@example.test",
+            admin_tenant_id,
         )
         await connection.execute(
             """
@@ -171,7 +185,9 @@ async def test_manual_hold_resolution_is_atomic_idempotent_and_quota_exact():
         await connection.execute(
             "UPDATE platform_runtime_controls " "SET inbound_settlement_enabled=FALSE WHERE id=1"
         )
-        # Exercise real tenant RLS during every service read/write.
+        # Exercise the tenant context during every service read/write. This
+        # disposable owner fixture is not restricted-role RLS/auth proof. The
+        # actual canonical actors belong to a different tenant than the call.
         await connection.execute("SET LOCAL app.bypass_rls = 'off'")
         await connection.execute(f"SET LOCAL app.current_tenant_id = '{tenant_id}'")
 

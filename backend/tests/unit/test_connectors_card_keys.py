@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
+from starlette.requests import Request
 
 from app.api.v1.endpoints import connectors as ce  # noqa: E402
 
@@ -101,6 +103,14 @@ def _user():
     return SimpleNamespace(tenant_id=TENANT, id="user-1")
 
 
+def _authenticated_request():
+    """Synthetic context for direct route calls; these tests mock the writer."""
+    request = Request({"type": "http", "method": "POST", "path": "/connectors", "headers": []})
+    request.state.authenticated_user_id = _user().id
+    request.state.authenticated_session_id = str(uuid4())
+    return request
+
+
 async def test_status_lists_hubspot_and_salesforce_as_separate_cards(monkeypatch):
     monkeypatch.setenv("SALESFORCE_CLIENT_ID", "x")
     monkeypatch.setenv("SALESFORCE_CLIENT_SECRET", "y")
@@ -125,27 +135,30 @@ async def test_status_hides_the_salesforce_card_when_the_server_is_not_configure
     assert [i.type for i in out.items] == ["calendar", "email", "crm", "drive"]
 
 
-async def test_disconnect_crm_card_only_removes_hubspot_rows():
+async def test_disconnect_crm_card_only_disables_hubspot_rows(monkeypatch):
+    from unittest.mock import AsyncMock
+    from app.services.connector_lifecycle import ConnectorDisableResult
+    disable = AsyncMock(return_value=ConnectorDisableResult("confirmed", "receipt", "operation"))
+    monkeypatch.setattr(ce, "_disconnect_connector", disable)
     db = FakeDB({("connectors", "select"): [_resp([{"id": "c-hs", "provider": "hubspot"}])]})
-    out = await ce.disconnect_connector_by_type("crm", current_user=_user(), db_client=db)
+    request = _authenticated_request()
+    out = await ce.disconnect_connector_by_type("crm", current_user=_user(), db_client=db, request=request)
     assert out["removed"] == 1
     select = db.calls[0]
     assert ("type", "crm") in select[2] and ("provider", "hubspot") in select[2]
-    deleted = [c for c in db.calls if c[1] == "delete"]
-    assert [c[0] for c in deleted] == ["connector_accounts", "connectors"]
-    assert ("connector_id", "c-hs") in deleted[0][2] and ("id", "c-hs") in deleted[1][2]
+    disable.assert_awaited_once_with(db, _user().tenant_id, "c-hs", "hubspot", current_user=_user(), request=request)
 
 
 async def test_disconnect_salesforce_card_targets_salesforce_rows_only():
     db = FakeDB({("connectors", "select"): [_resp([])]})
-    out = await ce.disconnect_connector_by_type("salesforce", current_user=_user(), db_client=db)
+    out = await ce.disconnect_connector_by_type("salesforce", current_user=_user(), db_client=db, request=_authenticated_request())
     assert out["removed"] == 0
     assert ("type", "crm") in db.calls[0][2] and ("provider", "salesforce") in db.calls[0][2]
 
 
 async def test_unknown_card_key_is_a_400():
     with pytest.raises(HTTPException) as exc:
-        await ce.disconnect_connector_by_type("zoho", current_user=_user(), db_client=FakeDB())
+        await ce.disconnect_connector_by_type("zoho", current_user=_user(), db_client=FakeDB(), request=_authenticated_request())
     assert exc.value.status_code == 400
 
 
@@ -162,7 +175,7 @@ async def test_authorize_salesforce_without_server_credentials_is_a_503(monkeypa
     assert "SALESFORCE_CLIENT_ID" in str(exc.value.detail)
 
 
-async def test_authorize_salesforce_inserts_a_crm_row_for_the_salesforce_provider(monkeypatch):
+async def test_authorize_salesforce_admits_a_crm_row_for_the_salesforce_provider(monkeypatch):
     monkeypatch.setenv("SALESFORCE_CLIENT_ID", "cid")
     monkeypatch.setenv("SALESFORCE_CLIENT_SECRET", "sec")
 
@@ -171,13 +184,28 @@ async def test_authorize_salesforce_inserts_a_crm_row_for_the_salesforce_provide
             return {"state": "S", "code_verifier": "V", "code_challenge": "C", "code_challenge_method": "S256"}
 
     monkeypatch.setattr(ce, "get_oauth_state_manager", lambda: FakeStateManager())
-    db = FakeDB({("connectors", "insert"): [_resp([{"id": "new-sf"}])]})
-    request = SimpleNamespace(base_url="http://testserver/")
+    db, admitted = FakeDB(), []
+    request = SimpleNamespace(base_url="http://testserver/", state=_authenticated_request().state)
+
+    class FakeLifecycle:
+        def __init__(self, passed_db, *, actor):
+            assert passed_db is db
+            assert actor.user_id == _user().id and actor.tenant_id == TENANT
+            assert actor.session_id == request.state.authenticated_session_id
+            self.actor = actor
+
+        async def create_pending(self, tenant_id, connector_type, provider, name=None):
+            admitted.append((tenant_id, connector_type, provider, name))
+            return {"id": "new-sf", "audit_event_id": "audit", "operation_id": "operation"}
+
+    # Direct caller compatibility only. Normal-auth PostgreSQL tests prove the
+    # actual admission, pending write and mandatory audit transaction.
+    monkeypatch.setattr(ce, "ConnectorLifecycle", FakeLifecycle)
     out = await ce.authorize_connector_by_type(
         "salesforce", request, redirect_uri="http://app/connectors/salesforce/callback",
         current_user=_user(), db_client=db,
     )
-    inserted = db.calls[0][3]
-    assert inserted["type"] == "crm" and inserted["provider"] == "salesforce" and inserted["name"] == "Salesforce"
+    assert admitted == [(TENANT, "crm", "salesforce", "Salesforce")]
+    assert db.calls == []
     assert out.authorization_url.startswith("https://login.salesforce.com/services/oauth2/authorize?")
     assert "code_challenge=C" in out.authorization_url

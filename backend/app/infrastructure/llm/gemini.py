@@ -22,6 +22,7 @@ from app.domain.interfaces.llm_provider import LLMProvider
 from app.domain.models.conversation import Message, MessageRole
 from app.utils.resilience import CircuitBreaker, CircuitOpenError
 from app.infrastructure.llm.request_profile import record_traditional_request
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
 
 from app.infrastructure.llm.streaming import (
     LLMStreamStalled, stream_with_timeout, close_stream, execute_tool_call,
@@ -132,6 +133,7 @@ class GeminiLLMProvider(LLMProvider):
         Accepts api_key from `config["api_key"]` or `GEMINI_API_KEY` env.
         """
         self._config = config
+        self._observation_context = dict(config.get("observation_context") or {})
         api_key = config.get("api_key") or os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError(
@@ -146,6 +148,8 @@ class GeminiLLMProvider(LLMProvider):
                 "google-genai package is not installed. "
                 "Run: pip install google-genai"
             ) from exc
+
+        self._api_key = api_key
 
         # genai.Client is sync to construct; the .aio sub-client is async.
         self._client = genai.Client(api_key=api_key)
@@ -191,14 +195,23 @@ class GeminiLLMProvider(LLMProvider):
             warm_tc = self._build_thinking_config(self._model, self._thinking_budget)
             if warm_tc is not None:
                 warm_cfg_kwargs["thinking_config"] = warm_tc
-            await asyncio.wait_for(
-                self._client.aio.models.generate_content(
-                    model=self._model,
-                    contents="hi",
-                    config=genai_types.GenerateContentConfig(**warm_cfg_kwargs),
-                ),
-                timeout=2.0,
-            )
+            with ProviderAttempt("llm", self.name, getattr(self, "_api_key", None), getattr(self, "_observation_context", None)) as observation:
+                response = await asyncio.wait_for(
+                    self._client.aio.models.generate_content(
+                        model=self._model,
+                        contents="hi",
+                        config=genai_types.GenerateContentConfig(**warm_cfg_kwargs),
+                    ),
+                    timeout=2.0,
+                )
+                observation.accepted()
+                text = getattr(response, "text", None)
+                if (isinstance(text, str) and text.strip()) or getattr(response, "function_calls", None):
+                    observation.first_output()
+                candidate = (getattr(response, "candidates", None) or [None])[0]
+                reason = getattr(candidate, "finish_reason", None)
+                if getattr(reason, "value", reason) == "STOP":
+                    observation.complete()
             elapsed_ms = (asyncio.get_event_loop().time() - _t0) * 1000.0
             logger.info(
                 "gemini_warmup_ok model=%s warmup_ms=%.0f",
@@ -444,32 +457,37 @@ class GeminiLLMProvider(LLMProvider):
                         instructions=system_prompt, configured_temperature=temperature,
                         configured_max_tokens=max_tokens,
                     )
-                    stream = await self._client.aio.models.generate_content_stream(
-                        model=model,
-                        contents=contents,
-                        config=gen_config,
-                    )
-                    terminal_seen = False
-                    try:
-                        async for chunk in stream:
-                            terminal_seen = self._completed_chunk(chunk) or terminal_seen
-                            # chunk.text may be None for safety-flag chunks or
-                            # response-metadata chunks that carry no content.
-                            text = getattr(chunk, "text", None)
-                            if text:
-                                tokens_yielded += 1
-                                yield text
-                        if not terminal_seen:
-                            raise LLMStreamStalled(
-                                "Gemini stream ended without a terminal reason"
-                            )
-                    finally:
-                        await close_stream(stream)
-                    logger.debug(
-                        "Gemini stream completed, yielded %d chunks", tokens_yielded
-                    )
-                    if tokens_yielded == 0:
-                        logger.warning("Zero text chunks received from Gemini")
+                    with ProviderAttempt("llm", self.name, getattr(self, "_api_key", None), getattr(self, "_observation_context", None)) as observation:
+                        stream = await self._client.aio.models.generate_content_stream(
+                            model=model,
+                            contents=contents,
+                            config=gen_config,
+                        )
+                        observation.accepted()
+                        terminal_seen = False
+                        try:
+                            async for chunk in stream:
+                                terminal_seen = self._completed_chunk(chunk) or terminal_seen
+                                # chunk.text may be None for safety-flag chunks or
+                                # response-metadata chunks that carry no content.
+                                text = getattr(chunk, "text", None)
+                                if text:
+                                    tokens_yielded += 1
+                                    if isinstance(text, str) and text.strip():
+                                        observation.first_output()
+                                    yield text
+                            if not terminal_seen:
+                                raise LLMStreamStalled(
+                                    "Gemini stream ended without a terminal reason"
+                                )
+                        finally:
+                            await close_stream(stream)
+                        logger.debug(
+                            "Gemini stream completed, yielded %d chunks", tokens_yielded
+                        )
+                        if tokens_yielded == 0:
+                            logger.warning("Zero text chunks received from Gemini")
+                        observation.complete()
                 # Success — break out of retry loop.
                 break
 
@@ -594,40 +612,61 @@ class GeminiLLMProvider(LLMProvider):
                 return None
 
         async def _stream(cfg, fcalls_out, model_parts):
+            observation = None
             async def chunks():
+                nonlocal observation
                 record_traditional_request(
                     provider=self.name,
                     request={"model": model, "contents": contents, "config": cfg},
                     instructions=system_prompt, configured_temperature=temperature,
                     configured_max_tokens=max_tokens,
                 )
+                observation = ProviderAttempt("llm", self.name, getattr(self, "_api_key", None), getattr(self, "_observation_context", None))
                 stream = await self._client.aio.models.generate_content_stream(
                     model=model, contents=contents, config=cfg)
+                observation.accepted()
                 try:
                     async for chunk in stream:
                         yield chunk
                 finally:
                     await close_stream(stream)
 
-            terminal_seen = False
-            async with self._circuit, aclosing(stream_with_timeout(chunks(), timeout_seconds, timeout_error=LLMTimeoutError)) as stream:
-                async for chunk in stream:
-                    terminal_seen = self._completed_chunk(chunk) or terminal_seen
-                    candidate = (getattr(chunk, "candidates", None) or [None])[0]
-                    parts = getattr(getattr(candidate, "content", None), "parts", None) or []
-                    # Keep provider-returned parts intact (including thought signatures).
-                    # Rebuilding Part(function_call=...) silently discards their metadata.
-                    model_parts.extend(parts)
-                    txt = _chunk_text(chunk)
-                    if txt:
-                        yield txt
-                    for fc in (getattr(chunk, "function_calls", None) or []):
-                        if fc and fc.name:
-                            fcalls_out.append(fc)
-                if not terminal_seen:
-                    raise LLMStreamStalled(
-                        "Gemini stream ended without a terminal reason"
-                    )
+            try:
+                terminal_seen = False
+                valid_function_calls = True
+                async with self._circuit, aclosing(stream_with_timeout(chunks(), timeout_seconds, timeout_error=LLMTimeoutError)) as stream:
+                    async for chunk in stream:
+                        terminal_seen = self._completed_chunk(chunk) or terminal_seen
+                        candidate = (getattr(chunk, "candidates", None) or [None])[0]
+                        parts = getattr(getattr(candidate, "content", None), "parts", None) or []
+                        # Keep provider-returned parts intact (including thought signatures).
+                        # Rebuilding Part(function_call=...) silently discards their metadata.
+                        model_parts.extend(parts)
+                        txt = _chunk_text(chunk)
+                        if txt:
+                            if txt.strip():
+                                observation.first_output()
+                            yield txt
+                        for fc in (getattr(chunk, "function_calls", None) or []):
+                            args = getattr(fc, "args", None)
+                            if not fc or not getattr(fc, "name", None) or (args is not None and not isinstance(args, dict)):
+                                valid_function_calls = False
+                            if fc and fc.name:
+                                observation.first_output()
+                                fcalls_out.append(fc)
+                    if not terminal_seen:
+                        raise LLMStreamStalled(
+                            "Gemini stream ended without a terminal reason"
+                        )
+                    if valid_function_calls:
+                        observation.complete()
+            except BaseException as error:
+                if observation is not None:
+                    observation.finish(error)
+                raise
+            finally:
+                if observation is not None:
+                    observation.finish()
 
         decision_cfg = genai_types.GenerateContentConfig(tools=gemini_tools, **base_cfg)
         tool_results = {}

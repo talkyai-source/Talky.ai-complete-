@@ -15,6 +15,7 @@ import httpx
 
 from app.domain.interfaces.llm_provider import LLMProvider
 from app.infrastructure.llm.request_profile import record_traditional_request
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
 from app.infrastructure.llm.streaming import (
     LLMStreamStalled, LLMTimeoutError, accumulate_tool_calls, finalize_tool_calls,
     stream_tool_turn, stream_with_timeout,
@@ -46,6 +47,8 @@ class OpenAILLMProvider(LLMProvider):
         key = config.get("api_key") or os.getenv("OPENAI_API_KEY")
         if not key:
             raise ValueError("OpenAI API key is not configured")
+        self._api_key = key
+        self._observation_context = dict(config.get("observation_context") or {})
         self._model = config.get("model") or "gpt-6-luna"
         if self._model != "gpt-6-luna":
             raise ValueError("This voice adapter supports gpt-6-luna")
@@ -100,32 +103,41 @@ class OpenAILLMProvider(LLMProvider):
                     configured_temperature=request["temperature"],
                     configured_max_tokens=request["max_completion_tokens"],
                 )
-                async with self._client.stream("POST", "chat/completions", json=request) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if not line.startswith("data:"):
-                            continue
-                        payload = line[5:].strip()
-                        if payload == "[DONE]":
-                            break
-                        event = json.loads(payload)
-                        if event.get("error"):
-                            raise RuntimeError("OpenAI rejected the streamed request")
-                        for choice in event.get("choices") or []:
-                            delta = choice.get("delta") or {}
-                            if delta.get("content"):
-                                received = True
-                                yield delta["content"]
-                            accumulate_tool_calls(calls, delta.get("tool_calls"))
-                            reason = choice.get("finish_reason")
-                            if reason:
-                                if reason not in {"stop", "tool_calls"}:
-                                    raise LLMStreamStalled(f"OpenAI response incomplete: {reason}")
-                                finished = True
-            if not finished:
-                raise LLMStreamStalled("OpenAI stream closed without a terminal response")
-            if sink is not None:
-                sink.extend(finalize_tool_calls(calls))
+                with ProviderAttempt("llm", self.name, getattr(self, "_api_key", None), getattr(self, "_observation_context", None)) as observation:
+                    async with self._client.stream("POST", "chat/completions", json=request) as response:
+                        response.raise_for_status()
+                        observation.accepted()
+                        async for line in response.aiter_lines():
+                            if not line.startswith("data:"):
+                                continue
+                            payload = line[5:].strip()
+                            if payload == "[DONE]":
+                                break
+                            event = json.loads(payload)
+                            if event.get("error"):
+                                raise RuntimeError("OpenAI rejected the streamed request")
+                            for choice in event.get("choices") or []:
+                                delta = choice.get("delta") or {}
+                                if delta.get("content"):
+                                    received = True
+                                    if isinstance(delta["content"], str) and delta["content"].strip():
+                                        observation.first_output()
+                                    yield delta["content"]
+                                if delta.get("tool_calls"):
+                                    observation.first_output()
+                                accumulate_tool_calls(calls, delta.get("tool_calls"))
+                                reason = choice.get("finish_reason")
+                                if reason:
+                                    if reason not in {"stop", "tool_calls"}:
+                                        raise LLMStreamStalled(f"OpenAI response incomplete: {reason}")
+                                    finished = True
+                    if not finished:
+                        raise LLMStreamStalled("OpenAI stream closed without a terminal response")
+                    finalized_calls = finalize_tool_calls(calls)
+                    if sink is not None:
+                        sink.extend(finalized_calls)
+                    if len(finalized_calls) == len(calls) and all(call["arguments_valid"] for call in finalized_calls):
+                        observation.complete()
         except httpx.TimeoutException as exc:
             error = LLMStreamStalled if received else LLMTimeoutError
             raise error("OpenAI connection timed out") from exc

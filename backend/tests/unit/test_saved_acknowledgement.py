@@ -105,6 +105,11 @@ class Rows(VoiceRows):
             return dict(id=self.actor, tenant_id=self.tenant, profile_role=self.role,
                         is_active=self.active, is_verified=self.verified,
                         membership_status="active", membership_role=self.role)
+        if "FROM tenants t" in sql and "AS active_holds" in sql:
+            assert str(args[0]) == self.tenant
+            return dict(id=self.tenant,status="active",subscription_status="active",suspended_at=None,
+                        suspended_by=None,suspension_reason=None,white_label_partner_id=None,
+                        formal_partner_id=None,formal_partner_status=None,active_holds=[],authority_scope_ok=True)
         if sql.startswith("SELECT * FROM assistant_action_resolutions"):
             if "actor_id=$1" in sql:
                 return next((deepcopy(e) for e in self.events if (e["actor_id"], e["request_id"]) == args), None)
@@ -136,6 +141,8 @@ class Rows(VoiceRows):
     async def fetchval(self, sql, *args):
         sql = " ".join(sql.split())
         self.sql.append(sql)
+        if sql == "SELECT current_setting('app.bypass_rls', TRUE)":
+            return "on"
         if sql.startswith("SELECT EXISTS(SELECT 1 FROM calls"):
             assert args == (self.call, self.tenant, self.campaign, self.lead)
             return self.owned

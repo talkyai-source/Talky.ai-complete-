@@ -540,6 +540,7 @@ class TelephonyBridgeTransferApiTests(unittest.IsolatedAsyncioTestCase):
             provider_leg_ids=("talky-xfer-current", "talky-xfer-stale"),
             provider_legs=(("talky-xfer-current", "asterisk"), ("talky-xfer-stale", "asterisk")),
             provider="asterisk",
+            control_backend="asterisk",
             campaign_id=None,
             answered_at=datetime.now(timezone.utc),
         )
@@ -579,6 +580,9 @@ class TelephonyBridgeTransferApiTests(unittest.IsolatedAsyncioTestCase):
             request_hangup.await_args.kwargs["provider_leg_ids"],
             context.provider_leg_ids,
         )
+        self.assertEqual(request_hangup.await_args.kwargs["expected_provider"], "asterisk")
+        self.assertEqual(request_hangup.await_args.kwargs["expected_backend"], "asterisk")
+        self.assertIs(request_hangup.await_args.kwargs["require_backend_identity"], True)
         finalize.assert_awaited_once()
 
     async def test_unconfirmed_voicemail_fallback_is_truthful_and_retryable(self) -> None:
@@ -595,11 +599,15 @@ class TelephonyBridgeTransferApiTests(unittest.IsolatedAsyncioTestCase):
             provider_leg_ids=(),
             provider_legs=(),
             provider="asterisk",
+            control_backend="asterisk",
             campaign_id=None,
             answered_at=None,
         )
         container = SimpleNamespace(db_pool=object(), redis=None)
         finalize = AsyncMock()
+        request_hangup = AsyncMock(
+            return_value=SimpleNamespace(confirmed=False, error=None, code="hangup_unconfirmed")
+        )
 
         with (
             patch("app.core.container.get_container", return_value=container),
@@ -611,13 +619,7 @@ class TelephonyBridgeTransferApiTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 telephony_bridge,
                 "request_confirmed_hangup",
-                new=AsyncMock(
-                    return_value=SimpleNamespace(
-                        confirmed=False,
-                        error=None,
-                        code="hangup_unconfirmed",
-                    )
-                ),
+                new=request_hangup,
             ),
             patch.object(
                 telephony_bridge,
@@ -636,6 +638,9 @@ class TelephonyBridgeTransferApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["fallback_status"], "termination_pending")
         self.assertEqual(result["fallback_reason"], "voicemail_runtime_unavailable")
         self.assertEqual(telephony_bridge._transfer_http_response(result).status_code, 202)
+        self.assertEqual(request_hangup.await_args.kwargs["expected_provider"], "asterisk")
+        self.assertEqual(request_hangup.await_args.kwargs["expected_backend"], "asterisk")
+        self.assertIs(request_hangup.await_args.kwargs["require_backend_identity"], True)
         finalize.assert_not_awaited()
 
     def test_reconciliation_required_transfer_response_remains_pending(self) -> None:

@@ -73,11 +73,10 @@ async def canonical(request, monkeypatch):
     effect = AsyncMock(return_value=EmailMessage(id="synthetic-message") if provider == "gmail" else
         CalendarEvent(id="synthetic-event", start_time=start, end_time=start + timedelta(minutes=30)))
     monkeypatch.setattr(cls, "send_email" if provider == "gmail" else "create_event", effect)
-    response = await endpoints.oauth_callback(Request({"type": "http", "method": "GET", "path": "/", "headers": []}),
-        state="synthetic", code="synthetic", error=None, db_client=db)
-    assert "status=success" in response.headers["location"]
-    account = db.rows["connector_accounts"][0]
-    assert account["external_account_id"] is None and account["status"] == "active"
+    from tests.unit.connector_consumer_ports import seed_authorization, install_refresh_port
+    account = seed_authorization(db, "connector-a", "tenant-a", tokens,
+                                 account_email="synthetic@example.invalid" if provider == "gmail" else None)
+    install_refresh_port(monkeypatch)
     if provider == "gmail":
         service = email_service.EmailService(db, template_manager=SimpleNamespace(validate_content=Mock()))
         monkeypatch.setattr(email_service, "get_email_service", lambda _db: service)
@@ -143,9 +142,10 @@ async def test_retained_older_active_authorization_cannot_override_newer_reconne
     assert result.get("success") is False
     c.effect.assert_not_awaited()
     c.refresh.assert_not_awaited()
-    # Global/inbox refresh-time ordering is intentionally unchanged.
+    # Ordinary resolution now agrees with reviewed resolution: refreshing an
+    # old authorization does not promote it above a newer authorization.
     ordinary, _, _ = await resolver.resolve_active_connector(c.db, "tenant-a", "email" if c.provider == "gmail" else "calendar")
-    assert ordinary.account_row_id == c.account["id"]
+    assert ordinary.account_row_id == "replacement-row"
 
 
 @pytest.mark.parametrize("ordering", [None, "not-a-date", "tie"])

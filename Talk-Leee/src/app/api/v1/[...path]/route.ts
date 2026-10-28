@@ -604,7 +604,7 @@ const DevConnectorCreateSchema = z
     .object({
         name: z.string().min(1).max(160).optional(),
         type: z.string().min(1).max(120).optional(),
-        config: z.record(z.unknown()).optional(),
+        config: z.record(z.string(), z.unknown()).optional(),
     })
     .strict();
 

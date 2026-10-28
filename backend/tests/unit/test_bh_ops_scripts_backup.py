@@ -18,11 +18,17 @@ SCRIPT = BACKEND / "deploy" / "db-backup.sh"
 
 FAKE_DOCKER = """#!/usr/bin/env bash
 case "$*" in
-  *pg_dump*) head -c "${FAKE_DUMP_BYTES}" /dev/zero ;;
   *pg_restore*)
     cat > /dev/null
     for i in $(seq 1 "${FAKE_TABLE_DATA}"); do echo "1; 0 0 TABLE DATA public t$i owner"; done ;;
 esac
+"""
+
+# Snapshot/client semantics are exercised by test_backup_snapshot.py and the
+# real PostgreSQL roundtrip. Here the helper boundary controls publication.
+FAKE_PYTHON = """#!/usr/bin/env bash
+head -c "${FAKE_DUMP_BYTES}" /dev/zero
+exit "${FAKE_HELPER_EXIT:-0}"
 """
 
 
@@ -46,15 +52,16 @@ def _real_bash() -> str | None:
 pytestmark = pytest.mark.skipif(_real_bash() is None, reason="no POSIX bash available")
 
 
-def _run_backup(tmp_path: Path, dump_bytes: int, table_data: int = 60):
+def _run_backup(tmp_path: Path, dump_bytes: int, table_data: int = 60, *, helper_exit=0, principal="00000000-0000-4000-8000-000000000001"):
     shim = tmp_path / "shim"
     shim.mkdir(exist_ok=True)
     docker = shim / "docker"
     docker.write_text(FAKE_DOCKER, encoding="utf-8", newline="\n")
     (shim / "install").write_text(FAKE_INSTALL, encoding="utf-8", newline="\n")
+    (shim / "python3").write_text(FAKE_PYTHON, encoding="utf-8", newline="\n")
     # Linux PATH lookup skips files without the execute bit and would run the real
     # docker/install instead (Git Bash on Windows does not check it).
-    for name in ("docker", "install"):
+    for name in ("docker", "install", "python3"):
         (shim / name).chmod(0o755)
     backups = tmp_path / "backups"
     env = dict(os.environ)
@@ -64,6 +71,8 @@ def _run_backup(tmp_path: Path, dump_bytes: int, table_data: int = 60):
         TALKY_BACKUP_DIR=backups.as_posix(),
         FAKE_DUMP_BYTES=str(dump_bytes),
         FAKE_TABLE_DATA=str(table_data),
+        FAKE_HELPER_EXIT=str(helper_exit),
+        TALKY_BACKUP_PRINCIPAL_ID=principal,
     )
     # Git Bash re-prepends /usr/bin to PATH at startup, which would shadow shims
     # for ``install``; put the shim dir first from inside the shell instead.
@@ -147,3 +156,13 @@ def test_a_healthy_dump_publishes_and_exits_zero(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert "db-backup: ok" in result.stdout
+
+
+@pytest.mark.parametrize("helper_exit,principal", [(1, "00000000-0000-4000-8000-000000000001"), (0, "")])
+def test_keeper_or_configuration_failure_never_publishes_or_runs_retention(tmp_path, helper_exit, principal):
+    previous = _seed_previous(tmp_path, 10_000, 45, "talky-20250101T000000Z.dump")
+    result = _run_backup(tmp_path, 9000, helper_exit=helper_exit, principal=principal)
+    assert result.returncode != 0
+    assert _published(tmp_path) == [previous]
+    assert previous.exists()
+    assert not list((tmp_path / "backups").glob("*.partial"))

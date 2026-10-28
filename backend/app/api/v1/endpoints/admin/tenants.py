@@ -30,7 +30,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import List, Literal, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field, field_validator
@@ -43,6 +45,9 @@ from app.api.v1.dependencies import (
 )
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
+from app.core.security.platform_admin_guard import (
+    lock_user_administration, require_current_platform_admin,
+)
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
 from ._serialization import AdminResponseModel
@@ -82,6 +87,7 @@ class TenantListItem(AdminResponseModel):
     campaign_count: int
     max_concurrent_calls: int
     created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 class TenantDetailResponse(AdminResponseModel):
@@ -101,19 +107,32 @@ class TenantDetailResponse(AdminResponseModel):
     updated_at: Optional[str] = None
 
 
-class QuotaUpdateRequest(BaseModel):
+class TenantVersionRequest(BaseModel):
+    # Explicit null supports legacy rows with no timestamp; omission is unsafe.
+    expected_updated_at: Optional[datetime] = Field(...)
+    reason: Optional[str] = Field(None, max_length=1000)
+
+    @field_validator("expected_updated_at")
+    @classmethod
+    def _timezone_required(cls, value):
+        if value is not None and value.tzinfo is None:
+            raise ValueError("expected_updated_at must include a timezone")
+        return value
+
+
+class QuotaUpdateRequest(TenantVersionRequest):
     """Request model for updating tenant quota"""
     # The plan's monthly minutes; a negative value would read as an unknown
     # allowance and 0 is the unlimited sentinel only on a 0-minute plan.
-    minutes_allocated: Optional[int] = Field(None, ge=0)
-    max_concurrent_calls: Optional[int] = Field(None, ge=0)
+    minutes_allocated: Optional[int] = Field(None, ge=0, le=2147483647)
+    max_concurrent_calls: Optional[int] = Field(None, ge=1, le=1000)
 
 
 class TenantCreateRequest(BaseModel):
     """Request model for provisioning a tenant."""
     business_name: str = Field(..., min_length=1, max_length=255)
-    plan_id: str = Field("free", min_length=1, max_length=50)
-    minutes_allocated: Optional[int] = Field(None, ge=0)
+    plan_id: Optional[str] = Field(None, min_length=1, max_length=50)
+    minutes_allocated: Optional[int] = Field(None, ge=0, le=2147483647)
     max_concurrent_calls: Optional[int] = Field(None, ge=1, le=1000)
     subscription_status: str = Field("active", pattern=_SUBSCRIPTION_STATUS_PATTERN)
 
@@ -137,6 +156,8 @@ class TenantCreateResponse(AdminResponseModel):
     max_concurrent_calls: int
     status: str
     created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    audit_event_id: Optional[str] = None
     # False when the natural key already existed and the existing tenant was
     # returned instead — lets a seeder tell a fresh run from a replay.
     created: bool
@@ -158,6 +179,7 @@ _TENANT_LIST_SELECT = """
            t.subscription_status,
            t.calling_rules,
            t.created_at,
+           t.updated_at,
            (SELECT count(*) FROM user_profiles up WHERE up.tenant_id = t.id)
                AS user_count,
            (SELECT count(*) FROM campaigns c WHERE c.tenant_id = t.id)
@@ -175,10 +197,20 @@ _TENANT_ROW_SELECT = """
            t.minutes_used,
            t.subscription_status,
            t.calling_rules,
-           t.created_at
+           t.created_at,
+           t.updated_at
     FROM tenants t
     LEFT JOIN plans p ON p.id = t.plan_id
 """
+
+
+def _subscription_status(value: Optional[str]) -> str:
+    """Preserve the list/admission legacy fallback in every Admin response.
+
+    This is a subscription display projection, not payment or call authority.
+    Stored values, audit snapshots and formal account holds stay unchanged.
+    """
+    return value or "active"
 
 
 def _calling_rules(value) -> dict:
@@ -212,15 +244,30 @@ def _natural_key_lock(business_name: str) -> int:
     return int.from_bytes(digest, "big", signed=True)
 
 
-async def _safe_audit(audit_logger: AuditLogger, **kwargs) -> None:
-    """Audit logging must never break the actual operation."""
-    try:
-        await audit_logger.log(**kwargs)
-    except Exception as exc:  # pragma: no cover - best effort
-        logger.warning("audit log failed: %s", exc)
+async def _lock_operator_write(conn, audit_logger, admin_user):
+    # Shared flusher -> authority writers -> target rows: never reverse this.
+    await audit_logger.lock_transaction(conn)
+    await lock_user_administration(conn)
+    await require_current_platform_admin(conn, admin_user.id)
 
 
-def _create_response(row, *, created: bool) -> TenantCreateResponse:
+def _version(value):
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return value.astimezone(timezone.utc) if value is not None else None
+
+
+def _check_version(row, expected):
+    if _version(row["updated_at"]) != _version(expected):
+        raise HTTPException(status_code=409, detail={
+            "code": "tenant_changed",
+            "message": "Tenant changed. Refresh and review before applying this change.",
+            "status": _subscription_status(row["subscription_status"]),
+            "updated_at": row["updated_at"].isoformat() if isinstance(row["updated_at"], datetime) else row["updated_at"],
+        })
+
+
+def _create_response(row, *, created: bool, audit_event_id=None) -> TenantCreateResponse:
     rules = _calling_rules(row["calling_rules"])
     return TenantCreateResponse(
         id=row["id"],
@@ -230,8 +277,10 @@ def _create_response(row, *, created: bool) -> TenantCreateResponse:
         minutes_allocated=row["minutes_allocated"] or 0,
         minutes_used=row["minutes_used"] or 0,
         max_concurrent_calls=_max_concurrent(rules),
-        status=row["subscription_status"] or "active",
+        status=_subscription_status(row["subscription_status"]),
         created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        audit_event_id=str(audit_event_id) if audit_event_id else None,
         created=created,
     )
 
@@ -249,8 +298,8 @@ async def create_tenant(
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """
-    Provision a tenant with its plan, minute quota and limits rows
-    (platform_admin only).
+    Provision a planless tenant with zero minutes by default (platform_admin
+    only). An explicit plan or quota remains an administrator decision.
 
     Idempotent on the natural key ``business_name`` (case-insensitive): a
     re-run of a seeder returns the existing tenant with ``created: false``
@@ -264,16 +313,19 @@ async def create_tenant(
         # this platform-admin provisioning transaction is intentionally global.
         async with acquire_with_tenant(db_client.pool, None) as conn:
             async with conn.transaction():
-                plan = await conn.fetchrow(
-                    "SELECT id, name, minutes, concurrent_calls "
-                    "FROM plans WHERE id = $1",
-                    body.plan_id,
-                )
-                if not plan:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Unknown plan_id '{body.plan_id}'",
+                await _lock_operator_write(conn, audit_logger, admin_user)
+                plan = None
+                if body.plan_id is not None:
+                    plan = await conn.fetchrow(
+                        "SELECT id, name, minutes, concurrent_calls "
+                        "FROM plans WHERE id = $1",
+                        body.plan_id,
                     )
+                    if not plan:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Unknown plan_id '{body.plan_id}'",
+                        )
 
                 # Serialise concurrent creates of the same natural key.
                 await conn.fetchval(
@@ -292,7 +344,7 @@ async def create_tenant(
                 minutes = (
                     body.minutes_allocated
                     if body.minutes_allocated is not None
-                    else (plan["minutes"] or 0)
+                    else ((plan["minutes"] or 0) if plan else 0)
                 )
 
                 # Same column list the signup path writes.
@@ -304,10 +356,10 @@ async def create_tenant(
                     VALUES ($1, $2, $3, 0, $4)
                     RETURNING id, business_name, plan_id, minutes_allocated,
                               minutes_used, subscription_status,
-                              calling_rules, created_at
+                              calling_rules, created_at, updated_at
                     """,
                     name,
-                    plan["id"],
+                    plan["id"] if plan else None,
                     int(minutes),
                     body.subscription_status,
                 )
@@ -315,7 +367,7 @@ async def create_tenant(
                 rules = _calling_rules(tenant["calling_rules"])
                 desired = (
                     body.max_concurrent_calls
-                    or plan["concurrent_calls"]
+                    or (plan["concurrent_calls"] if plan else None)
                     or _max_concurrent(rules)
                 )
                 if int(desired) != _max_concurrent(rules):
@@ -328,13 +380,16 @@ async def create_tenant(
                                 to_jsonb($2::int)),
                             updated_at = NOW()
                         WHERE id = $1
-                        RETURNING calling_rules
+                        RETURNING calling_rules, updated_at
                         """,
                         tenant["id"],
                         int(desired),
                     )
                     if updated:
                         rules = _calling_rules(updated["calling_rules"])
+                        tenant = {**dict(tenant), "updated_at": updated["updated_at"]}
+                    else:
+                        raise RuntimeError("Tenant limits update was not persisted")
 
                 # Default per-tenant limits row (emails/sms/calls per day).
                 await conn.execute(
@@ -349,45 +404,40 @@ async def create_tenant(
                 )
                 await seed_for_tenant(conn, str(tenant["id"]))
 
+                audit_event_id = await audit_logger.log_in_transaction(
+                    conn, event_type=AuditEvent.TENANT_CREATED,
+                    actor_id=admin_user.id, actor_role="platform_admin",
+                    tenant_id=tenant["id"], resource_type="tenant", resource_id=tenant["id"],
+                    action="tenant_created",
+                    after_state={"business_name": name, "plan_id": tenant["plan_id"],
+                                 "minutes_allocated": int(minutes),
+                                 "subscription_status": body.subscription_status,
+                                 "calling_rules": rules},
+                )
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to create tenant: {str(e)}",
+            status_code=503,
+            detail="Tenant creation was not confirmed. Refresh before retrying.",
         )
-
-    await _safe_audit(
-        audit_logger,
-        event_type=AuditEvent.TENANT_CREATED,
-        actor_id=admin_user.id,
-        actor_type="user",
-        tenant_id=str(tenant["id"]),
-        resource_type="tenant",
-        resource_id=str(tenant["id"]),
-        action="tenant_created",
-        description=f"Admin created tenant '{name}' on plan {plan['id']}",
-        metadata={
-            "business_name": name,
-            "plan_id": plan["id"],
-            "minutes_allocated": int(minutes),
-            "subscription_status": body.subscription_status,
-        },
-    )
 
     return _create_response(
         {
             "id": tenant["id"],
             "business_name": tenant["business_name"],
             "plan_id": tenant["plan_id"],
-            "plan_name": plan["name"],
+            "plan_name": plan["name"] if plan else None,
             "minutes_allocated": tenant["minutes_allocated"],
             "minutes_used": tenant["minutes_used"],
             "subscription_status": tenant["subscription_status"],
             "calling_rules": rules,
             "created_at": tenant["created_at"],
+            "updated_at": tenant["updated_at"],
         },
         created=True,
+        audit_event_id=audit_event_id,
     )
 
 
@@ -403,6 +453,7 @@ async def list_tenants(
     ),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    sort_by: Literal["name", "minutes_used"] = "name",
 ):
     """
     List tenants with plan, counts and status (platform_admin only).
@@ -412,6 +463,7 @@ async def list_tenants(
         - status: Filter by subscription_status (active, suspended, ...)
         - include_archived: Show archived (cancelled) tenants too
         - limit / offset: Pagination
+        - sort_by: Stable name ordering or highest recorded minutes first
 
     The total number of matching tenants (ignoring limit/offset) is returned
     in the ``X-Total-Count`` header.
@@ -425,7 +477,8 @@ async def list_tenants(
 
     if status:
         params.append(status)
-        conditions.append(f"t.subscription_status = ${len(params)}")
+        # Filter the same projected value displayed in the returned rows.
+        conditions.append(f"COALESCE(NULLIF(t.subscription_status, ''), 'active') = ${len(params)}")
     elif not include_archived:
         # Archived tenants drop out of the default view; an explicit status
         # filter (or include_archived) brings them back.
@@ -433,9 +486,10 @@ async def list_tenants(
         conditions.append(f"t.subscription_status IS DISTINCT FROM ${len(params)}")
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    order = "t.minutes_used DESC NULLS LAST, t.id" if sort_by == "minutes_used" else "t.business_name, t.id"
 
     try:
-        async with db_client.pool.acquire() as conn:
+        async with acquire_with_tenant(db_client.pool, None) as conn:
             total = await conn.fetchval(
                 f"SELECT count(*) FROM tenants t {where}", *params
             )
@@ -448,7 +502,7 @@ async def list_tenants(
 
             rows = await conn.fetch(
                 _TENANT_LIST_SELECT
-                + f" {where} ORDER BY t.business_name, t.id "
+                + f" {where} ORDER BY {order} "
                 + f"LIMIT ${limit_idx} OFFSET ${offset_idx}",
                 *page_params,
             )
@@ -463,13 +517,14 @@ async def list_tenants(
                 plan_name=row["plan_name"],
                 minutes_used=row["minutes_used"] or 0,
                 minutes_allocated=row["minutes_allocated"] or 0,
-                status=row["subscription_status"] or "active",
+                status=_subscription_status(row["subscription_status"]),
                 user_count=row["user_count"] or 0,
                 campaign_count=row["campaign_count"] or 0,
                 max_concurrent_calls=_max_concurrent(
                     _calling_rules(row["calling_rules"])
                 ),
                 created_at=row["created_at"],
+                updated_at=row["updated_at"],
             )
             for row in rows
         ]
@@ -478,307 +533,157 @@ async def list_tenants(
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch tenants: {str(e)}"
+            status_code=503,
+            detail="Tenant data is temporarily unavailable."
         )
 
 
 @router.get("/tenants/{tenant_id}", response_model=TenantDetailResponse)
 async def get_tenant(
-    tenant_id: str,
+    tenant_id: UUID,
     admin_user: CurrentUser = Depends(require_platform_admin),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
 ):
-    """
-    Get a single tenant by ID with full details (admin only).
-    """
     try:
-        # Fetch tenant with plan info
-        response = db_client.table("tenants").select(
-            "*, plans(name)"
-        ).eq("id", tenant_id).single().execute()
-
-        if not response.data:
-            raise HTTPException(
-                status_code=404,
-                detail="Tenant not found"
-            )
-
-        tenant = response.data
-
-        # Get user count
-        user_count_resp = db_client.table("user_profiles").select(
-            "id", count="exact"
-        ).eq("tenant_id", tenant_id).execute()
-        user_count = user_count_resp.count or 0
-
-        # Get campaign count
-        campaign_count_resp = db_client.table("campaigns").select(
-            "id", count="exact"
-        ).eq("tenant_id", tenant_id).execute()
-        campaign_count = campaign_count_resp.count or 0
-
-        # Extract max_concurrent_calls from calling_rules
-        calling_rules = tenant.get("calling_rules") or {}
-        max_concurrent = calling_rules.get("max_concurrent_calls", 10)
-
-        # Get plan name
-        plan_data = tenant.get("plans") or {}
-        plan_name = plan_data.get("name") if plan_data else None
-
-        return TenantDetailResponse(
-            id=tenant["id"],
-            business_name=tenant["business_name"],
-            plan_id=tenant.get("plan_id"),
-            plan_name=plan_name,
-            minutes_used=tenant.get("minutes_used", 0),
-            minutes_allocated=tenant.get("minutes_allocated", 0),
-            status=tenant.get("subscription_status", "active"),
-            user_count=user_count,
-            campaign_count=campaign_count,
-            max_concurrent_calls=max_concurrent,
-            calling_rules=calling_rules,
-            created_at=tenant.get("created_at"),
-            updated_at=tenant.get("updated_at")
-        )
-
+        async with acquire_with_tenant(db_client.pool, None) as conn:
+            row = await conn.fetchrow(_TENANT_LIST_SELECT + " WHERE t.id=$1", tenant_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        data = dict(row)
+        data["status"] = _subscription_status(data.pop("subscription_status"))
+        data["calling_rules"] = _calling_rules(data["calling_rules"])
+        data["max_concurrent_calls"] = _max_concurrent(data["calling_rules"])
+        return TenantDetailResponse(**data)
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception("Admin tenant detail read failed")
+        raise HTTPException(status_code=503, detail="Tenant data is temporarily unavailable.")
+
+
+def _mutation_receipt(row, *, detail, changed, audit_event_id=None):
+    return {
+        "id": str(row["id"]), "detail": detail, "changed": changed,
+        "status": _subscription_status(row["subscription_status"]),
+        "updated_at": row["updated_at"],
+        "minutes_allocated": row["minutes_allocated"],
+        "max_concurrent_calls": _max_concurrent(_calling_rules(row["calling_rules"])),
+        "audit_event_id": str(audit_event_id) if audit_event_id else None,
+    }
+
+
+async def _mutate_tenant(
+    db_client, tenant_id, body, admin_user, audit_logger, *,
+    target=None, quota=None, action, event_type, detail,
+):
+    try:
+        async with acquire_with_tenant(db_client.pool, None) as conn:
+            await _lock_operator_write(conn, audit_logger, admin_user)
+            current = await conn.fetchrow(
+                "SELECT id,subscription_status,minutes_allocated,calling_rules,updated_at "
+                "FROM tenants WHERE id=$1 FOR UPDATE", tenant_id,
+            )
+            if not current:
+                raise HTTPException(status_code=404, detail="Tenant not found")
+            rules = _calling_rules(current["calling_rules"])
+            same = (
+                current["subscription_status"] == target if target is not None else
+                (quota.minutes_allocated is None or current["minutes_allocated"] == quota.minutes_allocated)
+                and (quota.max_concurrent_calls is None or _max_concurrent(rules) == quota.max_concurrent_calls)
+            )
+            # A lost-response retry reaching the already-desired state is a
+            # read acknowledgement. It never overwrites unrelated newer state.
+            if same:
+                return _mutation_receipt(current, detail="Requested values already saved", changed=False)
+            _check_version(current, body.expected_updated_at)
+            if target is not None:
+                saved = await conn.fetchrow(
+                    "UPDATE tenants SET subscription_status=$2, "
+                    "updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond') "
+                    "WHERE id=$1 RETURNING id,subscription_status,minutes_allocated,calling_rules,updated_at",
+                    tenant_id, target,
+                )
+            else:
+                saved = await conn.fetchrow(
+                    """UPDATE tenants SET minutes_allocated=COALESCE($2::int,minutes_allocated),
+                       calling_rules=CASE WHEN $3::int IS NULL THEN calling_rules ELSE
+                           jsonb_set(COALESCE(calling_rules,'{}'::jsonb),
+                                     '{max_concurrent_calls}',to_jsonb($3::int)) END,
+                       updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond')
+                       WHERE id=$1
+                       RETURNING id,subscription_status,minutes_allocated,calling_rules,updated_at""",
+                    tenant_id, quota.minutes_allocated, quota.max_concurrent_calls,
+                )
+            if not saved or saved["id"] != current["id"]:
+                raise RuntimeError("Tenant update was not persisted")
+            receipt = await audit_logger.log_in_transaction(
+                conn, event_type=event_type, action=action,
+                actor_id=admin_user.id, actor_role="platform_admin",
+                tenant_id=tenant_id, resource_type="tenant", resource_id=tenant_id,
+                before_state=dict(current), after_state=dict(saved),
+                metadata={"reason": body.reason.strip()} if body.reason and body.reason.strip() else None,
+            )
+            payload = _mutation_receipt(saved, detail=detail, changed=True, audit_event_id=receipt)
+        # Exiting the scope commits both mutation and audit; no success receipt
+        # may escape a failed commit.
+        return payload
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Admin tenant mutation was not confirmed: %s", action)
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch tenant: {str(e)}"
+            status_code=503,
+            detail="Tenant change was not confirmed. Refresh and review before retrying.",
         )
 
 
 @router.patch("/tenants/{tenant_id}/quota")
 async def update_tenant_quota(
-    tenant_id: str,
-    quota: QuotaUpdateRequest,
+    tenant_id: UUID, quota: QuotaUpdateRequest,
     admin_user: CurrentUser = Depends(require_platform_admin),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
-    """
-    Update tenant's quota (minutes allocated and/or max concurrent calls).
-    """
-    try:
-        # First get current tenant data
-        current = db_client.table("tenants").select(
-            "calling_rules"
-        ).eq("id", tenant_id).single().execute()
-
-        if not current.data:
-            raise HTTPException(
-                status_code=404,
-                detail="Tenant not found"
-            )
-
-        update_data = {}
-
-        if quota.minutes_allocated is not None:
-            update_data["minutes_allocated"] = quota.minutes_allocated
-
-        if quota.max_concurrent_calls is not None:
-            # Update calling_rules JSONB
-            calling_rules = current.data.get("calling_rules") or {}
-            calling_rules["max_concurrent_calls"] = quota.max_concurrent_calls
-            update_data["calling_rules"] = calling_rules
-
-        if not update_data:
-            return {"detail": "No changes provided"}
-
-        response = db_client.table("tenants").update(
-            update_data
-        ).eq("id", tenant_id).execute()
-
-        if not response.data:
-            raise HTTPException(
-                status_code=404,
-                detail="Tenant not found"
-            )
-
-        return {
-            "detail": "Quota updated",
-            "minutes_allocated": quota.minutes_allocated,
-            "max_concurrent_calls": quota.max_concurrent_calls
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to update quota: {str(e)}"
-        )
-
-
-async def _set_subscription_status(
-    db_client: Client,
-    tenant_id: str,
-    *,
-    target: str,
-    already_detail: str,
-) -> tuple[dict, bool]:
-    """Shared body for suspend / resume / archive.
-
-    Returns (payload, changed). ``changed`` is False when the tenant was
-    already in the target state, so the caller can skip the audit row.
-    """
-    async with db_client.pool.acquire() as conn:
-        current = await conn.fetchrow(
-            "SELECT id, subscription_status FROM tenants WHERE id = $1",
-            tenant_id,
-        )
-        if not current:
-            raise HTTPException(status_code=404, detail="Tenant not found")
-
-        if current["subscription_status"] == target:
-            return {"detail": already_detail, "status": target}, False
-
-        await conn.fetchrow(
-            """
-            UPDATE tenants
-            SET subscription_status = $2, updated_at = NOW()
-            WHERE id = $1
-            RETURNING id, subscription_status
-            """,
-            tenant_id,
-            target,
-        )
-
-    return {"status": target}, True
+    return await _mutate_tenant(
+        db_client, tenant_id, quota, admin_user, audit_logger, quota=quota,
+        action="tenant_quota_updated", event_type=AuditEvent.LIMITS_CHANGED, detail="Quota updated",
+    )
 
 
 @router.post("/tenants/{tenant_id}/suspend")
 async def suspend_tenant(
-    tenant_id: str,
+    tenant_id: UUID, body: TenantVersionRequest,
     admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
-    """
-    Suspend a tenant (sets subscription_status to 'suspended').
-    Suspended tenants cannot make calls or use the platform.
-    """
-    try:
-        payload, changed = await _set_subscription_status(
-            db_client,
-            tenant_id,
-            target="suspended",
-            already_detail="Tenant is already suspended",
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to suspend tenant: {str(e)}"
-        )
-
-    if not changed:
-        return payload
-
-    await _safe_audit(
-        audit_logger,
-        event_type=AuditEvent.TENANT_SUSPENDED,
-        actor_id=admin_user.id,
-        actor_type="user",
-        tenant_id=tenant_id,
-        resource_type="tenant",
-        resource_id=tenant_id,
-        action="tenant_suspended",
-        description=f"Admin suspended tenant {tenant_id}",
+    return await _mutate_tenant(
+        db_client, tenant_id, body, admin_user, audit_logger, target="suspended",
+        action="tenant_suspended", event_type=AuditEvent.TENANT_SUSPENDED, detail="Tenant suspended",
     )
-    return {"detail": "Tenant suspended", "status": "suspended"}
 
 
 @router.post("/tenants/{tenant_id}/resume")
 async def resume_tenant(
-    tenant_id: str,
+    tenant_id: UUID, body: TenantVersionRequest,
     admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
-    """
-    Resume a suspended or archived tenant (sets subscription_status to
-    'active'). This is the un-do verb for both /suspend and /archive.
-    """
-    try:
-        payload, changed = await _set_subscription_status(
-            db_client,
-            tenant_id,
-            target="active",
-            already_detail="Tenant is already active",
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to resume tenant: {str(e)}"
-        )
-
-    if not changed:
-        return payload
-
-    await _safe_audit(
-        audit_logger,
-        event_type=AuditEvent.TENANT_RESTORED,
-        actor_id=admin_user.id,
-        actor_type="user",
-        tenant_id=tenant_id,
-        resource_type="tenant",
-        resource_id=tenant_id,
-        action="tenant_resumed",
-        description=f"Admin resumed tenant {tenant_id}",
+    return await _mutate_tenant(
+        db_client, tenant_id, body, admin_user, audit_logger, target="active",
+        action="tenant_resumed", event_type=AuditEvent.TENANT_RESTORED, detail="Tenant resumed",
     )
-    return {"detail": "Tenant resumed", "status": "active"}
 
 
 @router.post("/tenants/{tenant_id}/archive")
 async def archive_tenant(
-    tenant_id: str,
+    tenant_id: UUID, body: TenantVersionRequest,
     admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
-    """
-    Archive a tenant (sets subscription_status to 'cancelled').
-
-    Reversible: ``POST /tenants/{id}/resume`` puts it back to 'active'.
-    Nothing is deleted, so no child rows (users, campaigns, calls,
-    recordings, invoices) are orphaned — retention/purge is a separate,
-    deliberate operation. Archived tenants are hidden from the default
-    tenant list and are blocked by CallGuard.
-    """
-    try:
-        payload, changed = await _set_subscription_status(
-            db_client,
-            tenant_id,
-            target=ARCHIVED_STATUS,
-            already_detail="Tenant is already archived",
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to archive tenant: {str(e)}"
-        )
-
-    if not changed:
-        return payload
-
-    await _safe_audit(
-        audit_logger,
-        event_type=AuditEvent.TENANT_UPDATED,
-        actor_id=admin_user.id,
-        actor_type="user",
-        tenant_id=tenant_id,
-        resource_type="tenant",
-        resource_id=tenant_id,
-        action="tenant_archived",
-        description=f"Admin archived tenant {tenant_id}",
-        metadata={"subscription_status": ARCHIVED_STATUS},
+    return await _mutate_tenant(
+        db_client, tenant_id, body, admin_user, audit_logger, target=ARCHIVED_STATUS,
+        action="tenant_archived", event_type=AuditEvent.TENANT_UPDATED, detail="Tenant archived",
     )
-    return {"detail": "Tenant archived", "status": ARCHIVED_STATUS}

@@ -10,8 +10,43 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from app.domain.services.telephony.termination_receipts import TerminationReceiptResult
 
 from app.domain.services.telephony import lifecycle
+from app.domain.services.telephony.termination import TerminationContext
+from tests.unit.pbx_identity_helpers import BINDING, bind_test_adapter, bound_test_adapter
+
+
+def _install_synthetic_termination_ports(
+    monkeypatch, *, call_id, durable_id, tenant_id=None, leg_ids=(),
+):
+    """Only synthetic coordinator cases replace these two database ports.
+
+    The real hydration/query cases below deliberately do not use this helper.
+    The refreshed typed context retains every supplied leg and original PBX;
+    confirmation and logical-finalization behavior remain real code.
+    """
+    from app.domain.services.telephony import termination
+    context = TerminationContext(
+        call_id=durable_id, tenant_id=tenant_id, provider_call_id=call_id,
+        previous_status="in_progress", provider_leg_ids=tuple(leg_ids),
+        provider="asterisk", direction="inbound", control_backend=BINDING,
+        provider_legs=tuple((leg, "asterisk") for leg in leg_ids),
+        leg_inventory=tuple(("synthetic-row-"+leg, "asterisk", leg) for leg in leg_ids),
+    )
+    marked = []
+    async def mark(_pool, *, call_reference, tenant_id):
+        assert call_reference == context.call_id
+        assert tenant_id == context.tenant_id
+        marked.append(context)
+        return context
+    async def receipt(_pool, refreshed, *, requested):
+        assert marked and refreshed is context
+        assert refreshed.provider_legs == tuple((leg, "asterisk") for leg in leg_ids)
+        assert refreshed.control_backend == BINDING and requested is True
+        return TerminationReceiptResult(True, True, "saved")
+    monkeypatch.setattr(termination, "mark_termination_pending_and_load_context", mark)
+    monkeypatch.setattr(lifecycle, "_save_confirmed_termination_receipt", receipt)
 
 
 class _RetryLedger:
@@ -60,6 +95,8 @@ class _ConfirmationAdapter:
     def __init__(self, *results: bool) -> None:
         self._results = list(results)
         self.attempts: list[str] = []
+        self.name = "asterisk"
+        bind_test_adapter(self)
 
     async def hangup_confirmed(self, call_id: str) -> bool:
         self.attempts.append(call_id)
@@ -138,6 +175,7 @@ async def test_bounded_recovery_attempts_database_candidate_before_redis_backlog
             "call_id": f"redis-orphan-{index}",
             "pod_id": "dead-incarnation",
             "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
         }
         for index in range(10)
     ]
@@ -150,6 +188,7 @@ async def test_bounded_recovery_attempts_database_candidate_before_redis_backlog
                 "call_id": "database-reservation",
                 "pod_id": "database:termination_pending",
                 "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
                 "durable_call_id": "11111111-1111-1111-1111-111111111111",
                 "_termination_pending": True,
                 "_has_redis_ledger": False,
@@ -163,6 +202,7 @@ async def test_bounded_recovery_attempts_database_candidate_before_redis_backlog
             "durable_call_id": entry.get("durable_call_id"),
             "direction": "outbound",
             "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
             "logical_settled": True,
             "ledger_entry": dict(entry),
         }
@@ -207,6 +247,7 @@ async def test_inverse_recovery_makes_preledger_ari_channel_durable_then_confirm
             "durable_call_id": None,
             "direction": "unknown",
             "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
             "logical_settled": True,
             "ledger_entry": dict(entry),
         }
@@ -307,6 +348,7 @@ async def test_inverse_atomic_claim_loses_to_normal_answer_without_mutation():
                     "campaign_id": "campaign-1",
                     "durable_call_id": "durable-1",
                     "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
                     "provider_call_id": call_id,
                     "answer_requested_at": "2026-08-28T12:00:00+00:00",
                 }
@@ -333,6 +375,7 @@ async def test_inverse_atomic_claim_loses_to_normal_answer_without_mutation():
                 "campaign_id": "campaign-1",
                 "durable_call_id": "durable-1",
                 "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
                 "provider_call_id": "answer-race",
                 "answer_requested_at": "2026-08-28T12:00:00+00:00",
             }
@@ -360,6 +403,7 @@ async def test_inverse_recovery_rechecks_local_setup_after_hydration(monkeypatch
             "durable_call_id": None,
             "direction": "unknown",
             "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
             "logical_settled": True,
             "ledger_entry": dict(entry),
         }
@@ -426,6 +470,7 @@ async def test_hydration_uses_durable_inbound_truth_and_all_active_transfer_ids(
                 "campaign_id": None,
                 "direction": "inbound",
                 "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
                 "provider_call_id": "provider-inbound",
                 "external_call_uuid": "external-inbound",
                 "status": "termination_pending",
@@ -441,7 +486,7 @@ async def test_hydration_uses_durable_inbound_truth_and_all_active_transfer_ids(
                 "billing_status": "reserved",
                 "reserved_seconds": 60,
                 "concurrency_lease_id": None,
-                "route_snapshot": {},
+                "route_snapshot": {"control_backend": BINDING},
                 "recovery_duration_seconds": 42,
                 "recovery_match_count": 1,
             }
@@ -472,6 +517,7 @@ async def test_hydration_uses_durable_inbound_truth_and_all_active_transfer_ids(
             # Direction is only a mirror value; PostgreSQL wins.
             "direction": "outbound",
             "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
             "state": "ringing",
         },
     )
@@ -521,6 +567,7 @@ async def test_answered_orphan_without_monotonic_duration_is_held_at_zero(
                 "campaign_id": None,
                 "direction": "inbound",
                 "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
                 "provider_call_id": "answered-without-terminal-proof",
                 "external_call_uuid": None,
                 "status": "answered",
@@ -539,7 +586,7 @@ async def test_answered_orphan_without_monotonic_duration_is_held_at_zero(
                 "billing_status": "reserved",
                 "reserved_seconds": 60,
                 "concurrency_lease_id": None,
-                "route_snapshot": {},
+                "route_snapshot": {"control_backend": BINDING},
                 "terminal_settled_at": None,
                 "terminal_retry_payload": None,
                 "terminal_retry_enqueued_at": None,
@@ -595,6 +642,7 @@ async def test_unresolved_answer_intent_is_held_without_inventing_billable_durat
                 "campaign_id": None,
                 "direction": "inbound",
                 "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
                 "provider_call_id": "pbx-answer-intent",
                 "external_call_uuid": None,
                 "status": "initiated",
@@ -609,7 +657,7 @@ async def test_unresolved_answer_intent_is_held_without_inventing_billable_durat
                 "billing_status": "reserved",
                 "reserved_seconds": 60,
                 "concurrency_lease_id": None,
-                "route_snapshot": {},
+                "route_snapshot": {"control_backend": BINDING},
                 "terminal_settled_at": None,
                 "terminal_retry_payload": None,
                 "terminal_retry_enqueued_at": None,
@@ -639,6 +687,7 @@ async def test_unresolved_answer_intent_is_held_without_inventing_billable_durat
             "durable_call_id": durable_id,
             "tenant_id": tenant_id,
             "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
             "provider_call_id": "pbx-answer-intent",
             "direction": "inbound",
         },
@@ -680,6 +729,7 @@ async def test_pending_scan_includes_termination_and_terminal_reserved_inbound(
                     "id": "11111111-1111-1111-1111-111111111111",
                     "tenant_id": "22222222-2222-2222-2222-222222222222",
                     "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
                     "provider_call_id": "termination-parent",
                     "external_call_uuid": None,
                     "direction": "outbound",
@@ -693,6 +743,7 @@ async def test_pending_scan_includes_termination_and_terminal_reserved_inbound(
                     "id": "33333333-3333-3333-3333-333333333333",
                     "tenant_id": "44444444-4444-4444-4444-444444444444",
                     "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
                     "provider_call_id": "settlement-parent",
                     "external_call_uuid": None,
                     "direction": "inbound",
@@ -824,6 +875,7 @@ async def test_unconfirmed_orphan_is_retained_without_logical_end_then_retried(
             "durable_call_id": None,
             "direction": "unknown",
             "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
             "duration_seconds": 0,
             "was_answered": True,
             "logical_settled": True,
@@ -1051,6 +1103,7 @@ async def test_inbound_orphan_runs_real_logical_teardown_before_ack(
             "tenant_id": tenant_id,
             "direction": "inbound",
             "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
             "provider_call_id": call_id,
             "duration_seconds": 37,
             "was_answered": True,
@@ -1061,6 +1114,7 @@ async def test_inbound_orphan_runs_real_logical_teardown_before_ack(
                 "call_id": durable_id,
                 "tenant_id": tenant_id,
                 "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
                 "provider_call_id": call_id,
                 "_terminal_reason": "process_restart_recovery",
             },
@@ -1076,8 +1130,11 @@ async def test_inbound_orphan_runs_real_logical_teardown_before_ack(
     async def no_pending():
         return []
 
+    _install_synthetic_termination_ports(
+        monkeypatch, call_id=call_id, durable_id=durable_id, tenant_id=tenant_id, leg_ids=("talky-xfer-durable-target",),
+    )
     monkeypatch.setattr(lifecycle, "_state", lambda: ledger)
-    monkeypatch.setattr(lifecycle, "get_adapter", lambda: Adapter())
+    monkeypatch.setattr(lifecycle, "get_adapter", lambda: bound_test_adapter(Adapter()))
     monkeypatch.setattr(lifecycle, "_hydrate_orphan_recovery_context", hydrate)
     monkeypatch.setattr(lifecycle, "_load_termination_pending_candidates", no_pending)
     monkeypatch.setattr(lifecycle, "_release_ended_marker_later", lambda _cid: None)
@@ -1142,7 +1199,7 @@ async def test_adapter_terminal_callback_during_recovery_adopts_inbound_context(
 
     class Adapter:
         async def hangup_many_confirmed(self, actual_call_ids):
-            assert actual_call_ids == [call_id, "durable-target-leg"]
+            assert tuple(actual_call_ids) == (call_id, "durable-target-leg")
             # Model StasisEnd being dispatched synchronously by the DELETE
             # before all-leg inventory proof returns.
             assert await lifecycle._on_call_ended(call_id) is False
@@ -1159,6 +1216,7 @@ async def test_adapter_terminal_callback_during_recovery_adopts_inbound_context(
             "tenant_id": tenant_id,
             "direction": "inbound",
             "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
             "provider_call_id": call_id,
             "duration_seconds": 14,
             "was_answered": True,
@@ -1169,6 +1227,7 @@ async def test_adapter_terminal_callback_during_recovery_adopts_inbound_context(
                 "call_id": durable_id,
                 "tenant_id": tenant_id,
                 "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
                 "provider_call_id": call_id,
             },
         }
@@ -1187,8 +1246,11 @@ async def test_adapter_terminal_callback_during_recovery_adopts_inbound_context(
     async def release_global(*_args, **_kwargs):
         return True
 
+    _install_synthetic_termination_ports(
+        monkeypatch, call_id=call_id, durable_id=durable_id, tenant_id=tenant_id, leg_ids=("durable-target-leg",),
+    )
     monkeypatch.setattr(lifecycle, "_state", lambda: ledger)
-    monkeypatch.setattr(lifecycle, "get_adapter", lambda: Adapter())
+    monkeypatch.setattr(lifecycle, "get_adapter", lambda: bound_test_adapter(Adapter()))
     monkeypatch.setattr(lifecycle, "_hydrate_orphan_recovery_context", hydrate)
     monkeypatch.setattr(lifecycle, "_load_termination_pending_candidates", no_pending)
     monkeypatch.setattr(lifecycle, "_release_ended_marker_later", lambda _cid: None)
@@ -1268,6 +1330,7 @@ async def test_database_only_terminal_reserved_inbound_settles_without_redis_ack
                 "pod_id": "database:termination_pending",
                 "tenant_id": tenant_id,
                 "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
                 "durable_call_id": durable_id,
                 "_termination_pending": False,
                 "_inbound_settlement_pending": True,
@@ -1283,6 +1346,7 @@ async def test_database_only_terminal_reserved_inbound_settles_without_redis_ack
             "tenant_id": tenant_id,
             "direction": "inbound",
             "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
             "provider_call_id": call_id,
             "duration_seconds": 29,
             "was_answered": True,
@@ -1293,6 +1357,7 @@ async def test_database_only_terminal_reserved_inbound_settles_without_redis_ack
                 "call_id": durable_id,
                 "tenant_id": tenant_id,
                 "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
                 "provider_call_id": call_id,
             },
         }
@@ -1306,8 +1371,11 @@ async def test_database_only_terminal_reserved_inbound_settles_without_redis_ack
     async def release_global(*_args, **_kwargs):
         return True
 
+    _install_synthetic_termination_ports(
+        monkeypatch, call_id=call_id, durable_id=durable_id, tenant_id=tenant_id,
+    )
     monkeypatch.setattr(lifecycle, "_state", lambda: ledger)
-    monkeypatch.setattr(lifecycle, "get_adapter", lambda: Adapter())
+    monkeypatch.setattr(lifecycle, "get_adapter", lambda: bound_test_adapter(Adapter()))
     monkeypatch.setattr(lifecycle, "_load_termination_pending_candidates", pending)
     monkeypatch.setattr(lifecycle, "_hydrate_orphan_recovery_context", hydrate)
     monkeypatch.setattr(lifecycle, "_release_ended_marker_later", lambda _cid: None)
@@ -1377,6 +1445,7 @@ async def test_recovered_preanswer_denial_uses_release_after_pbx_proof(monkeypat
             "durable_call_id": durable_id,
             "direction": "inbound",
             "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
             "provider_call_id": call_id,
             "duration_seconds": 0,
             "was_answered": False,
@@ -1387,6 +1456,7 @@ async def test_recovered_preanswer_denial_uses_release_after_pbx_proof(monkeypat
                 "admission_status": "denied",
                 "call_id": durable_id,
                 "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
                 "provider_call_id": call_id,
             },
         }
@@ -1397,8 +1467,11 @@ async def test_recovered_preanswer_denial_uses_release_after_pbx_proof(monkeypat
     async def no_transfers(*_args, **_kwargs):
         return 0
 
+    _install_synthetic_termination_ports(
+        monkeypatch, call_id=call_id, durable_id=durable_id,
+    )
     monkeypatch.setattr(lifecycle, "_state", lambda: ledger)
-    monkeypatch.setattr(lifecycle, "get_adapter", lambda: Adapter())
+    monkeypatch.setattr(lifecycle, "get_adapter", lambda: bound_test_adapter(Adapter()))
     monkeypatch.setattr(lifecycle, "_load_termination_pending_candidates", pending)
     monkeypatch.setattr(lifecycle, "_hydrate_orphan_recovery_context", hydrate)
     monkeypatch.setattr(lifecycle, "_finalize_inbound_admission", finalize)
@@ -1462,6 +1535,7 @@ async def test_inbound_settlement_failure_keeps_ledger_and_retries(monkeypatch):
             "tenant_id": "44444444-4444-4444-4444-444444444444",
             "direction": "inbound",
             "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
             "provider_call_id": call_id,
             "duration_seconds": 21,
             "was_answered": True,
@@ -1471,6 +1545,7 @@ async def test_inbound_settlement_failure_keeps_ledger_and_retries(monkeypatch):
                 "allowed": True,
                 "call_id": durable_id,
                 "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
                 "provider_call_id": call_id,
             },
         }
@@ -1487,8 +1562,11 @@ async def test_inbound_settlement_failure_keeps_ledger_and_retries(monkeypatch):
     async def no_pending():
         return []
 
+    _install_synthetic_termination_ports(
+        monkeypatch, call_id=call_id, durable_id=durable_id, tenant_id="44444444-4444-4444-4444-444444444444",
+    )
     monkeypatch.setattr(lifecycle, "_state", lambda: ledger)
-    monkeypatch.setattr(lifecycle, "get_adapter", lambda: Adapter())
+    monkeypatch.setattr(lifecycle, "get_adapter", lambda: bound_test_adapter(Adapter()))
     monkeypatch.setattr(lifecycle, "_hydrate_orphan_recovery_context", hydrate)
     monkeypatch.setattr(lifecycle, "_load_termination_pending_candidates", no_pending)
     monkeypatch.setattr(lifecycle, "_release_ended_marker_later", lambda _cid: None)
@@ -1578,6 +1656,7 @@ async def test_ack_failure_after_settlement_retries_without_double_finalizing(
             "tenant_id": "77777777-7777-7777-7777-777777777777",
             "direction": "inbound",
             "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
             "provider_call_id": call_id,
             "duration_seconds": 18,
             "was_answered": True,
@@ -1590,6 +1669,7 @@ async def test_ack_failure_after_settlement_retries_without_double_finalizing(
                 "allowed": True,
                 "call_id": durable_id,
                 "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
                 "provider_call_id": call_id,
             },
         }
@@ -1610,8 +1690,11 @@ async def test_ack_failure_after_settlement_retries_without_double_finalizing(
     async def no_pending():
         return []
 
+    _install_synthetic_termination_ports(
+        monkeypatch, call_id=call_id, durable_id=durable_id, tenant_id="77777777-7777-7777-7777-777777777777",
+    )
     monkeypatch.setattr(lifecycle, "_state", lambda: ledger)
-    monkeypatch.setattr(lifecycle, "get_adapter", lambda: Adapter())
+    monkeypatch.setattr(lifecycle, "get_adapter", lambda: bound_test_adapter(Adapter()))
     monkeypatch.setattr(lifecycle, "_hydrate_orphan_recovery_context", hydrate)
     monkeypatch.setattr(lifecycle, "_load_termination_pending_candidates", no_pending)
     monkeypatch.setattr(lifecycle, "_release_ended_marker_later", lambda _cid: None)
@@ -1662,6 +1745,8 @@ async def test_ack_failure_after_settlement_retries_without_double_finalizing(
 async def test_duplicate_inflight_finalizer_cannot_be_acked_before_commit(
     monkeypatch,
 ):
+    import app.core.container as container_module
+
     call_id = "existing-finalizer-race"
     ledger = _RetryLedger([{"call_id": call_id, "pod_id": "dead"}])
 
@@ -1676,6 +1761,7 @@ async def test_duplicate_inflight_finalizer_cannot_be_acked_before_commit(
             "durable_call_id": "66666666-6666-6666-6666-666666666666",
             "direction": "inbound",
             "provider": "asterisk",
+            "route_snapshot": {"control_backend": BINDING},
             "duration_seconds": 10,
             "was_answered": True,
             # Model parent billing having committed while transfer lease
@@ -1688,8 +1774,12 @@ async def test_duplicate_inflight_finalizer_cannot_be_acked_before_commit(
     async def no_pending():
         return []
 
+    _install_synthetic_termination_ports(
+        monkeypatch, call_id=call_id, durable_id="66666666-6666-6666-6666-666666666666",
+    )
+    monkeypatch.setattr(container_module, "get_container", lambda: SimpleNamespace(db_pool=object()))
     monkeypatch.setattr(lifecycle, "_state", lambda: ledger)
-    monkeypatch.setattr(lifecycle, "get_adapter", lambda: Adapter())
+    monkeypatch.setattr(lifecycle, "get_adapter", lambda: bound_test_adapter(Adapter()))
     monkeypatch.setattr(lifecycle, "_hydrate_orphan_recovery_context", hydrate)
     monkeypatch.setattr(lifecycle, "_load_termination_pending_candidates", no_pending)
     lifecycle._orphan_recovery_in_flight.clear()

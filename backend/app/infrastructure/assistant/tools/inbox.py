@@ -18,6 +18,7 @@ import httpx
 from app.core.postgres_adapter import Client
 from app.core.db_utils import acquire_with_tenant
 from app.services.connector_resolver import ConnectorAuthorizationSnapshot, _authorization_snapshot_for_row
+from app.services.connector_lifecycle import ConnectorActor, ConnectorLifecycle
 from app.infrastructure.assistant.tools.coercion import coerce_bool
 from app.infrastructure.connectors.base import BaseConnector, ConnectorProviderError
 
@@ -241,10 +242,12 @@ async def _mark_email_authorization_expired(
     try:
         tenant_uuid, connector_uuid = UUID(tenant_id), UUID(connector_id)
         account_uuid = UUID(authorization.account_row_id)
+        lifecycle = ConnectorLifecycle(db_client, actor=ConnectorActor.system("inbox_authorization_expiry"))
         async with asyncio.timeout(_EMAIL_HEALTH_TIMEOUT_SECONDS):
             async with acquire_with_tenant(
                 db_client.pool, tenant_id, timeout=_EMAIL_HEALTH_TIMEOUT_SECONDS
             ) as conn:
+                await lifecycle._begin(conn, tenant_id)
                 parent = await conn.fetchrow(
                     """SELECT id FROM connectors WHERE id=$1 AND tenant_id=$2
                        AND provider=$3 AND status='active' FOR UPDATE""",
@@ -265,15 +268,16 @@ async def _mark_email_authorization_expired(
                 )
                 active = await conn.fetch(
                     """SELECT id, access_token_encrypted, refresh_token_encrypted,
-                              external_account_id, token_expires_at, last_refreshed_at
+                              external_account_id, token_expires_at, last_refreshed_at, refresh_state, created_at,
+                              credential_generation
                        FROM connector_accounts WHERE connector_id=$1 AND tenant_id=$2
-                       AND status='active' ORDER BY last_refreshed_at DESC LIMIT 2""",
+                       AND status='active' ORDER BY created_at DESC LIMIT 2""",
                     connector_uuid,
                     tenant_uuid,
                 )
-                if not active or (
+                if not active or active[0]["refresh_state"] != "idle" or (
                     len(active) > 1
-                    and active[0]["last_refreshed_at"] == active[1]["last_refreshed_at"]
+                    and active[0]["created_at"] == active[1]["created_at"]
                 ):
                     return False
                 current = _authorization_snapshot_for_row(
@@ -282,7 +286,8 @@ async def _mark_email_authorization_expired(
                 if current != authorization:
                     return False
                 account_ack = await conn.fetchval(
-                    """UPDATE connector_accounts SET status='expired' WHERE id=$1
+                    """UPDATE connector_accounts SET status='expired',
+                       credential_generation=credential_generation+1 WHERE id=$1
                        AND connector_id=$2 AND tenant_id=$3 AND status='active' RETURNING id""",
                     account_uuid,
                     connector_uuid,
@@ -297,6 +302,9 @@ async def _mark_email_authorization_expired(
                 )
                 if account_ack is None or parent_ack is None:
                     raise RuntimeError("Authorization expiry was not acknowledged")
+                await lifecycle._record(conn, tenant_id, connector_id, lifecycle.actor,
+                    "connector.authorization_expired", account_id=str(account_uuid),
+                    generation=active[0]["credential_generation"] + 1, local_status="expired")
         return True
     except Exception as exc:
         logger.warning(

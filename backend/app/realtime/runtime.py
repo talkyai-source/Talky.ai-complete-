@@ -59,9 +59,10 @@ async def create_realtime_voice_session(
         provider = str(rt_settings.get("provider") or "openai").strip().lower()
 
         if provider == "xai":
-            api_key = await get_credential_resolver().resolve(
+            credential = await get_credential_resolver().resolve_with_metadata(
                 "xai", tenant_id=config.tenant_id,
             )
+            api_key = credential.secret if credential else None
             if not api_key:
                 logger.error(
                     "realtime session call_id=%s: no XAI_API_KEY resolved "
@@ -70,9 +71,10 @@ async def create_realtime_voice_session(
                 )
                 return None
         else:
-            api_key = await get_credential_resolver().resolve(
+            credential = await get_credential_resolver().resolve_with_metadata(
                 "openai", tenant_id=config.tenant_id,
             )
+            api_key = credential.secret if credential else None
             if not api_key:
                 logger.error(
                     "realtime session call_id=%s: no OPENAI_API_KEY resolved "
@@ -128,6 +130,7 @@ async def create_realtime_voice_session(
                 tools=[*knowledge_tools, *realtime_voice_action_tools(action_context)],
                 settings=config.realtime_settings,
                 call_id=call_id,
+                observation_context=credential.observation_context,
             )
         else:
             rt = OpenAIRealtimeSession(
@@ -138,6 +141,7 @@ async def create_realtime_voice_session(
                 tools=[*knowledge_tools, *realtime_voice_action_tools(action_context)],
                 settings=config.realtime_settings,
                 call_id=call_id,
+                observation_context=credential.observation_context,
             )
         rt._prompt_identity = {"template": config.prompt_template, "version": config.prompt_version}
         if getattr(config, "_knowledge_catalog", None) is not None:

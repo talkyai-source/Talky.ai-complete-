@@ -34,8 +34,8 @@ def _load_drain_manifest_module():
     return module
 
 
-def _valid_drain_manifest(candidate_sha: str) -> dict:
-    return {
+def _valid_drain_manifest(candidate_sha: str, schema_version: int = 1) -> dict:
+    value = {
         "schema_version": 1,
         "manifest_id": "drain-test-001",
         "candidate_sha": candidate_sha,
@@ -69,6 +69,18 @@ def _valid_drain_manifest(candidate_sha: str) -> dict:
             },
         ],
     }
+    if schema_version == 2:
+        value.update(
+            schema_version=2,
+            approval_mode="single-owner",
+            owner_authorization_ref="test-authorization:solo-policy-001",
+            approvers=[{
+                "principal": "owner@example.com",
+                "role": "platform-owner",
+                "approval_ref": "test-approval:release-001",
+            }],
+        )
+    return value
 
 
 def _write_manifest(path: Path, value: dict) -> str:
@@ -111,19 +123,21 @@ def test_deployment_docs_match_candidate_first_reconciliation_sequence():
         "creates an isolated detached worktree before mutating the live "
         "`/opt/talky` checkout"
     )
-    checkout_at = normalized.index(
-        "only after those candidate proofs, checks out the frozen SHA"
-    )
+    preserve_unit_at = normalized.index("saves the exact `/etc/systemd/system/talky-api-web.service`")
+    checkout_at = normalized.index("then checks out the frozen SHA")
     unit_at = normalized.index(
         "installs `talky-migrate.service`, `talky-inbound-synthetic.service`"
     )
     migrate_at = normalized.index("verifies `alembic current == heads`")
+    privileges_at = normalized.index("the Admin runtime database privilege gate")
     asterisk_at = normalized.index(
         "applies the repository-owned Asterisk configuration"
     )
-    restart_at = normalized.index("restarts the API and three Python workers")
+    version_at = normalized.index("atomically sets only `APP_VERSION`")
+    restart_at = normalized.index("It restarts both APIs and three Python workers")
 
-    assert candidate_at < checkout_at < unit_at < migrate_at < asterisk_at < restart_at
+    assert candidate_at < preserve_unit_at < checkout_at < unit_at < migrate_at
+    assert migrate_at < privileges_at < asterisk_at < version_at < restart_at
     for contract in (
         "Python import smoke test",
         "complete C++ gateway CTest suite",
@@ -131,6 +145,11 @@ def test_deployment_docs_match_candidate_first_reconciliation_sequence():
         "carrier-hairpin synthetic configuration",
         "enables `talky-inbound-synthetic.timer`",
         "restarts `talky-inbound-synthetic.timer`",
+        "file or symlink using `cp -a`",
+        "inherited database URL overrides are cleared",
+        "preserving the other bindings, file ownership and permissions",
+        "each API unit's current `MainPID`",
+        "exact `APP_VERSION` without printing its environment",
     ):
         assert contract in normalized
 
@@ -246,12 +265,13 @@ def test_trunk_status_restart_cannot_abort_an_otherwise_healthy_deploy():
     assert "Restart=always will keep retrying" in deploy
 
 
-def test_drain_manifest_binds_candidate_external_state_and_is_single_use(tmp_path):
+@pytest.mark.parametrize("schema_version", [1, 2])
+def test_drain_manifest_binds_candidate_external_state_and_is_single_use(tmp_path, schema_version):
     verifier = _load_drain_manifest_module()
     candidate = "a" * 40
     manifest_path = tmp_path / "drain.json"
     replay_dir = tmp_path / "used"
-    digest = _write_manifest(manifest_path, _valid_drain_manifest(candidate))
+    digest = _write_manifest(manifest_path, _valid_drain_manifest(candidate, schema_version))
     now = datetime(2026, 8, 29, 10, 5, tzinfo=UTC)
 
     assert verifier.verify_and_consume_manifest(
@@ -326,11 +346,12 @@ def test_drain_manifest_rejects_mismatch_staleness_nonzero_and_collusion(
         )
 
 
-def test_drain_manifest_rejects_digest_tampering_and_duplicate_keys(tmp_path):
+@pytest.mark.parametrize("schema_version", [1, 2])
+def test_drain_manifest_rejects_digest_tampering_and_duplicate_keys(tmp_path, schema_version):
     verifier = _load_drain_manifest_module()
     candidate = "a" * 40
     manifest_path = tmp_path / "drain.json"
-    _write_manifest(manifest_path, _valid_drain_manifest(candidate))
+    _write_manifest(manifest_path, _valid_drain_manifest(candidate, schema_version))
 
     with pytest.raises(verifier.ManifestError, match="SHA-256"):
         verifier.verify_and_consume_manifest(
@@ -353,10 +374,11 @@ def test_drain_manifest_rejects_digest_tampering_and_duplicate_keys(tmp_path):
         )
 
 
-def test_drain_manifest_id_cannot_escape_replay_ledger(tmp_path):
+@pytest.mark.parametrize("schema_version", [1, 2])
+def test_drain_manifest_id_cannot_escape_replay_ledger(tmp_path, schema_version):
     verifier = _load_drain_manifest_module()
     candidate = "a" * 40
-    value = _valid_drain_manifest(candidate)
+    value = _valid_drain_manifest(candidate, schema_version)
     value["manifest_id"] = "../outside"
     manifest_path = tmp_path / "drain.json"
     digest = _write_manifest(manifest_path, value)
@@ -372,32 +394,169 @@ def test_drain_manifest_id_cannot_escape_replay_ledger(tmp_path):
     assert not (tmp_path / "outside.used").exists()
 
 
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda value: value.pop("approval_mode"), "missing=.*approval_mode"),
+        (lambda value: value.update(approval_mode="two-person"), "exactly single-owner"),
+        (lambda value: value.update(approval_mode=None), "exactly single-owner"),
+        (lambda value: value.pop("owner_authorization_ref"), "missing=.*owner_authorization_ref"),
+        (lambda value: value.update(owner_authorization_ref=None), "owner_authorization_ref"),
+        (lambda value: value.update(owner_authorization_ref=""), "owner_authorization_ref"),
+        (lambda value: value.update(owner_authorization_ref="not a reference"), "owner_authorization_ref"),
+        (lambda value: value.update(approvers=[]), "exactly one platform owner"),
+        (lambda value: value.update(approvers={}), "exactly one platform owner"),
+        (lambda value: value["approvers"].append(dict(value["approvers"][0])), "exactly one platform owner"),
+        (lambda value: value["approvers"][0].update(role="release-manager"), "exactly platform-owner"),
+        (lambda value: value["approvers"][0].update(principal=""), "principal"),
+        (lambda value: value["approvers"][0].pop("approval_ref"), "missing=.*approval_ref"),
+        (lambda value: value["approvers"][0].update(approval_ref=""), "approval_ref"),
+        (lambda value: value["approvers"][0].update(optional=True), "extra=.*optional"),
+        (lambda value: value.update(optional=True), "extra=.*optional"),
+        (lambda value: value.update(schema_version=1), "extra=.*approval_mode"),
+        (lambda value: value.update(schema_version=True), "integer 1 or 2"),
+        (lambda value: value.update(schema_version=3), "integer 1 or 2"),
+    ],
+)
+def test_single_owner_manifest_requires_explicit_authority_and_exact_shape(tmp_path, mutation, message):
+    verifier = _load_drain_manifest_module()
+    candidate = "a" * 40
+    value = _valid_drain_manifest(candidate, 2)
+    mutation(value)
+    path = tmp_path / "drain.json"
+    digest = _write_manifest(path, value)
+    replay_dir = tmp_path / "used"
+
+    with pytest.raises(verifier.ManifestError, match=message):
+        verifier.verify_and_consume_manifest(
+            manifest_path=path, candidate_sha=candidate, expected_sha256=digest,
+            replay_dir=replay_dir, now=datetime(2026, 8, 29, 10, 5, tzinfo=UTC),
+        )
+    assert not replay_dir.exists()
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda value: value.update(candidate_sha="b" * 40), "candidate_sha"),
+        (lambda value: value.update(environment="staging"), "environment"),
+        (lambda value: value.update(issued_at="2026-08-29T09:00:00Z"), "older than"),
+        (lambda value: value.update(issued_at="2026-08-29T10:07:00Z"), "future"),
+        (lambda value: value.update(expires_at="2026-08-29T10:04:59Z"), "expired"),
+        (lambda value: value.update(expires_at="2026-08-29T10:31:00Z"), "30 minutes"),
+        (lambda value: value["traffic"].update(ingress_disabled=False), "ingress_disabled"),
+        (lambda value: value["traffic"].update(outbound_origination_disabled=False), "outbound_origination_disabled"),
+        (lambda value: value["evidence"].update(topology_ref=""), "topology_ref"),
+        (lambda value: value["evidence"].update(change_ref=value["evidence"]["topology_ref"]), "independent evidence"),
+    ],
+)
+def test_single_owner_keeps_candidate_freshness_traffic_and_evidence_gates(tmp_path, mutation, message):
+    verifier = _load_drain_manifest_module()
+    candidate = "a" * 40
+    value = _valid_drain_manifest(candidate, 2)
+    mutation(value)
+    path = tmp_path / "drain.json"
+    digest = _write_manifest(path, value)
+    replay_dir = tmp_path / "used"
+
+    with pytest.raises(verifier.ManifestError, match=message):
+        verifier.verify_and_consume_manifest(
+            manifest_path=path, candidate_sha=candidate, expected_sha256=digest,
+            replay_dir=replay_dir, now=datetime(2026, 8, 29, 10, 5, tzinfo=UTC),
+        )
+    assert not replay_dir.exists()
+
+
+@pytest.mark.parametrize("counter", ["gateway_sessions", "asterisk_legs", "redis_leases", "db_live_calls"])
+@pytest.mark.parametrize("count", [1, False])
+def test_single_owner_still_requires_four_integer_zero_counters(tmp_path, counter, count):
+    verifier = _load_drain_manifest_module()
+    candidate = "a" * 40
+    value = _valid_drain_manifest(candidate, 2)
+    value["traffic"]["active_counts"][counter] = count
+    path = tmp_path / "drain.json"
+    digest = _write_manifest(path, value)
+    replay_dir = tmp_path / "used"
+
+    with pytest.raises(verifier.ManifestError, match=counter):
+        verifier.verify_and_consume_manifest(
+            manifest_path=path, candidate_sha=candidate, expected_sha256=digest,
+            replay_dir=replay_dir, now=datetime(2026, 8, 29, 10, 5, tzinfo=UTC),
+        )
+    assert not replay_dir.exists()
+
+
+def test_version_one_never_infers_single_owner_policy(tmp_path):
+    verifier = _load_drain_manifest_module()
+    candidate = "a" * 40
+    value = _valid_drain_manifest(candidate)
+    value["approvers"] = value["approvers"][:1]
+    path = tmp_path / "drain.json"
+    digest = _write_manifest(path, value)
+    replay_dir = tmp_path / "used"
+
+    with pytest.raises(verifier.ManifestError, match="at least two independent approvers"):
+        verifier.verify_and_consume_manifest(
+            manifest_path=path, candidate_sha=candidate, expected_sha256=digest,
+            replay_dir=replay_dir, now=datetime(2026, 8, 29, 10, 5, tzinfo=UTC),
+        )
+    assert not replay_dir.exists()
+
+
 def test_deployment_docs_keep_external_attestation_and_toctou_limit_explicit():
     deployment_doc = (ROOT / "docs" / "DEPLOYMENT.md").read_text(encoding="utf-8")
+    deployment_prose = " ".join(deployment_doc.split())
 
-    assert "repository code does not yet read" in deployment_doc
-    assert "carrier, Asterisk legs, Redis leases, or database live-call state" in deployment_doc
-    assert "externally attested" in deployment_doc
+    assert "backend/scripts/observe_release_quiescence.py" in deployment_doc
+    assert "bounded gateway/Asterisk/Redis/database counters" in deployment_prose
+    assert "non-atomic snapshot, never a drain manifest or approval" in deployment_prose
+    assert (
+        "exit zero means the reads were complete and internally consistent, "
+        "not that every counter was zero"
+    ) in deployment_prose
+    assert (
+        "carrier topology and ingress/origination freeze still require owner attestation"
+    ) in deployment_prose
+    assert "counts must be rechecked after that freeze" in deployment_prose
     assert "neither the manifest nor a phrase eliminates TOCTOU" in deployment_doc
     assert "closes the check/restart race" not in deployment_doc
 
 
 def test_backup_and_restore_examples_are_fail_fast_and_isolated():
     runbook = (ROOT / "docs" / "RUNBOOK.md").read_text(encoding="utf-8")
+    prose = " ".join(runbook.split())
+    backup = (BACKEND / "deploy" / "db-backup.sh").read_text(encoding="utf-8")
 
-    assert runbook.count("set -Eeuo pipefail") >= 2
-    assert "refusing to overwrite existing backup artifact" in runbook
-    assert 'test -s "${partial}"' in runbook
-    assert 'checksum_partial="${checksum_file}.partial"' in runbook
-    assert '[[ "$digest" =~ ^[0-9a-f]{64}$ ]]' in runbook
-    assert 'if [[ "$rc" -ne 0 && "${published:-0}" -eq 1 ]]' in runbook
-    assert "trap cleanup_partial EXIT" in runbook
-    assert "trap cleanup_restore EXIT" in runbook
-    assert 'restore_db="talky_restore_' in runbook
-    assert 'dropdb -U talky --if-exists --force "${restore_db}"' in runbook
-    assert "verify_restore_compatibility.py" in runbook
-    assert '--database "${restore_db}"' in runbook
-    assert "never use the production `talky`" in runbook
+    # The runbook now invokes the reviewed service instead of maintaining a
+    # second bare-pg_dump recipe. Its real publication gates remain required.
+    for contract in (
+        "set -Eeuo pipefail", "refusing to overwrite existing artifact",
+        "trap cleanup_partial EXIT", '[[ "$digest" =~ ^[0-9a-f]{64}$ ]]',
+    ):
+        assert contract in backup
+    assert (backup.index('python3 "${script_dir}/backup_snapshot.py"')
+            < backup.index('test -s "${partial}"')
+            < backup.index('pg_restore --list')
+            < backup.index('mv -- "${partial}" "${dump}"')
+            < backup.index('sha256sum --check --quiet')
+            < backup.index("# --- retention"))
+    for contract in (
+        "sudo systemctl start talky-db-backup.service",
+        "`/etc/talky/db-backup.env` must have mode `0600`",
+        "TALKY_BACKUP_PRINCIPAL_ID=<existing-platform-admin-UUID>",
+        "read-only repeatable-read transaction", "`pg_dump --enable-row-security`",
+        "failure or keeper failure prevents publication and retention",
+        "published but exits nonzero with a critical shrink alert",
+        "isolated PostgreSQL cluster", "exact production image ID",
+        "no network or published ports", "never the production data volume",
+        "ownership and ACLs retained", "`--exit-on-error`",
+        "Do not filter archive entries", "do not load a production `.env`",
+        "verify_restore_compatibility.py", "The compatibility checker does not migrate",
+        "Close owned connections and remove only", "after identity checks",
+        "never use a production-cluster `dropdb --force` shortcut",
+    ):
+        assert contract in prose
+    assert 'dropdb -U talky --if-exists --force "${restore_db}"' not in runbook
 
 
 def test_restore_smoke_rewrites_only_to_explicit_isolated_database():

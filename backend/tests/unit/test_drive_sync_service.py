@@ -177,10 +177,12 @@ class TestDriveSyncNoConnector:
     """Tests for sync when no Drive connector is connected."""
     
     @pytest.fixture
-    def service_no_connector(self):
+    def service_no_connector(self, monkeypatch):
         """Create service that returns no connector."""
         mock_supabase = MagicMock()
-        mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
+        from app.services import connector_resolver
+        monkeypatch.setattr(connector_resolver, "resolve_active_connector", AsyncMock(
+            side_effect=connector_resolver.ConnectorNotConnectedError("drive")))
         return DriveSyncService(mock_supabase)
     
     @pytest.mark.asyncio
@@ -203,17 +205,12 @@ class TestDriveSyncNoFiles:
     """Tests for sync when no files to upload."""
     
     @pytest.fixture
-    def service(self):
+    def service(self, monkeypatch):
         """Create service with mock connector."""
         mock_supabase = MagicMock()
-        # Mock that a connector exists
-        mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = [{
-            "id": "conn-1",
-            "provider": "google_drive",
-            "type": "drive",
-            "status": "active",
-            "encrypted_tokens": "encrypted"
-        }]
+        from app.services import connector_resolver
+        monkeypatch.setattr(connector_resolver, "resolve_active_connector", AsyncMock(
+            return_value=(MagicMock(), "conn-1", "google_drive")))
         return DriveSyncService(mock_supabase)
     
     @pytest.mark.asyncio

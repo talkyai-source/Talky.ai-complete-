@@ -9,7 +9,10 @@ countries, no spend cap, no business hours). A database blip therefore let a
 suspended / cancelled / over-cap tenant dial.
 
 Contract after the fix:
-  * Only ``UndefinedTableError`` / ``UndefinedColumnError`` mean "this schema
+  * Legacy partner/subscription gates retain ``UndefinedTableError`` /
+    ``UndefinedColumnError`` compatibility; formal tenant/parent authority
+    fails closed on missing schema as well as other read failures.
+  * For legacy checks only, missing schema means "this schema
     does not have the column yet" -> ``schema_check_skipped`` / defaults.
   * Any other error makes the check FAIL with a ``check_error_blocked`` reason,
     the vocabulary ``dialer_worker._classify_guard_denial`` recognises as a
@@ -139,8 +142,12 @@ async def test_account_gate_skips_only_when_the_schema_is_missing(method, check,
     result = await getattr(guard, method)(tenant_id=TENANT, **extra)
 
     assert result.check == check
-    assert result.passed is True
-    assert result.reason == "schema_check_skipped"
+    if check == GuardCheck.TENANT_ACTIVE:
+        assert result.passed is False
+        assert result.reason.startswith("check_error_blocked")
+    else:
+        assert result.passed is True
+        assert result.reason == "schema_check_skipped"
 
 
 @pytest.mark.parametrize("method,check,extra", ACCOUNT_CHECKS)
@@ -205,7 +212,8 @@ async def test_subscription_real_verdicts_are_still_cached():
 
 
 async def test_tenant_active_still_reports_a_suspended_tenant():
-    guard = _guard(_Conn(row={"id": TENANT, "subscription_status": "active", "status": "suspended"}))
+    from tests.unit.test_call_guard_formal_authority import authority_row
+    guard = _guard(_Conn(row=authority_row(status="suspended")))
 
     result = await guard._check_tenant_active(tenant_id=TENANT)
 

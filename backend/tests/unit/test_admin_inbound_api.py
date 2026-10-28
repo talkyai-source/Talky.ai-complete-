@@ -37,7 +37,9 @@ def test_admin_router_exposes_operational_contract():
         ("/inbound/assignments/{assignment_id}/unquarantine", "POST"),
         ("/inbound/reassignments", "GET"),
         ("/inbound/reassignments", "POST"),
+        ("/inbound/reassignments/{request_id}", "GET"),
         ("/inbound/reassignments/{request_id}/approve", "POST"),
+        ("/inbound/reassignments/{request_id}/cancel", "POST"),
     }
     assert expected <= routes
 
@@ -143,3 +145,26 @@ def test_service_conflicts_keep_stable_admin_error_shape():
         "code": "version_conflict",
         "message": "Version conflict",
     }
+
+
+@pytest.mark.asyncio
+async def test_billing_unconfirmed_outcome_maps_to_503_without_claiming_rollback(monkeypatch):
+    from app.api.v1.schemas.inbound_campaigns import AdminInboundBillingHoldResolutionRequest
+    from app.domain.services.telephony.inbound_admission import InboundHoldResolutionUnavailableError
+
+    class Unavailable:
+        async def resolve_billing_hold(self, _request):
+            raise InboundHoldResolutionUnavailableError("Reconcile the original idempotency key")
+
+    monkeypatch.setattr(admin_inbound, "InboundAdmissionService", lambda _pool: Unavailable())
+    with pytest.raises(HTTPException) as exc:
+        await admin_inbound.resolve_inbound_billing_hold(
+            "22222222-2222-2222-2222-222222222222", "33333333-3333-3333-3333-333333333333",
+            AdminInboundBillingHoldResolutionRequest(
+                hold_reason="provider_answer_ambiguous", decision="release_unanswered",
+                evidence_type="carrier_cdr", evidence_reference="synthetic-reference",
+                evidence_sha256="a" * 64, adjudication_reason="Synthetic external evidence reviewed"),
+            user=ADMIN, idempotency_key="synthetic-resolution-key", db_pool=object())
+    assert exc.value.status_code == 503
+    assert exc.value.detail == {"code": "inbound_hold_resolution_unconfirmed",
+                                "message": "Reconcile the original idempotency key"}

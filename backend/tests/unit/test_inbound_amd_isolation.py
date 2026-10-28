@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.domain.services.credential_resolver import ResolvedCredential
 from app.domain.services.voice_orchestrator import (
     Direction,
     VoiceOrchestrator,
@@ -216,7 +217,8 @@ async def test_realtime_orchestrator_pins_direction_on_session_and_bridge(
         gateway_sample_rate=8000,
     )
 
-    resolver = SimpleNamespace(resolve=AsyncMock(return_value="test-api-key"))
+    credential = ResolvedCredential("test-api-key", source="platform")
+    resolver = SimpleNamespace(resolve_with_metadata=AsyncMock(return_value=credential))
     realtime_session = SimpleNamespace(
         connect=AsyncMock(return_value=True), close=AsyncMock()
     )

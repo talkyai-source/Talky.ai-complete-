@@ -27,12 +27,17 @@ class FakeConn:
     def _write(self, sql):
         self.pending.append(" ".join(str(sql).split()))
 
+    def is_in_transaction(self):
+        return True
+
     async def execute(self, sql, *args):
         self._write(sql)
         return "DELETE 1" if sql.lstrip().upper().startswith("DELETE") else "UPDATE 1"
 
     async def fetchrow(self, sql, *args):
         self._write(sql)
+        if "FROM user_profiles" in sql and "FOR UPDATE" in sql:
+            return {"id": USER_ID, "password_hash": None}
         if "RETURNING" in str(sql).upper():
             return {"user_id": USER_ID}
         return None

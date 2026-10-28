@@ -24,11 +24,12 @@ INSTALLER = BACKEND / "systemd" / "install-services.sh"
 
 def test_backup_dumps_with_the_rls_bypass_and_refuses_a_schema_only_result():
     text = SCRIPT.read_text(encoding="utf-8")
-    dump_cmd = re.search(r"docker exec (.*?)pg_dump ", text, re.S)
-    assert dump_cmd, "the dump must run through docker exec"
-    assert "PGOPTIONS='-c app.bypass_rls=true'" in dump_cmd.group(1), "without the bypass the dump is schema-only"
-    assert "--format=custom" in text, "custom format is what pg_restore --list can verify"
-    assert "--enable-row-security" in text, "row_security=off is refused on FORCE RLS tables (first prod run failed)"
+    helper = (BACKEND / "deploy" / "backup_snapshot.py").read_text(encoding="utf-8")
+    assert 'python3 "${script_dir}/backup_snapshot.py"' in text
+    assert '"docker", "exec"' in helper
+    assert "app.bypass_rls=true" in helper and "app.current_user_id=" in helper
+    assert "--format=custom" in helper, "custom format is what pg_restore --list can verify"
+    assert "--enable-row-security" in helper, "row_security=off is refused on FORCE RLS tables"
     assert re.search(r"grep -c 'TABLE DATA'", text), "must count data entries"
     assert "schema-only dump" in text, "must name the failure when data is missing"
     assert "published anyway so the baseline moves" in text, "a shrink must alert but still publish"
@@ -41,6 +42,8 @@ def test_units_are_wired_the_way_the_other_oneshots_are():
     installer = INSTALLER.read_text(encoding="utf-8")
     assert "Type=oneshot" in service
     assert "ExecStart=/bin/bash /opt/talky/backend/deploy/db-backup.sh" in service
+    assert "EnvironmentFile=-/etc/talky/db-backup.env" in service
+    assert "TALKY_BACKUP_PRINCIPAL_ID" in service
     assert not re.search(r"^Restart=", service, re.M), "a failed backup must surface, not loop"
     assert "OnCalendar=*-*-* 02:30:00" in timer and "Persistent=true" in timer
     assert "systemctl enable talky-db-backup.timer" in installer, "symlinked but never enabled = dead on disk"

@@ -285,6 +285,92 @@ jobs:
           JWT_SECRET: ci-test-secret-key-not-for-production-32chars
           ENVIRONMENT: test
 
+      - name: Migrated Admin PostgreSQL control contracts (serial)
+        # These fixtures exercise global administrator invariants. Keep them
+        # in one serial invocation after migration/inbound fixtures finish;
+        # never run this step concurrently against the same database.
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+          dsn = os.environ.get("TEST_ADMIN_DATABASE_URL")
+          assert dsn, "TEST_ADMIN_DATABASE_URL must be explicit; skipping is not acceptance"
+          target = urlparse(dsn)
+          assert target.hostname in {"localhost", "127.0.0.1"} and target.path.endswith("_test"), "Admin contracts require a disposable local test database"
+          PY
+          command -v pg_config >/dev/null
+          export TALKY_BACKUP_PG_BIN="$(pg_config --bindir)"
+          for pg_client in psql pg_dump pg_restore; do
+            test -x "$TALKY_BACKUP_PG_BIN/$pg_client"
+          done
+          pytest -o addopts='' \
+            tests/integration/test_admin_authority_invariant.py \
+            tests/integration/test_admin_mutation_guard.py \
+            tests/integration/test_admin_action_cancel_authority.py \
+            tests/integration/test_admin_connector_session_authority.py \
+            tests/integration/test_connector_permission_expiry.py \
+            tests/integration/test_connector_authorize_session.py \
+            tests/integration/test_admin_inbound_current_authority.py \
+            tests/integration/test_admin_inbound_reassignment_reads.py \
+            tests/integration/test_admin_inbound_reassignment_cancellation.py \
+            tests/integration/test_admin_media_current_authority.py \
+            tests/integration/test_admin_media_recovery.py \
+            tests/integration/test_admin_feedback_current_authority.py \
+            tests/integration/test_admin_incident_authority.py \
+            tests/integration/test_admin_tenant_atomicity.py \
+            tests/integration/test_admin_incidents.py \
+            tests/integration/test_legacy_incidents_adoption.py \
+            tests/integration/test_alertmanager_incidents.py \
+            tests/integration/test_connector_lifecycle.py \
+            tests/integration/test_connector_audit_atomicity.py \
+            tests/integration/test_formal_user_credential_hold.py \
+            tests/integration/test_formal_account_holds.py \
+            tests/integration/test_formal_account_principal.py \
+            tests/integration/test_formal_appeal_submission.py \
+            tests/integration/test_formal_enforcement_projection.py \
+            tests/integration/test_assistant_runtime_receipts.py \
+            tests/integration/test_suspension_expiry.py \
+            tests/integration/test_call_authority_formal_holds.py \
+            tests/integration/test_account_hold_telephony.py \
+            tests/unit/test_suspension_revokes_sessions_pg.py \
+            tests/integration/test_control_backend_binding.py \
+            tests/integration/test_termination_receipts.py \
+            tests/integration/test_feedback_attempt_ownership.py \
+            tests/integration/test_admin_real_auth_journey.py \
+            tests/integration/test_admin_canonical_context.py \
+            tests/integration/test_admin_runtime_privileges.py \
+            tests/integration/test_legacy_tenant_rls_repair.py \
+            tests/integration/test_auth_logout_refresh_lock_order.py \
+            tests/integration/test_admin_user_name_audit.py \
+            tests/integration/test_admin_users_tenants_crud.py \
+            tests/integration/test_admin_user_operation_receipts.py \
+            tests/integration/test_admin_user_operations.py \
+            tests/integration/test_admin_user_primary_membership.py \
+            tests/integration/test_admin_user_hold_block_conflicts.py \
+            tests/integration/test_admin_partner_directory.py \
+            tests/integration/test_admin_audit_security_reads.py \
+            tests/integration/test_admin_tenant_status_projection.py \
+            tests/integration/test_admin_dashboard_tenant_counts.py \
+            tests/integration/test_admin_usage_owned_reads.py \
+            tests/integration/test_admin_parent_expiry_composition.py \
+            tests/integration/test_admin_original_account_inspection.py \
+            tests/integration/test_backup_snapshot_restore.py \
+            tests/integration/test_supplier_evidence.py \
+            -q --junitxml=admin-postgres-results.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          report = ET.parse("admin-postgres-results.xml").getroot()
+          assert report.findall(".//testcase"), "Admin database contracts collected no cases"
+          assert not report.findall(".//skipped"), "Admin database contracts must run, not silently skip"
+          PY
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
+          TALKY_BACKUP_TEST_ADMIN_DSN: postgresql://talky:testpassword@127.0.0.1:5432/talky_alembic_test
+          TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
+          PYTEST_ADDOPTS: ""
+          JWT_SECRET: ci-test-secret-key-not-for-production-32chars
+          ENVIRONMENT: test
+
       - name: Isolated provider admission Redis contracts
         run: pytest tests/integration/test_op02_redis_admission.py -q
         env:
@@ -420,6 +506,10 @@ jobs:
     name: Admin Frontend
     runs-on: ubuntu-latest
     needs: [secret-scan, secret-guard]
+    env:
+      # Build configuration validation is mandatory. This CI artifact is not
+      # deployment acceptance; hosting/CORS are checked against the release.
+      VITE_API_BASE_URL: https://api.talkleeai.com/api/v1
     defaults:
       run:
         working-directory: Admin/frontend

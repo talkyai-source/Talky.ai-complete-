@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import asyncio
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
@@ -17,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from pydantic_core import PydanticCustomError
 
 from app.core.db_utils import acquire_with_tenant
+from app.core.security.platform_admin_guard import lock_user_administration, require_current_platform_admin
 
 EnquiryStatus = Literal["new", "handled"]
 
@@ -69,6 +71,7 @@ class EnquiryItem(BaseModel):
     status: EnquiryStatus
     created_at: datetime
     handled_at: datetime | None
+    revision: int
 
 
 class EnquiryPage(BaseModel):
@@ -81,13 +84,18 @@ class EnquiryPage(BaseModel):
 class EnquiryStatusInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     status: EnquiryStatus
+    expected_revision: int = Field(ge=0, le=2_147_483_647, strict=True)
 
 
 class EnquiryConflict(Exception):
     """The same request identity was reused for different normalized content."""
 
 
-_ITEM_COLUMNS = "id, name, email, company, message, status, created_at, handled_at"
+class EnquiryRevisionConflict(Exception):
+    """The operator's reviewed enquiry version is no longer current."""
+
+
+_ITEM_COLUMNS = "id, name, email, company, message, status, created_at, handled_at, revision"
 
 
 async def submit_enquiry(pool: asyncpg.Pool, body: ContactEnquiryInput) -> tuple[dict, bool]:
@@ -121,32 +129,50 @@ async def submit_enquiry(pool: asyncpg.Pool, body: ContactEnquiryInput) -> tuple
 
 
 async def list_enquiries(pool: asyncpg.Pool, *, status: EnquiryStatus | None,
-                         limit: int, offset: int) -> dict:
+                         limit: int, offset: int, enquiry_id: UUID | None = None) -> dict:
     # API dependency has already required platform_admin. RLS admits only
     # explicit platform context, never an ordinary tenant's null ownership.
     async with acquire_with_tenant(pool, None, timeout=5) as conn:
         await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         total = await conn.fetchval(
-            "SELECT COUNT(*) FROM public_contact_enquiries WHERE ($1::text IS NULL OR status = $1)", status,
+            "SELECT COUNT(*) FROM public_contact_enquiries WHERE ($1::text IS NULL OR status = $1) "
+            "AND ($2::uuid IS NULL OR id = $2)", status, enquiry_id,
         )
         rows = await conn.fetch(
             f"""SELECT {_ITEM_COLUMNS} FROM public_contact_enquiries
                 WHERE ($1::text IS NULL OR status = $1)
-                ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3""", status, limit, offset,
+                AND ($4::uuid IS NULL OR id = $4)
+                ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3""", status, limit, offset, enquiry_id,
         )
     return {"items": [dict(row) for row in rows], "total": total, "limit": limit, "offset": offset}
 
 
 async def update_enquiry_status(pool: asyncpg.Pool, enquiry_id: UUID,
-                                status: EnquiryStatus, operator_id: UUID) -> dict | None:
-    async with acquire_with_tenant(pool, None, timeout=5) as conn:
+                                status: EnquiryStatus, operator_id: UUID, *,
+                                expected_revision: int) -> dict | None:
+    # Reuse the existing authority lock before the resource lock. A revoked
+    # administrator waiting for either lock cannot retain a stale write grant.
+    async with asyncio.timeout(5), acquire_with_tenant(pool, None, timeout=5) as conn:
+        await lock_user_administration(conn)
+        await require_current_platform_admin(conn, operator_id)
+        current = await conn.fetchrow(
+            f"SELECT {_ITEM_COLUMNS} FROM public_contact_enquiries WHERE id=$1 FOR UPDATE", enquiry_id,
+        )
+        if current is None:
+            return None
+        if current["revision"] != expected_revision:
+            raise EnquiryRevisionConflict
+        if current["status"] == status:
+            return dict(current)
         row = await conn.fetchrow(
             f"""UPDATE public_contact_enquiries
                 SET status = $2,
+                    revision = revision + 1,
                     handled_at = CASE WHEN $2 = 'new' THEN NULL
                                       WHEN status = 'handled' THEN handled_at ELSE NOW() END,
                     handled_by = CASE WHEN $2 = 'new' THEN NULL
                                       WHEN status = 'handled' THEN handled_by ELSE $3 END
-                WHERE id = $1 RETURNING {_ITEM_COLUMNS}""", enquiry_id, status, operator_id,
+                WHERE id = $1 AND revision = $4 RETURNING {_ITEM_COLUMNS}""",
+            enquiry_id, status, operator_id, expected_revision,
         )
     return dict(row) if row else None

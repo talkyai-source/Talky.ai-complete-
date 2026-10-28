@@ -3,6 +3,8 @@
  * Aligned with Talky.ai Backend API
  */
 
+import type { HoldTarget, HoldRequest, HoldReceipt, FormalHoldStatus, HoldPropagation } from './formal-holds';
+
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
 // Types - Define before usage
@@ -30,6 +32,7 @@ export interface LoginResponse {
     access_token: string;
     token_type: string;
     user_id: string;
+    tenant_id?: string | null;
     email: string;
     role: string;
     name?: string | null;
@@ -86,11 +89,24 @@ export interface TenantListItem {
     campaign_count: number;
     max_concurrent_calls: number;
     created_at: string | null;
+    updated_at?: string | null;
 }
 
 export interface QuotaUpdateRequest {
+    expected_updated_at: string | null;
     minutes_allocated?: number;
     max_concurrent_calls?: number;
+}
+
+export interface TenantMutationReceipt {
+    id: string;
+    detail: string;
+    changed: boolean;
+    status: string;
+    updated_at: string | null;
+    minutes_allocated: number;
+    max_concurrent_calls: number;
+    audit_event_id: string | null;
 }
 
 // =============================================================================
@@ -115,6 +131,8 @@ export interface TerminateCallResponse {
     provider_hangup_requested: boolean;
     provider_hangup_confirmed: boolean;
     provider_hangup_error: string | null;
+    termination_receipt_saved?: boolean;
+    termination_reconciliation_error?: string | null;
     detail?: string;
 }
 
@@ -127,6 +145,7 @@ export interface ContactEnquiry {
     status: 'new' | 'handled';
     created_at: string;
     handled_at: string | null;
+    revision: number;
 }
 
 export interface ContactEnquiriesResponse {
@@ -151,6 +170,8 @@ export interface LiveCallItem {
     admission_status?: string | null;
     termination_status?: CallTerminationStatus | null;
     termination_requested_at?: string | null;
+    termination_confirmed_at?: string | null;
+    termination_reconciliation_error?: string | null;
     termination_error?: string | null;
     provider_hangup_requested?: boolean;
     provider_hangup_confirmed?: boolean;
@@ -168,8 +189,8 @@ export interface CallHistoryItem {
     started_at: string | null;
     ended_at: string | null;
     created_at: string;
-    has_recording: boolean;
-    has_feedback: boolean;
+    has_recording: boolean | null;
+    has_feedback: boolean | null;
     feedback_transcript_status: string | null;
     direction?: 'inbound' | 'outbound' | string;
     caller_ani?: string | null;
@@ -285,6 +306,8 @@ export interface AdminCallDetail {
     crm_receipts_available?: boolean;
     termination_status?: CallTerminationStatus | null;
     termination_requested_at?: string | null;
+    termination_confirmed_at?: string | null;
+    termination_reconciliation_error?: string | null;
     termination_error?: string | null;
     provider_hangup_requested?: boolean;
     provider_hangup_confirmed?: boolean;
@@ -384,6 +407,49 @@ export interface AdminFeedbackParams extends AdminMediaParams {
     transcript_status?: string;
 }
 
+export type AdminMediaResourceType = 'recording' | 'call_feedback';
+export type AdminMediaDeletionStatus = 'intent_committed' | 'object_deleted' | 'failed' | 'completed';
+
+export interface AdminMediaDeletionReceipt {
+    detail: string;
+    resource_type: AdminMediaResourceType;
+    resource_id: string;
+    outcome: 'completed' | 'absent';
+    deletion_intent_id: string | null;
+}
+
+export interface AdminMediaDeletionItem {
+    id: string;
+    resource_type: AdminMediaResourceType;
+    resource_id: string;
+    tenant_id: string;
+    call_id: string;
+    original_actor_id: string;
+    reason: string;
+    status: AdminMediaDeletionStatus;
+    attempt_count: number;
+    created_at: string;
+    updated_at: string;
+    object_deleted_at: string | null;
+    completed_at: string | null;
+}
+
+export interface AdminMediaDeletionParams {
+    resource_type?: AdminMediaResourceType;
+    resource_id?: string;
+    tenant_id?: string;
+    call_id?: string;
+    status?: AdminMediaDeletionStatus | 'all';
+    limit?: number;
+    cursor?: string;
+}
+
+export interface AdminMediaDeletionList {
+    items: AdminMediaDeletionItem[];
+    has_more: boolean;
+    next_cursor: string | null;
+}
+
 // =============================================================================
 // Inbound operations control plane
 // =============================================================================
@@ -449,10 +515,11 @@ export interface AdminInboundAssignmentParams {
 export interface AdminInboundReassignmentRequest {
     id: string;
     assignment_id: string;
+    approved_assignment_id?: string | null;
     source_tenant_id: string;
     target_tenant_id: string;
     target_campaign_id: string;
-    status: 'pending' | 'approved' | 'rejected' | 'expired' | string;
+    status: 'pending' | 'approved' | 'rejected' | 'cancelled';
     requested_by: string;
     approved_by?: string | null;
     reason: string;
@@ -463,7 +530,8 @@ export interface AdminInboundReassignmentRequest {
 
 export interface AdminInboundReassignmentListResponse {
     items: AdminInboundReassignmentRequest[];
-    total: number;
+    has_more: boolean;
+    next_cursor: string | null;
 }
 
 // =============================================================================
@@ -637,6 +705,8 @@ export interface AdminConnectorItem {
     token_status: string; // valid, expiring_soon, expired, unknown
     last_refreshed_at: string | null;
     created_at: string;
+    refresh_state?: 'idle' | 'in_flight' | 'uncertain';
+    provider_revocation_status?: 'not_requested' | 'pending' | 'confirmed' | 'unconfirmed';
 }
 
 export interface AdminConnectorDetail extends AdminConnectorItem {
@@ -650,6 +720,13 @@ export interface AdminConnectorListResponse {
     total: number;
     page: number;
     page_size: number;
+    summary?: {
+        scope: 'all_connectors';
+        total: number;
+        active: number;
+        expiring_or_expired: number;
+        error: number;
+    };
 }
 
 export interface ConnectorListParams {
@@ -735,6 +812,7 @@ export interface TenantDetails extends TenantListItem {
 export interface UserQueryParams {
     page?: string;
     limit?: string;
+    offset?: string;
     search?: string;
     tenant_id?: string;
     role?: string;
@@ -796,9 +874,37 @@ export interface AdminUserItem {
     is_verified?: boolean;
     last_login_at?: string | null;
     created_at?: string | null;
+    review_token: string;
+    audit_event_id?: string | null;
+}
+
+export interface UserMutationReceipt extends AdminUserItem {
+    operation_id: string;
+    operation: 'updated';
+    audit_event_id: string;
+}
+
+export interface UserCreateState {
+    request_id: string;
+    state: 'unrecorded' | 'created' | 'cancelled';
+    audit_event_id: string | null;
+    user_id: string | null;
+    user: AdminUserItem | null;
+    intent: { name: string; email: string; role: string; tenant_id: string | null } | null;
+}
+
+export interface UserDeleteReceipt {
+    operation_id: string;
+    id: string;
+    outcome: 'deleted' | 'deactivated';
+    audit_event_id: string;
+    detail: string;
+    user: AdminUserItem | null;
 }
 
 export interface CreateUserRequest {
+    operation_id: string;
+    request_id: string;
     name: string;
     email: string;
     password: string;
@@ -807,9 +913,57 @@ export interface CreateUserRequest {
 }
 
 export interface UpdateUserRequest {
+    operation_id: string;
+    expected_review_token: string;
     name?: string;
     role?: string;
+    expected_role?: string;
     is_active?: boolean;
+}
+
+export type UserOperationKind = 'create' | 'update' | 'delete' | 'primary_membership';
+export interface UserOperationPrepare {
+    kind: UserOperationKind;
+    target_user_id: string | null;
+    intent: Record<string, unknown>;
+    password?: string;
+}
+export interface UserOperationView {
+    operation_id: string;
+    kind: UserOperationKind;
+    target_user_id: string | null;
+    intent: Record<string, unknown>;
+    state: 'prepared' | 'committed' | 'cancelled';
+    prepared_at: string;
+    expires_at: string;
+    dispatch_eligible: boolean;
+    terminal_audit_event_id: string | null;
+    receipt: unknown | null;
+}
+export interface UserOperationList { items: UserOperationView[]; next_cursor: string | null }
+export interface PrimaryMembershipItem { id: string; role: string; status: string; is_primary: boolean }
+export interface PrimaryMembershipReview {
+    user: AdminUserItem;
+    tenant: { id: string; name: string | null };
+    membership: PrimaryMembershipItem | null;
+    eligible: boolean;
+    reason: string | null;
+    review_token: string;
+}
+export interface PrimaryMembershipRequest {
+    operation_id: string;
+    tenant_id: string;
+    role: string;
+    expected_review_token: string;
+}
+export interface PrimaryMembershipReceipt {
+    operation_id: string;
+    operation: 'primary_membership_configured';
+    user: AdminUserItem;
+    membership: PrimaryMembershipItem;
+    tenant_id: string;
+    audit_event_id: string;
+    credential_cutoff: { revoked_sessions: number; revoked_refresh_tokens: number; invalidated_mfa_challenges: number; invalidated_passkey_challenges: number };
 }
 
 export interface RbacRole {
@@ -1001,16 +1155,21 @@ export interface HealthStatus {
 // Command Center Types
 export interface DashboardStats {
     active_calls: number;
-    error_rate_24h: string;
+    failed_call_rate_24h: string | null;
     active_tenants: number;
-    api_errors_24h: number;
+    failed_calls_24h: number;
+    total_calls_24h: number;
+    observed_at: string;
 }
 
 export interface SystemHealthItem {
     name: string;
-    status: 'operational' | 'degraded' | 'down';
-    latency_ms: number;
+    status: 'operational' | 'degraded' | 'down' | 'unknown' | 'observed_success' | 'observed_failure';
+    latency_ms: number | null;
     latency_display: string;
+    last_check: string | null;
+    scope: string;
+    detail: string;
 }
 
 export interface SystemHealthResponse {
@@ -1044,51 +1203,64 @@ export interface DetailedHealthResponse {
     environment: string;
     providers: SystemHealthItem[];
     checked_at: string;
+    last_updated: string;
+    metrics_scope: string;
 }
 
 export interface WorkerStatus {
     id: string;
     name: string;
-    status: 'idle' | 'busy' | 'offline';
+    status: 'healthy' | 'offline' | 'unknown';
     current_task: string | null;
-    processed_count: number;
-    success_rate: number;
-    uptime_seconds: number;
-    last_heartbeat: string;
+    processed_count: number | null;
+    failed_count: number | null;
+    success_rate: number | null;
+    uptime_seconds: number | null;
+    last_heartbeat: string | null;
+    age_seconds: number | null;
+    detail: string;
 }
 
 export interface WorkersResponse {
     workers: WorkerStatus[];
     total_workers: number;
     active_workers: number;
-    busy_workers: number;
+    busy_workers: number | null;
+    checked_at: string;
+    scope: string;
 }
 
 export interface QueueStatus {
     name: string;
-    pending: number;
-    processing: number;
-    failed: number;
-    completed_24h: number;
-    avg_processing_time_ms: number;
-    success_rate_24h: number;
+    pending: number | null;
+    processing: number | null;
+    failed: number | null;
+    completed_24h: number | null;
+    avg_processing_time_ms: number | null;
+    success_rate_24h: number | null;
+    status: 'measured' | 'unavailable';
+    scope: string;
+    detail: string;
 }
 
 export interface QueuesResponse {
     queues: QueueStatus[];
-    total_pending: number;
-    total_processing: number;
+    total_pending: number | null;
+    total_processing: number | null;
+    checked_at: string;
 }
 
 export interface DatabaseHealthResponse {
     connected: boolean;
-    latency_ms: number;
-    pool_size: number;
-    active_connections: number;
-    available_connections: number;
-    database_size_mb: number;
-    table_count: number;
+    latency_ms: number | null;
+    pool_size: number | null;
+    active_connections: number | null;
+    available_connections: number | null;
+    database_size_mb: number | null;
+    table_count: number | null;
     last_check: string;
+    error: string | null;
+    scope: string;
 }
 
 export interface IncidentItem {
@@ -1102,6 +1274,13 @@ export interface IncidentItem {
     acknowledged_by: string | null;
     resolved_at: string | null;
     resolved_by: string | null;
+    source_system?: string | null;
+    source_fingerprint?: string | null;
+    source_started_at?: string | null;
+    source_status?: 'firing' | 'recovered' | null;
+    source_recovered_at?: string | null;
+    source_last_received_at?: string | null;
+    source_labels?: Record<string, string>;
 }
 
 export interface IncidentsResponse {
@@ -1109,6 +1288,19 @@ export interface IncidentsResponse {
     total: number;
     page: number;
     page_size: number;
+    open_count: number;
+    critical_count: number;
+}
+
+export interface IncidentTransitionReceipt {
+    success: boolean;
+    message: string;
+    incident_id: string;
+    status: IncidentItem['status'];
+    acknowledged_at: string | null;
+    acknowledged_by: string | null;
+    resolved_at: string | null;
+    resolved_by: string | null;
 }
 
 export interface IncidentsParams {
@@ -1119,14 +1311,12 @@ export interface IncidentsParams {
 }
 
 export interface AlertSettings {
-    error_rate_threshold: number;
-    latency_threshold_ms: number;
-    queue_depth_threshold: number;
-    memory_threshold_percent: number;
-    cpu_threshold_percent: number;
-    email_notifications: boolean;
-    slack_notifications: boolean;
-    slack_webhook_url: string | null;
+    management: 'external';
+    source: 'alertmanager';
+    editable: false;
+    ingestion_status: 'configured' | 'unavailable';
+    notification_delivery: 'unverified';
+    detail: string;
 }
 
 // API Response wrapper
@@ -1137,6 +1327,8 @@ interface ApiResponse<T> {
         message: string;
         status?: number;
         details?: unknown;
+        // Local coordination evidence only; never accepted from an HTTP payload.
+        sessionRequestNotSent?: true;
     };
 }
 
@@ -1196,6 +1388,27 @@ interface RequestOptions {
     body?: unknown;
     headers?: Record<string, string>;
     timeoutMs?: number;
+    // Logout may wait behind another tab while its own UI retires credentials.
+    // Keep the reviewed caller's headers; never adopt a replacement account.
+    authSnapshot?: { token: string | null; headers: Record<string, string> };
+}
+
+type SessionIdentity = { userId: string; tenantId?: string | null; role?: string };
+type RefreshedSession = { access_token: string; user_id: string; tenant_id?: string | null; role: string };
+const sessionChangedError = { code: 'IDENTITY_CHANGED', message: 'Your sign-in changed. Reload the current view before continuing.', status: 409 };
+const publicAuthPath = (path: string) => ['/auth/login', '/auth/mfa/verify', '/auth/passkey-check',
+    '/auth/passkeys/login/begin', '/auth/passkeys/login/complete'].includes(path);
+const managesSession = (path: string) => publicAuthPath(path) || ['/auth/logout', '/auth/refresh'].includes(path);
+
+/** A stored JWT supplies consistency hints only; /me and /refresh still verify authority. */
+function storedIdentity(token: string | null): SessionIdentity | null {
+    try {
+        if (!token) return null;
+        const payload = token.split('.')[1];
+        const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+        if (typeof claims.sub !== 'string' || !claims.sub) return null;
+        return { userId: claims.sub, tenantId: typeof claims.tenant_id === 'string' ? claims.tenant_id : null };
+    } catch { return null; }
 }
 
 // API Client Class
@@ -1203,23 +1416,68 @@ class ApiClient {
     private baseUrl: string;
     private token: string | null = null;
     private authGeneration = 0;
+    private expectedIdentity: SessionIdentity | null = null;
+    private refreshInFlight: { generation: number; promise: Promise<ApiResponse<RefreshedSession>> } | null = null;
+    private refreshListeners = new Set<(role: string, authorityChanged: boolean) => void>();
+    private authorityCheckInFlight: { generation: number; token: string | null; promise: Promise<void> } | null = null;
+    private authorityUnavailableListeners = new Set<(message: string) => void>();
 
     constructor(baseUrl: string) {
         this.baseUrl = baseUrl;
         // Try to get token from localStorage on init
         if (typeof window !== 'undefined') {
-            this.token = localStorage.getItem('admin_token');
+            try { this.token = localStorage.getItem('admin_token'); } catch { /* Cookie auth remains available. */ }
         }
     }
 
-    setToken(token: string | null) {
-        if (this.token !== token) this.authGeneration += 1;
+    private authGenerationListeners = new Set<() => void>();
+
+    onAuthGenerationChanged(listener: () => void): () => void {
+        this.authGenerationListeners.add(listener);
+        return () => { this.authGenerationListeners.delete(listener); };
+    }
+
+    setToken(token: string | null, persist = true) {
+        const changed = this.token !== token;
+        if (changed) { this.authGeneration += 1; this.expectedIdentity = null; }
         this.token = token;
-        if (token) {
-            localStorage.setItem('admin_token', token);
-        } else {
-            localStorage.removeItem('admin_token');
-        }
+        if (persist) this.persistToken();
+        if (changed) for (const listener of [...this.authGenerationListeners]) listener();
+    }
+
+    /** Cookie-only identities also need an epoch boundary even when no token changed. */
+    invalidateIdentity(persist = true) {
+        this.authGeneration += 1;
+        this.expectedIdentity = null;
+        this.token = null;
+        if (persist) this.persistToken();
+        for (const listener of [...this.authGenerationListeners]) listener();
+    }
+
+    private persistToken() {
+        try {
+            if (this.token) localStorage.setItem('admin_token', this.token);
+            else localStorage.removeItem('admin_token');
+        } catch { /* A blocked storage area must not prevent in-memory/cookie authentication. */ }
+    }
+
+    expectIdentity(identity: SessionIdentity | null) { this.expectedIdentity = identity; }
+
+    onSessionRefreshed(listener: (role: string, authorityChanged: boolean) => void): () => void {
+        this.refreshListeners.add(listener);
+        return () => { this.refreshListeners.delete(listener); };
+    }
+
+    onAuthorityUnavailable(listener: (message: string) => void): () => void {
+        this.authorityUnavailableListeners.add(listener);
+        return () => { this.authorityUnavailableListeners.delete(listener); };
+    }
+
+    private identityHeaders(): Record<string, string> {
+        const identity = this.expectedIdentity ?? storedIdentity(this.token);
+        if (!identity) return {};
+        return { 'X-Talky-Expected-User': identity.userId,
+            ...(identity.tenantId !== undefined ? { 'X-Talky-Expected-Tenant': identity.tenantId ?? '' } : {}) };
     }
 
     getToken(): string | null {
@@ -1243,29 +1501,176 @@ class ApiClient {
     // calls (a 401 there means bad credentials, or is handled by checkAuth,
     // which would otherwise lose its own result) and for a response that
     // belongs to a previous session (a newer login must survive a late 401).
-    private handleSessionRejected(endpoint: string, sentGeneration: number) {
+    private handleSessionRejected(endpoint: string, sentGeneration: number, sentToken: string | null) {
         const path = endpoint.split('?')[0];
-        if (['/auth/login', '/auth/me', '/auth/logout', '/auth/passkeys/login', '/auth/passkey-check']
-            .some((skip) => path === skip || path.startsWith(`${skip}/`))) return;
-        if (!this.token || sentGeneration !== this.authGeneration) return;
-        this.setToken(null);
+        if (managesSession(path) || path === '/auth/me') return;
+        if (sentGeneration !== this.authGeneration || sentToken !== this.token) return;
+        this.invalidateIdentity();
         for (const listener of [...this.unauthorizedListeners]) listener();
     }
 
-    private async request<T>(endpoint: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
-        const { method = 'GET', body, headers = {}, timeoutMs } = options;
+    /** A forbidden operation may reveal a changed role, but is not itself a logout.
+     * Verify current authority once, without replaying the rejected operation or
+     * recursively inspecting /me. Unchanged permissions remain an ordinary403.
+     */
+    private recheckForbiddenAuthority(endpoint: string, generation: number, token: string | null): Promise<void> {
+        const path = endpoint.split('?')[0];
+        const current = () => generation === this.authGeneration && token === this.token;
+        if (managesSession(path) || path === '/auth/me' || !current()) return Promise.resolve();
+        // There must be a prior server-verified role to reconsider. Otherwise a
+        // denied unverified view could remount itself on each rejected /me.
+        const expected = this.expectedIdentity;
+        if (!expected?.role) return Promise.resolve();
+        if (this.authorityCheckInFlight?.generation === generation && this.authorityCheckInFlight.token === token) {
+            return this.authorityCheckInFlight.promise;
+        }
+        const pending = (async () => {
+            const result = await this.request<MeResponse>('/auth/me');
+            if (!current()) return;
+            if (result.error) {
+                if ([401, 403, 409].includes(result.error.status ?? 0) && result.error.code !== 'SESSION_RENEWAL_UNAVAILABLE') {
+                    this.handleSessionRejected(endpoint, generation, token);
+                } else {
+                    for (const listener of [...this.authorityUnavailableListeners]) listener(result.error.message);
+                }
+                return;
+            }
+            const value = result.data;
+            if (!value || typeof value.id !== 'string' || !value.id || typeof value.email !== 'string'
+                || typeof value.role !== 'string' || !value.role.trim()
+                || (value.tenant_id != null && typeof value.tenant_id !== 'string')) {
+                for (const listener of [...this.authorityUnavailableListeners]) listener('The server returned an incomplete identity.');
+                return;
+            }
+            if (expected && (value.id !== expected.userId
+                || (expected.tenantId !== undefined && (value.tenant_id ?? null) !== expected.tenantId))) {
+                this.handleSessionRejected(endpoint, generation, token);
+                return;
+            }
+            this.expectedIdentity = { userId: value.id, tenantId: value.tenant_id ?? null, role: value.role };
+            if (expected?.role && expected.role !== value.role) {
+                // The bearer may be unchanged. Still retire every old-role view
+                // and use the existing canonical AuthProvider verification flow.
+                this.authGeneration += 1;
+                for (const listener of [...this.authGenerationListeners]) listener();
+                for (const listener of [...this.refreshListeners]) listener(value.role, true);
+            }
+        })();
+        this.authorityCheckInFlight = { generation, token, promise: pending };
+        void pending.finally(() => {
+            if (this.authorityCheckInFlight?.promise === pending) this.authorityCheckInFlight = null;
+        });
+        return pending;
+    }
+
+    /** Serialize cookie-changing transports across same-origin Admin/customer tabs.
+     * Without this browser capability, do not dispatch an unordered update.
+     * Different frontend origins remain outside this coordination boundary.
+     */
+    private async withSessionLock<T>(run: () => Promise<ApiResponse<T>>): Promise<ApiResponse<T>> {
+        const controller = new AbortController();
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        let admitted = false;
+        try {
+            // Lookup itself can fail when browser storage access is restricted.
+            const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+            if (!locks || typeof locks.request !== 'function') throw new Error('Session coordination unavailable');
+            // Match Talk-Leee/browser-session.ts. Equivalent relative/absolute
+            // configuration must identify the same API; do not guess proxy aliases.
+            const url = new URL(this.baseUrl, window.location.origin);
+            if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('Invalid session API URL');
+            const name = `talky-admin-session:${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+            timeout = setTimeout(() => controller.abort(), 20000);
+            return await locks.request(name, { signal: controller.signal }, () => {
+                admitted = true;
+                // Web Locks aborts only a queued acquisition. Once admitted,
+                // the request transport owns its deadline and outcome.
+                clearTimeout(timeout);
+                return run();
+            });
+        } catch {
+            if (admitted) return { error: { code: 'SESSION_UPDATE_UNCONFIRMED',
+                message: 'The browser session update could not be confirmed. Check your session before trying again.' } };
+            return { error: {
+                code: controller.signal.aborted ? 'SESSION_COORDINATION_TIMEOUT' : 'SESSION_COORDINATION_UNAVAILABLE',
+                message: controller.signal.aborted
+                    ? 'The session request was not sent because another browser session update is still running. Wait for it to finish, then try again.'
+                    : 'The session request was not sent because this page cannot coordinate browser sessions. Open Admin over HTTPS in a supported browser with site storage enabled, then try again.',
+                sessionRequestNotSent: true,
+            } };
+        } finally { clearTimeout(timeout); }
+    }
+
+    private credentialRequest<T>(endpoint: string, body: unknown, ownsOperation?: () => boolean): Promise<ApiResponse<T>> {
+        const generation = this.authGeneration;
+        const token = this.token;
+        return this.withSessionLock(() => {
+            if (generation !== this.authGeneration || token !== this.token || (ownsOperation && !ownsOperation())) {
+                return Promise.resolve({ error: sessionChangedError });
+            }
+            return this.request<T>(endpoint, { method: 'POST', body });
+        });
+    }
+
+    /** One rotation per tab; the shared lock also orders login/MFA/logout headers. */
+    private renewSession(generation: number, sentToken: string | null): Promise<ApiResponse<RefreshedSession>> {
+        if (generation !== this.authGeneration) return Promise.resolve({ error: sessionChangedError });
+        if (this.refreshInFlight?.generation === generation) return this.refreshInFlight.promise;
+        const expected = this.expectedIdentity ?? storedIdentity(sentToken);
+        const run = async (): Promise<ApiResponse<RefreshedSession>> => {
+            if (generation !== this.authGeneration) return { error: sessionChangedError };
+            // A sibling request in this verified identity already rotated it.
+            if (sentToken !== this.token && this.token && this.expectedIdentity) {
+                return { data: { access_token: this.token, user_id: this.expectedIdentity.userId,
+                    tenant_id: this.expectedIdentity.tenantId, role: this.expectedIdentity.role ?? '' } };
+            }
+            const result = await this.request<RefreshedSession>('/auth/refresh', { method: 'POST', timeoutMs: 10000 }, false);
+            if (generation !== this.authGeneration) return { error: sessionChangedError };
+            if (result.error) return result;
+            const value = result.data;
+            if (!value || typeof value.access_token !== 'string' || !value.access_token
+                || typeof value.user_id !== 'string' || !value.user_id || typeof value.role !== 'string' || !value.role) {
+                return { error: { code: 'INVALID_RESPONSE', message: 'Session renewal could not be confirmed. Please sign in again.' } };
+            }
+            if (expected && (value.user_id !== expected.userId
+                || (expected.tenantId !== undefined && (value.tenant_id ?? null) !== expected.tenantId))) {
+                return { error: sessionChangedError };
+            }
+            // Routine token rotation preserves operation ownership. A role change
+            // retires privileged views just as a sign-in change does.
+            const authorityChanged = Boolean(expected?.role && expected.role !== value.role);
+            if (authorityChanged) this.setToken(value.access_token);
+            else { this.token = value.access_token; this.persistToken(); }
+            this.expectedIdentity = { userId: value.user_id, tenantId: value.tenant_id ?? null, role: value.role };
+            for (const listener of [...this.refreshListeners]) listener(value.role, authorityChanged);
+            return result;
+        };
+        const pending = this.withSessionLock(run);
+        this.refreshInFlight = { generation, promise: pending };
+        void pending.finally(() => {
+            if (this.refreshInFlight?.promise === pending) this.refreshInFlight = null;
+        });
+        return pending;
+    }
+
+    private async request<T>(endpoint: string, options: RequestOptions = {}, mayRefresh = true): Promise<ApiResponse<T>> {
+        const { method = 'GET', body, headers = {}, timeoutMs = 20000, authSnapshot } = options;
+        const path = endpoint.split('?')[0];
         const controller = timeoutMs ? new AbortController() : undefined;
         const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
 
         const requestHeaders: Record<string, string> = {
             'Content-Type': 'application/json',
+            ...(!publicAuthPath(path) ? authSnapshot?.headers ?? this.identityHeaders() : {}),
             ...headers,
         };
 
-        if (this.token) {
-            requestHeaders['Authorization'] = `Bearer ${this.token}`;
+        const requestToken = authSnapshot ? authSnapshot.token : this.token;
+        if (requestToken && !publicAuthPath(path) && path !== '/auth/refresh') {
+            requestHeaders['Authorization'] = `Bearer ${requestToken}`;
         }
         const sentGeneration = this.authGeneration;
+        const sentToken = requestToken;
 
         try {
             const response = await fetch(`${this.baseUrl}${endpoint}`, {
@@ -1273,15 +1678,42 @@ class ApiClient {
                 headers: requestHeaders,
                 body: body ? JSON.stringify(body) : undefined,
                 signal: controller?.signal,
+                credentials: 'include',
             });
 
-            const data: unknown = await response.json();
-
-            if (!response.ok) {
-                if (response.status === 401) this.handleSessionRejected(endpoint, sentGeneration);
-                return { error: { ...normalizeAdminApiError(data), status: response.status } };
+            // Gateways may return HTML or an empty body. Preserve the HTTP
+            // status even when JSON decoding fails, especially a rejected session.
+            let data: unknown;
+            try { data = await response.json(); }
+            catch {
+                if (response.ok && response.status !== 204) {
+                    return { error: { code: 'INVALID_RESPONSE', message: 'The server returned an invalid response. Refresh to check the current state.', status: response.status } };
+                }
+                data = { detail: `Request failed (${response.status})` };
             }
 
+            if (!response.ok) {
+                const error = { ...normalizeAdminApiError(data), status: response.status };
+                if (!managesSession(path) && sentGeneration !== this.authGeneration) return { error: sessionChangedError };
+                if (response.status === 401 && mayRefresh && !managesSession(path)) {
+                    const refreshed = await this.renewSession(sentGeneration, sentToken);
+                    if (refreshed.data) {
+                        // Never replay a mutation, even when authentication rejected it.
+                        if (method === 'GET') return this.request<T>(endpoint, options, false);
+                        return { error: { code: 'AUTH_RETRY_REQUIRED', status: 401,
+                            message: 'Your session was renewed. Review the current state, then confirm the action again.' } };
+                    }
+                    if (refreshed.error?.code === 'IDENTITY_CHANGED') this.handleSessionRejected(endpoint, sentGeneration, sentToken);
+                    if (refreshed.error?.status !== 401) return { error: refreshed.error?.status === 403
+                        ? { ...refreshed.error, code: 'SESSION_RENEWAL_UNAVAILABLE' } : refreshed.error ?? error };
+                }
+                if (response.status === 401) this.handleSessionRejected(endpoint, sentGeneration, sentToken);
+                if (response.status === 409 && error.code === 'IDENTITY_CHANGED') this.handleSessionRejected(endpoint, sentGeneration, sentToken);
+                if (response.status === 403) await this.recheckForbiddenAuthority(endpoint, sentGeneration, sentToken);
+                return { error };
+            }
+
+            if (!managesSession(path) && sentGeneration !== this.authGeneration) return { error: sessionChangedError };
             return { data: data as T };
         } catch (error) {
             return {
@@ -1297,34 +1729,51 @@ class ApiClient {
         }
     }
 
-    private async requestBlob(endpoint: string): Promise<Blob> {
-        const headers: Record<string, string> = {};
+    private async requestBlob(endpoint: string, mayRefresh = true): Promise<Blob> {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 30000);
+        try {
+        const headers: Record<string, string> = this.identityHeaders();
         if (this.token) {
             headers.Authorization = `Bearer ${this.token}`;
         }
         const sentGeneration = this.authGeneration;
-        const response = await fetch(`${this.baseUrl}${endpoint}`, { headers });
+        const sentToken = this.token;
+        const response = await fetch(`${this.baseUrl}${endpoint}`, { headers, signal: controller.signal, credentials: 'include' });
+        if (sentGeneration !== this.authGeneration) throw new Error(sessionChangedError.message);
         if (!response.ok) {
-            if (response.status === 401) this.handleSessionRejected(endpoint, sentGeneration);
+            if (response.status === 401 && mayRefresh) {
+                const refreshed = await this.renewSession(sentGeneration, sentToken);
+                if (refreshed.data) return this.requestBlob(endpoint, false);
+                if (refreshed.error?.code === 'IDENTITY_CHANGED') this.handleSessionRejected(endpoint, sentGeneration, sentToken);
+                if (refreshed.error?.status !== 401) throw new Error(refreshed.error?.message ?? 'Session renewal unavailable');
+            }
+            if (response.status === 401) this.handleSessionRejected(endpoint, sentGeneration, sentToken);
+            if (response.status === 403) await this.recheckForbiddenAuthority(endpoint, sentGeneration, sentToken);
             let message = `Media request failed (${response.status})`;
             try {
                 const payload: unknown = await response.json();
                 const normalized = normalizeAdminApiError(payload);
+                if (response.status === 409 && normalized.code === 'IDENTITY_CHANGED') this.handleSessionRejected(endpoint, sentGeneration, sentToken);
                 message = normalized.message === 'An error occurred' ? message : normalized.message;
             } catch {
                 // Non-JSON storage/provider errors retain the status message.
             }
             throw new Error(message);
         }
-        return response.blob();
+        const blob = await response.blob();
+        if (sentGeneration !== this.authGeneration) throw new Error(sessionChangedError.message);
+        return blob;
+        } finally { clearTimeout(timer); }
     }
 
     // Auth Endpoints
-    async login(email: string, password: string) {
-        return this.request<LoginResponse>('/auth/login', {
-            method: 'POST',
-            body: { email, password },
-        });
+    async login(email: string, password: string, ownsOperation?: () => boolean) {
+        return this.credentialRequest<LoginResponse>('/auth/login', { email, password }, ownsOperation);
+    }
+
+    async verifyMfaChallenge(challengeToken: string, factor: { code: string } | { recovery_code: string }, ownsOperation?: () => boolean) {
+        return this.credentialRequest<LoginResponse>('/auth/mfa/verify', { challenge_token: challengeToken, ...factor }, ownsOperation);
     }
 
     // The backend has no /auth/verify — the current user is read from /auth/me.
@@ -1335,6 +1784,14 @@ class ApiClient {
             return { error: res.error ?? { code: 'AUTH_FAILED', message: 'Not authenticated' } };
         }
         const me = res.data;
+        if (typeof me.id !== 'string' || !me.id || typeof me.email !== 'string' || typeof me.role !== 'string' || !me.role) {
+            return { error: { code: 'INVALID_RESPONSE', message: 'The server could not verify your identity.' } };
+        }
+        const expected = this.expectedIdentity;
+        if (expected && (me.id !== expected.userId || (expected.tenantId !== undefined && (me.tenant_id ?? null) !== expected.tenantId))) {
+            return { error: sessionChangedError };
+        }
+        this.expectedIdentity = { userId: me.id, tenantId: me.tenant_id ?? null, role: me.role };
         return {
             data: {
                 valid: true,
@@ -1349,8 +1806,14 @@ class ApiClient {
         };
     }
 
-    async logout() {
-        return this.request('/auth/logout', { method: 'POST' });
+    async logout(ownsOperation?: () => boolean) {
+        const authSnapshot = { token: this.token, headers: this.identityHeaders() };
+        return this.withSessionLock(() => {
+            if ((ownsOperation && !ownsOperation()) || (this.token !== null && this.token !== authSnapshot.token)) {
+                return Promise.resolve({ error: sessionChangedError });
+            }
+            return this.request('/auth/logout', { method: 'POST', authSnapshot });
+        });
     }
 
     // Admin Endpoints
@@ -1363,7 +1826,41 @@ class ApiClient {
     }
 
     async getUser(userId: string) {
-        return this.request<UserDetails>(`/admin/users/${userId}`);
+        return this.request<AdminUserItem>(`/admin/users/${userId}`);
+    }
+
+    async getUserCreateState(requestId: string) {
+        return this.request<UserCreateState>(`/admin/users/create-requests/${requestId}`);
+    }
+
+    async cancelUserCreate(requestId: string) {
+        return this.request<UserCreateState>(`/admin/users/create-requests/${requestId}/cancel`, { method: 'POST' });
+    }
+
+    async prepareUserOperation(body: UserOperationPrepare) {
+        return this.request<UserOperationView>('/admin/users/operations', { method: 'POST', body });
+    }
+
+    async getUserOperations(state: 'pending' | 'terminal', cursor?: string) {
+        const query = new URLSearchParams({ state, limit: '25' });
+        if (cursor) query.set('cursor', cursor);
+        return this.request<UserOperationList>(`/admin/users/operations?${query}`);
+    }
+
+    async getUserOperation(operationId: string) {
+        return this.request<UserOperationView>(`/admin/users/operations/${operationId}`);
+    }
+
+    async cancelUserOperation(operationId: string) {
+        return this.request<UserOperationView>(`/admin/users/operations/${operationId}/cancel`, { method: 'POST' });
+    }
+
+    async getPrimaryMembershipReview(userId: string, tenantId: string) {
+        return this.request<PrimaryMembershipReview>(`/admin/users/${userId}/primary-membership?${new URLSearchParams({ tenant_id: tenantId })}`);
+    }
+
+    async configurePrimaryMembership(userId: string, body: PrimaryMembershipRequest) {
+        return this.request<PrimaryMembershipReceipt>(`/admin/users/${userId}/primary-membership`, { method: 'POST', body });
     }
 
     // --- Users & Roles management ---------------------------------------------
@@ -1377,12 +1874,14 @@ class ApiClient {
         const sp = new URLSearchParams();
         if (params?.search) sp.append('search', params.search);
         if (params?.role) sp.append('role', params.role);
+        if (params?.limit) sp.append('limit', params.limit);
+        if (params?.offset) sp.append('offset', params.offset);
         const query = sp.toString() ? `?${sp.toString()}` : '';
         return this.request<AdminUserItem[]>(`/admin/users${query}`);
     }
 
     async createUser(payload: CreateUserRequest) {
-        return this.request<AdminUserItem>('/admin/users', {
+        return this.request<UserCreateState>('/admin/users', {
             method: 'POST',
             body: payload,
         });
@@ -1390,15 +1889,16 @@ class ApiClient {
 
     // Block/unblock (is_active), rename, or change role.
     async updateUser(userId: string, payload: UpdateUserRequest) {
-        return this.request<AdminUserItem>(`/admin/users/${userId}`, {
+        return this.request<UserMutationReceipt>(`/admin/users/${userId}`, {
             method: 'PATCH',
             body: payload,
         });
     }
 
-    async deleteUser(userId: string) {
-        return this.request<{ detail: string }>(`/admin/users/${userId}`, {
+    async deleteUser(userId: string, expectedReviewToken: string, operationId: string) {
+        return this.request<UserDeleteReceipt>(`/admin/users/${userId}`, {
             method: 'DELETE',
+            body: { expected_review_token: expectedReviewToken, operation_id: operationId },
         });
     }
 
@@ -1487,16 +1987,51 @@ class ApiClient {
         return this.request<ContactEnquiriesResponse>(`/admin/contact-enquiries?${params}`, { timeoutMs: 15_000 });
     }
 
-    async updateContactEnquiry(id: string, status: 'new' | 'handled') {
+    async getContactEnquiry(id: string) {
+        const params = new URLSearchParams({ enquiry_id: id, limit: '1', offset: '0' });
+        return this.request<ContactEnquiriesResponse>(`/admin/contact-enquiries?${params}`, { timeoutMs: 15_000 });
+    }
+
+    async updateContactEnquiry(id: string, status: 'new' | 'handled', expectedRevision: number) {
         return this.request<ContactEnquiry>(`/admin/contact-enquiries/${encodeURIComponent(id)}`, {
-            method: 'PATCH', body: { status }, timeoutMs: 15_000,
+            method: 'PATCH', body: { status, expected_revision: expectedRevision }, timeoutMs: 15_000,
         });
     }
 
-    async getTenants(search?: string, status?: string) {
+    async getFormalHoldStatus(target: HoldTarget) {
+        return this.request<FormalHoldStatus>(`/admin/suspensions/${target.type}s/${encodeURIComponent(target.id)}/status`);
+    }
+
+    async getFormalHoldPropagation(eventId: string) {
+        return this.request<HoldPropagation>(`/admin/suspensions/propagation-status/${encodeURIComponent(eventId)}`);
+    }
+
+    async createFormalHold(target: HoldTarget, body: HoldRequest, immediate: boolean) {
+        return this.request<HoldReceipt>(`/admin/suspensions/${target.type}s/${encodeURIComponent(target.id)}/suspend${target.type === 'tenant' ? `?immediate=${immediate}` : ''}`, { method: 'POST', body });
+    }
+
+    async restoreFormalHold(target: HoldTarget, eventId: string, reason: string) {
+        return this.request<HoldReceipt>(`/admin/suspensions/${target.type}s/${encodeURIComponent(target.id)}/restore`, {
+            method: 'POST', body: { expected_suspension_id: eventId, reason },
+        });
+    }
+
+    async submitFormalHoldAppeal(eventId: string, appealReason: string) {
+        return this.request<HoldReceipt>(`/admin/suspensions/${encodeURIComponent(eventId)}/appeal`, { method: 'POST', body: { appeal_reason: appealReason } });
+    }
+
+    async reviewFormalHoldAppeal(eventId: string, decision: 'granted' | 'denied', response: string) {
+        return this.request<HoldReceipt>(`/admin/suspensions/${encodeURIComponent(eventId)}/appeal/review`, { method: 'POST', body: { decision, response } });
+    }
+
+    async getTenants(search?: string, status?: string, limit?: number, offset?: number, includeArchived = false, sortBy?: 'name' | 'minutes_used') {
         const params = new URLSearchParams();
         if (search) params.append('search', search);
         if (status) params.append('status', status);
+        if (limit !== undefined) params.append('limit', String(limit));
+        if (offset !== undefined) params.append('offset', String(offset));
+        if (includeArchived) params.append('include_archived', 'true');
+        if (sortBy) params.append('sort_by', sortBy);
         const query = params.toString() ? '?' + params.toString() : '';
         return this.request<TenantListItem[]>(`/admin/tenants${query}`);
     }
@@ -1505,20 +2040,22 @@ class ApiClient {
         return this.request<TenantDetails>(`/admin/tenants/${tenantId}`);
     }
 
-    async suspendTenant(tenantId: string) {
-        return this.request<{ detail: string; status: string }>(`/admin/tenants/${tenantId}/suspend`, {
+    async suspendTenant(tenantId: string, expectedUpdatedAt: string | null) {
+        return this.request<TenantMutationReceipt>(`/admin/tenants/${tenantId}/suspend`, {
             method: 'POST',
+            body: { expected_updated_at: expectedUpdatedAt },
         });
     }
 
-    async resumeTenant(tenantId: string) {
-        return this.request<{ detail: string; status: string }>(`/admin/tenants/${tenantId}/resume`, {
+    async resumeTenant(tenantId: string, expectedUpdatedAt: string | null) {
+        return this.request<TenantMutationReceipt>(`/admin/tenants/${tenantId}/resume`, {
             method: 'POST',
+            body: { expected_updated_at: expectedUpdatedAt },
         });
     }
 
     async updateTenantQuota(tenantId: string, quota: QuotaUpdateRequest) {
-        return this.request<{ detail: string; minutes_allocated?: number; max_concurrent_calls?: number }>(
+        return this.request<TenantMutationReceipt>(
             `/admin/tenants/${tenantId}/quota`,
             {
                 method: 'PATCH',
@@ -1602,7 +2139,7 @@ class ApiClient {
     }
 
     async deleteAdminRecording(recordingId: string, reason: string, idempotencyKey: string) {
-        return this.request<{ detail: string; deletion_intent_id?: string }>(`/admin/recordings/${recordingId}`, {
+        return this.request<AdminMediaDeletionReceipt>(`/admin/recordings/${recordingId}`, {
             method: 'DELETE',
             body: { reason },
             headers: { 'Idempotency-Key': idempotencyKey },
@@ -1610,11 +2147,23 @@ class ApiClient {
     }
 
     async deleteAdminFeedback(feedbackId: string, reason: string, idempotencyKey: string) {
-        return this.request<{ detail: string; deletion_intent_id?: string }>(`/admin/feedback/${feedbackId}`, {
+        return this.request<AdminMediaDeletionReceipt>(`/admin/feedback/${feedbackId}`, {
             method: 'DELETE',
             body: { reason },
             headers: { 'Idempotency-Key': idempotencyKey },
         });
+    }
+
+    getAdminMediaDeletions(params: AdminMediaDeletionParams = {}) {
+        const query = new URLSearchParams();
+        for (const [key, value] of Object.entries(params)) {
+            if (value !== undefined && value !== '') query.set(key, String(value));
+        }
+        return this.request<AdminMediaDeletionList>(`/admin/media-deletions${query.size ? `?${query}` : ''}`);
+    }
+
+    getAdminMediaDeletion(intentId: string) {
+        return this.request<AdminMediaDeletionItem>(`/admin/media-deletions/${encodeURIComponent(intentId)}`);
     }
 
     getAdminRecordingAudio(recordingId: string) {
@@ -1666,7 +2215,7 @@ class ApiClient {
         reason: string,
         idempotencyKey: string,
     ) {
-        return this.request<AdminInboundAssignment>(
+        return this.request<Pick<AdminInboundAssignment, 'id' | 'status' | 'version' | 'masked_did'> & { quarantine_reason?: string | null }>(
             `/admin/inbound/assignments/${assignmentId}/quarantine`,
             {
                 method: 'POST',
@@ -1682,7 +2231,7 @@ class ApiClient {
         reason: string,
         idempotencyKey: string,
     ) {
-        return this.request<AdminInboundAssignment>(
+        return this.request<Pick<AdminInboundAssignment, 'id' | 'status' | 'version' | 'masked_did'> & { quarantine_reason?: string | null }>(
             `/admin/inbound/assignments/${assignmentId}/unquarantine`,
             {
                 method: 'POST',
@@ -1709,11 +2258,16 @@ class ApiClient {
         });
     }
 
-    async getAdminInboundReassignments(status = 'pending') {
-        const query = new URLSearchParams({ status });
+    async getAdminInboundReassignments(status = 'pending', limit = 50, cursor?: string) {
+        const query = new URLSearchParams({ status, limit: String(limit) });
+        if (cursor) query.set('cursor', cursor);
         return this.request<AdminInboundReassignmentListResponse>(
             `/admin/inbound/reassignments?${query.toString()}`,
         );
+    }
+
+    async getAdminInboundReassignment(requestId: string) {
+        return this.request<AdminInboundReassignmentRequest>(`/admin/inbound/reassignments/${encodeURIComponent(requestId)}`);
     }
 
     async approveAdminInboundReassignment(
@@ -1728,6 +2282,13 @@ class ApiClient {
                 body: { reason },
                 headers: { 'Idempotency-Key': idempotencyKey },
             },
+        );
+    }
+
+    async cancelAdminInboundReassignment(requestId: string, reason: string, idempotencyKey: string) {
+        return this.request<AdminInboundReassignmentRequest>(
+            `/admin/inbound/reassignments/${encodeURIComponent(requestId)}/cancel`,
+            { method: 'POST', body: { reason }, headers: { 'Idempotency-Key': idempotencyKey } },
         );
     }
 
@@ -1810,7 +2371,8 @@ class ApiClient {
     }
 
     async revokeConnector(connectorId: string) {
-        return this.request<{ success: boolean; message: string; connector_id: string; revoked_at: string }>(
+        return this.request<{ success: boolean; message: string; connector_id: string;
+            provider_revoked?: boolean; provider_revocation_status?: 'not_requested' | 'pending' | 'confirmed' | 'unconfirmed' }>(
             `/admin/connectors/${connectorId}/revoke`,
             { method: 'POST' }
         );
@@ -1837,6 +2399,31 @@ class ApiClient {
         if (params?.group_by) searchParams.append('group_by', params.group_by);
         const query = searchParams.toString() ? '?' + searchParams.toString() : '';
         return this.request<UsageBreakdownResponse>(`/admin/usage/breakdown${query}`);
+    }
+
+    async getSupplierStatements(fromDate: string, toDate: string, offset = 0) {
+        const query = new URLSearchParams({ from_date: fromDate, to_date: toDate, offset: String(offset) });
+        return this.request<unknown>(`/admin/usage/statements?${query}`);
+    }
+
+    async importSupplierStatement(body: Record<string, unknown>) {
+        return this.request<unknown>('/admin/usage/statements', { method: 'POST', body });
+    }
+
+    async getSupplierImport(requestId: string) {
+        return this.request<unknown>(`/admin/usage/statements/imports/${encodeURIComponent(requestId)}`);
+    }
+
+    async getSupplierStatement(statementId: string) {
+        return this.request<unknown>(`/admin/usage/statements/${encodeURIComponent(statementId)}`);
+    }
+
+    async reviewSupplierStatement(statementId: string, body: Record<string, unknown>) {
+        return this.request<unknown>(`/admin/usage/statements/${encodeURIComponent(statementId)}/reviews`, { method: 'POST', body });
+    }
+
+    async getSupplierSource(statementId: string) {
+        return this.requestBlob(`/admin/usage/statements/${encodeURIComponent(statementId)}/source`);
     }
 
     // =========================================================================
@@ -1869,15 +2456,19 @@ class ApiClient {
         return this.request<IncidentsResponse>(`/admin/incidents${query}`);
     }
 
+    async getIncident(incidentId: string) {
+        return this.request<IncidentItem>(`/admin/incidents/${incidentId}`);
+    }
+
     async acknowledgeIncident(incidentId: string) {
-        return this.request<{ success: boolean; message: string; incident_id: string }>(
+        return this.request<IncidentTransitionReceipt>(
             `/admin/incidents/${incidentId}/acknowledge`,
             { method: 'POST' }
         );
     }
 
     async resolveIncident(incidentId: string) {
-        return this.request<{ success: boolean; message: string; incident_id: string }>(
+        return this.request<IncidentTransitionReceipt>(
             `/admin/incidents/${incidentId}/resolve`,
             { method: 'POST' }
         );
@@ -1885,13 +2476,6 @@ class ApiClient {
 
     async getAlertSettings() {
         return this.request<AlertSettings>('/admin/alerts/settings');
-    }
-
-    async updateAlertSettings(settings: Partial<AlertSettings>) {
-        return this.request<AlertSettings>('/admin/alerts/settings', {
-            method: 'PUT',
-            body: settings
-        });
     }
 
     // =============================================================================
