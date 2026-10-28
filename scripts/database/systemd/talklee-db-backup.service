@@ -8,12 +8,16 @@ Type=oneshot
 User=talklee-backup
 Group=talklee-backup
 UMask=0077
-Environment=PGPASSFILE=/etc/talklee/secrets/pgpass
+Environment=PGPASSFILE=/etc/talklee/secrets/backup/pgpass
+# Secrets live in /etc/talklee/secrets/backup/ (owner talklee-backup, 0700; files 0600):
+# libpq and the tools refuse a password file any other user can read.
 # backup.env sets TALKLEE_BACKUP_RLS_OPTIONS: empty for a BYPASSRLS backup role,
 # otherwise "--rls-bypass-guc --rls-setting app.current_user_id=<platform admin id>"
 # (scripts/database/README.md, "Row-level security and complete backups").
-EnvironmentFile=/etc/talklee/secrets/backup.env
-ExecStart=/usr/bin/python3 /opt/talky/scripts/database/scheduled_backup.py --service-file /etc/talklee/secrets/pg_service.conf --service talklee_backup --backup-root /var/backups/talklee --replica-root /mnt/talklee-offhost/backups --keep-days 30 --keep-minimum 7 $TALKLEE_BACKUP_RLS_OPTIONS
+# The off-host copy is encrypted with the passphrase file (owner talklee-backup, mode 0600);
+# keep a second copy of that passphrase outside this server or the replicas cannot be read.
+EnvironmentFile=/etc/talklee/secrets/backup/backup.env
+ExecStart=/usr/bin/python3 /opt/talky/scripts/database/scheduled_backup.py --service-file /etc/talklee/secrets/backup/pg_service.conf --service talklee_backup --backup-root /var/backups/talklee --replica-root /mnt/talklee-offhost/backups --replica-passphrase-file /etc/talklee/secrets/backup/replica.passphrase --keep-days 30 --keep-minimum 7 $TALKLEE_BACKUP_RLS_OPTIONS
 TimeoutStartSec=2h
 NoNewPrivileges=true
 PrivateTmp=true

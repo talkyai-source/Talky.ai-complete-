@@ -67,6 +67,7 @@ class ScramTests(unittest.TestCase):
                 roles.generate_password(path)
             short = Path(tmp) / "short.txt"
             short.write_text("too-short\n", encoding="utf-8")
+            short.chmod(0o600)  # refused for its length, not its mode
             with self.assertRaises(RecoveryError):
                 roles.read_password(short)
 
@@ -160,6 +161,7 @@ class ApplyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             secret = Path(tmp) / "app.txt"
             secret.write_text("x" * 32 + "\n", encoding="utf-8")
+            secret.chmod(0o600)
             pg = MagicMock()
             pg.json.return_value = observed()
             result = roles.apply(pg, MagicMock(), R, "talkyai", from_owner=None,
@@ -170,6 +172,70 @@ class ApplyTests(unittest.TestCase):
         self.assertIn('ALTER ROLE "talklee_app" PASSWORD \'SCRAM-SHA-256$4096:', sent)
         self.assertEqual((result["operation"], result["status"], result["passwords_set"]),
                          ("roles_apply", "passed", [R.runtime]))
+
+    def test_apply_can_cap_the_runtime_role_connections(self):
+        pg = MagicMock()
+        pg.json.return_value = observed()
+        roles.apply(pg, MagicMock(), R, "talkyai", from_owner=None, passwords={}, backup_bypassrls=False,
+                    runtime_connection_limit=60)
+        self.assertIn('ALTER ROLE "talklee_app" CONNECTION LIMIT 60;', pg.sql.call_args.args[1])
+        for bad in (0, -1, 10001):
+            with self.assertRaises(RecoveryError):
+                roles.connection_limit_sql(R.runtime, bad)
+
+
+class RotateTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.secret = Path(self.tmp.name) / "new.txt"
+        self.secret.write_text("New:pass\\word-" + "y" * 24 + "\n", encoding="utf-8")
+        self.secret.chmod(0o600)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_rotation_changes_only_the_password_and_proves_the_new_login(self):
+        seen = {}
+
+        def sql(service, text, **kwargs):
+            if text == "SELECT current_user;":
+                env = service.env()
+                seen.update(user=env["PGUSER"], passfile=Path(env["PGPASSFILE"]).read_text(encoding="utf-8"),
+                            database=kwargs.get("database"))
+                return R.runtime
+            seen["alter"] = text
+            return ""
+
+        pg = MagicMock()
+        pg.json.return_value = {"exists": True}
+        pg.sql.side_effect = sql
+        admin = MagicMock()
+        admin.env.return_value = {"PGHOST": "db.internal", "PGUSER": "admin", "PGSSLMODE": "verify-full"}
+        result = roles.rotate_password(pg, admin, R, R.runtime, self.secret, "talkyai")
+        self.assertEqual((result["status"], result["new_password_login"]), ("passed", True))
+        self.assertTrue(seen["alter"].startswith('ALTER ROLE "talklee_app" PASSWORD \'SCRAM-SHA-256$4096:'))
+        self.assertNotIn("GRANT", seen["alter"])
+        self.assertNotIn("New:pass", seen["alter"])
+        self.assertEqual((seen["user"], seen["database"]), (R.runtime, "talkyai"))
+        self.assertEqual(seen["passfile"], "*:*:*:talklee_app:New\\:pass\\\\word-" + "y" * 24 + "\n")
+        self.assertNotIn("New:pass", repr(result))
+
+    def test_rotation_refuses_unmanaged_or_missing_roles_before_any_change(self):
+        pg = MagicMock()
+        with self.assertRaises(RecoveryError):
+            roles.rotate_password(pg, MagicMock(), R, "postgres", self.secret, "talkyai")
+        pg.json.return_value = {"exists": False}
+        with self.assertRaises(RecoveryError):
+            roles.rotate_password(pg, MagicMock(), R, R.backup, self.secret, "talkyai")
+        pg.sql.assert_not_called()
+
+    def test_failed_login_proof_is_reported_not_hidden(self):
+        pg = MagicMock()
+        pg.json.return_value = {"exists": True}
+        pg.sql.side_effect = lambda service, text, **kw: "someone_else" if text == "SELECT current_user;" else ""
+        admin = MagicMock()
+        admin.env.return_value = {}
+        self.assertEqual(roles.rotate_password(pg, admin, R, R.owner, self.secret, "talkyai")["status"], "needs_attention")
 
 
 if __name__ == "__main__":

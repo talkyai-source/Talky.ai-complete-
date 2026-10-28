@@ -55,6 +55,12 @@ _buffer_lock = asyncio.Lock()
 _flusher_task: Optional[asyncio.Task] = None
 _stop_event: Optional[asyncio.Event] = None
 
+_INSERT_SQL = (
+    "INSERT INTO tenant_provider_cost_events (tenant_id, call_id, provider, provider_role, api_key_fp, "
+    "unit, quantity, unit_price_usd, cost_usd, model, voice_id, latency_ms, status) "
+    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"
+)
+
 FLUSH_INTERVAL_S = float(os.getenv("COST_LEDGER_FLUSH_INTERVAL_S", "5.0"))
 MAX_BUFFER_SIZE = int(os.getenv("COST_LEDGER_MAX_BUFFER", "5000"))
 
@@ -112,20 +118,15 @@ async def _flush_once(pool: Any) -> int:
             #
             # SET LOCAL requires an explicit transaction to survive to the next
             # statement; outside one it is discarded as soon as it auto-commits,
-            # so the COPY below would run without the bypass.
+            # so the INSERT below would run without the bypass.
+            #
+            # INSERT, not COPY: PostgreSQL refuses COPY FROM whenever row-level
+            # security applies to the role (any non-owner, such as the
+            # restricted talklee_app role, or an owner under FORCE), even when
+            # a policy would admit every row.
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
-                await conn.copy_records_to_table(
-                    "tenant_provider_cost_events",
-                    records=rows,
-                    columns=[
-                        "tenant_id", "call_id",
-                        "provider", "provider_role", "api_key_fp",
-                        "unit", "quantity", "unit_price_usd", "cost_usd",
-                        "model", "voice_id",
-                        "latency_ms", "status",
-                    ],
-                )
+                await conn.executemany(_INSERT_SQL, rows)
         logger.debug("cost_ledger_flushed rows=%d", len(rows))
         return len(rows)
     except Exception as exc:

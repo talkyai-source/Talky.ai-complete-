@@ -83,7 +83,7 @@ async def test_flush_once_with_no_pool_keeps_buffer():
 
 
 @pytest.mark.asyncio
-async def test_flush_once_writes_via_copy_records():
+async def test_flush_once_writes_with_insert_inside_the_bypass_transaction():
     L.record(_ev())
     L.record(_ev(provider="elevenlabs", provider_role="tts", unit="characters"))
 
@@ -91,7 +91,7 @@ async def test_flush_once_writes_via_copy_records():
         def __init__(self):
             self.calls = []
             # `SET LOCAL` only survives to the next statement inside an explicit
-            # transaction; outside one it is discarded and the COPY would run
+            # transaction; outside one it is discarded and the INSERT would run
             # without the RLS bypass. Recorded so the test proves the scoping.
             self.in_transaction = False
 
@@ -111,6 +111,8 @@ async def test_flush_once_writes_via_copy_records():
 
         async def execute(self, *a, **kw):
             self.calls.append(("execute", a, kw, self.in_transaction))
+        async def executemany(self, *a, **kw):
+            self.calls.append(("executemany", a, kw, self.in_transaction))
         async def copy_records_to_table(self, *a, **kw):
             self.calls.append(("copy", a, kw, self.in_transaction))
 
@@ -128,14 +130,18 @@ async def test_flush_once_writes_via_copy_records():
     written = await L._flush_once(pool=_FakePool())
     assert written == 2
     assert L.buffer_size() == 0
-    # Both the RLS bypass and the COPY ran.
+    # Both the RLS bypass and one batched INSERT ran. Never COPY: PostgreSQL
+    # refuses COPY FROM whenever row-level security applies to the role (the
+    # restricted runtime role, or an owner under FORCE), whatever the policy.
     assert any(c[0] == "execute" and "bypass_rls" in c[1][0] for c in fake.calls)
-    assert any(c[0] == "copy" for c in fake.calls)
+    assert not any(c[0] == "copy" for c in fake.calls)
+    insert = next(c for c in fake.calls if c[0] == "executemany")
+    assert insert[1][0].startswith("INSERT INTO tenant_provider_cost_events (")
+    assert len(insert[1][1]) == 2 and all(len(row) == 13 for row in insert[1][1])
 
     # ...and both ran INSIDE an explicit transaction. Without it the SET LOCAL is
-    # discarded before the COPY, so the bypass silently does nothing — the defect
+    # discarded before the INSERT, so the bypass silently does nothing — the defect
     # fixed under TKT-009 / F-25. See docs/v2/rls-set-audit.md.
     bypass = next(c for c in fake.calls if c[0] == "execute" and "bypass_rls" in c[1][0])
-    copy = next(c for c in fake.calls if c[0] == "copy")
     assert bypass[3] is True, "SET LOCAL app.bypass_rls must run inside a transaction"
-    assert copy[3] is True, "COPY must run inside the same transaction as the bypass"
+    assert insert[3] is True, "INSERT must run inside the same transaction as the bypass"

@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -118,6 +119,21 @@ class SafetyTests(unittest.TestCase):
         receipt = recovery.verify_bundle(bundle)
         receipt["inventory"]["snapshot_time"] = "2000-01-01T00:00:00+00:00"
         (bundle / "receipt.json").write_text(json.dumps(receipt))
+        with self.assertRaises(recovery.RecoveryError):
+            recovery.health(self.root, 26)
+
+    def test_health_orders_by_snapshot_and_never_skips_an_unreadable_receipt(self):
+        fresh = self.bundle()
+        older = self.root / "older"
+        shutil.copytree(fresh, older)                       # published after the fresh one
+        receipt = recovery.verify_bundle(older)
+        receipt["inventory"]["snapshot_time"] = "2000-01-01T00:00:00+00:00"
+        (older / "receipt.json").write_text(json.dumps(receipt))
+        (self.root / "operator-notes").mkdir()              # no receipt: not a bundle, ignored
+        self.assertEqual(recovery.health(self.root, 26)["bundle"], fresh.name)
+        broken = self.root / "zz-broken"
+        broken.mkdir()
+        (broken / "receipt.json").write_text("{not json")
         with self.assertRaises(recovery.RecoveryError):
             recovery.health(self.root, 26)
 

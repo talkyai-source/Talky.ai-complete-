@@ -5,11 +5,15 @@ Description=Take a verified Talklee PostgreSQL base backup for point-in-time rec
 Type=oneshot
 User=talklee-backup
 Group=talklee-backup
+Environment=PGPASSFILE=/etc/talklee/secrets/backup/pgpass
 # The role in the named service needs REPLICATION and a replication pg_hba entry.
 # $$ and %% are systemd escapes for the shell's $ and date's %.
-ExecStart=/bin/sh -c 'exec /usr/bin/python3 /opt/talky/scripts/database/pitr.py base-backup --service-file /etc/talklee/pg_service.conf --service talklee_replication --destination /var/backups/talklee-pitr/base/"$$(date -u +%%Y%%m%%dT%%H%%M%%SZ)"'
+ExecStart=/bin/sh -c 'exec /usr/bin/python3 /opt/talky/scripts/database/pitr.py base-backup --service-file /etc/talklee/secrets/backup/pg_service.conf --service talklee_replication --destination /var/backups/talklee-pitr/base/"$$(date -u +%%Y%%m%%dT%%H%%M%%SZ)"'
 # WAL archiving must also be healthy, otherwise the base backup is not restorable to a time.
 ExecStartPost=/usr/bin/python3 /opt/talky/scripts/database/pitr.py archive-health --archive-dir /var/backups/talklee-pitr/wal --max-age-minutes 30
+# Retention after a verified base backup: 7 daily base backups = a 7-day PITR window,
+# plus the WAL needed to replay from the oldest of them.
+ExecStartPost=/usr/bin/python3 /opt/talky/scripts/database/pitr.py prune --base-root /var/backups/talklee-pitr/base --archive-dir /var/backups/talklee-pitr/wal --keep 7
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

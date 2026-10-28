@@ -164,6 +164,23 @@ class Service:
         return "dbname=" + identifier(database or self.values["dbname"])[1:-1]
 
 
+class ServiceOverride:
+    """The same pinned endpoint with extra client environment: another login
+    with a temporary password file, or a fixed message locale."""
+
+    def __init__(self, service: Service, **overrides: str):
+        self.service, self.overrides = service, overrides
+        self.name, self.values = service.name, service.values
+
+    def env(self, *, database: str | None = None, readonly: bool = True) -> dict[str, str]:
+        env = self.service.env(database=database, readonly=readonly)
+        env.update(self.overrides)
+        return env
+
+    def connection(self, database: str | None = None) -> str:
+        return self.service.connection(database)
+
+
 class Postgres:
     def __init__(self, bin_dir: Path | None = None, timeout: int = 3600):
         self.bin_dir = bin_dir
@@ -202,6 +219,73 @@ class Postgres:
             return json.loads(self.sql(service, sql, **kwargs))
         except json.JSONDecodeError as exc:
             raise RecoveryError("database returned invalid verification data") from exc
+
+
+ENCRYPTED_ARCHIVE = "database.dump.gpg"
+REPLICA_RECEIPT = "replica.json"
+
+
+class Gpg:
+    """OpenPGP symmetric encryption (AES-256, integrity-protected) keyed by a
+    protected passphrase file. Every call uses a private throwaway keyring and
+    never starts an agent, so an operator's own GnuPG state is never touched."""
+
+    ENCRYPT = ("--symmetric", "--cipher-algo", "AES256", "--s2k-mode", "3", "--s2k-digest-algo", "SHA512",
+               "--s2k-count", "65011712", "--compress-algo", "none")
+
+    def __init__(self, passphrase_file: Path, executable: str | None = None, timeout: int = 7200):
+        self.passphrase = private_file(passphrase_file)
+        if len(self.passphrase.read_text(encoding="utf-8").strip()) < 24:
+            raise RecoveryError("the replica passphrase must have at least 24 characters")
+        self.executable = executable or shutil.which("gpg")
+        if not self.executable or not Path(self.executable).is_file():
+            raise RecoveryError("gpg is required for an encrypted replica")
+        self.timeout = timeout
+
+    def _start(self, args: list[str], work: Path, **kwargs) -> subprocess.Popen:
+        # The keyring directory is passed relative to the working directory:
+        # GnuPG builds for Windows (Git's MSYS gpg) misread absolute Windows paths.
+        (work / "gnupg").mkdir(mode=0o700)
+        flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+        command = [self.executable, "--batch", "--quiet", "--no-tty", "--no-autostart", "--homedir", "gnupg",
+                   "--pinentry-mode", "loopback", "--passphrase-file", self.passphrase.as_posix(), *args]
+        return subprocess.Popen(command, cwd=work, stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **flags, **kwargs)
+
+    def _run(self, args: list[str], failure: str) -> None:
+        work = Path(tempfile.mkdtemp(prefix="talklee-gpg-"))
+        try:
+            process = self._start(args, work, stdout=subprocess.DEVNULL)
+            if process.wait(timeout=self.timeout):
+                raise RecoveryError(failure)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise RecoveryError(failure) from exc
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    def encrypt(self, source: Path, target: Path) -> None:
+        self._run([*self.ENCRYPT, "--output", target.as_posix(), source.as_posix()], "gpg could not encrypt the archive")
+
+    def decrypt(self, source: Path, target: Path) -> None:
+        self._run(["--decrypt", "--output", target.as_posix(), source.as_posix()],
+                  "the encrypted archive did not decrypt (wrong passphrase, or it failed its integrity check)")
+
+    def decrypted_digest(self, source: Path) -> tuple[str, int]:
+        """SHA-256 and size of the plaintext, streamed: nothing decrypted is written to disk."""
+        work = Path(tempfile.mkdtemp(prefix="talklee-gpg-"))
+        hasher, size = hashlib.sha256(), 0
+        try:
+            process = self._start(["--decrypt", source.as_posix()], work, stdout=subprocess.PIPE)
+            for chunk in iter(lambda: process.stdout.read(1024 * 1024), b""):
+                hasher.update(chunk)
+                size += len(chunk)
+            process.stdout.close()
+            if process.wait(timeout=self.timeout):
+                raise RecoveryError("the encrypted archive did not decrypt (wrong passphrase, or it failed its integrity check)")
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise RecoveryError("the encrypted archive could not be read back") from exc
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        return hasher.hexdigest(), size
 
 
 AUDIT_SQL = """
@@ -408,17 +492,29 @@ def audit(pg: Postgres, service: Service, app_addresses: list[str]) -> dict:
 
 
 def verify_bundle(bundle: Path) -> dict:
+    archive = bundle / "database.dump"
+    if archive.is_symlink():
+        raise RecoveryError("backup bundle must not contain symlinks")
+    receipt = _published_receipt(bundle)
+    try:
+        if archive.stat().st_size != receipt["bytes"] or digest(archive) != receipt["sha256"]:
+            raise RecoveryError("backup size/checksum does not match its receipt")
+    except (KeyError, OSError, TypeError) as exc:
+        raise RecoveryError("backup bundle is incomplete or unreadable") from exc
+    return receipt
+
+
+def _published_receipt(bundle: Path) -> dict:
+    """The bundle's receipt, validated without reading the archive itself."""
     if bundle.is_symlink() or not bundle.is_dir():
         raise RecoveryError("backup must be a published bundle directory")
-    receipt_path, archive = bundle / "receipt.json", bundle / "database.dump"
-    if receipt_path.is_symlink() or archive.is_symlink():
+    receipt_path = bundle / "receipt.json"
+    if receipt_path.is_symlink():
         raise RecoveryError("backup bundle must not contain symlinks")
     try:
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         if receipt.get("operation") != "backup" or receipt.get("status") != "archive_verified":
             raise RecoveryError("backup receipt is not a successful published archive")
-        if archive.stat().st_size != receipt["bytes"] or digest(archive) != receipt["sha256"]:
-            raise RecoveryError("backup size/checksum does not match its receipt")
         if (bundle / "database.dump.sha256").read_text(encoding="ascii").strip() != receipt["sha256"] + "  database.dump":
             raise RecoveryError("backup checksum file does not match receipt")
         if set(receipt["inventory"]["counts"]) != set(TABLES):
@@ -602,11 +698,20 @@ def restore(pg: Postgres, service: Service, bundle: Path, database: str, runtime
 def health(root: Path, maximum_age_hours: float) -> dict:
     if maximum_age_hours <= 0:
         raise RecoveryError("maximum age must be positive")
-    bundles = sorted((path for path in root.iterdir() if path.is_dir() and not path.name.startswith(".")),
-                     key=lambda path: path.stat().st_mtime, reverse=True)
+    # Newest by snapshot time, like retention: a copy published late (an older
+    # replica fetched back) must not pass for the newest backup. A directory
+    # with a receipt that cannot be read fails the check instead of being
+    # skipped, so health never falls back to an older bundle.
+    published = _bundles_by_snapshot(root)
+    known = {path for _, path in published}
+    unreadable = sorted(path.name for path in root.iterdir() if not path.name.startswith(".") and path.is_dir()
+                        and (path / "receipt.json").exists() and path not in known)
+    if unreadable:
+        raise RecoveryError("backup receipts are unreadable or not successful: " + ", ".join(unreadable[:5]))
+    bundles = [path for _, path in published]
     if not bundles:
         raise RecoveryError("no published backup bundles exist")
-    receipt = verify_bundle(bundles[0])
+    receipt = verify_published(bundles[0])
     try:
         age = (datetime.now(timezone.utc) - datetime.fromisoformat(receipt["inventory"]["snapshot_time"])).total_seconds() / 3600
     except (KeyError, ValueError, TypeError) as exc:
@@ -643,7 +748,7 @@ def prune(root: Path, keep_days: float, keep_minimum: int, dry_run: bool) -> dic
     bundles = _bundles_by_snapshot(root)
     if not bundles:
         raise RecoveryError("no published backup bundles exist")
-    verify_bundle(bundles[0][1])
+    verify_published(bundles[0][1])
     cutoff = datetime.now(timezone.utc).timestamp() - keep_days * 86400
     expired = [path for index, (snapshot, path) in enumerate(bundles)
                if index >= keep_minimum and snapshot.timestamp() < cutoff]
@@ -658,9 +763,36 @@ def prune(root: Path, keep_days: float, keep_minimum: int, dry_run: bool) -> dic
             "deleted" if not dry_run else "would_delete": [path.name for path in expired]}
 
 
-def replicate(bundle: Path, destination_root: Path) -> dict:
+def verify_published(bundle: Path, gpg: Gpg | None = None) -> dict:
+    """A plain bundle, or an encrypted replica: its ciphertext is checked
+    against replica.json, and with the passphrase it is decrypted (streamed,
+    never written) and compared with the original archive's checksum."""
+    encrypted = bundle / ENCRYPTED_ARCHIVE
+    if not encrypted.exists() and not encrypted.is_symlink():
+        if gpg:
+            raise RecoveryError("a decryption check was requested but the bundle is not encrypted")
+        return verify_bundle(bundle)
+    if encrypted.is_symlink() or (bundle / REPLICA_RECEIPT).is_symlink() or (bundle / "database.dump").exists():
+        raise RecoveryError("an encrypted replica holds only its ciphertext, receipts and checksum file")
+    receipt = _published_receipt(bundle)
+    try:
+        replica = json.loads((bundle / REPLICA_RECEIPT).read_text(encoding="utf-8"))
+        if (replica.get("operation") != "replicate" or replica.get("status") != "replica_verified"
+                or replica.get("encrypted") is not True or replica.get("plaintext_sha256") != receipt["sha256"]):
+            raise RecoveryError("replica receipt does not describe this encrypted archive")
+        if encrypted.stat().st_size != replica["bytes"] or digest(encrypted) != replica["sha256"]:
+            raise RecoveryError("encrypted archive size/checksum does not match its replica receipt")
+    except (KeyError, OSError, ValueError, TypeError) as exc:
+        raise RecoveryError("encrypted replica is incomplete or unreadable") from exc
+    if gpg and gpg.decrypted_digest(encrypted) != (receipt["sha256"], receipt["bytes"]):
+        raise RecoveryError("decrypted archive differs from the original backup")
+    return receipt
+
+
+def replicate(bundle: Path, destination_root: Path, gpg: Gpg | None = None) -> dict:
     """Copy one verified bundle to a second location (an off-host mount) and
-    verify the copy byte-for-byte before publishing it there."""
+    verify the copy before publishing it there. With gpg the archive leaves
+    this server only encrypted, and is proven to decrypt to the original."""
     receipt = verify_bundle(bundle)
     destination_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     target = destination_root / bundle.name
@@ -668,10 +800,23 @@ def replicate(bundle: Path, destination_root: Path) -> dict:
         raise RecoveryError("replica already exists; replicas are never overwritten")
     staging = Path(tempfile.mkdtemp(prefix=".talklee-replica-", dir=destination_root))
     try:
-        for name in ("database.dump", "database.dump.sha256", "receipt.json"):
+        for name in ("database.dump.sha256", "receipt.json"):
             shutil.copyfile(bundle / name, staging / name)
             sync_file(staging / name)
-        copied = verify_bundle(staging)
+        if gpg:
+            gpg.encrypt(bundle / "database.dump", staging / ENCRYPTED_ARCHIVE)
+            sync_file(staging / ENCRYPTED_ARCHIVE)
+            write_json_new(staging / REPLICA_RECEIPT, {
+                "operation": "replicate", "status": "replica_verified", "encrypted": True,
+                "cipher": "OpenPGP symmetric, AES-256, integrity protected (gpg)", "archive": ENCRYPTED_ARCHIVE,
+                "bytes": (staging / ENCRYPTED_ARCHIVE).stat().st_size, "sha256": digest(staging / ENCRYPTED_ARCHIVE),
+                "plaintext_sha256": receipt["sha256"], "replicated_at": utcnow()})
+            sync_file(staging / REPLICA_RECEIPT)
+            copied = verify_published(staging, gpg)
+        else:
+            shutil.copyfile(bundle / "database.dump", staging / "database.dump")
+            sync_file(staging / "database.dump")
+            copied = verify_bundle(staging)
         if copied["sha256"] != receipt["sha256"]:
             raise RecoveryError("replica checksum differs from the source bundle")
         staging.rename(target)
@@ -680,8 +825,42 @@ def replicate(bundle: Path, destination_root: Path) -> dict:
             if staging.resolve().parent != destination_root.resolve() or not staging.name.startswith(".talklee-replica-"):
                 raise RecoveryError("refusing cleanup outside the owned replica staging directory")
             shutil.rmtree(staging)
-    return {"operation": "replicate", "status": "replica_verified", "replicated_at": utcnow(),
-            "bundle": bundle.name, "sha256": receipt["sha256"], "bytes": receipt["bytes"]}
+    result = {"operation": "replicate", "status": "replica_verified", "replicated_at": utcnow(),
+              "bundle": bundle.name, "sha256": receipt["sha256"], "bytes": receipt["bytes"], "encrypted": bool(gpg)}
+    if gpg:
+        result["ciphertext_sha256"] = json.loads((target / REPLICA_RECEIPT).read_text(encoding="utf-8"))["sha256"]
+    return result
+
+
+def decrypt_replica(replica: Path, destination: Path, gpg: Gpg) -> dict:
+    """Turn an encrypted off-host replica back into an ordinary verified bundle
+    that restore and cutover accept. The destination must not exist."""
+    receipt = verify_published(replica)
+    if not (replica / ENCRYPTED_ARCHIVE).exists():
+        raise RecoveryError("replica is not encrypted; use it directly")
+    if destination.exists() or destination.is_symlink():
+        raise RecoveryError("refusing to replace an existing bundle")
+    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    staging = Path(tempfile.mkdtemp(prefix=".talklee-decrypt-", dir=destination.parent))
+    try:
+        gpg.decrypt(replica / ENCRYPTED_ARCHIVE, staging / "database.dump")
+        for name in ("database.dump.sha256", "receipt.json"):
+            shutil.copyfile(replica / name, staging / name)
+        for path in staging.iterdir():
+            if os.name != "nt":
+                path.chmod(0o600)
+            sync_file(path)
+        restored = verify_bundle(staging)
+        if restored["sha256"] != receipt["sha256"]:
+            raise RecoveryError("decrypted archive differs from the original backup")
+        staging.rename(destination)
+    finally:
+        if staging.exists():
+            if staging.resolve().parent != destination.parent.resolve() or not staging.name.startswith(".talklee-decrypt-"):
+                raise RecoveryError("refusing cleanup outside the owned decryption staging directory")
+            shutil.rmtree(staging)
+    return {"operation": "decrypt_replica", "status": "bundle_verified", "decrypted_at": utcnow(),
+            "bundle": destination.name, "sha256": receipt["sha256"], "bytes": receipt["bytes"]}
 
 
 def parser() -> argparse.ArgumentParser:
@@ -712,6 +891,12 @@ def parser() -> argparse.ArgumentParser:
     copy = commands.add_parser("replicate", help="copy a verified bundle to an off-host location and verify it")
     copy.add_argument("--bundle", type=Path, required=True)
     copy.add_argument("--destination-root", type=Path, required=True)
+    add_encryption_arguments(copy, "--passphrase-file", "--allow-unencrypted")
+    reveal = commands.add_parser("decrypt-replica", help="turn an encrypted replica back into a verified bundle")
+    reveal.add_argument("--replica", type=Path, required=True)
+    reveal.add_argument("--destination", type=Path, required=True)
+    reveal.add_argument("--passphrase-file", type=Path, required=True)
+    reveal.add_argument("--gpg", help="gpg executable (default: gpg on PATH)")
     replay = commands.add_parser("restore", help="restore only into a newly created scratch database")
     replay.add_argument("--service", required=True, help="isolated-server maintenance service (dbname=postgres)")
     replay.add_argument("--bundle", type=Path, required=True)
@@ -725,6 +910,22 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
+def add_encryption_arguments(command: argparse.ArgumentParser, passphrase_flag: str, unencrypted_flag: str) -> None:
+    """An off-host copy holds every customer's data, so leaving it unencrypted
+    must be an explicit choice (for a destination that already encrypts)."""
+    command.add_argument(passphrase_flag, dest="passphrase_file", type=Path,
+                         help="protected file holding the encryption passphrase")
+    command.add_argument(unencrypted_flag, dest="allow_unencrypted", action="store_true",
+                         help="copy the archive in clear (only to storage that is itself encrypted)")
+    command.add_argument("--gpg", help="gpg executable (default: gpg on PATH)")
+
+
+def replica_encryption(args: argparse.Namespace) -> Gpg | None:
+    if bool(args.passphrase_file) == bool(args.allow_unencrypted):
+        raise RecoveryError("an off-host copy needs exactly one of a passphrase file or the explicit unencrypted option")
+    return Gpg(args.passphrase_file, args.gpg) if args.passphrase_file else None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
@@ -734,7 +935,9 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "prune":
             payload = prune(args.backup_root, args.keep_days, args.keep_minimum, args.dry_run)
         elif args.command == "replicate":
-            payload = replicate(args.bundle, args.destination_root)
+            payload = replicate(args.bundle, args.destination_root, replica_encryption(args))
+        elif args.command == "decrypt-replica":
+            payload = decrypt_replica(args.replica, args.destination, Gpg(args.passphrase_file, args.gpg))
         else:
             if args.service_file is None:
                 raise RecoveryError("--service-file or PGSERVICEFILE is required")

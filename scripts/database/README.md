@@ -118,8 +118,15 @@ privilege grants are deliberately reapplied on the isolated destination.
 
 `replicate` copies one verified bundle to a second root (a mounted off-host
 store, e.g. a Hetzner Storage Box or an object-store mount) through a staging
-directory, verifies the copy byte-for-byte, then publishes it; replicas are
-never overwritten. `prune` applies the retention policy: bundles older than
+directory and publishes it only after verification; replicas are never
+overwritten. With `--passphrase-file` only `database.dump.gpg` leaves the server
+(OpenPGP symmetric AES-256 via gpg, integrity protected, private throwaway
+keyring), and the copy is decrypted as a stream and compared with the original
+checksum before it is published; receipts stay in clear so retention and
+health work without the passphrase. Copying in clear needs the explicit
+`--allow-unencrypted` (for storage that encrypts by itself). `decrypt-replica`
+turns an encrypted replica back into an ordinary verified bundle for `restore`
+or `cutover.py`. Keep a copy of the passphrase outside the server. `prune` applies the retention policy: bundles older than
 `--keep-days` (default 30) are deleted, the newest `--keep-minimum` (default 7)
 are always kept, unknown directories are never touched, and nothing is deleted
 unless the newest bundle verifies (a failing schedule never ages out the last
@@ -127,13 +134,17 @@ good archive). `--dry-run` lists what would go.
 
 ```bash
 python3 scripts/database/recovery.py replicate --bundle /var/backups/talklee/20261028T020000Z \
-  --destination-root /mnt/offhost/talklee
+  --destination-root /mnt/talklee-offhost/backups --passphrase-file /etc/talklee/secrets/backup/replica.passphrase
+python3 scripts/database/recovery.py decrypt-replica --replica /mnt/talklee-offhost/backups/20261028T020000Z \
+  --destination /var/backups/talklee/recovered --passphrase-file /etc/talklee/secrets/backup/replica.passphrase
 python3 scripts/database/recovery.py prune --backup-root /var/backups/talklee --keep-days 30 --keep-minimum 7
 ```
 
 `scheduled_backup.py` (the systemd timer's entry point) runs backup, then
 `replicate` + `prune` on `--replica-root`, then `prune` locally; it accepts the
-same `--rls-bypass-guc` / `--rls-setting` options. It does not choose a storage
+same `--rls-bypass-guc` / `--rls-setting` options and needs
+`--replica-passphrase-file` (or `--allow-unencrypted-replica`) with a replica
+root, checked before the dump starts. It does not choose a storage
 provider or assert that PITR is enabled; record retention, expiry, capacity,
 PITR capability and recoverable key ownership in the operating handover.
 
@@ -187,10 +198,12 @@ compatibility; the recovery CLI does not silently run it.
 
 ## Scheduling and health
 
-The files in `systemd/` are opt-in templates. They use a dedicated
-`talklee-backup` OS user, protected files under `/etc/talklee/secrets`, and
-`/var/backups/talklee`. Create the user/directories and make the credential/CA
-files readable only by that user before installing the units. The scheduled
+The files in `systemd/` are opt-in templates. Each unit user has its own
+secrets directory (`/etc/talklee/secrets/backup/` for `talklee-backup`,
+`/etc/talklee/secrets/monitor/` for `talklee-monitor`; 0700, files 0600):
+libpq and these tools refuse a password file another user can read, so one
+file cannot serve both. Backups go to `/var/backups/talklee`. Create the users
+and directories before installing the units. The scheduled
 entry point locks the backup root and compares to the previous bundle. It does
 not enable itself or alter existing units.
 
@@ -220,10 +233,23 @@ runtime and backup roles every object a later migration creates.
 
 ```bash
 python3 scripts/database/roles.py generate-password --output /etc/talklee/secrets/talklee_app.password
-python3 scripts/database/roles.py --service talklee_admin_db apply --database talkyai   --owner-password-file ... --runtime-password-file ... --backup-password-file ...   --receipt /secure/evidence/roles-apply.json
-python3 scripts/database/roles.py --service talklee_admin_db verify --database talkyai   --receipt /secure/evidence/roles-verify.json
+python3 scripts/database/roles.py apply --service talklee_admin_db --database talkyai \
+  --owner-password-file ... --runtime-password-file ... --backup-password-file ... \
+  --runtime-connection-limit 87 --receipt /secure/evidence/roles-apply.json
+python3 scripts/database/roles.py verify --service talklee_admin_db --database talkyai \
+  --receipt /secure/evidence/roles-verify.json
+python3 scripts/database/roles.py rotate-password --service talklee_admin_db --database talkyai \
+  --role talklee_app --password-file /etc/talklee/secrets/talklee_app.password.new \
+  --receipt /secure/evidence/rotate.json
 python3 scripts/database/roles.py plan --database talkyai     # print the SQL, no connection
 ```
+
+`rotate-password` changes one managed role's password and nothing else (no
+grants, no ownership, no table locks), then proves the new password logs in;
+existing connections keep working until the services restart with the new
+URL. `--runtime-connection-limit` caps the runtime role below the server's
+usable connections so a leaking pool cannot lock out backups, monitoring or
+operators (`preflight.py` recommends the number).
 
 The administrator service may be a superuser or a CREATEROLE/CREATEDB
 administrator (a managed provider's admin). Passwords are read from protected
@@ -236,6 +262,24 @@ start and, with `DATABASE_REQUIRE_RESTRICTED_ROLE=true`, refuses to boot as a
 role that is a superuser, bypasses RLS, can create roles/databases or owns
 relations.
 
+## Preflight before the cut-over (`preflight.py`)
+
+Read-only on the new server and on today's database. Days before the window it
+fails on what would stop the cut-over halfway: an unsupported or older target
+version, no TLS, an administrator without CREATEROLE/CREATEDB, too few
+connections for the application's pool budget (read from
+`backend/systemd/talky-*.service`) plus headroom, missing or untrusted
+extensions, non-UTF8 databases, an existing target database, round-trip
+latency above 2 ms p95, a `pg_dump` older than the source, a source using half
+of the planned storage, and tables whose row-level security is enabled but not
+forced. It recommends the runtime connection limit.
+
+```bash
+python3 scripts/database/preflight.py --service-file /etc/talklee/secrets/pg_service.conf \
+  --target-service talklee_admin --source-service talklee_source --allow-local-plaintext \
+  --database talkyai --capacity-bytes 85899345920 --receipt /secure/evidence/preflight.json
+```
+
 ## Cut-over to the separate server (`cutover.py`)
 
 `load` restores a verified backup bundle into a database that does not exist
@@ -246,7 +290,9 @@ snapshot exactly, applies the least-privilege grants and verifies them. The
 source database is never contacted; the bundle was taken read-only.
 
 ```bash
-python3 scripts/database/cutover.py --service talklee_admin load   --bundle /var/backups/talklee/cutover --database talkyai   --expected-head 0073_payment_test_plan   --rls-setting app.current_user_id=<platform admin user id>   --receipt /secure/evidence/cutover.json
+python3 scripts/database/cutover.py load --service talklee_admin \
+  --bundle /var/backups/talklee/cutover --database talkyai --expected-head 0073_payment_test_plan \
+  --rls-setting app.current_user_id=<platform admin user id> --receipt /secure/evidence/cutover.json
 ```
 
 Then set the role passwords with `roles.py apply` and configure the printed
@@ -270,7 +316,9 @@ Managed providers include PITR; for a dedicated server, `archive-settings`
 prints the WAL archiving lines, `base-backup` publishes a checksummed
 `pg_basebackup` (replication role, verified TLS), `restore` rebuilds a NEW data
 directory to `--target-time` (or the latest WAL) on its own loopback port with
-archiving off, and `archive-health` alerts on a stale archive.
+archiving off, `archive-health` alerts on a stale archive, and `prune` keeps the
+newest `--keep` base backups (7 daily = a 7-day window) and the WAL needed to
+replay from the oldest of them, deleting nothing unless the newest verifies.
 
 ## Dedicated database server (`db_server/`)
 

@@ -204,6 +204,60 @@ def verify_base_backup(base: Path) -> dict:
         raise RecoveryError("base backup is incomplete or unreadable") from exc
 
 
+def wal_segment_name(timeline: int, lsn: str, segment_bytes: int = 16 * 1024 * 1024) -> str:
+    """The WAL segment file holding an LSN such as 0/2000028 (16 MB segments by default)."""
+    match = re.fullmatch(r"([0-9A-Fa-f]{1,8})/([0-9A-Fa-f]{1,8})", lsn or "")
+    if not match or not isinstance(timeline, int) or timeline < 1:
+        raise RecoveryError("base backup receipt has an invalid start position")
+    segment = ((int(match.group(1), 16) << 32) | int(match.group(2), 16)) // segment_bytes
+    per_log = 0x100000000 // segment_bytes
+    return f"{timeline:08X}{segment // per_log:08X}{segment % per_log:08X}"
+
+
+def prune(base_root: Path, archive_dir: Path, keep: int, dry_run: bool) -> dict:
+    """Keep the newest `keep` base backups and the WAL needed to replay from the
+    oldest of them; delete older base backups and older WAL segments.
+
+    Nothing is deleted unless the newest base backup verifies. Like
+    pg_archivecleanup, segments are compared without their timeline, history
+    and .backup files are kept, and unknown files and directories are never
+    touched."""
+    if keep < 1:
+        raise RecoveryError("retention requires keep >= 1")
+    base_root, archive_dir = base_root.resolve(strict=True), archive_dir.resolve(strict=True)
+    published = []
+    for path in base_root.iterdir():
+        if path.name.startswith(".") or path.is_symlink() or not path.is_dir():
+            continue
+        try:
+            receipt = json.loads((path / "receipt.json").read_text(encoding="utf-8"))
+            if receipt.get("operation") == "base_backup" and receipt.get("status") == "verified":
+                published.append((datetime.fromisoformat(receipt["created_at"]), path, receipt))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    if not published:
+        raise RecoveryError("no published base backups exist")
+    published.sort(key=lambda item: item[0], reverse=True)
+    verify_base_backup(published[0][1])
+    kept, expired = published[:keep], published[keep:]
+    oldest = kept[-1][2]
+    boundary = wal_segment_name(oldest.get("timeline"), oldest.get("start_lsn"))
+    old_segments = sorted(path.name for path in archive_dir.iterdir()
+                          if path.is_file() and not path.is_symlink() and SEGMENT.fullmatch(path.name)
+                          and path.name[8:] < boundary[8:])
+    if not dry_run:
+        for _, path, _ in expired:
+            if path.resolve().parent != base_root:
+                raise RecoveryError("refusing to delete outside the base backup root")
+            shutil.rmtree(path)
+        for name in old_segments:
+            (archive_dir / name).unlink()
+    return {"operation": "pitr_prune", "status": "passed", "checked_at": utcnow(), "dry_run": dry_run, "keep": keep,
+            "kept": [path.name for _, path, _ in kept], "oldest_needed_segment": boundary,
+            "deleted_base_backups" if not dry_run else "would_delete_base_backups": [path.name for _, path, _ in expired],
+            "deleted_segments" if not dry_run else "would_delete_segments": len(old_segments)}
+
+
 def safe_extract(tar_path: Path, dest: Path) -> int:
     """Extract regular files and directories only, all strictly inside dest."""
     root = dest.resolve()
@@ -337,6 +391,11 @@ def parser() -> argparse.ArgumentParser:
     h = commands.add_parser("archive-health", help="fail when the WAL archive is empty or stale")
     h.add_argument("--archive-dir", type=Path, required=True)
     h.add_argument("--max-age-minutes", type=float, required=True)
+    k = commands.add_parser("prune", help="keep the newest base backups and the WAL they need")
+    k.add_argument("--base-root", type=Path, required=True)
+    k.add_argument("--archive-dir", type=Path, required=True)
+    k.add_argument("--keep", type=int, default=7, help="base backups to keep (daily backups: the PITR window in days)")
+    k.add_argument("--dry-run", action="store_true")
     return result
 
 
@@ -356,6 +415,8 @@ def main(argv: list[str] | None = None) -> int:
             payload = restore(recovery.Postgres(args.bin_dir), args.base_backup, args.archive_dir, args.target_data_dir,
                               target_time=when, port=args.port, start=args.start, platform=args.platform,
                               wait_seconds=args.wait_seconds, receipt_path=args.receipt)
+        elif args.command == "prune":
+            payload = prune(args.base_root, args.archive_dir, args.keep, args.dry_run)
         else:
             payload = archive_health(args.archive_dir, args.max_age_minutes)
         print(json.dumps(payload, indent=2, sort_keys=True))

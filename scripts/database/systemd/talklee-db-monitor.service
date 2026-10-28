@@ -5,17 +5,19 @@ Description=Talklee database health and capacity check with alerting
 Type=oneshot
 User=talklee-monitor
 Group=talklee-monitor
-Environment=PGSERVICEFILE=/etc/talklee/secrets/pg_service.conf
-Environment=PGPASSFILE=/etc/talklee/secrets/pgpass
+# Secrets live in /etc/talklee/secrets/monitor/ (owner talklee-monitor, 0700; files 0600).
+Environment=PGSERVICEFILE=/etc/talklee/secrets/monitor/pg_service.conf
+Environment=PGPASSFILE=/etc/talklee/secrets/monitor/pgpass
 # Webhook URL is a secret: put TALKLEE_ALERT_WEBHOOK_URL=... in this 0600 file.
-EnvironmentFile=-/etc/talklee/secrets/monitor.env
+EnvironmentFile=-/etc/talklee/secrets/monitor/monitor.env
 # Set --capacity-bytes to the provisioned storage of the database server/plan.
-ExecStart=/usr/bin/python3 /opt/talky/scripts/database/monitor.py --service talklee_runtime check --capacity-bytes 214748364800 --state-file /var/lib/talklee-monitor/alert-state.json --prometheus-textfile /var/lib/node_exporter/textfile/talklee_db.prom
+ExecStart=/usr/bin/python3 /opt/talky/scripts/database/monitor.py --service talklee_runtime check --capacity-bytes 214748364800 --state-file /var/lib/talklee-monitor/alert-state.json --prometheus-textfile /var/lib/talklee-monitor/talklee_db.prom
 StateDirectory=talklee-monitor
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/node_exporter/textfile
+# Metrics stay in the state directory (always present); point a node exporter's
+# --collector.textfile.directory at /var/lib/talklee-monitor if one is installed.
 # Exit 1 = warning, 2 = critical, 3 = tool/config error: all are visible as a failed unit.
 SuccessExitStatus=0

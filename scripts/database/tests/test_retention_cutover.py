@@ -51,6 +51,7 @@ class Fixture(unittest.TestCase):
         path = self.root / "services.conf"
         path.write_text("[admin]\nhost=127.0.0.1\nport=5433\ndbname=postgres\nuser=admin\nsslmode=disable\n"
                         "[legacy]\nhost=127.0.0.1\nport=5432\ndbname=talkyai\nuser=talkyai\nsslmode=disable\n")
+        path.chmod(0o600)  # the tools refuse a service file other users can read (POSIX)
         return recovery.Service(path, "admin", True)
 
 
@@ -219,6 +220,7 @@ class CutoverTests(Fixture):
         path = self.root / "s.conf"
         path.write_text("[t]\nhost=db.internal\nport=5432\ndbname=postgres\nuser=admin\nsslmode=verify-full\n"
                         "sslrootcert=/etc/talklee/ca.pem\n")
+        path.chmod(0o600)
         template = cutover.connection_template(recovery.Service(path, "t"), "talkyai", "talklee_app")
         self.assertEqual(template, "postgresql://talklee_app:<URL-ENCODED talklee_app PASSWORD>@db.internal:5432/"
                                    "talkyai?sslmode=verify-full&sslrootcert=/etc/talklee/ca.pem")

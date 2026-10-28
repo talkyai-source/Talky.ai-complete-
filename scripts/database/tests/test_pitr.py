@@ -209,5 +209,65 @@ class PitrTests(unittest.TestCase):
             self.assertEqual(pitr.main(["archive-settings", "--archive-dir", "/w", "--platform", "linux"]), 0)
 
 
+class RetentionTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.bases, self.archive = self.root / "base", self.root / "wal"
+        self.bases.mkdir()
+        self.archive.mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def base(self, name, created_at, start_lsn, timeline=1):
+        base = self.bases / name
+        base.mkdir()
+        for file in pitr.BASE_FILES:
+            make_tar(base / file, [("PG_VERSION", "file", b"16")]) if file.endswith(".gz") else (base / file).write_text("{}")
+        files = {n: {"bytes": (base / n).stat().st_size, "sha256": pitr.digest(base / n)} for n in pitr.BASE_FILES}
+        (base / "receipt.json").write_text(json.dumps({"operation": "base_backup", "status": "verified", "files": files,
+                                                       "created_at": created_at, "timeline": timeline,
+                                                       "start_lsn": start_lsn}))
+        return base
+
+    def test_wal_segment_name(self):
+        self.assertEqual(pitr.wal_segment_name(1, "0/2000028"), "000000010000000000000002")
+        self.assertEqual(pitr.wal_segment_name(2, "1/A000000"), "00000002000000010000000A")
+        for bad in ((1, "nonsense"), (0, "0/1"), ("1", "0/1")):
+            with self.assertRaises(Err):
+                pitr.wal_segment_name(*bad)
+
+    def test_prune_keeps_newest_bases_and_the_wal_they_need(self):
+        self.base("d1", "2026-10-01T03:00:00+00:00", "0/1000028")
+        self.base("d2", "2026-10-02T03:00:00+00:00", "0/5000028")
+        self.base("d3", "2026-10-03T03:00:00+00:00", "0/9000028", timeline=2)
+        (self.bases / "operator-notes").mkdir()
+        segments = [f"00000001000000000000000{n:X}" for n in range(1, 10)] + ["000000020000000000000009"]
+        for name in segments + ["00000002.history", "000000010000000000000005.00000028.backup", "README"]:
+            (self.archive / name).write_text("x")
+        dry = pitr.prune(self.bases, self.archive, 2, True)
+        self.assertEqual((dry["would_delete_base_backups"], dry["would_delete_segments"]), (["d1"], 4))
+        self.assertTrue((self.bases / "d1").exists() and (self.archive / segments[0]).exists())
+        result = pitr.prune(self.bases, self.archive, 2, False)
+        self.assertEqual((result["kept"], result["deleted_base_backups"], result["oldest_needed_segment"]),
+                         (["d3", "d2"], ["d1"], "000000010000000000000005"))
+        left = sorted(p.name for p in self.archive.iterdir())
+        self.assertEqual(left, sorted(segments[4:] + ["00000002.history", "000000010000000000000005.00000028.backup",
+                                                      "README"]))
+        self.assertTrue((self.bases / "operator-notes").exists())
+
+    def test_prune_deletes_nothing_when_the_newest_base_backup_is_corrupt(self):
+        self.base("old", "2026-10-01T03:00:00+00:00", "0/1000028")
+        newest = self.base("new", "2026-10-02T03:00:00+00:00", "0/5000028")
+        (self.archive / "000000010000000000000001").write_text("x")
+        (newest / "base.tar.gz").write_bytes(b"corrupt")
+        with self.assertRaises(Err):
+            pitr.prune(self.bases, self.archive, 1, False)
+        self.assertTrue((self.bases / "old").exists() and (self.archive / "000000010000000000000001").exists())
+        with self.assertRaises(Err):
+            pitr.prune(self.bases, self.archive, 0, True)
+
+
 if __name__ == "__main__":
     unittest.main()

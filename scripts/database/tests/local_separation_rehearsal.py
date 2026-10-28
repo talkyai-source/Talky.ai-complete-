@@ -12,6 +12,14 @@ directory; it never reads DATABASE_URL or contacts an existing server.
             a managed provider's admin), WAL archiving on
   recovery  a disposable restore target
 
+Stages: legacy -> read-only source backup -> external server -> preflight ->
+cut-over -> migrations as owner -> application as the restricted role ->
+the cost ledger writing under forced row-level security ->
+the running application survives a server restart -> runtime password
+rotation -> backups with an encrypted off-host replica and retention ->
+restore drill from the decrypted off-host copy -> point-in-time recovery ->
+monitoring -> legacy database proven unchanged.
+
 Run with the backend's Python (it drives Alembic and the application's own
 pool code):
   python scripts/database/tests/local_separation_rehearsal.py \
@@ -95,14 +103,50 @@ SELECT json_build_object(
 """
 
 APP_SMOKE = r'''
-import asyncio, json, os, sys
+import asyncio, json, os, sys, time
+from pathlib import Path
 import asyncpg
+
+async def survive_restart(db):
+    """Hold a warm pool, let the rehearsal restart the server, then measure how
+    long the unchanged application process needs to serve queries again."""
+    pool = await db.init_db_pool()
+    try:
+        async def query():
+            async with pool.acquire() as conn:
+                return await conn.fetchval("SELECT pg_backend_pid()")
+        before = await asyncio.gather(*[query() for _ in range(3)])
+        Path(os.environ["SMOKE_READY"]).write_text("ready")
+        deadline = time.monotonic() + 180
+        while not Path(os.environ["SMOKE_GO"]).exists():
+            if time.monotonic() > deadline:
+                raise SystemExit("restart signal never came")
+            await asyncio.sleep(0.2)
+        started, errors = time.monotonic(), []
+        while True:
+            try:
+                await query()
+                break
+            except (asyncpg.PostgresError, OSError, asyncpg.InterfaceError) as exc:
+                errors.append(type(exc).__name__)
+                if time.monotonic() - started > 60:
+                    raise
+                await asyncio.sleep(0.25)
+        recovered = round(time.monotonic() - started, 2)
+        after = await asyncio.gather(*[query() for _ in range(4)])
+        print(json.dumps({"recovered_seconds": recovered, "failed_attempts": len(errors), "errors": sorted(set(errors)),
+                          "new_backends": not set(after) & set(before), "queries_after_restart": len(after)}))
+    finally:
+        await db.close_db_pool()
 
 async def main():
     from app.core import db
     from app.core.database_policy import DatabasePolicyError, POSTURE_SQL
     from app.core.db import _apply_rls_context
     mode, tenants, campaigns = sys.argv[1], json.loads(os.environ["SMOKE_TENANTS"]), json.loads(os.environ["SMOKE_CAMPAIGNS"])
+    if mode == "resilience":
+        await survive_restart(db)
+        return
     if mode == "expect_refusal":
         try:
             await db.init_db_pool()
@@ -165,6 +209,30 @@ asyncio.run(main())
 '''
 
 
+COST_LEDGER_SMOKE = r'''
+import asyncio, json, os
+from app.core import db
+from app.domain.services import provider_cost_ledger as ledger
+
+async def main():
+    pool = await db.init_db_pool()
+    try:
+        for unit in ("tokens_in", "tokens_out"):
+            ledger.record(ledger.CostEvent(tenant_id=os.environ["SMOKE_TENANT"], provider="groq", provider_role="llm",
+                                           unit=unit, quantity=12.5, cost_usd=0.0001))
+        written = await ledger._flush_once(pool)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                rows = await conn.fetchval("SELECT count(*) FROM tenant_provider_cost_events")
+        print(json.dumps({"written": written, "rows": rows, "buffered": ledger.buffer_size()}))
+    finally:
+        await db.close_db_pool()
+
+asyncio.run(main())
+'''
+
+
 class Rehearsal:
     def __init__(self, bin_dir: Path, work: Path, python: str):
         self.bin_dir, self.work, self.python = bin_dir, work, python
@@ -213,7 +281,7 @@ class Rehearsal:
         env = {k: v for k, v in os.environ.items() if not k.startswith("PG") and "DATABASE_URL" not in k}
         env["PGPASSFILE"] = str(self.pgpass)
         result = subprocess.run([self.python, str(TOOLS / script), *args], capture_output=True, text=True,
-                                encoding="utf-8", env=env, timeout=1200, stdin=subprocess.DEVNULL)
+                                encoding="utf-8", errors="replace", env=env, timeout=1200, stdin=subprocess.DEVNULL)
         if result.returncode not in ok_codes:
             raise AssertionError(f"{script} exit {result.returncode}: {result.stdout[-1500:]} {result.stderr[-1500:]}")
         return result
@@ -223,7 +291,7 @@ class Rehearsal:
         env.update({"PYTHONPATH": str(BACKEND), "ENVIRONMENT": "development"})
         env.update(env_extra)
         result = subprocess.run([self.python, *args], cwd=BACKEND, capture_output=True, text=True,
-                                encoding="utf-8", env=env, timeout=timeout, stdin=subprocess.DEVNULL)
+                                encoding="utf-8", errors="replace", env=env, timeout=timeout, stdin=subprocess.DEVNULL)
         if result.returncode:
             raise AssertionError(f"backend command failed ({result.returncode}): {result.stdout[-2000:]} {result.stderr[-3000:]}")
         return result
@@ -335,7 +403,7 @@ class Rehearsal:
         print("== external database server (TLS only, allow-listed, non-superuser admin)", flush=True)
         self.certificates()
         data, port = self.cluster("external", "bootstrap_superuser")
-        self.ext_port = port
+        self.ext_port, self.ext_data = port, data
         self.start(data)
         boot = self.service("ext_bootstrap", port, "postgres", "bootstrap_superuser", tls=False)
         admin_pw = roles_tool.scram_verifier(self.secret(str(port), "managed_admin"))
@@ -372,6 +440,25 @@ class Rehearsal:
         except recovery.RecoveryError:
             self.check(True, "external server refuses a plaintext connection (hostnossl reject)")
 
+    def preflight(self) -> None:
+        print("== preflight of the external server before the window (read-only)", flush=True)
+        common = ["--service-file", str(self.services), "--bin-dir", str(self.bin_dir), "--allow-local-plaintext",
+                  "--target-service", "ext_admin", "--source-service", "legacy_app", "--database", "talkyai"]
+        result = json.loads(self.tool("preflight.py", *common, "--receipt", str(self.work / "receipts" / "preflight.json")).stdout)
+        statuses = {name: check["status"] for name, check in result["checks"].items()}
+        print("     preflight: " + json.dumps(statuses), flush=True)
+        self.check(result["status"] == "passed" and set(statuses.values()) == {"ok"},
+                   f"preflight passes: version, TLS, non-superuser admin, {result['checks']['connection_capacity']['detail']}, "
+                   f"extensions, collation, round trip {result['observations']['round_trip']['p95_ms']} ms p95, "
+                   "forced row-level security in the source")
+        self.recommended_limit = result["recommendations"]["runtime_connection_limit"]
+        refused = self.tool("preflight.py", *common, "--pool-budget", "1000", "--receipt",
+                            str(self.work / "receipts" / "preflight-oversized.json"), ok_codes=(1,))
+        verdict = json.loads(refused.stdout)
+        self.check(verdict["status"] == "failed" and verdict["checks"]["connection_capacity"]["status"] == "fail",
+                   "preflight refuses a server too small for the application's connection budget")
+        self.check(self.fingerprint(self.legacy_super) == self.before, "legacy database unchanged after the preflight")
+
     def cut_over(self) -> None:
         print("== cut-over: load the verified bundle into the external server", flush=True)
         started = time.monotonic()
@@ -383,10 +470,15 @@ class Rehearsal:
         self.ext_db_admin = self.service("ext_db_admin", self.ext_port, "talkyai", "managed_admin", tls=True)
         passwords = {role: self.password_file(str(self.ext_port), role) for role in (ROLES.owner, ROLES.runtime, ROLES.backup)}
         applied = roles_tool.apply(self.pg, self.ext_db_admin, ROLES, "talkyai", from_owner=None,
-                                   passwords=passwords, backup_bypassrls=False)
+                                   passwords=passwords, backup_bypassrls=False,
+                                   runtime_connection_limit=self.recommended_limit)
         self.timings["cutover_seconds"] = round(time.monotonic() - started, 1)
         self.check(applied["status"] == "passed" and sorted(applied["passwords_set"]) == sorted(passwords),
                    "role passwords set as client-side SCRAM verifiers; verification still passes")
+        limit = applied["observations"]["roles"][ROLES.runtime]["connection_limit"]
+        self.check(limit == self.recommended_limit,
+                   f"runtime role capped at the preflight's recommended {limit} connections, so a leaking pool "
+                   "cannot lock out backups, monitoring or an operator")
         self.check(self.fingerprint(self.legacy_super) == self.before, "legacy database unchanged after the cut-over")
 
     def migrations(self) -> None:
@@ -433,6 +525,90 @@ class Rehearsal:
         self.check(refused["refused"] and "owns" in refused["reason"],
                    "the application refuses to boot as the owner role when the restricted role is required")
 
+    def cost_ledger(self) -> None:
+        print("== provider cost ledger writes as the restricted role under forced row-level security", flush=True)
+        # The table comes from a standalone SQL file outside the Alembic lineage;
+        # created here as the owner, exactly as production may hold it, then dropped.
+        owner = self.service("ext_owner", self.ext_port, "talkyai", ROLES.owner, tls=True)
+        ddl = (BACKEND / "database" / "migrations" / "20260505_add_tenant_provider_cost_events.sql").read_text(encoding="utf-8")
+        self.sql(owner, ddl + "\nALTER TABLE tenant_provider_cost_events FORCE ROW LEVEL SECURITY;\n", readonly=False)
+        try:
+            script = self.work / "cost_ledger_smoke.py"
+            script.write_text(COST_LEDGER_SMOKE, encoding="utf-8")
+            env = {"DATABASE_URL": self.dsn(self.ext_port, "talkyai", ROLES.runtime, tls=True), "ENVIRONMENT": "production",
+                   "DATABASE_REQUIRE_RESTRICTED_ROLE": "true", "SMOKE_TENANT": TENANTS["a"],
+                   "PG_POOL_MIN_SIZE": "1", "PG_POOL_MAX_SIZE": "2"}
+            out = json.loads(self.backend([str(script)], env).stdout.strip().splitlines()[-1])
+        finally:
+            self.sql(owner, "DROP TABLE tenant_provider_cost_events;", readonly=False)
+        self.check(out == {"written": 2, "rows": 2, "buffered": 0},
+                   "the provider cost ledger flushes as talklee_app into a FORCE row-level-security table "
+                   "(batched INSERT; PostgreSQL refuses COPY FROM whenever row-level security applies)")
+
+    def resilience(self) -> None:
+        print("== the running application survives a database restart (provider maintenance, failover)", flush=True)
+        script, ready, go = self.work / "app_smoke.py", self.work / "smoke-ready", self.work / "smoke-go"
+        env = {k: v for k, v in os.environ.items() if not k.startswith("PG") and "DATABASE_URL" not in k}
+        env.update({"PYTHONPATH": str(BACKEND), "ENVIRONMENT": "production", "DATABASE_REQUIRE_RESTRICTED_ROLE": "true",
+                    "DATABASE_URL": self.dsn(self.ext_port, "talkyai", ROLES.runtime, tls=True),
+                    "SMOKE_TENANTS": "{}", "SMOKE_CAMPAIGNS": "{}", "SMOKE_READY": str(ready), "SMOKE_GO": str(go),
+                    "PG_POOL_MIN_SIZE": "2", "PG_POOL_MAX_SIZE": "4"})
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            process = subprocess.Popen([self.python, str(script), "resilience"], cwd=BACKEND, env=env,
+                                       stdout=out, stderr=err, stdin=subprocess.DEVNULL)
+            try:
+                deadline = time.monotonic() + 180
+                while not ready.exists():
+                    if process.poll() is not None or time.monotonic() > deadline:
+                        raise AssertionError("application pool did not start for the restart test")
+                    time.sleep(0.2)
+                started = time.monotonic()
+                self.stop(self.ext_data)
+                self.start(self.ext_data)
+                self.timings["database_restart_seconds"] = round(time.monotonic() - started, 1)
+                go.write_text("go", encoding="utf-8")
+                process.wait(timeout=180)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+            out.seek(0)
+            err.seek(0)
+            stdout, stderr = out.read().decode("utf-8", "replace"), err.read().decode("utf-8", "replace")
+        if process.returncode:
+            raise AssertionError("restart test failed: " + stdout[-1000:] + stderr[-2000:])
+        result = json.loads(stdout.strip().splitlines()[-1])
+        print("     restart: " + json.dumps(result), flush=True)
+        self.timings["application_recovered_after_restart_seconds"] = result["recovered_seconds"]
+        self.check(result["queries_after_restart"] == 4 and result["new_backends"],
+                   f"the same application process served queries {result['recovered_seconds']} s after the server came "
+                   f"back from a restart, on fresh connections, without being restarted "
+                   f"({result['failed_attempts']} failed attempts while reconnecting)")
+
+    def rotation(self) -> None:
+        print("== rotating the runtime role's password", flush=True)
+        old_password = self.passwords[(str(self.ext_port), ROLES.runtime)]
+        new_password = secrets.token_urlsafe(30)
+        new_file = self.work / "secrets" / "talklee_app-rotated.txt"
+        new_file.write_text(new_password + "\n", encoding="utf-8")
+        receipt = json.loads(self.tool("roles.py", "--service-file", str(self.services), "--bin-dir", str(self.bin_dir),
+                                       "rotate-password", "--service", "ext_db_admin", "--database", "talkyai",
+                                       "--role", ROLES.runtime, "--password-file", str(new_file),
+                                       "--receipt", str(self.work / "receipts" / "rotate.json")).stdout)
+        self.check(receipt["status"] == "passed" and receipt["new_password_login"] and old_password not in json.dumps(receipt)
+                   and new_password not in json.dumps(receipt),
+                   "rotate-password changed only the runtime password and proved the new one logs in (no secret in the receipt)")
+        runtime = self.service("ext_runtime", self.ext_port, "talkyai", ROLES.runtime, tls=True)
+        try:
+            self.sql(runtime, "SELECT 1;")
+            raise AssertionError("the old runtime password still logs in")
+        except recovery.RecoveryError:
+            self.check(True, "the old runtime password is refused after rotation")
+        self.passwords[(str(self.ext_port), ROLES.runtime)] = new_password
+        self.secret(str(self.ext_port), ROLES.runtime)
+        out = self.app_smoke(self.ext_port, "talkyai", "readonly", "app after rotation")
+        self.check(out["posture"]["role"] == ROLES.runtime and out["worker_bypass_campaigns"] == sum(CAMPAIGNS.values()),
+                   "the application boots and reads with the new runtime password")
+
     def backups(self) -> None:
         print("== automated backups of the external database: replica + retention", flush=True)
         backup = self.service("ext_backup", self.ext_port, "talkyai", ROLES.backup, tls=True)
@@ -443,9 +619,19 @@ class Rehearsal:
         self.timings["external_backup_seconds"] = round(time.monotonic() - started, 1)
         self.check(first["inventory"]["table_counts"] == self.before["inventory"]["table_counts"],
                    "backup role (verify-full TLS, app.bypass_rls) captures every row from the external server")
-        copy = recovery.replicate(root / "20261028T020000Z", replica)
-        self.check(copy["status"] == "replica_verified" and copy["sha256"] == first["sha256"],
-                   "bundle copied to the off-host replica root and verified byte-for-byte")
+        passphrase = self.work / "secrets" / "backup-replica.passphrase"
+        passphrase.write_text(secrets.token_urlsafe(32) + "\n", encoding="utf-8")
+        gpg_path = shutil.which("gpg") or r"C:\Program Files\Git\usr\bin\gpg.exe"
+        self.gpg = recovery.Gpg(passphrase, gpg_path)
+        copy = recovery.replicate(root / "20261028T020000Z", replica, self.gpg)
+        replica_files = sorted(path.name for path in (replica / "20261028T020000Z").iterdir())
+        self.check(copy["status"] == "replica_verified" and copy["encrypted"] and copy["sha256"] == first["sha256"]
+                   and "database.dump" not in replica_files,
+                   "bundle copied off-host only as AES-256 ciphertext, proven to decrypt to the original archive")
+        self.check(recovery.health(replica, 26)["status"] == "passed"
+                   and recovery.prune(replica, 30, 1, False)["kept"] == ["20261028T020000Z"],
+                   "retention and health checks work on the encrypted off-host root without the passphrase")
+        self.replica_bundle = replica / "20261028T020000Z"
         aged = root / "20260901T020000Z"
         shutil.copytree(root / "20261028T020000Z", aged)
         receipt = json.loads((aged / "receipt.json").read_text(encoding="utf-8"))
@@ -459,7 +645,15 @@ class Rehearsal:
         self.ext_bundle = root / "20261028T020000Z"
 
     def restore_drill(self) -> None:
-        print("== restore drill on a separate cluster, then the application on the restored copy", flush=True)
+        print("== restore drill from the off-host copy on a separate cluster, then the application on it", flush=True)
+        # The drill starts from what survives losing both servers: the encrypted off-host replica.
+        started_decrypt = time.monotonic()
+        fetched = self.work / "fetched-from-offhost" / self.replica_bundle.name
+        decrypted = recovery.decrypt_replica(self.replica_bundle, fetched, self.gpg)
+        self.timings["offhost_decrypt_seconds"] = round(time.monotonic() - started_decrypt, 1)
+        self.check(decrypted["status"] == "bundle_verified" and decrypted["sha256"] == recovery.verify_bundle(self.ext_bundle)["sha256"],
+                   "off-host replica decrypted with the escrowed passphrase into a verified bundle identical to the original")
+        self.ext_bundle = fetched
         data, port = self.cluster("recovery", "restore_operator")
         self.start(data)
         operator = self.service("restore_admin", port, "postgres", "restore_operator", tls=False)
@@ -493,7 +687,7 @@ class Rehearsal:
     def point_in_time(self) -> None:
         print("== point-in-time recovery on the external server (TLS replication)", flush=True)
         replication = self.service("ext_replication", self.ext_port, "postgres", "talklee_replication", tls=True)
-        base = self.work / "pitr-base"
+        base = self.work / "pitr-base" / "20261028T030000Z"
         receipt = json.loads(self.tool("pitr.py", "base-backup", "--service-file", str(self.services), "--service",
                                        replication.name, "--destination", str(base), "--bin-dir", str(self.bin_dir)).stdout)
         self.check(receipt["status"] == "verified", "base backup over verify-full TLS replication published and checksummed")
@@ -514,6 +708,15 @@ class Rehearsal:
             if time.monotonic() > deadline:
                 raise AssertionError("WAL segment was not archived")
             time.sleep(1)
+        # Retention before the restore: the pruned archive must still reach the target.
+        before = {path.name for path in self.archive.iterdir()}
+        pruned = json.loads(self.tool("pitr.py", "prune", "--base-root", str(base.parent), "--archive-dir",
+                                      str(self.archive), "--keep", "1").stdout)
+        self.check(pruned["kept"] == [base.name] and pruned["deleted_segments"] >= 1
+                   and (self.archive / pruned["oldest_needed_segment"]).exists()
+                   and pruned["oldest_needed_segment"] in before,
+                   f"WAL retention removed {pruned['deleted_segments']} segments older than the base backup's start "
+                   f"({pruned['oldest_needed_segment']}, a real archived file name) and kept the rest")
         restored, port = self.work / "pitr-restored", free_port()
         self.clusters.append(restored)
         started = time.monotonic()
@@ -566,9 +769,11 @@ def main() -> int:
     started = time.monotonic()
     status = "failed"
     try:
-        for stage in (rehearsal.legacy, rehearsal.source_backup, rehearsal.external, rehearsal.cut_over,
-                      rehearsal.migrations, rehearsal.application, rehearsal.backups, rehearsal.restore_drill,
-                      rehearsal.point_in_time, rehearsal.monitoring, rehearsal.final):
+        for stage in (rehearsal.legacy, rehearsal.source_backup, rehearsal.external, rehearsal.preflight,
+                      rehearsal.cut_over, rehearsal.migrations, rehearsal.application, rehearsal.cost_ledger,
+                      rehearsal.resilience,
+                      rehearsal.rotation, rehearsal.backups, rehearsal.restore_drill, rehearsal.point_in_time,
+                      rehearsal.monitoring, rehearsal.final):
             stage()
         status = "passed"
     finally:

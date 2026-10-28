@@ -19,6 +19,47 @@ sslmode=verify-full
 sslrootcert=/etc/talklee/secrets/database-ca.pem
 connect_timeout=10
 
+# The new server's administrator (managed provider admin or the dedicated
+# server's admin role: CREATEROLE + CREATEDB, not a superuser). Used only by
+# preflight.py, cutover.py and roles.py during preparation and the cut-over.
+[talklee_admin]
+host=database.example.invalid
+port=5432
+dbname=postgres
+user=talklee_dbadmin
+sslmode=verify-full
+sslrootcert=/etc/talklee/secrets/database-ca.pem
+connect_timeout=10
+
+[talklee_admin_db]
+host=database.example.invalid
+port=5432
+dbname=talkyai
+user=talklee_dbadmin
+sslmode=verify-full
+sslrootcert=/etc/talklee/secrets/database-ca.pem
+connect_timeout=10
+
+# Today's database (the Docker container on this server), read-only source for
+# the cut-over. Loopback only; the tools need --allow-local-plaintext for it.
+[talklee_source]
+host=127.0.0.1
+port=5432
+dbname=talkyai
+user=talkyai
+sslmode=disable
+connect_timeout=10
+
+# Dedicated server only: base backups for point-in-time recovery (pitr.py).
+[talklee_replication]
+host=database.example.invalid
+port=5432
+dbname=postgres
+user=talklee_replication
+sslmode=verify-full
+sslrootcert=/etc/talklee/secrets/database-ca.pem
+connect_timeout=10
+
 # A disposable test host, with a privileged restore operator. This is not the
 # application runtime credential. Provision the restricted probe role there.
 [talklee_restore]

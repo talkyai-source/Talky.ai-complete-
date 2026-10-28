@@ -30,8 +30,10 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shutil
 import string
 import sys
+import tempfile
 
 import recovery
 from recovery import RecoveryError, identifier
@@ -164,7 +166,7 @@ def verify_sql(roles: Roles, database: str) -> str:
 SELECT json_build_object(
  'roles', (SELECT json_object_agg(rolname, json_build_object('login', rolcanlogin, 'superuser', rolsuper,
             'bypass_rls', rolbypassrls, 'create_role', rolcreaterole, 'create_database', rolcreatedb,
-            'replication', rolreplication)) FROM pg_roles WHERE rolname IN ({o}, {a}, {b})),
+            'replication', rolreplication, 'connection_limit', rolconnlimit)) FROM pg_roles WHERE rolname IN ({o}, {a}, {b})),
  'database_owner', (SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname={d}),
  'schema_owner', (SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname='public'),
  'objects', (SELECT count(*) {objects}),
@@ -234,8 +236,47 @@ def verify(pg: recovery.Postgres, service: recovery.Service, roles: Roles, datab
                     backup_bypassrls=backup_bypassrls)
 
 
+def connection_limit_sql(role: str, limit: int) -> str:
+    if not 1 <= limit <= 10000:
+        raise RecoveryError("a connection limit must be between 1 and 10000")
+    return f"ALTER ROLE {identifier(role)} CONNECTION LIMIT {int(limit)};\n"
+
+
+def _pgpass_field(value: str) -> str:
+    return value.replace("\\", "\\\\").replace(":", "\\:")
+
+
+def rotate_password(pg: recovery.Postgres, service: recovery.Service, roles: Roles, role: str,
+                    password_file: Path, database: str) -> dict:
+    """Change one managed role's password and nothing else (no grants, no
+    ownership, no locks on application tables), then prove the new password
+    logs in over the administrator's endpoint and TLS settings. Connections
+    already open keep working; new ones need the new password."""
+    identifier(database)
+    if role not in (roles.owner, roles.runtime, roles.backup):
+        raise RecoveryError("only the three managed roles can be rotated here")
+    password = read_password(password_file)
+    exists = pg.json(service, f"SELECT json_build_object('exists', count(*) = 1) FROM pg_roles WHERE rolname={_literal(role)};")
+    if not exists["exists"]:
+        raise RecoveryError("the role does not exist; provision it with apply first")
+    pg.sql(service, password_sql(role, scram_verifier(password)), readonly=False)
+    work = Path(tempfile.mkdtemp(prefix="talklee-rotate-"))
+    try:
+        passfile = work / "pgpass"
+        passfile.write_text(f"*:*:*:{_pgpass_field(role)}:{_pgpass_field(password)}\n", encoding="utf-8")
+        if os.name != "nt":
+            passfile.chmod(0o600)
+        login = recovery.ServiceOverride(service, PGUSER=role, PGPASSFILE=str(passfile))
+        current = pg.sql(login, "SELECT current_user;", database=database)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return {"operation": "rotate_password", "status": "passed" if current == role else "needs_attention",
+            "role": role, "database": database, "rotated_at": recovery.utcnow(), "new_password_login": current == role}
+
+
 def apply(pg: recovery.Postgres, service: recovery.Service, roles: Roles, database: str, *,
-          from_owner: str | None, passwords: dict[str, Path], backup_bypassrls: bool) -> dict:
+          from_owner: str | None, passwords: dict[str, Path], backup_bypassrls: bool,
+          runtime_connection_limit: int | None = None) -> dict:
     identifier(database)
     if from_owner:
         identifier(from_owner)
@@ -251,6 +292,7 @@ def apply(pg: recovery.Postgres, service: recovery.Service, roles: Roles, databa
             raise RecoveryError("passwords can only be set for the three managed roles")
     sql = (create_roles_sql(roles, backup_bypassrls=backup_bypassrls)
            + "".join(password_sql(name, verifier) for name, verifier in verifiers.items())
+           + (connection_limit_sql(roles.runtime, runtime_connection_limit) if runtime_connection_limit else "")
            + ownership_sql(roles, database, from_owner) + grants_sql(roles, database))
     # One transaction: a failure leaves roles, ownership and grants untouched.
     pg.sql(service, "BEGIN;\n" + sql + "COMMIT;\n", database=database, readonly=False)
@@ -267,6 +309,14 @@ def parser() -> argparse.ArgumentParser:
     commands = result.add_subparsers(dest="command", required=True)
     generate = commands.add_parser("generate-password", help="write a new random password to a new protected file")
     generate.add_argument("--output", type=Path, required=True)
+    rotate = commands.add_parser("rotate-password", help="change one managed role's password and prove it logs in")
+    rotate.add_argument("--service", required=True, help="administrator service (superuser or CREATEROLE)")
+    rotate.add_argument("--database", required=True, help="database the role logs in to for the proof")
+    rotate.add_argument("--role", required=True)
+    rotate.add_argument("--password-file", type=Path, required=True)
+    rotate.add_argument("--receipt", type=Path, required=True)
+    for role in ("owner", "runtime", "backup"):
+        rotate.add_argument(f"--{role}", default=f"talklee_{'app' if role == 'runtime' else role}")
     for name in ("plan", "apply", "verify"):
         command = commands.add_parser(name)
         command.add_argument("--database", required=True)
@@ -282,6 +332,8 @@ def parser() -> argparse.ArgumentParser:
         if name == "apply":
             for role in ("owner", "runtime", "backup"):
                 command.add_argument(f"--{role}-password-file", type=Path)
+            command.add_argument("--runtime-connection-limit", type=int,
+                                 help="cap the runtime role's connections (scripts/database/preflight.py recommends one)")
     return result
 
 
@@ -293,6 +345,16 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"operation": "generate_password", "status": "written", "file": str(args.output)}))
             return 0
         roles = Roles(args.owner, args.runtime, args.backup)
+        if args.command == "rotate-password":
+            if args.service_file is None:
+                raise RecoveryError("--service-file or PGSERVICEFILE is required")
+            if args.receipt.exists() or args.receipt.is_symlink():
+                raise RecoveryError("receipt already exists")
+            service = recovery.Service(Path(args.service_file), args.service, args.allow_local_plaintext)
+            payload = rotate_password(recovery.Postgres(args.bin_dir), service, roles, args.role, args.password_file, args.database)
+            recovery.write_json_new(args.receipt, payload)
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0 if payload["status"] == "passed" else 1
         if args.command == "plan":
             print(create_roles_sql(roles, backup_bypassrls=args.backup_bypassrls)
                   + ownership_sql(roles, args.database, args.from_owner) + grants_sql(roles, args.database))
@@ -308,7 +370,8 @@ def main(argv: list[str] | None = None) -> int:
                                                        (roles.runtime, args.runtime_password_file),
                                                        (roles.backup, args.backup_password_file)) if path}
             payload = apply(pg, service, roles, args.database, from_owner=args.from_owner,
-                            passwords=passwords, backup_bypassrls=args.backup_bypassrls)
+                            passwords=passwords, backup_bypassrls=args.backup_bypassrls,
+                            runtime_connection_limit=args.runtime_connection_limit)
         else:
             payload = verify(pg, service, roles, args.database, backup_bypassrls=args.backup_bypassrls)
         recovery.write_json_new(args.receipt, payload)

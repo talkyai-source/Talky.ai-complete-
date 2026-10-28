@@ -3,7 +3,9 @@
 then copy it to the off-host replica root and apply the retention policy.
 
 Retention runs only after a successful backup, and the replica is written
-before pruning, so a failing schedule never deletes the last good archive."""
+before pruning, so a failing schedule never deletes the last good archive.
+The replica leaves this server encrypted (--replica-passphrase-file) unless
+--allow-unencrypted-replica is given for storage that encrypts by itself."""
 from __future__ import annotations
 
 import argparse
@@ -16,21 +18,28 @@ import sys
 import recovery
 
 
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(description=__doc__)
+    result.add_argument("--service-file", type=Path, required=True)
+    result.add_argument("--service", default="talklee_backup")
+    result.add_argument("--backup-root", type=Path, required=True)
+    result.add_argument("--minimum-bytes", type=int, default=1048576)
+    result.add_argument("--minimum-ratio", type=float, default=.5)
+    result.add_argument("--rls-bypass-guc", action="store_true")
+    result.add_argument("--rls-setting", action="append", default=[], metavar="app.NAME=VALUE")
+    result.add_argument("--replica-root", type=Path, help="off-host mount that receives a verified copy")
+    recovery.add_encryption_arguments(result, "--replica-passphrase-file", "--allow-unencrypted-replica")
+    result.add_argument("--keep-days", type=float, default=30)
+    result.add_argument("--keep-minimum", type=int, default=7)
+    return result
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--service-file", type=Path, required=True)
-    parser.add_argument("--service", default="talklee_backup")
-    parser.add_argument("--backup-root", type=Path, required=True)
-    parser.add_argument("--minimum-bytes", type=int, default=1048576)
-    parser.add_argument("--minimum-ratio", type=float, default=.5)
-    parser.add_argument("--rls-bypass-guc", action="store_true")
-    parser.add_argument("--rls-setting", action="append", default=[], metavar="app.NAME=VALUE")
-    parser.add_argument("--replica-root", type=Path, help="off-host mount that receives a verified copy")
-    parser.add_argument("--keep-days", type=float, default=30)
-    parser.add_argument("--keep-minimum", type=int, default=7)
-    args = parser.parse_args()
+    args = parser().parse_args()
     lock = None
     try:
+        # Checked before the backup runs, so a misconfigured copy never costs a dump.
+        gpg = recovery.replica_encryption(args) if args.replica_root else None
         if os.name != "posix":
             raise recovery.RecoveryError("scheduled entry point requires Linux advisory file locking")
         import fcntl
@@ -48,7 +57,7 @@ def main() -> int:
                                   recovery.parse_rls_settings(args.rls_setting))
         result = {"backup": receipt}
         if args.replica_root:
-            result["replica"] = recovery.replicate(args.backup_root / stamp, args.replica_root)
+            result["replica"] = recovery.replicate(args.backup_root / stamp, args.replica_root, gpg)
             result["replica_retention"] = recovery.prune(args.replica_root, args.keep_days, args.keep_minimum, False)
         result["retention"] = recovery.prune(args.backup_root, args.keep_days, args.keep_minimum, False)
         print(json.dumps(result, indent=2, sort_keys=True))

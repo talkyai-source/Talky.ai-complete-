@@ -461,6 +461,27 @@ jobs:
       - name: Validate telephony routing, admission, and rollback contracts
         run: python telephony/tests/test_telephony_stack.py
 
+  database-tools:
+    name: Database Separation & Recovery Tools
+    runs-on: ubuntu-latest
+    needs: [secret-scan, secret-guard]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Roles, cut-over, preflight, backup, encrypted replica, PITR and monitor tests
+        # Standard library plus the runner's gpg; no database. Run on Linux
+        # because the protected-file rules (mode 0600) only apply on POSIX.
+        working-directory: scripts/database
+        run: |
+          gpg --version | head -1
+          python -m unittest discover -s tests -p "test_*.py"
+
   # ──────────────────────────────────────────────────────────────────
   # Docker: build + image vulnerability scan (Trivy)
   # ──────────────────────────────────────────────────────────────────
