@@ -97,6 +97,13 @@ The production API requires `DEEPGRAM_API_KEY`, `CARTESIA_API_KEY` and
 before installation; it does not contact the providers or verify that their
 credentials work. Supply approved credentials for the designated environment
 and retain real provider/call acceptance separately.
+Set `TOTP_ENCRYPTION_KEY` to the application's retained Fernet key so existing
+administrator/user MFA secrets remain decryptable. A genuinely new environment
+needs a new, distinct Fernet key generated privately with the existing
+`cryptography.fernet.Fernet.generate_key()` utility and transferred directly to
+the protected runtime environment. Preflight requires a valid URL-safe base64
+encoding of 32 bytes. Never replace the key to resolve a bootstrap error or when
+restoring existing MFA data: that would make the saved factors unreadable.
 The runtime file must not contain `MIGRATION_DATABASE_URL`. The frontend files
 contain public build settings only; never put service credentials in
 `NEXT_PUBLIC_*` or `VITE_*` variables. Paid-use acceptance requires the approved
@@ -187,6 +194,14 @@ writes with the real runtime role and populated own/foreign-tenant fixtures to
 verify permissions and tenant isolation. Review bootstrap plan/catalog data
 against the approved billing configuration; schema seeds are not proof of a
 working Stripe subscription or a configured administrator account.
+
+For a new database without an administrator, use the supported
+[first-administrator procedure](../../docs/operations/FIRST-ADMIN.md) after
+the application environment and migration owner are ready. It requires an
+operator-owned mailbox, private password and verified enrolled authenticator;
+the account and MFA/audit records are saved together. It refuses any existing
+administrator or existing-email promotion. Restored installations retain their
+existing administrator and MFA credentials instead of running bootstrap again.
 
 Only after these checks set `database_prepared=true`. If restored data is used,
 also preserve media and encryption keys and resolve pending jobs before starting

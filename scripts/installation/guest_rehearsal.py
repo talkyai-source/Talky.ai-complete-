@@ -12,12 +12,16 @@ import json
 import os
 from pathlib import Path
 import secrets
+import re
 import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 INPUTS = Path('/root/talklee-rehearsal-inputs')
 MARKER = Path('/etc/talklee-disposable-installer-vm')
+UNITS = ('talky-api', 'talky-voice-gateway', 'talky-voice-worker', 'talky-dialer-worker',
+         'talky-reminder-worker', 'talky-dashboard', 'talky-redis', 'asterisk', 'nginx',
+         'talky-trunk-status', 'talky-asterisk-reconcile', 'talky-healthwatch')
 
 
 def run(*args):
@@ -28,6 +32,35 @@ def private(path, content):
     with path.open('x', encoding='utf-8') as handle:
         path.chmod(0o600)
         handle.write(content)
+
+
+def diagnose():
+    """Sanitized synthetic-VM service failures, never an arbitrary host reader."""
+    if os.geteuid() != 0 or not MARKER.is_file():
+        raise RuntimeError('Only the marked disposable VM can be diagnosed')
+    payload = json.loads((INPUTS / 'fixture.json').read_text())
+    if MARKER.read_text().strip() != payload['token']:
+        raise RuntimeError('Disposable VM identity mismatch')
+    from urllib.parse import unquote, urlsplit
+    secret_values = [payload['runtime_url'], unquote(urlsplit(payload['runtime_url']).password or '')]
+    for line in (INPUTS / 'prepared/backend.env').read_text().splitlines():
+        if '=' in line:
+            key, value = line.split('=', 1)
+            if any(part in key for part in ('KEY', 'TOKEN', 'PASSWORD', 'SECRET', '_URL', 'EMAIL_PASS')):
+                secret_values.append(value.strip('"\''))
+    result = {}
+    for unit in UNITS:
+        state = subprocess.run(['systemctl', 'show', unit, '--property=ActiveState,SubState,Result,ExecMainStatus,User,Group'],
+                               capture_output=True, text=True, timeout=10)
+        journal = subprocess.run(['journalctl', '-u', unit, '-n', '35', '--no-pager', '-o', 'cat'],
+                                 capture_output=True, text=True, timeout=10)
+        text = journal.stdout[-12000:]
+        for value in sorted(set(secret_values), key=len, reverse=True):
+            if len(value) >= 8:
+                text = text.replace(value, '[redacted synthetic credential]')
+        text = re.sub(r'(?:postgres(?:ql)?|redis)://\S+', '[redacted connection]', text)
+        result[unit] = {'state': state.stdout.strip(), 'sanitized_journal': text}
+    print(json.dumps(result))
 
 
 def main():
@@ -101,4 +134,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    if sys.argv[1:] == ['--diagnose']:
+        diagnose()
+    else:
+        main()

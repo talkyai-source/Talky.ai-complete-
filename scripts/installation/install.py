@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import base64
 import configparser
 import hashlib
 import ipaddress
@@ -37,6 +38,18 @@ PACKAGES = ('asterisk', 'build-essential', 'ca-certificates', 'cmake', 'curl',
             'python3.12-dev', 'python3.12-venv', 'ufw', 'xz-utils')
 SERVICES = ('talky-api', 'talky-voice-worker', 'talky-dialer-worker',
             'talky-reminder-worker', 'talky-voice-gateway')
+# Operator oneshots retain a different OS identity from application code.
+# In particular, an API process must not be able to read a migration process's
+# privileged database environment through a shared UID.
+OPERATOR_SERVICES = frozenset({'talky-migrate', 'talky-asterisk-reconcile',
+                               'talky-db-backup', 'talky-inbound-synthetic'})
+SYSTEMCTL_DIAGNOSTIC_UNITS = frozenset({
+    'asterisk', 'docker', 'nginx', 'talky-redis', 'talky-dashboard',
+    'talky-trunk-status', *SERVICES,
+    *(unit + '.service' for unit in ('asterisk', 'docker', 'nginx', 'talky-redis',
+                                   'talky-dashboard', 'talky-trunk-status', *SERVICES)),
+    'talky-healthwatch.timer', 'talky-trunk-status.timer', 'talky-asterisk-reconcile.timer',
+})
 AST_FILES = ('asterisk.conf', 'pjsip.conf', 'extensions.conf', 'http.conf',
              'ari.conf', 'rtp.conf', 'modules.conf')
 SECRET_FIELDS = ('backend_env_file', 'tls_private_key_file')
@@ -239,12 +252,19 @@ def validate_config(config: dict, *, inputs: bool = False) -> dict:
     # before apply mutates the host. This does not verify provider credentials.
     for name in ('DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'SECRET_KEY',
                  'DEEPGRAM_API_KEY', 'CARTESIA_API_KEY', 'GROQ_API_KEY',
-                 'CONNECTOR_ENCRYPTION_KEY', 'SECRETS_MASTER_KEY', 'TELEPHONY_METRICS_TOKEN', 'INTERNAL_SERVICE_TOKEN',
+                 'CONNECTOR_ENCRYPTION_KEY', 'TOTP_ENCRYPTION_KEY', 'SECRETS_MASTER_KEY', 'TELEPHONY_METRICS_TOKEN', 'INTERNAL_SERVICE_TOKEN',
                  'VOICE_GATEWAY_AUTH_TOKEN', 'BACKEND_INTERNAL_URL',
                  'VOICE_GATEWAY_CALLBACK_HOST', 'ASTERISK_ARI_USER',
                  'ASTERISK_ARI_PASSWORD', 'FRONTEND_URL', 'API_BASE_URL'):
         require(bool(env.get(name, '').strip()) and 'REPLACE' not in env[name] and 'change_me' not in env[name],
                 f'Configure backend {name}')
+    totp_key = env['TOTP_ENCRYPTION_KEY']
+    require(re.fullmatch(r'[A-Za-z0-9_-]{43}=', totp_key) is not None,
+            'TOTP_ENCRYPTION_KEY must be a URL-safe base64 Fernet key encoding exactly 32 bytes')
+    decoded_totp_key = base64.b64decode(totp_key, altchars=b'-_', validate=True)
+    require(len(decoded_totp_key) == 32 and
+            base64.urlsafe_b64encode(decoded_totp_key).decode('ascii') == totp_key,
+            'TOTP_ENCRYPTION_KEY must be a URL-safe base64 Fernet key encoding exactly 32 bytes')
     require(env.get('ENVIRONMENT') == 'production', 'ENVIRONMENT must be production')
     validate_production_gate_inputs(env, rows)
     require(env['FRONTEND_URL'] == f"https://{config['dashboard_domain']}" and
@@ -380,13 +400,31 @@ def steps(config: dict) -> list[str]:
     ]
 
 
+def systemctl_diagnostic(args: list[str]) -> str:
+    """Expose only the installer's fixed actions and reviewed service names."""
+    if args == ['systemctl', 'daemon-reload']:
+        return 'systemctl daemon-reload'
+    if len(args) < 4 or args[0] != 'systemctl':
+        return ''
+    if tuple(args[1:3]) not in {('enable', '--now'), ('disable', '--now'), ('is-active', '--quiet')}:
+        return ''
+    units = args[3:]
+    if len(units) > len(SYSTEMCTL_DIAGNOSTIC_UNITS) or any(
+            not isinstance(unit, str)
+            or re.fullmatch(r'[a-z0-9][a-z0-9-]*(?:\.(?:service|timer))?', unit) is None
+            or unit not in SYSTEMCTL_DIAGNOSTIC_UNITS for unit in units):
+        return ''
+    return ' '.join(args)
+
+
 def run(args: list[str], *, cwd: Path | None = None, env: dict | None = None,
         capture: bool = False) -> str:
     # Capture rather than echo commands/environment: package tools may reveal URLs.
     result = subprocess.run(args, cwd=cwd, env=env, text=True, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, check=False)
     if result.returncode:
-        raise InstallError(f'{Path(args[0]).name} failed (exit {result.returncode}); '
+        command = systemctl_diagnostic(args) or Path(args[0]).name
+        raise InstallError(f'{command} failed (exit {result.returncode}); '
                            'inspect the service/package locally; command output was suppressed to protect secrets')
     return result.stdout if capture else ''
 
@@ -419,12 +457,56 @@ def require_install_umask() -> None:
             'secret files are created separately with protected modes')
 
 
-def unit_dropin(*, asterisk: bool = False) -> str:
+def unit_dropin(*, asterisk: bool = False, operator: bool = False) -> str:
+    identity = 'root' if operator else 'talky'
     return ('[Unit]\nAfter=network-online.target talky-redis.service asterisk.service\n'
             'Wants=network-online.target talky-redis.service\n[Service]\n'
-            'User=talky\nGroup=talky\n' +
+            f'User={identity}\nGroup={identity}\n' +
             ('SupplementaryGroups=asterisk\n' if asterisk else '') +
-            'UMask=0027\nNoNewPrivileges=true\nPrivateTmp=true\n')
+            ('UMask=0077\n' if operator else 'UMask=0027\n') +
+            'NoNewPrivileges=true\nPrivateTmp=true\n')
+
+
+def check_migration_identity(path: Path = Path('/etc/talky/migration.env')) -> None:
+    """Read-only preflight for the manually invoked privileged migration unit."""
+    require(getattr(os, 'geteuid', lambda: -1)() == 0,
+            'Database migrations require the root operator identity')
+    metadata = path.lstat()
+    require(stat.S_ISREG(metadata.st_mode) and metadata.st_uid == 0
+            and stat.S_IMODE(metadata.st_mode) == 0o600,
+            'migration.env must be a root-owned regular file with mode 0600')
+    values = read_env(path)
+    require(set(values) == {'MIGRATION_DATABASE_URL'} and bool(values['MIGRATION_DATABASE_URL'])
+            and os.environ.get('MIGRATION_DATABASE_URL') == values['MIGRATION_DATABASE_URL'],
+            'migration.env must contain only the loaded nonempty MIGRATION_DATABASE_URL')
+
+
+def install_service_units(backend: Path, systemd_dir: Path = Path('/etc/systemd/system')) -> None:
+    for path in (backend / 'systemd').iterdir():
+        if path.suffix in ('.service', '.timer', '.target'):
+            shutil.copyfile(path, systemd_dir / path.name)
+            if path.suffix == '.service':
+                write(systemd_dir / (path.name + '.d') / '10-fresh-host.conf',
+                      unit_dropin(asterisk=path.stem == 'talky-trunk-status',
+                                  operator=path.stem in OPERATOR_SERVICES))
+    write(systemd_dir / 'talky-migrate.service.d/20-migration-identity.conf',
+          '[Service]\nEnvironmentFile=/etc/talky/migration.env\n'
+          'ExecStartPre=/opt/talky/backend/venv/bin/python '
+          '/opt/talky/scripts/installation/install.py check-migration-identity\n')
+
+
+def start_host_services(frontend_mode: str) -> None:
+    run(['systemctl', 'daemon-reload'])
+    # The service owns its loop; this compatibility timer must stay disabled.
+    run(['systemctl', 'disable', '--now', 'talky-trunk-status.timer'])
+    run(['systemctl', 'enable', '--now', 'docker', 'talky-redis', 'asterisk'])
+    run(['systemctl', 'enable', '--now', 'talky-voice-gateway'])
+    run(['systemctl', 'enable', '--now', *SERVICES[:-1], 'talky-healthwatch.timer',
+         'talky-trunk-status.service', 'talky-asterisk-reconcile.timer', 'nginx'])
+    if frontend_mode == 'linux':
+        run(['systemctl', 'enable', '--now', 'talky-dashboard'])
+    # No automatic migration, legacy Docker DB backup, retention deletion or
+    # carrier synthetic-call schedule. Those require their own operating inputs.
 
 
 def nginx_site(config: dict) -> str:
@@ -658,16 +740,7 @@ def apply(config: dict, source: Path) -> None:
           'ExecStart=/usr/bin/docker compose -f /etc/talky/compose.yml up -d --wait\n'
           'ExecStop=/usr/bin/docker compose -f /etc/talky/compose.yml stop\n'
           '[Install]\nWantedBy=multi-user.target\n')
-    for path in (backend / 'systemd').iterdir():
-        if path.suffix in ('.service', '.timer', '.target'):
-            shutil.copyfile(path, Path('/etc/systemd/system') / path.name)
-            if path.suffix == '.service':
-                write(Path('/etc/systemd/system') / (path.name + '.d') / '10-fresh-host.conf',
-                      unit_dropin(asterisk=path.stem == 'talky-trunk-status'))
-    write(Path('/etc/systemd/system/talky-migrate.service.d/20-migration-identity.conf'),
-          '[Service]\nEnvironmentFile=/etc/talky/migration.env\n'
-          'ExecStartPre=/opt/talky/backend/venv/bin/python -c "import os,sys; '
-          "sys.exit(0 if os.environ.get('MIGRATION_DATABASE_URL') else 'MIGRATION_DATABASE_URL is required')" + '"\n')
+    install_service_units(backend)
     # Loopback bind; nginx is the only public HTTP listener.
     write(Path('/etc/systemd/system/talky-api.service.d/20-loopback.conf'),
           '[Service]\nExecStart=\nExecStart=/opt/talky/backend/venv/bin/uvicorn app.main:app '
@@ -685,14 +758,9 @@ def apply(config: dict, source: Path) -> None:
     run(['nginx', '-t'])
     configure_firewall(config)
     print('Starting services and checking readiness...', flush=True)
-    run(['systemctl', 'daemon-reload'])
-    run(['systemctl', 'enable', '--now', 'docker', 'talky-redis', 'asterisk'])
-    run(['systemctl', 'enable', '--now', 'talky-voice-gateway'])
-    run(['systemctl', 'enable', '--now', *SERVICES[:-1], 'talky-healthwatch.timer',
-         'talky-trunk-status.timer', 'nginx'])
-    if config['frontend_mode'] == 'linux':
-        run(['systemctl', 'enable', '--now', 'talky-dashboard'])
-    for unit in ('asterisk', 'nginx', 'talky-redis', *SERVICES):
+    start_host_services(config['frontend_mode'])
+    for unit in ('asterisk', 'nginx', 'talky-redis', *SERVICES,
+                 'talky-trunk-status', 'talky-asterisk-reconcile.timer', 'talky-healthwatch.timer'):
         run(['systemctl', 'is-active', '--quiet', unit])
     for url in ('http://127.0.0.1:18080/ready', 'http://127.0.0.1:8000/health',
                 'http://127.0.0.1:8000/api/v1/healthz/ready',
@@ -791,12 +859,16 @@ def install_frontends(config: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', nargs='?', choices=('plan', 'validate', 'packages', 'apply'), default='plan')
+    parser.add_argument('command', nargs='?',
+                        choices=('plan', 'validate', 'packages', 'apply', 'check-migration-identity'), default='plan')
     parser.add_argument('--config', type=Path, default=Path(__file__).with_name('install.example.json'))
     parser.add_argument('--source', type=Path, default=ROOT)
     parser.add_argument('--confirm-new-host', action='store_true')
     args = parser.parse_args(argv)
     try:
+        if args.command == 'check-migration-identity':
+            check_migration_identity()
+            return 0
         if args.command == 'packages':
             print(json.dumps(list(PACKAGES), indent=2))
             return 0

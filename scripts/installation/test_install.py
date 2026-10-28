@@ -1,10 +1,12 @@
 """Offline tests for destructive boundaries and generated installation contracts."""
+import base64
 import contextlib
 import copy
 import importlib.util
 import io
 import json
 import os
+import stat
 from pathlib import Path
 import tempfile
 import sys
@@ -57,6 +59,7 @@ class InstallerTests(unittest.TestCase):
             'REDIS_URL': 'redis://:' + 'r' * 32 + '@127.0.0.1:6379/0',
             'JWT_SECRET': 'j' * 32, 'SECRET_KEY': 's' * 32,
             'CONNECTOR_ENCRYPTION_KEY': 'e' * 44,
+            'TOTP_ENCRYPTION_KEY': base64.urlsafe_b64encode(b't' * 32).decode('ascii'),
             'SECRETS_MASTER_KEY': 'c' * 64, 'TELEPHONY_METRICS_TOKEN': 'm' * 32,
             'TELEPHONY_ADAPTER': 'asterisk', 'STRIPE_BILLING_DISABLED': '1',
             'INTERNAL_SERVICE_TOKEN': 'i' * 32, 'VOICE_GATEWAY_AUTH_TOKEN': 'g' * 32,
@@ -137,7 +140,7 @@ class InstallerTests(unittest.TestCase):
         self.write_env()
 
     def test_missing_production_secrets_fail_before_apply(self):
-        for key in ('SECRETS_MASTER_KEY', 'TELEPHONY_METRICS_TOKEN'):
+        for key in ('SECRETS_MASTER_KEY', 'TELEPHONY_METRICS_TOKEN', 'TOTP_ENCRYPTION_KEY'):
             original = self.env.pop(key)
             self.write_env()
             config_path = self.path / 'config.json'
@@ -147,6 +150,28 @@ class InstallerTests(unittest.TestCase):
                     self.assertEqual(installer.main(['apply', '--config', str(config_path), '--confirm-new-host']), 2)
             apply.assert_not_called()
             self.env[key] = original
+
+    def test_invalid_totp_key_fails_before_host_changes_without_echoing_key(self):
+        config_path = self.path / 'config.json'
+        config_path.write_text(json.dumps(self.config))
+        for value in ('NOT_A_FERNET_KEY_DO_NOT_PRINT', 'a' * 32, 'a' * 64,
+                      base64.urlsafe_b64encode(b't' * 31).decode('ascii'),
+                      base64.urlsafe_b64encode(b't' * 33).decode('ascii'),
+                      base64.b64encode(b'\xff' * 32).decode('ascii'),
+                      'A' * 42 + 'B=', 'A' * 43, 'A' * 43 + '==',
+                      ' ' + self.env['TOTP_ENCRYPTION_KEY']):
+            with self.subTest(value=value):
+                self.env['TOTP_ENCRYPTION_KEY'] = value
+                self.write_env()
+                with patch.object(installer, 'apply') as apply, \
+                     patch.object(installer, 'run') as run, \
+                     contextlib.redirect_stderr(io.StringIO()) as output:
+                    self.assertEqual(installer.main(['apply', '--config', str(config_path),
+                                                     '--confirm-new-host']), 2)
+                apply.assert_not_called()
+                run.assert_not_called()
+                self.assertIn('TOTP_ENCRYPTION_KEY', output.getvalue())
+                self.assertNotIn(value, output.getvalue())
 
     def test_production_guard_flags_rejected_before_install(self):
         bad = {
@@ -358,6 +383,132 @@ class InstallerTests(unittest.TestCase):
         self.write_env()
         with self.assertRaisesRegex(installer.InstallError, 'migration credentials'):
             installer.validate_config(self.config, inputs=True)
+
+    def test_emitted_services_separate_application_and_operator_identities(self):
+        target = self.path / 'systemd'
+        target.mkdir()
+        installer.install_service_units(installer.ROOT / 'backend', target)
+        operator_units = {'talky-migrate', 'talky-asterisk-reconcile',
+                          'talky-db-backup', 'talky-inbound-synthetic'}
+        for path in target.glob('*.service'):
+            effective = installer.configparser.ConfigParser(interpolation=None, strict=False)
+            overrides = sorted((target / (path.name + '.d')).glob('*.conf'))
+            effective.read([str(path), *(str(item) for item in overrides)])
+            service = effective['Service']
+            expected = 'root' if path.stem in operator_units else 'talky'
+            with self.subTest(service=path.name):
+                self.assertEqual(service['User'], expected)
+                self.assertEqual(service['Group'], expected)
+                self.assertEqual(service['NoNewPrivileges'], 'true')
+                self.assertEqual(service['UMask'], '0077' if expected == 'root' else '0027')
+                if path.stem == 'talky-migrate':
+                    self.assertEqual(service['EnvironmentFile'], '/etc/talky/migration.env')
+                    self.assertEqual(service['ExecStartPre'],
+                        '/opt/talky/backend/venv/bin/python /opt/talky/scripts/installation/install.py check-migration-identity')
+                    self.assertNotIn('Install', effective)
+                else:
+                    self.assertNotIn('migration.env', '\n'.join(item.read_text() for item in [path, *overrides]))
+        reconciler = (target / 'talky-asterisk-reconcile.service').read_text()
+        self.assertIn('/opt/talky/backend/deploy/asterisk-reconcile-on-drift.sh', reconciler)
+        # Retain the existing guarded reconciler, rather than inventing another
+        # config writer or changing its live-channel/digest/lock boundaries.
+        self.assertEqual(reconciler,
+            (installer.ROOT / 'backend/systemd/talky-asterisk-reconcile.service').read_text())
+
+    def test_service_activation_uses_current_trunk_loop_without_unsafe_schedules(self):
+        for mode in ('linux', 'external'):
+            with self.subTest(mode=mode), patch.object(installer, 'run') as run:
+                installer.start_host_services(mode)
+                commands = [call.args[0] for call in run.call_args_list]
+                enabled = {unit for command in commands if command[:3] == ['systemctl', 'enable', '--now']
+                           for unit in command[3:]}
+                self.assertIn('talky-trunk-status.service', enabled)
+                self.assertIn('talky-asterisk-reconcile.timer', enabled)
+                self.assertIn('talky-healthwatch.timer', enabled)
+                self.assertEqual('talky-dashboard' in enabled, mode == 'linux')
+                self.assertTrue(set(installer.SERVICES) <= enabled)
+                for forbidden in ('talky-trunk-status.timer', 'talky-migrate', 'talky-migrate.service',
+                                  'talky-db-backup.timer', 'talky-inbound-synthetic.timer', 'talky-cleanup.timer'):
+                    self.assertNotIn(forbidden, enabled)
+                disable = commands.index(['systemctl', 'disable', '--now', 'talky-trunk-status.timer'])
+                start = next(index for index, command in enumerate(commands)
+                             if command[:3] == ['systemctl', 'enable', '--now']
+                             and 'talky-trunk-status.service' in command)
+                self.assertLess(disable, start)
+
+    def test_systemctl_failure_identifies_only_reviewed_installer_actions_and_units(self):
+        result = types.SimpleNamespace(returncode=3, stdout='PRIVATE_STDOUT', stderr='PRIVATE_STDERR')
+        commands = [
+            ['systemctl', 'daemon-reload'],
+            ['systemctl', 'enable', '--now', 'docker', 'talky-redis', 'asterisk'],
+            ['systemctl', 'disable', '--now', 'talky-trunk-status.timer'],
+            ['systemctl', 'is-active', '--quiet', 'talky-api'],
+            ['systemctl', 'is-active', '--quiet', 'talky-asterisk-reconcile.timer'],
+        ]
+        for command in commands:
+            with self.subTest(command=command), patch.object(installer.subprocess, 'run', return_value=result):
+                with self.assertRaises(installer.InstallError) as error:
+                    installer.run(command, env={'PASSWORD': 'PRIVATE_ENV'})
+                message = str(error.exception)
+                self.assertIn(' '.join(command) + ' failed (exit 3)', message)
+                self.assertNotIn('PRIVATE_', message)
+
+    def test_systemctl_diagnostic_rejects_unreviewed_actions_units_and_options(self):
+        result = types.SimpleNamespace(returncode=1, stdout='PRIVATE_STDOUT', stderr='PRIVATE_STDERR')
+        commands = [
+            ['systemctl', 'show', 'talky-api', '--property=Environment'],
+            ['systemctl', 'set-environment', 'PASSWORD=PRIVATE_SECRET'],
+            ['systemctl', 'enable', '--now', 'private-secret.service'],
+            ['systemctl', 'enable', '--now', 'talky-api', 'PRIVATE_SECRET'],
+            ['systemctl', 'enable', '--now', '--host=PRIVATE_SECRET', 'talky-api'],
+            ['systemctl', 'is-active', '--quiet', 'talky-api\nPRIVATE_SECRET'],
+            ['systemctl', 'daemon-reload', 'PRIVATE_SECRET'],
+            ['systemctl', 'is-active', '--quiet'],
+            ['python', '-c', 'PRIVATE_SECRET'],
+        ]
+        for command in commands:
+            with self.subTest(command=command), patch.object(installer.subprocess, 'run', return_value=result):
+                with self.assertRaises(installer.InstallError) as error:
+                    installer.run(command, env={'PASSWORD': 'PRIVATE_ENV'})
+                self.assertEqual(str(error.exception), command[0] + ' failed (exit 1); '
+                    'inspect the service/package locally; command output was suppressed to protect secrets')
+
+    def test_migration_identity_requires_root_private_regular_file_and_exact_loaded_value(self):
+        path = self.path / 'migration.env'
+        value = 'postgresql://migration:synthetic@db.example.test/db?sslmode=verify-full'
+        path.write_text('MIGRATION_DATABASE_URL=' + value + '\n')
+        path.chmod(0o600)
+        regular = types.SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=0)
+        with patch.object(installer.os, 'geteuid', return_value=0, create=True), \
+             patch.object(Path, 'lstat', return_value=regular), \
+             patch.dict(os.environ, {'MIGRATION_DATABASE_URL': value}, clear=True):
+            installer.check_migration_identity(path)
+            for metadata in (types.SimpleNamespace(st_mode=stat.S_IFREG | 0o640, st_uid=0),
+                             types.SimpleNamespace(st_mode=stat.S_IFREG | 0o644, st_uid=0),
+                             types.SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=1000),
+                             types.SimpleNamespace(st_mode=stat.S_IFLNK | 0o600, st_uid=0)):
+                with self.subTest(metadata=metadata), patch.object(Path, 'lstat', return_value=metadata), \
+                     patch.object(installer, 'read_env') as reader:
+                    with self.assertRaisesRegex(installer.InstallError, 'root-owned regular file'):
+                        installer.check_migration_identity(path)
+                    reader.assert_not_called()
+            with patch.object(installer.os, 'geteuid', return_value=1000):
+                with self.assertRaisesRegex(installer.InstallError, 'root operator'):
+                    installer.check_migration_identity(path)
+            for contents, loaded in (('MIGRATION_DATABASE_URL=\n', ''),
+                                     ('MIGRATION_DATABASE_URL=' + value + '\nJWT_SECRET=synthetic\n', value),
+                                     ('MIGRATION_DATABASE_URL=' + value + '\n', 'different')):
+                path.write_text(contents)
+                with patch.dict(os.environ, {'MIGRATION_DATABASE_URL': loaded}):
+                    with self.assertRaisesRegex(installer.InstallError, 'only the loaded nonempty'):
+                        installer.check_migration_identity(path)
+
+    def test_migration_unit_preflight_never_loads_install_config_or_runs_host_commands(self):
+        with patch.object(installer, 'check_migration_identity') as check, \
+             patch.object(installer, 'validate_config', side_effect=AssertionError('installer config opened')), \
+             patch.object(installer, 'run', side_effect=AssertionError('host command executed')):
+            self.assertEqual(installer.main(['check-migration-identity']), 0)
+        check.assert_called_once_with()
 
     def test_read_replica_cannot_bypass_database_qualification(self):
         self.env['READ_DATABASE_URL'] = 'postgresql://u:p@localhost/old'

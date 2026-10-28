@@ -8,6 +8,9 @@ on:
       - "backend/database/complete_schema.sql"
       - "backend/Alembic/**"
       - "backend/alembic.ini"
+      - "backend/scripts/bootstrap_first_admin.py"
+      - "backend/app/core/security/**"
+      - "backend/app/api/v1/endpoints/auth/**"
       - "scripts/installation/requirements-linux-py312.lock"
       - ".github/workflows/database-recovery-acceptance.yml"
   push:
@@ -17,6 +20,9 @@ on:
       - "backend/database/complete_schema.sql"
       - "backend/Alembic/**"
       - "backend/alembic.ini"
+      - "backend/scripts/bootstrap_first_admin.py"
+      - "backend/app/core/security/**"
+      - "backend/app/api/v1/endpoints/auth/**"
       - "scripts/installation/requirements-linux-py312.lock"
       - ".github/workflows/database-recovery-acceptance.yml"
   workflow_dispatch:
@@ -33,7 +39,7 @@ concurrency:
 jobs:
   canonical-tls-restore:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       PYTHON_DOTENV_DISABLED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
@@ -57,11 +63,20 @@ jobs:
           python scripts/database/tests/tls_canonical_rehearsal.py --run \
             --bin-dir /usr/lib/postgresql/16/bin \
             --receipt "$RUNNER_TEMP/canonical-tls-recovery.json"
+      - name: Check protected runtime-grants connection boundaries
+        run: python -m unittest discover -s scripts/database/tests -p test_runtime_grants.py -v
+      - name: Exercise supported runtime grants and initial admin on real PostgreSQL
+        run: |
+          python scripts/database/tests/runtime_grants_rehearsal.py --run \
+            --bin-dir /usr/lib/postgresql/16/bin \
+            --receipt "$RUNNER_TEMP/canonical-runtime-grants.json"
       - name: Retain nonsecret recovery evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: canonical-tls-recovery-${{ github.sha }}
-          path: ${{ runner.temp }}/canonical-tls-recovery.json
+          path: |
+            ${{ runner.temp }}/canonical-tls-recovery.json
+            ${{ runner.temp }}/canonical-runtime-grants.json
           if-no-files-found: warn
           retention-days: 14

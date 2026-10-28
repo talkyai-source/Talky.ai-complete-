@@ -109,7 +109,10 @@ actually live, and prove recovery after loss of the application server.
    stamp an old snapshot at the current head. Read actual heads from the
    selected commit; historical prose can name an older head. Separate
    migration and runtime roles also need reviewed grants and runtime access
-   checks, not just matching revision numbers.
+   checks, not just matching revision numbers. For the supported dedicated
+   PostgreSQL 16 canonical-0082 profile, use the reviewed
+   [runtime grants procedure](scripts/database/RUNTIME_GRANTS.md) and retain
+   successful real runtime-login verification before starting services.
 3. Use the preparation helper to copy the matching release's Linux/Python 3.12
    hash lock and collect exact Ubuntu package versions, a Redis image digest
    and the Node 22 archive version/checksum. Review its provenance and qualify
@@ -119,7 +122,13 @@ actually live, and prove recovery after loss of the application server.
    TLS certificates, database CA, runtime environment and network allow-lists.
    Existing lab telephony configurations are not production inputs.
 5. Preserve the existing encryption keys when restoring existing data. A new
-   secret-store or connector key cannot decrypt old database ciphertext.
+   secret-store, connector or TOTP encryption key cannot decrypt old database
+   ciphertext. The installer requires a valid `TOTP_ENCRYPTION_KEY` for MFA.
+6. For a genuinely new database, use the protected
+   [first-administrator procedure](docs/operations/FIRST-ADMIN.md). It requires
+   mailbox ownership and a working authenticator, creates no default password,
+   and refuses to promote or reset an existing account. Restored administrators
+   retain their normal recovery workflow.
 
 See the [input contract](scripts/installation/README.md#qualified-inputs) for
 formats, validation and dependency-lock preparation. Pin extension/client

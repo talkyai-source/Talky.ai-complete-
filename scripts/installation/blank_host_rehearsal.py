@@ -32,7 +32,8 @@ SPEC = importlib.util.spec_from_file_location('tls_fixture', ROOT / 'scripts/dat
 tls = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(tls)
 UNITS = ('talky-api', 'talky-voice-gateway', 'talky-voice-worker', 'talky-dialer-worker',
-         'talky-reminder-worker', 'talky-dashboard', 'talky-redis', 'asterisk', 'nginx')
+         'talky-reminder-worker', 'talky-dashboard', 'talky-redis', 'asterisk', 'nginx',
+         'talky-trunk-status', 'talky-asterisk-reconcile.timer', 'talky-healthwatch.timer')
 
 
 def require(condition, message):
@@ -170,8 +171,17 @@ def verify(vm, ca):
     states = {unit: vm.ssh('systemctl is-active ' + shlex.quote(unit)) for unit in UNITS}
     require(all(value == 'active' for value in states.values()), 'Not all installed services are active')
     identities = {unit: vm.ssh('systemctl show --property=User --value ' + shlex.quote(unit))
-                  for unit in UNITS if unit.startswith('talky-') and unit != 'talky-redis'}
+                  for unit in UNITS if unit.startswith('talky-') and unit != 'talky-redis' and not unit.endswith('.timer')}
     require(set(identities.values()) == {'talky'}, 'Installed application services must use talky')
+    for unit in ('talky-migrate', 'talky-asterisk-reconcile'):
+        require(vm.ssh('systemctl show --property=User --value ' + unit) == 'root', 'Operator identity mismatch')
+        require(vm.ssh('systemctl show --property=Group --value ' + unit) == 'root', 'Operator group mismatch')
+    for unit in ('talky-trunk-status.service', 'talky-asterisk-reconcile.timer', 'talky-healthwatch.timer'):
+        require(vm.ssh('systemctl is-enabled ' + unit) == 'enabled', 'Required scheduling is not enabled')
+    for unit in ('talky-migrate.service', 'talky-trunk-status.timer', 'talky-db-backup.timer',
+                 'talky-inbound-synthetic.timer'):
+        state = vm.ssh('systemctl show --property=UnitFileState --value ' + unit)
+        require(state in ('static', 'disabled', ''), 'Unapproved schedule was enabled')
     for endpoint in ('http://127.0.0.1:8000/health', 'http://127.0.0.1:8000/api/v1/healthz/ready',
                      'http://127.0.0.1:8000/api/v1/healthz/deep', 'http://127.0.0.1:18080/ready'):
         vm.ssh('curl --fail --silent --show-error --max-time 30 ' + shlex.quote(endpoint))
@@ -179,7 +189,8 @@ def verify(vm, ca):
         run(['curl', '--fail', '--silent', '--show-error', '--max-time', '60', '--noproxy', '*',
              '--cacert', str(ca), '--resolve', f'{domain}:{vm.https_port}:127.0.0.1',
              f'https://{domain}:{vm.https_port}{path}'])
-    return {'services': states, 'application_identities': identities, 'local_and_host_https_probes': True}
+    return {'services': states, 'application_identities': identities, 'operator_identity_and_scheduling_verified': True,
+            'local_and_host_https_probes': True}
 
 
 def main():
@@ -219,7 +230,10 @@ def main():
                 receipt.update(postgres_image_id=fixture.image_id, postgres_image_digests=fixture.image_digests)
                 pg = tls.recovery.Postgres(Path('/usr/lib/postgresql/16/bin'), timeout=180)
                 tls.bootstrap(pg, fixture)
-                tls.grant_runtime(pg, fixture.service('source_migration'), tls.SOURCE_DB)
+                grants_spec = importlib.util.spec_from_file_location('vm_runtime_grants', ROOT / 'scripts/database/runtime_grants.py')
+                grants = importlib.util.module_from_spec(grants_spec)
+                grants_spec.loader.exec_module(grants)
+                receipt['runtime_grants'] = grants.execute(fixture.service('source_migration'), fixture.service('source_runtime'), 'apply')
                 web_certificate(folder)
                 receipt['stage'] = 'blank_vm'
                 print('Starting fresh Ubuntu VM...', flush=True)
@@ -269,12 +283,24 @@ def main():
                     except RuntimeError:
                         require(time.monotonic() < deadline, 'Installed services did not recover after reboot')
                         time.sleep(5)
-                receipt.update(status='passed', reboot_verified=True, stage='complete')
+                receipt.update(reboot_verified=True, stage='cleanup')
+            except Exception:
+                if receipt.get('stage') in {'apply', 'reboot'}:
+                    try:
+                        receipt['diagnostics'] = json.loads(vm.ssh(
+                            'PYTHONDONTWRITEBYTECODE=1 python3 /root/source/scripts/installation/guest_rehearsal.py --diagnose'))
+                    except Exception:
+                        receipt['diagnostics_unavailable'] = True
+                raise
             finally:
-                vm.cleanup()
-                fixture.cleanup()
+                try:
+                    vm.cleanup()
+                finally:
+                    fixture.cleanup()
                 receipt['owned_resources_cleaned'] = True
+            receipt.update(status='passed', stage='complete')
     except Exception as error:
+        receipt['status'] = 'failed'
         receipt['error_type'] = type(error).__name__
         # Exception messages are from our fixed assertions; subprocess output
         # and generated credentials are deliberately not retained in artifacts.

@@ -30,6 +30,33 @@ under `telephony/`. See [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## Deploying
 
+### Fresh Ubuntu service identities
+
+The fresh-host profile in [INSTALLATION.md](../INSTALLATION.md) installs the API,
+workers, gateway and dashboard as `talky`, with root-owned source and binaries.
+Its migration and Asterisk reconciliation oneshots run as `root`, separate from
+application processes. Migration credentials belong in the operator-created
+`/etc/talky/migration.env`: a root-owned regular file with mode `0600` containing
+only `MIGRATION_DATABASE_URL`. The migration unit checks that identity, file
+metadata and loaded value before Alembic starts. Migrations have no boot
+enablement and must be invoked explicitly after the release gates pass.
+
+The installer enables the long-running `talky-trunk-status.service`, disables
+the retired trunk-status timer, and enables `talky-asterisk-reconcile.timer`.
+Reconciliation still uses the existing database-derived desired-state check,
+writer lock, digest recheck and active-channel refusal before applying changes.
+The healthwatch timer is enabled. Legacy Docker database backup and carrier
+synthetic-call units retain the root operator identity, but their timers are
+not enabled by this installer; retention cleanup is also not enabled. Configure
+those operations separately with their required environment and policy inputs.
+
+This service contract does not qualify a complete update or rollback procedure
+for the fresh-host profile. The deployment script below still assumes the older
+`admins` host layout; do not use it on a fresh `talky` host until its source,
+dependency, frontend, migration, drain and recovery paths have been qualified.
+
+### Existing production host
+
 The **only** supported path. Do not rsync source onto prod — that is what made
 the box silently diverge from git in the past.
 
