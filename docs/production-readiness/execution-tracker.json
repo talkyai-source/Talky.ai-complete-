@@ -2300,10 +2300,12 @@
           "kind": "bounded_paid_readiness_followup",
           "status": "implementation_and_acceptance_in_progress_not_release_closure"
         },
-        "docs/sessions/2026-10-28-ci-false-positive-review.md"
+        "docs/sessions/2026-10-28-ci-false-positive-review.md",
+        "docs/sessions/2026-10-28-fresh-update-acceptance.md",
+        "docs/sessions/2026-10-28-final-live-and-database-observation.md"
       ],
       "blocker": "Real Ubuntu rehearsals on two TLS PostgreSQL containers passed for both the earlier 0075 source and combined 0082 candidate. The latter preserved all 113 public-table records and five sequence states, verified restricted runtime access, source invariance and cleanup. Both containers share one runner. The observed production database remains on the application server without TLS; a designated external database, off-host archive/restore target, retention/PITR policy, recovery objectives and operator are still required.",
-      "next_action": "Retain the passed canonical TLS recovery, restricted runtime-grants and first-admin acceptance. Apply and verify the external production database topology and identities on designated infrastructure; prove separate failure domains, preserved keys, off-host durability and measured recovery objectives. Same-runner CI does not satisfy those operating outcomes.",
+      "next_action": "Use the designated separate production PostgreSQL destination and an isolated real-catalog restore. The live 0081 catalog contains 123 tables, ten beyond canonical-0082; review their application/retention purpose and prepare an explicit owner/runtime access profile without dropping objects or granting blanket access. Then qualify actual TLS, data/key preservation, cutover, off-host recovery and measured RPO/RTO. Canonical TLS/grants tests and the successful synthetic Ubuntu update are bounded evidence, not production conversion.",
       "target_date": null
     },
     {
@@ -2357,10 +2359,12 @@
           "kind": "bounded_paid_readiness_followup",
           "status": "implementation_and_acceptance_in_progress_not_release_closure"
         },
-        "docs/sessions/2026-10-28-blank-ubuntu-acceptance.md"
+        "docs/sessions/2026-10-28-blank-ubuntu-acceptance.md",
+        "docs/sessions/2026-10-28-fresh-update-acceptance.md",
+        "docs/sessions/2026-10-28-final-live-and-database-observation.md"
       ],
       "blocker": "Supplier-cost ingestion/reconciliation is unavailable. Source permission inventory is complete, but approved deployment identity/topology, permission matrix and positive/negative host acceptance are outstanding.",
-      "next_action": "Fresh Ubuntu application/operator identity and scheduling checks passed before and after reboot. Apply the reviewed boundaries to production with designated privileged access; remove live runtime ownership and CREATEROLE/CREATEDB privileges through the qualified migration/runtime split. Supplier statements and finance reconciliation remain separate requirements.",
+      "next_action": "Apply the reviewed runtime/migration/service-identity separation on the actual production topology. Fresh Ubuntu Node 22.23.4, service identities and guarded startup/update passed real VM checks; the live runtime still owns 123 tables with CREATEDB/CREATEROLE/REPLICATION and no TLS. Preserve its additional objects through a reviewed production profile and verify least privileges after migration. Complete actual supplier/account-period financial reconciliation and operating ownership; do not infer these from synthetic checks.",
       "target_date": null
     },
     {
@@ -2412,10 +2416,12 @@
           "status": "implementation_and_acceptance_in_progress_not_release_closure"
         },
         "docs/sessions/2026-10-28-blank-ubuntu-acceptance.md",
-        "docs/sessions/2026-10-28-customer-first-paid-release-scope.md"
+        "docs/sessions/2026-10-28-customer-first-paid-release-scope.md",
+        "docs/sessions/2026-10-28-fresh-update-acceptance.md",
+        "docs/sessions/2026-10-28-final-live-and-database-observation.md"
       ],
-      "blocker": "PR26 combines billing, Admin and Ubuntu work at schema 0082. Restricted-owner TLS upgrades and 55 incident-adoption cases passed; final Linux CI is tracked on the exact PR candidate. Privileged deployment access, a designated clean Ubuntu host and external database, required traffic-freeze/drain/operator attestations, coordinated activation and actual reboot/call/update/rollback/handover acceptance remain outstanding.",
-      "next_action": "Preserve the successful blank Ubuntu installation/reboot and green combined ce93fc6a CI, plus the independently deployed customer-only release. Qualify the new real update/rollback and migration-failure refusal VM path. Complete backend activation using designated access and fresh release/drain/backup records. Controlled calls, off-host recovery, independent handover and videos remain separate acceptance; the feature freeze remains active.",
+      "blocker": "Candidate 54665bdb passed all six workflows including real patched Ubuntu install/reboot, update/reboot, worker-failure rollback/reboot and post-migration code-rollback refusal. Customer 80b52743 is live; backend 10a8b9f0 and database 0081 remain unchanged. Secure privileged access, designated separate PostgreSQL destination, reviewed real-catalog privileges, fresh freeze/drain/backup, coordinated activation and actual call/customer/operating/handover acceptance remain outstanding.",
+      "next_action": "Preserve the exact 54665bdb/c6a18e3e Ubuntu and CI receipts and the independent customer-only live release. Use designated access and database destination to complete reviewed real-catalog conversion and backend activation with fresh release/drain/backup records. Controlled calls, failed model-profile qualification, off-host recovery, independent handover and the three videos retain separate evidence requirements. Future successful schema migrations need exact-change acceptance. The feature freeze remains active.",
       "target_date": null
     },
     {

@@ -6,6 +6,15 @@ dedicated application database and its existing migration owner. It separates
 the runtime LOGIN from database/object ownership without granting superuser,
 BYPASSRLS, CREATEDB, CREATEROLE, REPLICATION or role membership.
 
+The existing production catalog is not this canonical fixture: the
+[28 October read-only inventory](../../docs/sessions/2026-10-28-final-live-and-database-observation.md)
+contains 123 tables, including ten outside this profile. Reconcile their access
+and retention purpose on an isolated real-catalog restore before production
+conversion. Preserve the unknown-object and ownership refusals; do not delete
+objects, add blanket grants or treat a backup table as a runtime table to bypass
+them. The tested canonical profile supports prepared fresh databases, not an
+unreviewed privilege conversion of the current live catalog.
+
 The backend is a trusted database client. Auth must look up a principal before
 knowing its tenant; admin and worker paths need cross-tenant access. Existing
 `acquire_with_tenant(pool, None)` uses transaction-local `app.bypass_rls=on`;

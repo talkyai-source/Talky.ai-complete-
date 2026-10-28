@@ -30,8 +30,11 @@ runtime pin and refuses older or unreviewed versions before reading input files.
 External frontend mode still requires no local Node archive or installation.
 
 The earlier install/reboot evidence remains valid for its recorded source and
-Node runtime. **Qualification of the changed runtime is pending** until the
-new Linux builds and actual VM installation/reboot/update checks complete.
+Node runtime. **The changed runtime passed bounded qualification** on candidate
+`54665bdb`: matching Linux frontend builds and the actual VM installation,
+update, recovery and reboot checks completed successfully. The
+[acceptance record](2026-10-28-fresh-update-acceptance.md) retains exact source,
+Node process identity and all operating limits.
 The updater continues to refuse an unqualified host Node-version change.
 Its baseline must itself be installed and verified with the patched runtime
 before testing a descendant update; no runtime guard is relaxed.
@@ -45,5 +48,8 @@ and diff whitespace checks passed. No frontend build was duplicated locally.
 The actual helper fetched the official 22.23.4 metadata and selected the
 Linux x64 tar.xz SHA-256
 1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce.
-This verifies metadata selection, not an archive installation or runtime
-qualification; those remain the matching CI/VM acceptance.
+That metadata check alone did not prove installation. The subsequent matching
+CI/VM acceptance separately downloaded/verified the archive and checked the
+actual dashboard executable/version before and after installation, update,
+recovery and reboot. Production deployment and paid-use acceptance remain
+separate.

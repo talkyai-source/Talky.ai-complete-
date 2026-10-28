@@ -13,9 +13,10 @@ existing production deployment or its DNS automatically.
 
 The current preparation helper selects Node 22.23.4 from the existing 22 LTS
 line for [published runtime security fixes](../../docs/sessions/2026-10-28-node-runtime-security.md).
-Regenerate version/checksum inputs together. Qualification of the new runtime
-is pending its matching Linux builds and actual VM checks; historical Node
-22.22.0 receipts do not establish acceptance for this change.
+Regenerate version/checksum inputs together. Candidate `54665bdb` passed matching
+Linux builds and actual VM install/reboot/update/recovery checks with the running
+Node 22.23.4 process verified. See the [bounded acceptance record](../../docs/sessions/2026-10-28-fresh-update-acceptance.md);
+historical Node 22.22.0 receipts retain their original version scope.
 
 ## Files the release needs
 

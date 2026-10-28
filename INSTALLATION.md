@@ -2,9 +2,13 @@
 
 This is the entry point for rebuilding Talklee on a new Ubuntu 24.04 amd64
 server with PostgreSQL hosted separately. The local installer and recovery
-tools implement the October 30 production deliverables. Their checks do not
-establish that production has been migrated or that a clean Linux server has
-passed acceptance; those outcomes require the recorded rehearsals below.
+tools implement the October 30 production deliverables. Candidate
+`54665bdbe1ea074d23ecb3ab48d6f7bbf20b5aa6` passed actual blank-host
+installation/reboot and the bounded update/recovery matrix in
+[run 40691622408](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40691622408).
+It is published on [PR 26](https://github.com/talkyai-source/Talky.ai-complete-/pull/26).
+The combined backend is not deployed, and synthetic acceptance does not
+establish production migration, real calls, off-host recovery or paid readiness.
 
 The installer uses the existing Python API/workers, C++ voice gateway and
 Asterisk architecture. Use **`frontend_mode=linux` for the complete Ubuntu
@@ -27,7 +31,7 @@ sudo apt-get update
 sudo apt-get install --yes git python3 ca-certificates
 git clone https://github.com/talkyai-source/Talky.ai-complete-.git talklee-install-source
 cd talklee-install-source
-TALKLEE_RELEASE_SHA='REPLACE_WITH_REVIEWED_40_CHARACTER_RELEASE_COMMIT'
+TALKLEE_RELEASE_SHA='54665bdbe1ea074d23ecb3ab48d6f7bbf20b5aa6'
 git checkout --detach "$TALKLEE_RELEASE_SHA"
 test "$(git rev-parse HEAD)" = "$TALKLEE_RELEASE_SHA"
 test -z "$(git status --porcelain)"
@@ -231,10 +235,12 @@ the new profile. The new [fresh-host release procedure](scripts/installation/FRE
 stages both frontends, the backend and gateway; binds their artifacts to the
 reviewed source; and preserves the private configuration and data directories.
 It reuses the existing freeze/drain contract, verifies a fresh database backup,
-and permits automatic code rollback only before a migration begins. Its full
-VM update/recovery acceptance is being qualified separately from the successful
-blank-host install and reboot. Follow that guide's recorded acceptance status
-before using it for a customer release.
+and permits automatic code rollback only before a migration begins. The actual
+VM passed a same-schema update and reboot, deliberately broken worker recovery
+and reboot, and refusal of code recovery after a migration began and failed.
+The exact base/merge identity and retained earlier failure are linked from that
+guide. This does not qualify arbitrary future forward migrations or replace
+the actual customer's freeze/drain, backup, access and operating acceptance.
 
 Keep the old database intact during cutover. Returning to it after writes begin
 on the new database is a data-reconciliation decision, not simply an endpoint

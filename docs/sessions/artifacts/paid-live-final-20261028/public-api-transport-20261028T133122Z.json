@@ -1,0 +1,88 @@
+{
+  "checked_at": "2026-10-28T13:31:20.038472+00:00",
+  "read_only": true,
+  "tls_bypass_used": false,
+  "body_retained": false,
+  "scope": "Public unauthenticated transport diagnosis; no server or configuration changes",
+  "python_http": {
+    "client": "Python urllib",
+    "url": "https://api.talkleeai.com/health",
+    "tls_verification": true,
+    "proxy_schemes_present": [],
+    "http_status": 200,
+    "status": "healthy"
+  },
+  "dns_tcp_tls": {
+    "client": "Python direct TCP and verified TLS",
+    "host": "api.talkleeai.com",
+    "port": 443,
+    "openssl": "OpenSSL 3.0.16 11 Feb 2025",
+    "tls_verification": true,
+    "dns_addresses": [
+      "144.76.17.150"
+    ],
+    "tcp_connected": true,
+    "remote_address": "144.76.17.150",
+    "tls_version": "TLSv1.3",
+    "certificate": {
+      "subject": [
+        [
+          [
+            "commonName",
+            "api.talkleeai.com"
+          ]
+        ]
+      ],
+      "issuer": [
+        [
+          [
+            "countryName",
+            "US"
+          ]
+        ],
+        [
+          [
+            "organizationName",
+            "Let's Encrypt"
+          ]
+        ],
+        [
+          [
+            "commonName",
+            "YE2"
+          ]
+        ]
+      ],
+      "notBefore": "Sep  8 19:12:41 2026 GMT",
+      "notAfter": "Dec  7 19:12:40 2026 GMT",
+      "subjectAltName": [
+        [
+          "DNS",
+          "api.talkleeai.com"
+        ]
+      ]
+    }
+  },
+  "curl_readiness": {
+    "client": "Windows native curl",
+    "url": "https://api.talkleeai.com/api/v1/healthz/ready",
+    "tls_verification": true,
+    "return_code": 0,
+    "http_code": 200,
+    "http_version": "1.1",
+    "remote_ip": "144.76.17.150",
+    "remote_port": 443,
+    "ssl_verify_result": 0,
+    "exitcode": 0,
+    "errormsg": null,
+    "time_total": 0.55658,
+    "bounded_stderr": ""
+  },
+  "powershell_health": {
+    "status": "healthy",
+    "url": "https://api.talkleeai.com/health",
+    "client": "PowerShell Invoke-WebRequest",
+    "http_status": 200,
+    "tls_verification": true
+  }
+}

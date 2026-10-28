@@ -1,5 +1,16 @@
 # production ready
 
+**Patched Ubuntu qualification — 28 October 2026:** Candidate `54665bdb`
+passed all six Linux workflows, including corrected actual blank Ubuntu
+installation/reboot and full update/recovery tests. The [release acceptance record](sessions/2026-10-28-fresh-update-acceptance.md)
+retains the earlier Asterisk failure and native reproduction, exact Node
+22.23.4 security pin, mandatory synchronous PBX verification before application
+startup, actual process identities and provider-isolated fixture evidence.
+The VM proved update/reboot, worker-failure rollback/reboot and refusal of
+code rollback after a migration started and failed. Older Node 22.22.0
+receipts remain functional historical evidence. This does not change the live
+backend, production database, paid-use gates or feature-freeze status.
+
 **Verified Ubuntu and customer release — 28 October 2026:** The
 [blank Ubuntu acceptance](sessions/2026-10-28-blank-ubuntu-acceptance.md)
 passed actual installation, both frontend builds, service/source/identity and

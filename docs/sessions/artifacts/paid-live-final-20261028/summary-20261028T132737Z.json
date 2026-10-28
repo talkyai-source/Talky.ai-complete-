@@ -1,0 +1,303 @@
+{
+  "checked_at": "2026-10-28T13:27:37.939558+00:00",
+  "read_only": true,
+  "scope": "One final live observation; no deployment or business action",
+  "customer": {
+    "artifact": "customer-20261028T132737Z.json",
+    "checked_at": "2026-10-28T13:27:41.494540+00:00",
+    "read_only": true,
+    "expected_source": "80b52743d8073d0b3ed07fb260c82add50088d6e",
+    "domain": "talkleeai.com",
+    "project_id": "prj_zl23wGHqj7rhABA8UjP9KlUhZxLa",
+    "deployment_id": "dpl_3CuQmP8NmyUwEGryhmbJ9kCpsdYR",
+    "deployment_url": "talkleeai-euwmnuw06-allestateestimation-9391s-projects.vercel.app",
+    "ready_state": "READY",
+    "target": "production",
+    "git_source": "80b52743d8073d0b3ed07fb260c82add50088d6e",
+    "metadata_source": "80b52743d8073d0b3ed07fb260c82add50088d6e",
+    "alias_source_ready": true,
+    "status": "passed",
+    "http_checks": [
+      {
+        "path": "/",
+        "status": 200,
+        "redirect_host": null,
+        "redirect_path": "",
+        "expected": "public",
+        "passed": true,
+        "body_retained": false
+      },
+      {
+        "path": "/auth/login/",
+        "status": 200,
+        "redirect_host": null,
+        "redirect_path": "",
+        "expected": "public",
+        "passed": true,
+        "body_retained": false
+      },
+      {
+        "path": "/white-label/acme/preview/",
+        "status": 200,
+        "redirect_host": null,
+        "redirect_path": "",
+        "expected": "public",
+        "passed": true,
+        "body_retained": false
+      },
+      {
+        "path": "/white-label/dashboard/",
+        "status": 307,
+        "redirect_host": null,
+        "redirect_path": "/auth/login",
+        "expected": "login",
+        "passed": true,
+        "body_retained": false
+      },
+      {
+        "path": "/white-label/acme/tenants/",
+        "status": 307,
+        "redirect_host": null,
+        "redirect_path": "/auth/login",
+        "expected": "login",
+        "passed": true,
+        "body_retained": false
+      },
+      {
+        "path": "/white-label/acme/billing/",
+        "status": 307,
+        "redirect_host": null,
+        "redirect_path": "/auth/login",
+        "expected": "login",
+        "passed": true,
+        "body_retained": false
+      },
+      {
+        "path": "/white-label/acme/tenants/synthetic-local-id/agent-settings/",
+        "status": 307,
+        "redirect_host": null,
+        "redirect_path": "/auth/login",
+        "expected": "login",
+        "passed": true,
+        "body_retained": false
+      },
+      {
+        "path": "/white-label/acme/dashboard/",
+        "status": 307,
+        "redirect_host": null,
+        "redirect_path": "/auth/login",
+        "expected": "login",
+        "passed": true,
+        "body_retained": false
+      },
+      {
+        "path": "/white-label/acme/analytics/",
+        "status": 307,
+        "redirect_host": null,
+        "redirect_path": "/auth/login",
+        "expected": "login",
+        "passed": true,
+        "body_retained": false
+      }
+    ],
+    "limits": [
+      "Anonymous HTTP gates and source identity only; no owner login or business writes",
+      "No backend, database, deployment, alias or environment mutation"
+    ]
+  },
+  "backend": {
+    "artifact": "backend-20261028T132737Z.json",
+    "checked_at": "2026-10-28T13:27:39.723944+00:00",
+    "read_only": true,
+    "ssh_user": "admins",
+    "host": "144.76.17.150",
+    "strict_known_hosts": true,
+    "source_root": "/opt/talky",
+    "source_sha": "10a8b9f0f9d8e7d5c59140f1e4829790050161b9",
+    "services": {
+      "talky-api.service": {
+        "MainPID": "1192780",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "WorkingDirectory": "/opt/talky/backend",
+        "User": "",
+        "Group": "",
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "SubState": "running",
+        "source_sha": "10a8b9f0f9d8e7d5c59140f1e4829790050161b9",
+        "resolved_working_directory": "/opt/talky/backend",
+        "executable_path": "unavailable_to_read_only_identity"
+      },
+      "talky-api-web.service": {
+        "MainPID": "1192598",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "WorkingDirectory": "/opt/talky/backend",
+        "User": "",
+        "Group": "",
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "SubState": "running",
+        "source_sha": "10a8b9f0f9d8e7d5c59140f1e4829790050161b9",
+        "resolved_working_directory": "/opt/talky/backend",
+        "executable_path": "unavailable_to_read_only_identity"
+      },
+      "talky-voice-gateway.service": {
+        "MainPID": "1192473",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "WorkingDirectory": "/opt/talky/services/voice-gateway-cpp",
+        "User": "admins",
+        "Group": "admins",
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "SubState": "running",
+        "source_sha": "10a8b9f0f9d8e7d5c59140f1e4829790050161b9",
+        "resolved_working_directory": "/opt/talky/services/voice-gateway-cpp",
+        "executable_path": "/opt/talky/runtime/bin/voice_gateway"
+      },
+      "talky-voice-worker.service": {
+        "MainPID": "1192834",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "WorkingDirectory": "/opt/talky/backend",
+        "User": "",
+        "Group": "",
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "SubState": "running",
+        "executable_path": "unavailable_to_read_only_identity"
+      },
+      "talky-dialer-worker.service": {
+        "MainPID": "1192822",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "WorkingDirectory": "/opt/talky/backend",
+        "User": "",
+        "Group": "",
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "SubState": "running",
+        "executable_path": "unavailable_to_read_only_identity"
+      },
+      "talky-reminder-worker.service": {
+        "MainPID": "1192836",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "WorkingDirectory": "/opt/talky/backend",
+        "User": "",
+        "Group": "",
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "SubState": "running",
+        "executable_path": "unavailable_to_read_only_identity"
+      },
+      "talky-trunk-status.service": {
+        "MainPID": "1192886",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "WorkingDirectory": "/opt/talky/backend",
+        "User": "root",
+        "Group": "",
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "SubState": "running",
+        "executable_path": "unavailable_to_read_only_identity"
+      },
+      "talky-asterisk-reconcile.timer": {
+        "Result": "success",
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "SubState": "waiting"
+      },
+      "talky-healthwatch.timer": {
+        "Result": "success",
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "SubState": "waiting"
+      },
+      "asterisk.service": {
+        "MainPID": "925",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "WorkingDirectory": "/var/lib/asterisk",
+        "User": "",
+        "Group": "",
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "SubState": "running",
+        "executable_path": "unavailable_to_read_only_identity"
+      },
+      "nginx.service": {
+        "MainPID": "682870",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "WorkingDirectory": "",
+        "User": "",
+        "Group": "",
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "SubState": "running",
+        "executable_path": "unavailable_to_read_only_identity"
+      }
+    },
+    "local_api_health": {
+      "url": "http://127.0.0.1:8000/health",
+      "body_retained": false,
+      "http_status": 200,
+      "json_keys": [
+        "active_sessions",
+        "container",
+        "redis_enabled",
+        "status"
+      ],
+      "fields": {
+        "status": "healthy"
+      }
+    },
+    "local_gateway_readiness": {
+      "url": "http://127.0.0.1:18080/ready",
+      "body_retained": false,
+      "http_status": 200,
+      "json_keys": [
+        "build_sha",
+        "codecs",
+        "protocol_version",
+        "ready",
+        "status"
+      ],
+      "fields": {
+        "status": "ready",
+        "ready": true,
+        "build_sha": "10a8b9f0f9d8e7d5c59140f1e4829790050161b9"
+      }
+    },
+    "database": {
+      "queried": false,
+      "reason": "No designated existing read-only database helper was selected"
+    },
+    "limits": [
+      "No sudo, secret/environment-file reads, authentication, database queries or mutations",
+      "Service state and health endpoints do not prove provider delivery or operating capacity"
+    ]
+  },
+  "public_api_health": {
+    "url": "https://api.talkleeai.com/health",
+    "body_retained": false,
+    "cookies_or_auth_sent": false,
+    "error": "URLError"
+  },
+  "public_api_readiness": {
+    "url": "https://api.talkleeai.com/api/v1/healthz/ready",
+    "body_retained": false,
+    "cookies_or_auth_sent": false,
+    "error": "URLError"
+  },
+  "source_comparison": {
+    "expected_customer_sha": "80b52743d8073d0b3ed07fb260c82add50088d6e",
+    "customer_unchanged": true,
+    "expected_backend_prefix": "10a8b9f0",
+    "backend_unchanged": true
+  }
+}

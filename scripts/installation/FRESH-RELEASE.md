@@ -2,9 +2,19 @@
 
 `fresh_release.py` is the bounded release path for a host created by this
 repository's Ubuntu 24.04 amd64 installer with both frontends on Linux. It is
-separate from the legacy `admins` deployment script. This implementation is
-awaiting its full disposable-VM update/recovery acceptance; unit and filesystem
-tests alone do not qualify it for a customer release.
+separate from the legacy `admins` deployment script. Candidate
+`54665bdbe1ea074d23ecb3ab48d6f7bbf20b5aa6` passed the actual Ubuntu
+install/update/recovery matrix in
+[run 40691622408](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40691622408).
+It is published on the [PR 26 release branch](https://github.com/talkyai-source/Talky.ai-complete-/pull/26);
+the combined backend has not been deployed to production.
+
+The tested PR merge was `c6a18e3ee1d0dfb4f0f1a24a8ee6942e45b43be5`,
+with the same tree `1edc5a7fb21df590cfef317df4957c1901659bc8` as the
+candidate. The update base was `b216774648537e2e25afa550f9b227fc3283e089`,
+installed and reboot-verified in that run before the descendant update.
+This qualifies the recorded synthetic same-schema update and failure handling,
+not a future successful schema migration, production activation or paid use.
 
 It preserves the existing OS packages, Node version, Redis image/network/data,
 firewall, domains, certificates and carrier topology. Changing those requires a
@@ -177,22 +187,35 @@ can place its configured real call; do not run this command before its approved
 window. The release receipt does not claim customer-call, provider, billing,
 off-host recovery or load acceptance.
 
-## Required disposable-VM acceptance
+## Recorded disposable-VM acceptance
 
-Qualify against a pinned successful fresh-install base, using separate synthetic
-TLS PostgreSQL owner/runtime/backup identities. Retain exact candidate/base SHAs
-and sanitized receipts. Required cases are:
+The matching matrix used two disposable Ubuntu 24.04 amd64 VMs and separate
+synthetic TLS PostgreSQL owner/runtime/backup identities. Direct installation
+and reboot passed independently. The update job verified:
 
-1. Prepare and activate a real descendant, proving matching API/gateway source,
+1. Preparation and activation of the real descendant, proving matching API/gateway source,
    both frontends, immutable artifacts, protected keys, retained data and prior
    timer disposition before and after reboot.
-2. Induce a candidate startup failure with unchanged schema and prove that the
-   prior release is restored, healthy, correctly identified and recorded.
-3. Induce failure after the forward-migration boundary and prove that services
-   stay stopped and code rollback/downgrade are refused.
-4. Verify rejected artifact/config/DSN drift, a currently activating maintenance
-   job, repeated manifest and mismatched backup before source activation.
+2. A deliberately broken voice-worker descendant with unchanged schema,
+   automatic restoration of the previous healthy release and another real reboot.
+3. A deliberately failing migration after the migration-start boundary:
+   the old head remained, application services stayed stopped, and explicit
+   code recovery was refused.
+4. Refusal of modified prepared artifacts, an activating maintenance oneshot
+   and a migration URL destination override at their guarded boundaries.
 
-The local tests exercise actual Linux files, atomic links, Git and manifests,
-plus explicitly mocked service-fault boundaries. They do not claim these full
-VM acceptance cases have already passed.
+Configuration, keys, persistent data, exact process/frontend artifacts and
+Node 22.23.4 identity were checked across the allowed update/recovery phases.
+Schedules stayed frozen. Both jobs cleaned their owned resources before
+reporting success. The update receipt SHA-256 is
+`dde3a2a1be5d840d9bbf2c6946b569de7ecdaa2167d9734c287680b4f0d1d146`.
+The [acceptance record](../../docs/sessions/2026-10-28-fresh-update-acceptance.md)
+also preserves the earlier Asterisk failure and its native reproduction.
+
+The 33 native root tests separately cover filesystem, source, manifest and
+database-boundary regressions with explicitly mocked service-fault boundaries.
+They are not counted as additional VM scenarios. Synthetic approvals are not
+human operating approval. Real calls, provider/billing effects, public DNS,
+independent handover, off-host recovery and measured RPO/RTO remain unverified
+by this matrix. Every future schema change needs its own migration/grants
+qualification, and every actual release needs fresh operating evidence.

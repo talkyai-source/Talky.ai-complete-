@@ -1,5 +1,15 @@
 # Paid readiness follow-up — 28 October 2026
 
+Final technical checkpoint: candidate `54665bdb` passed all six workflows,
+including [actual patched Ubuntu installation, update, reboot and recovery](2026-10-28-fresh-update-acceptance.md).
+The [final live/database observation](2026-10-28-final-live-and-database-observation.md)
+confirms customer source `80b52743` is live, while backend `10a8b9f0` and database
+head 0081 remain in production. The runtime database still owns 123 tables,
+has CREATEDB/CREATEROLE/REPLICATION and lacks TLS. Its ten additional tables
+need a reviewed production access profile before conversion; the canonical
+113-table fixture profile is not a production inventory. Paid-use and
+operating gates remain open.
+
 The user requested completion for paid use with final Stripe account integration
 as the only intended handover item. Required non-Stripe work is resumed,
 including the earlier CP05/CP06 deferrals. This instruction does not turn missing
@@ -151,13 +161,15 @@ inputs, not another request to authorize the same work:
 - The actual release freeze/drain record, compatible recovery and the required
   independent operating review. Idle services cannot establish a traffic freeze.
 - The accepted first-release exclusion of reseller operations and staff
-  invitations must be reflected in the deployed surfaces and handover. Their
+  invitations is reflected in the live customer surfaces and handover. Their
   missing partner authorization/billing and invitation contracts remain future
   implementation work, outside this paid-launch acceptance scope.
 
-The complete fresh-host update/rollback path also remains unqualified. The
-legacy updater assumes the `admins` profile, API-web and different scheduling;
-changing one filesystem group would not qualify a Linux frontend/backend update.
+The fresh-host update/rollback path passed the bounded real-VM qualification
+recorded above. It applies to the fresh `talky` Linux-frontend profile. The
+legacy updater assumes `admins`, API-web and different scheduling; the new
+result does not make it a compatible production cutover procedure by changing
+one filesystem group.
 The original document's real restore, handover and three walkthrough videos,
 and the plan's real conversation, connector, capacity and purchased-journey
 acceptance retain their separate evidence requirements. The feature freeze

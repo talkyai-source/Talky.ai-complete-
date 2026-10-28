@@ -7,6 +7,15 @@ builds and serves both the dashboard and Admin on this host. Set
 `frontend_mode` to `external` to retain the documented Vercel topology.
 Choosing a mode does not move the existing production frontends.
 
+The tested release is `54665bdbe1ea074d23ecb3ab48d6f7bbf20b5aa6` on
+[PR 26](https://github.com/talkyai-source/Talky.ai-complete-/pull/26).
+[Ubuntu matrix 40691622408](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40691622408)
+passed fresh installation/reboot, a same-schema update/reboot, deliberate
+worker-failure recovery/reboot and refusal of code recovery after migration
+began. The [fresh-release guide](FRESH-RELEASE.md) binds the exact base, tested
+merge and limits. The combined backend is not deployed; this synthetic evidence
+does not establish paid-use or production-recovery acceptance.
+
 If an installation command fails, its bounded output is retained in a root-only
 `/var/lib/talky-install/command-failure-*.json` file. The terminal reports the
 private path and exit status, without printing command arguments, environment
@@ -212,8 +221,9 @@ The [fresh-host release guide](FRESH-RELEASE.md) provides the separate
 `fresh_release.py` prepare, activate, recover and resume-schedules commands.
 It binds actual builds to the selected source, preserves the `talky` identity
 and installed overrides, and keeps schema-safe rollback separate from
-post-migration recovery. Read its actual VM qualification status before using
-it for a customer release. The older `deploy_to_server.sh` continues to assume
+post-migration recovery. Its recorded same-schema update/recovery VM acceptance
+passed; actual customer releases still need their own operating evidence.
+The older `deploy_to_server.sh` continues to assume
 the `admins` host profile and must not be used unchanged on this host.
 
 Migrations use a required separate `/etc/talky/migration.env` file that the
@@ -250,7 +260,9 @@ Reference installation behavior was checked against the official
 and [Node release archive](https://nodejs.org/en/download/archive/v22.23.4).
 The preparation helper now pins Node 22.23.4 for published security fixes.
 See the [runtime security assessment](../../docs/sessions/2026-10-28-node-runtime-security.md);
-the changed runtime needs its own build and VM qualification, and old receipts
-retain their original source/version scope.
+the matching Node 22.23.4 frontend builds and actual running dashboard process
+passed the recorded matrix before and after reboot/update/recovery. Old receipts
+retain their original source/version scope; future runtime changes need new
+qualification.
 Ubuntu's `docker.io` / `docker-compose-v2` distribution packages are used here;
 do not mix them with Docker's separate `docker-ce` repository package family.
