@@ -223,7 +223,15 @@ export function Navbar() {
 
   const closeMobileMenu = useCallback(() => {
     const details = mobileMenuRef.current;
-    if (details?.hasAttribute("open")) details.removeAttribute("open");
+    if (details?.hasAttribute("open")) {
+      details.removeAttribute("open");
+      // The panel is about to be hidden; focus left inside it (the X button,
+      // a drawer item) would drop to <body>. Hand it back to the toggle, which
+      // is where Escape leaves it, so every way of closing lands in one place.
+      if (details.contains(document.activeElement)) {
+        details.querySelector<HTMLElement>(":scope > summary")?.focus();
+      }
+    }
     setMobileMenuOpen(false);
   }, []);
 
