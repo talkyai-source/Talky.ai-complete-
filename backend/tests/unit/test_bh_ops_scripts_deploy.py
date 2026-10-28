@@ -133,6 +133,7 @@ exit 0
 """,
     "sudo": """#!/usr/bin/env bash
 echo "sudo $*" >> "$LOG"
+if [ "$1 $2 $3" = "systemctl restart talky-voice-gateway" ]; then touch "$STATE/gateway_restarted"; fi
 if [ "$1 $2" = "systemctl start" ] && [ "${FAIL_MIGRATE:-0}" = 1 ]; then exit 1; fi
 case "$*" in
   *"reconcile_asterisk_release.sh") if [ "${FAIL_RECONCILE:-0}" = 1 ]; then exit 1; fi ;;
@@ -168,8 +169,24 @@ exit 0
 echo "curl $*" >> "$LOG"
 url="${@: -1}"
 case "$url" in
-  *:18080/stats) echo "{\\"active_sessions\\": ${FAKE_SESSIONS:-0}}" ;;
-  *:18080/ready) echo "{\\"ready\\": true, \\"protocol_version\\": 2, \\"codecs\\": [\\"pcmu\\"], \\"build_sha\\": \\"$FAKE_NEW_SHA\\"}" ;;
+  *:18080/stats)
+    if [ -f "$STATE/gateway_restarted" ]; then
+      n=$(cat "$STATE/gateway_stats_calls" 2>/dev/null || echo 0)
+      echo $((n + 1)) > "$STATE/gateway_stats_calls"
+      if [ "$n" -lt "${FAKE_GATEWAY_STATS_FAILURES:-0}" ]; then exit 7; fi
+      echo "{\\"active_sessions\\": ${FAKE_POST_RESTART_SESSIONS:-0}}"
+    else
+      echo "{\\"active_sessions\\": ${FAKE_SESSIONS:-0}}"
+    fi ;;
+  *:18080/ready)
+    n=$(cat "$STATE/gateway_ready_calls" 2>/dev/null || echo 0)
+    echo $((n + 1)) > "$STATE/gateway_ready_calls"
+    if [ "$n" -lt "${FAKE_GATEWAY_READY_FAILURES:-0}" ]; then exit 22; fi
+    if [ -n "${FAKE_GATEWAY_READY_JSON:-}" ]; then
+      printf '%s' "$FAKE_GATEWAY_READY_JSON"
+    else
+      echo "{\\"ready\\": true, \\"protocol_version\\": 2, \\"codecs\\": [\\"pcmu\\"], \\"build_sha\\": \\"$FAKE_NEW_SHA\\"}"
+    fi ;;
   *:8000/*|*:8001/*)
     n=$(cat "$STATE/probe_calls" 2>/dev/null || echo 0)
     echo $((n + 1)) > "$STATE/probe_calls"
@@ -369,3 +386,49 @@ def test_post_restart_probes_still_fail_the_deploy_at_the_deadline(tmp_path, cap
     assert "did not become healthy" in result.stderr
     health_calls = [line for line in log if line.endswith(":8000/health")]
     assert 2 <= len(health_calls) <= 100, "the wait must be bounded"
+
+
+def test_gateway_restart_waits_for_listener_and_ready_endpoint(tmp_path, captured_remote_script):
+    result, log, head = _run_remote(
+        tmp_path, captured_remote_script,
+        FAKE_GATEWAY_STATS_FAILURES="3", FAKE_GATEWAY_READY_FAILURES="2",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert head == remote_sha(captured_remote_script)
+    assert (tmp_path / "state/gateway_stats_calls").read_text().strip() == "4"
+    assert (tmp_path / "state/gateway_ready_calls").read_text().strip() == "3"
+    ready = max(i for i, line in enumerate(log) if line.endswith(":18080/ready"))
+    migrate = _index(log, "sudo systemctl start talky-migrate.service")
+    assert ready < migrate
+
+
+@pytest.mark.parametrize("failure", ["FAKE_GATEWAY_STATS_FAILURES", "FAKE_GATEWAY_READY_FAILURES"])
+def test_gateway_startup_deadline_blocks_migration(tmp_path, captured_remote_script, failure):
+    result, log, head = _run_remote(tmp_path, captured_remote_script, **{failure: "100000"})
+    assert result.returncode != 0 and head == PREV_SHA
+    assert "gateway probe did not become healthy" in result.stderr
+    assert not any("systemctl start talky-migrate" in line for line in log)
+    name = "gateway_stats_calls" if "STATS" in failure else "gateway_ready_calls"
+    assert int((tmp_path / "state" / name).read_text()) == 30
+
+
+@pytest.mark.parametrize("sessions", ["1", "true", "null"])
+def test_gateway_restart_preserves_exact_zero_session_requirement(tmp_path, captured_remote_script, sessions):
+    result, log, head = _run_remote(tmp_path, captured_remote_script, FAKE_POST_RESTART_SESSIONS=sessions)
+    assert result.returncode != 0 and head == PREV_SHA
+    assert not any("systemctl start talky-migrate" in line for line in log)
+    assert (tmp_path / "state/gateway_stats_calls").read_text().strip() == "1"
+
+
+@pytest.mark.parametrize("changed", [
+    {"ready": False}, {"protocol_version": 1}, {"codecs": ["opus"]}, {"build_sha": "a" * 40},
+])
+def test_gateway_restart_preserves_readiness_contract(tmp_path, captured_remote_script, changed):
+    import json
+
+    payload = {"ready": True, "protocol_version": 2, "codecs": ["pcmu"], "build_sha": remote_sha(captured_remote_script)}
+    payload.update(changed)
+    result, log, head = _run_remote(tmp_path, captured_remote_script, FAKE_GATEWAY_READY_JSON=json.dumps(payload))
+    assert result.returncode != 0 and head == PREV_SHA
+    assert not any("systemctl start talky-migrate" in line for line in log)
+    assert (tmp_path / "state/gateway_ready_calls").read_text().strip() == "1"

@@ -167,8 +167,10 @@ binary cannot silently survive a backend security or protocol change.
 ### Production drain manifest contract
 
 The manifest is a short-lived approval artifact, not a live probe. Its SHA-256
-is calculated over the exact file bytes and supplied separately. The verifier
-accepts only this version-1 shape (timestamps are RFC3339 UTC):
+is calculated over the exact file bytes and supplied separately. Version 1
+retains the two-operator procedure below (timestamps are RFC3339 UTC). Version 2
+explicitly supports an owner-authorized solo operation, as described afterwards;
+it is never inferred from an incomplete version-1 manifest.
 
 ```json
 {
@@ -199,10 +201,38 @@ accepts only this version-1 shape (timestamps are RFC3339 UTC):
 }
 ```
 
+For the current solo-operated platform, the owner explicitly authorized the
+single-owner procedure on 28 October 2026. A version-2 manifest keeps every
+candidate, environment, time, traffic, counter and evidence field above, and
+makes only these approval-field changes:
+
+```json
+{
+  "schema_version": 2,
+  "approval_mode": "single-owner",
+  "owner_authorization_ref": "owner-authorization:recorded-solo-policy-decision",
+  "approvers": [
+    {"principal": "actual-platform-owner-account", "role": "platform-owner", "approval_ref": "owner-approval:recorded-release-decision"}
+  ]
+}
+```
+
+This is a field-change example, not a complete executable manifest. Replace
+the illustrative references and principal with the actual owner's identity
+and retained authorization/release records. The policy authorization and release
+approval may refer to the same owner decision when it covers both. Version 2
+requires exactly one `platform-owner`, the literal `single-owner` mode and a
+nonempty `owner_authorization_ref`. Missing authority, other modes, extra keys
+and a second approver fail validation. Do not invent an independent operator or
+use an agent's code review as the owner's approval. Backup, actual ingress and
+origination freeze, fresh four-counter drain, candidate verification, migration,
+recovery and post-release health checks remain required under either version.
+
 `issued_at` may be no more than 15 minutes old (with at most 60 seconds of
 future clock skew), `expires_at` must still be in the future, and the total
-validity may not exceed 30 minutes. Both approvers need distinct principals,
-roles, and immutable approval references. The verifier rejects duplicate or
+validity may not exceed 30 minutes. Version 1 still requires at least two
+approvers with distinct principals, roles and immutable approval references.
+The verifier rejects duplicate or
 unknown JSON keys, booleans masquerading as integer counts, symlink/non-regular
 inputs where the platform supports no-follow opens, digest/candidate mismatch,
 and a reused `manifest_id`. Calculate the digest after the approvers publish
@@ -212,9 +242,11 @@ the immutable artifact, for example:
 sha256sum "$TALKY_DEPLOY_DRAIN_MANIFEST"
 ```
 
-The local replay ledger is an additional fail-closed guard; the change system
+The local replay ledger is an additional fail-closed guard; the release record
 must also enforce global manifest-ID uniqueness. SHA-256 binds the bytes but is
-not an approver signature. The optional `backend/scripts/observe_release_quiescence.py`
+not an approver signature. Neither version authenticates the named person's
+authority: the operator must retain the real authorization evidence. The
+optional `backend/scripts/observe_release_quiescence.py`
 now reads bounded gateway/Asterisk/Redis/database counters using an explicit
 `--env-file`. Its output is a non-atomic snapshot, never a drain manifest or
 approval; exit zero means the reads were complete and internally consistent,

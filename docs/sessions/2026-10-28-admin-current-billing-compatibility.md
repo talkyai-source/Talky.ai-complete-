@@ -1,5 +1,7 @@
 # Admin release compatibility with current billing
 
+**Follow-up:** [coordinated Admin release and hosted QA](2026-10-28-admin-live-release.md) records the subsequently authorized single-owner procedure, measured release-window evidence and successful activation, hosted contract checks and reopening, plus the READY customer deployment and verified production alias after merge. It supersedes the activation status below; prior observations and failed checks remain historical evidence.
+
 This checkpoint continues the existing Admin remediation scope. It does not
 record full production activation or lift the production-readiness freeze.
 
