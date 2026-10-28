@@ -34,8 +34,8 @@ def _load_drain_manifest_module():
     return module
 
 
-def _valid_drain_manifest(candidate_sha: str) -> dict:
-    return {
+def _valid_drain_manifest(candidate_sha: str, schema_version: int = 1) -> dict:
+    value = {
         "schema_version": 1,
         "manifest_id": "drain-test-001",
         "candidate_sha": candidate_sha,
@@ -69,6 +69,18 @@ def _valid_drain_manifest(candidate_sha: str) -> dict:
             },
         ],
     }
+    if schema_version == 2:
+        value.update(
+            schema_version=2,
+            approval_mode="single-owner",
+            owner_authorization_ref="test-authorization:solo-policy-001",
+            approvers=[{
+                "principal": "owner@example.com",
+                "role": "platform-owner",
+                "approval_ref": "test-approval:release-001",
+            }],
+        )
+    return value
 
 
 def _write_manifest(path: Path, value: dict) -> str:
@@ -253,12 +265,13 @@ def test_trunk_status_restart_cannot_abort_an_otherwise_healthy_deploy():
     assert "Restart=always will keep retrying" in deploy
 
 
-def test_drain_manifest_binds_candidate_external_state_and_is_single_use(tmp_path):
+@pytest.mark.parametrize("schema_version", [1, 2])
+def test_drain_manifest_binds_candidate_external_state_and_is_single_use(tmp_path, schema_version):
     verifier = _load_drain_manifest_module()
     candidate = "a" * 40
     manifest_path = tmp_path / "drain.json"
     replay_dir = tmp_path / "used"
-    digest = _write_manifest(manifest_path, _valid_drain_manifest(candidate))
+    digest = _write_manifest(manifest_path, _valid_drain_manifest(candidate, schema_version))
     now = datetime(2026, 8, 29, 10, 5, tzinfo=UTC)
 
     assert verifier.verify_and_consume_manifest(
@@ -333,11 +346,12 @@ def test_drain_manifest_rejects_mismatch_staleness_nonzero_and_collusion(
         )
 
 
-def test_drain_manifest_rejects_digest_tampering_and_duplicate_keys(tmp_path):
+@pytest.mark.parametrize("schema_version", [1, 2])
+def test_drain_manifest_rejects_digest_tampering_and_duplicate_keys(tmp_path, schema_version):
     verifier = _load_drain_manifest_module()
     candidate = "a" * 40
     manifest_path = tmp_path / "drain.json"
-    _write_manifest(manifest_path, _valid_drain_manifest(candidate))
+    _write_manifest(manifest_path, _valid_drain_manifest(candidate, schema_version))
 
     with pytest.raises(verifier.ManifestError, match="SHA-256"):
         verifier.verify_and_consume_manifest(
@@ -360,10 +374,11 @@ def test_drain_manifest_rejects_digest_tampering_and_duplicate_keys(tmp_path):
         )
 
 
-def test_drain_manifest_id_cannot_escape_replay_ledger(tmp_path):
+@pytest.mark.parametrize("schema_version", [1, 2])
+def test_drain_manifest_id_cannot_escape_replay_ledger(tmp_path, schema_version):
     verifier = _load_drain_manifest_module()
     candidate = "a" * 40
-    value = _valid_drain_manifest(candidate)
+    value = _valid_drain_manifest(candidate, schema_version)
     value["manifest_id"] = "../outside"
     manifest_path = tmp_path / "drain.json"
     digest = _write_manifest(manifest_path, value)
@@ -377,6 +392,115 @@ def test_drain_manifest_id_cannot_escape_replay_ledger(tmp_path):
             now=datetime(2026, 8, 29, 10, 5, tzinfo=UTC),
         )
     assert not (tmp_path / "outside.used").exists()
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda value: value.pop("approval_mode"), "missing=.*approval_mode"),
+        (lambda value: value.update(approval_mode="two-person"), "exactly single-owner"),
+        (lambda value: value.update(approval_mode=None), "exactly single-owner"),
+        (lambda value: value.pop("owner_authorization_ref"), "missing=.*owner_authorization_ref"),
+        (lambda value: value.update(owner_authorization_ref=None), "owner_authorization_ref"),
+        (lambda value: value.update(owner_authorization_ref=""), "owner_authorization_ref"),
+        (lambda value: value.update(owner_authorization_ref="not a reference"), "owner_authorization_ref"),
+        (lambda value: value.update(approvers=[]), "exactly one platform owner"),
+        (lambda value: value.update(approvers={}), "exactly one platform owner"),
+        (lambda value: value["approvers"].append(dict(value["approvers"][0])), "exactly one platform owner"),
+        (lambda value: value["approvers"][0].update(role="release-manager"), "exactly platform-owner"),
+        (lambda value: value["approvers"][0].update(principal=""), "principal"),
+        (lambda value: value["approvers"][0].pop("approval_ref"), "missing=.*approval_ref"),
+        (lambda value: value["approvers"][0].update(approval_ref=""), "approval_ref"),
+        (lambda value: value["approvers"][0].update(optional=True), "extra=.*optional"),
+        (lambda value: value.update(optional=True), "extra=.*optional"),
+        (lambda value: value.update(schema_version=1), "extra=.*approval_mode"),
+        (lambda value: value.update(schema_version=True), "integer 1 or 2"),
+        (lambda value: value.update(schema_version=3), "integer 1 or 2"),
+    ],
+)
+def test_single_owner_manifest_requires_explicit_authority_and_exact_shape(tmp_path, mutation, message):
+    verifier = _load_drain_manifest_module()
+    candidate = "a" * 40
+    value = _valid_drain_manifest(candidate, 2)
+    mutation(value)
+    path = tmp_path / "drain.json"
+    digest = _write_manifest(path, value)
+    replay_dir = tmp_path / "used"
+
+    with pytest.raises(verifier.ManifestError, match=message):
+        verifier.verify_and_consume_manifest(
+            manifest_path=path, candidate_sha=candidate, expected_sha256=digest,
+            replay_dir=replay_dir, now=datetime(2026, 8, 29, 10, 5, tzinfo=UTC),
+        )
+    assert not replay_dir.exists()
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda value: value.update(candidate_sha="b" * 40), "candidate_sha"),
+        (lambda value: value.update(environment="staging"), "environment"),
+        (lambda value: value.update(issued_at="2026-08-29T09:00:00Z"), "older than"),
+        (lambda value: value.update(issued_at="2026-08-29T10:07:00Z"), "future"),
+        (lambda value: value.update(expires_at="2026-08-29T10:04:59Z"), "expired"),
+        (lambda value: value.update(expires_at="2026-08-29T10:31:00Z"), "30 minutes"),
+        (lambda value: value["traffic"].update(ingress_disabled=False), "ingress_disabled"),
+        (lambda value: value["traffic"].update(outbound_origination_disabled=False), "outbound_origination_disabled"),
+        (lambda value: value["evidence"].update(topology_ref=""), "topology_ref"),
+        (lambda value: value["evidence"].update(change_ref=value["evidence"]["topology_ref"]), "independent evidence"),
+    ],
+)
+def test_single_owner_keeps_candidate_freshness_traffic_and_evidence_gates(tmp_path, mutation, message):
+    verifier = _load_drain_manifest_module()
+    candidate = "a" * 40
+    value = _valid_drain_manifest(candidate, 2)
+    mutation(value)
+    path = tmp_path / "drain.json"
+    digest = _write_manifest(path, value)
+    replay_dir = tmp_path / "used"
+
+    with pytest.raises(verifier.ManifestError, match=message):
+        verifier.verify_and_consume_manifest(
+            manifest_path=path, candidate_sha=candidate, expected_sha256=digest,
+            replay_dir=replay_dir, now=datetime(2026, 8, 29, 10, 5, tzinfo=UTC),
+        )
+    assert not replay_dir.exists()
+
+
+@pytest.mark.parametrize("counter", ["gateway_sessions", "asterisk_legs", "redis_leases", "db_live_calls"])
+@pytest.mark.parametrize("count", [1, False])
+def test_single_owner_still_requires_four_integer_zero_counters(tmp_path, counter, count):
+    verifier = _load_drain_manifest_module()
+    candidate = "a" * 40
+    value = _valid_drain_manifest(candidate, 2)
+    value["traffic"]["active_counts"][counter] = count
+    path = tmp_path / "drain.json"
+    digest = _write_manifest(path, value)
+    replay_dir = tmp_path / "used"
+
+    with pytest.raises(verifier.ManifestError, match=counter):
+        verifier.verify_and_consume_manifest(
+            manifest_path=path, candidate_sha=candidate, expected_sha256=digest,
+            replay_dir=replay_dir, now=datetime(2026, 8, 29, 10, 5, tzinfo=UTC),
+        )
+    assert not replay_dir.exists()
+
+
+def test_version_one_never_infers_single_owner_policy(tmp_path):
+    verifier = _load_drain_manifest_module()
+    candidate = "a" * 40
+    value = _valid_drain_manifest(candidate)
+    value["approvers"] = value["approvers"][:1]
+    path = tmp_path / "drain.json"
+    digest = _write_manifest(path, value)
+    replay_dir = tmp_path / "used"
+
+    with pytest.raises(verifier.ManifestError, match="at least two independent approvers"):
+        verifier.verify_and_consume_manifest(
+            manifest_path=path, candidate_sha=candidate, expected_sha256=digest,
+            replay_dir=replay_dir, now=datetime(2026, 8, 29, 10, 5, tzinfo=UTC),
+        )
+    assert not replay_dir.exists()
 
 
 def test_deployment_docs_keep_external_attestation_and_toctou_limit_explicit():
