@@ -120,3 +120,34 @@ def test_all_real_docs_produce_valid_sections():
             assert s.slug not in all_slugs, s.slug
             all_slugs.add(s.slug)
     assert total > 20
+
+
+def test_importer_reads_the_same_sections_from_git_as_from_the_working_tree():
+    """Production is a sparse checkout without Talk-Leee/: the importer must read git objects."""
+    import importlib.util
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parents[3] / "scripts" / "import_support_articles.py"
+    spec = importlib.util.spec_from_file_location("import_support_articles", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    from_disk = module.load_sections(module.DirSource(module.DEFAULT_DOCS_DIR))
+    from_git = module.load_sections(module.GitSource(module.REPO_ROOT, "HEAD"))
+    assert [s.slug for s in from_git] == [s.slug for s in from_disk]
+    assert len(from_git) > 100
+
+
+def test_importer_refuses_registry_paths_outside_the_docs_folder():
+    import importlib.util
+    from pathlib import Path
+
+    import pytest as _pytest
+
+    script = Path(__file__).resolve().parents[3] / "scripts" / "import_support_articles.py"
+    spec = importlib.util.spec_from_file_location("import_support_articles", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    for bad in ("../secrets.md", "a/b.md", "x.txt", "..md"):
+        with _pytest.raises(SystemExit):
+            module.safe_page_file(bad)
+    assert module.safe_page_file("billing.md") == "billing.md"

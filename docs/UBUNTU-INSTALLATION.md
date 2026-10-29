@@ -675,9 +675,9 @@ sudo git checkout --detach <FULL_SHA>
 
 Keep `/opt/talky` clean: `deploy_to_server.sh` refuses a dirty tree.
 
-Use a **full** checkout if the frontends build on this host or if you plan to
-import Support help articles (they are read from `Talk-Leee/src/app/docs/_content`).
-On a sparse checkout use `--docs-dir` (section 6.3).
+Use a **full** checkout if the frontends build on this host. Support help
+articles do not need one: on a sparse checkout without `Talk-Leee/` the importer
+reads the docs from the repository's git objects at `HEAD` (section 6.3).
 
 ### 5.3 Python environment
 
@@ -1119,12 +1119,17 @@ Options (from the script's `argparse`):
 | Option | Meaning |
 |---|---|
 | `--dry-run` | Parse and print the section count. No database. |
-| `--docs-dir PATH` | Docs folder. Default `<repo>/Talk-Leee/src/app/docs/_content`. |
+| `--docs-dir PATH` | Read the docs from this folder. |
+| `--git-ref REF` | Read the docs from git objects at `REF` (for example `HEAD`). |
 
-Expected output line: `support articles: parsed=N inserted=N updated=N unchanged=N unpublished=N skipped_staff=N`.
+Without either option the importer reads `<repo>/Talk-Leee/src/app/docs/_content`
+when it exists, otherwise git objects at `HEAD` (the deployed commit). This is
+how it runs on production, whose checkout is sparse.
+
+Expected output line: `support articles: source=... parsed=N inserted=N updated=N unchanged=N unpublished=N skipped_staff=N`.
 Exit code 2 with `DATABASE_URL is required` means the environment file was not
-loaded. If the checkout is sparse and the folder is missing, the script exits
-with `registry.ts not found in ...`; pass `--docs-dir` to a copy of the folder.
+loaded. `registry.ts not found in git HEAD:...` means the commit has no docs
+(not expected on `main`).
 
 The import uses `DATABASE_URL` (the runtime login), through `asyncpg`.
 Staff edit their own articles in the staff console.
@@ -1872,9 +1877,11 @@ entry. Commands are read-only unless stated.
 - Fix: enable support, or force with `--hourly` (6.6).
 
 **T30. `import_support_articles.py`: `DATABASE_URL is required` or `registry.ts not found`**
-- Cause: environment file not loaded; or a sparse checkout without `Talk-Leee/`.
-- Fix: run through `systemd-run ... -p EnvironmentFile=...` (6.3); or pass
-  `--docs-dir` to a copy of `Talk-Leee/src/app/docs/_content`.
+- Cause: environment file not loaded; or an importer older than the git
+  fallback on a sparse checkout without `Talk-Leee/`.
+- Fix: run through `systemd-run ... -p EnvironmentFile=...` (6.3); update to
+  `main`, where the importer reads git objects when the folder is absent, or
+  pass `--git-ref HEAD`.
 
 **T31. Support attachment upload fails in production**
 - Cause: no S3 settings, and `SUPPORT_ALLOW_LOCAL_STORAGE` is not `true`; or local
