@@ -1,0 +1,16 @@
+[Unit]
+Description=Talky.ai Support jobs (deadline checks every 15 min, hourly housekeeping)
+After=network.target
+# One-shot, triggered by talky-support-jobs.timer. Do NOT add Restart= here —
+# a failed run surfaces via exit code in journald and the next run retries.
+# Does nothing while SUPPORT_ENABLED=false.
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/talky/backend
+EnvironmentFile=/opt/talky/backend/.env
+ExecStart=/opt/talky/backend/venv/bin/python -m app.workers.support_jobs
+TimeoutStartSec=10min
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=talky-support-jobs

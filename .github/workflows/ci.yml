@@ -246,6 +246,9 @@ jobs:
             tests/integration/test_assemblyai_settings_persistence.py \
             tests/integration/test_call_redial.py \
             tests/integration/test_contact_enquiries.py \
+            tests/integration/test_support_pg.py \
+            tests/integration/test_support_articles_pg.py \
+            tests/integration/test_support_migration.py \
             tests/integration/test_billing_price_options.py \
             tests/integration/test_billing_checkout.py \
             tests/integration/test_billing_state_events.py \

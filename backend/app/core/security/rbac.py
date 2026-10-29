@@ -284,6 +284,8 @@ class Permission(str, enum.Enum):
     CALENDAR_MANAGE = "calendar:manage"
     REMINDERS_MANAGE = "reminders:manage"
     SUPPORT_REPORT = "support:report"
+    SUPPORT_READ_TEAM = "support:read_team"
+    SUPPORT_MANAGE = "support:manage"
 
     # Analytics permissions
     ANALYTICS_READ = "analytics:read"
@@ -532,6 +534,16 @@ _ASSISTANT_EXECUTION_PERMISSIONS = {
 }
 for _admin_role in (UserRole.TENANT_ADMIN, UserRole.PARTNER_ADMIN, UserRole.PLATFORM_ADMIN):
     ROLE_DEFAULT_PERMISSIONS[_admin_role].update(_ASSISTANT_EXECUTION_PERMISSIONS)
+
+# Support (2026-10-30): every working role may ask for help and follow its own
+# tickets (support:report); readonly is deliberately left out. Reading all of
+# a tenant's tickets is a tenant-administrator power, and the staff console
+# (support:manage) is platform-only. Migration 0082 seeds the same grants.
+for _support_role in (UserRole.CAMPAIGN_MANAGER, UserRole.USER, UserRole.AGENT, UserRole.BILLING_USER):
+    ROLE_DEFAULT_PERMISSIONS[_support_role].add(Permission.SUPPORT_REPORT)
+for _support_role in (UserRole.TENANT_ADMIN, UserRole.PARTNER_ADMIN, UserRole.PLATFORM_ADMIN):
+    ROLE_DEFAULT_PERMISSIONS[_support_role].add(Permission.SUPPORT_READ_TEAM)
+ROLE_DEFAULT_PERMISSIONS[UserRole.PLATFORM_ADMIN].add(Permission.SUPPORT_MANAGE)
 
 
 async def get_user_permissions(

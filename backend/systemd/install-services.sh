@@ -48,7 +48,8 @@ systemctl daemon-reload
 #     before the app restarts. Migrations must never run just because the
 #     machine booted. (See the unit's own header.)
 #   * talky-cleanup.service / talky-healthwatch.service / talky-db-backup.service
-#     / talky-inbound-synthetic.service — oneshots activated by their .timer,
+#     / talky-inbound-synthetic.service / talky-support-jobs.service — oneshots
+#     activated by their .timer,
 #     which IS enabled below.
 #   * talky-trunk-status.service — long-running loop since 2026-10-07 (its
 #     15-second timer was retired), enabled directly.
@@ -64,6 +65,7 @@ systemctl enable talky-healthwatch.timer   # activates talky-healthwatch.service
 systemctl enable talky-trunk-status.service  # refreshes runtime SIP evidence every 10 sec (loop)
 systemctl enable talky-inbound-synthetic.timer  # hourly carrier-hairpin proof
 systemctl enable talky-db-backup.timer  # nightly verified pg_dump (deploy/db-backup.sh)
+systemctl enable talky-support-jobs.timer  # support deadlines every 15 min + hourly housekeeping (no-op while SUPPORT_ENABLED=false)
 systemctl enable --now talky-asterisk-reconcile.timer # applies website line/number/inbound changes to Asterisk, every minute, only on drift
 systemctl enable talky.target
 

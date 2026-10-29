@@ -90,6 +90,11 @@ class AuditEvent(str, Enum):
     EMERGENCY_ACCESS_APPROVED = "emergency_access_approved"
     EMERGENCY_ACCESS_USED = "emergency_access_used"
 
+    # Support
+    SUPPORT_TICKET_CREATED = "support_ticket_created"
+    SUPPORT_TICKET_CHANGED = "support_ticket_changed"
+    SUPPORT_ARTICLE_CHANGED = "support_article_changed"
+
 
 class EventCategory(str, Enum):
     """Event categories for retention and routing"""

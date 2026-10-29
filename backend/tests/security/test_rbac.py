@@ -783,6 +783,7 @@ class TestValidationMatrixRoleDefaults:
             Permission.ANALYTICS_EXPORT,
             Permission.TENANTS_READ,
             Permission.USERS_READ,
+            Permission.SUPPORT_REPORT,
         }
 
     def test_campaign_manager_is_user_plus_campaign_ownership(
@@ -825,6 +826,7 @@ class TestValidationMatrixRoleDefaults:
             Permission.RECORDINGS_READ,
             Permission.ANALYTICS_READ,
             Permission.TENANTS_READ,
+            Permission.SUPPORT_REPORT,
         }
 
     def test_agent_can_work_calls(
@@ -869,6 +871,7 @@ class TestValidationMatrixRoleDefaults:
             Permission.ANALYTICS_READ,
             Permission.ANALYTICS_EXPORT,
             Permission.TENANTS_READ,
+            Permission.SUPPORT_REPORT,
         }
 
     def test_billing_user_can_see_and_pay_billing(
@@ -1150,3 +1153,31 @@ class TestRequirePermissionChecksTheTenantTheHandlerUses:
                          return_value=_Pool(_PerTenantConn({}))):
             user = await checker(_request(OTHER_TENANT_ID), _User("platform_admin"))
         assert user.id == "user-1"
+
+
+# ========================================================================
+# Support permissions (2026-10-30)
+# ========================================================================
+
+
+class TestSupportPermissions:
+    """Who may use support, read the team's tickets and run the staff console."""
+
+    def test_support_permissions_exist(self, Permission):
+        assert Permission.SUPPORT_REPORT.value == "support:report"
+        assert Permission.SUPPORT_READ_TEAM.value == "support:read_team"
+        assert Permission.SUPPORT_MANAGE.value == "support:manage"
+
+    def test_every_working_role_can_report_but_readonly_cannot(self, UserRole, Permission, ROLE_DEFAULT_PERMISSIONS):
+        for role in (UserRole.TENANT_ADMIN, UserRole.CAMPAIGN_MANAGER, UserRole.USER, UserRole.AGENT,
+                     UserRole.BILLING_USER, UserRole.PARTNER_ADMIN, UserRole.PLATFORM_ADMIN):
+            assert Permission.SUPPORT_REPORT in ROLE_DEFAULT_PERMISSIONS[role], role
+        assert Permission.SUPPORT_REPORT not in ROLE_DEFAULT_PERMISSIONS[UserRole.READONLY]
+
+    def test_only_tenant_administrators_read_the_team(self, UserRole, Permission, ROLE_DEFAULT_PERMISSIONS):
+        holders = {role for role, perms in ROLE_DEFAULT_PERMISSIONS.items() if Permission.SUPPORT_READ_TEAM in perms}
+        assert holders == {UserRole.TENANT_ADMIN, UserRole.PARTNER_ADMIN, UserRole.PLATFORM_ADMIN}
+
+    def test_only_platform_admin_manages_support(self, UserRole, Permission, ROLE_DEFAULT_PERMISSIONS):
+        holders = {role for role, perms in ROLE_DEFAULT_PERMISSIONS.items() if Permission.SUPPORT_MANAGE in perms}
+        assert holders == {UserRole.PLATFORM_ADMIN}

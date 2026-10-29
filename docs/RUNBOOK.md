@@ -21,6 +21,7 @@ Operator playbook for production Talky.ai. For architecture see
 | `talky-voice-gateway` | daemon (C++), runs as `admins` | `talky-voice-gateway` |
 | `talky-migrate` | oneshot, deploy-triggered | `talky-migrate` |
 | `talky-cleanup` | oneshot via `talky-cleanup.timer` (03:00 nightly) | `talky-cleanup` |
+| `talky-support-jobs` | oneshot via `talky-support-jobs.timer` (every 15 min; no-op while `SUPPORT_ENABLED=false`) | `talky-support-jobs` |
 | `talky-healthwatch` | oneshot via `talky-healthwatch.timer` (every 2 min) | `talky-healthwatch` |
 | `talky-trunk-status` | oneshot via `talky-trunk-status.timer` (every 15 s) | — |
 | `talky.target` | groups API + the three workers | — |
@@ -298,6 +299,37 @@ trimming `call_events` / `stream_events` / `call_legs`.
 ```bash
 systemctl list-timers 'talky-*' --no-pager
 journalctl -u talky-cleanup --since yesterday
+```
+
+## Support jobs
+
+`talky-support-jobs.timer` runs `app.workers.support_jobs` every 15 minutes.
+Each run marks newly missed support deadlines (once per ticket per deadline)
+and alerts staff by Slack and `SUPPORT_STAFF_ALERT_EMAIL`. The run in the first
+quarter of each hour also closes tickets resolved more than 7 days ago,
+deletes uploads never attached within 24 hours, marks bot conversations idle
+for 24 hours as abandoned, and deletes bot transcripts older than
+`SUPPORT_TRANSCRIPT_RETENTION_DAYS` that never became a ticket. It exits 0
+without touching anything while `SUPPORT_ENABLED=false`.
+
+```bash
+systemctl list-timers talky-support-jobs.timer --no-pager
+journalctl -u talky-support-jobs --since '1 hour ago'
+sudo systemctl start talky-support-jobs.service                 # run the deadline pass now
+sudo systemd-run --wait --pipe -p WorkingDirectory=/opt/talky/backend \
+  -p EnvironmentFile=/opt/talky/backend/.env \
+  /opt/talky/backend/venv/bin/python -m app.workers.support_jobs --hourly   # force housekeeping now
+```
+
+Help articles come from the in-app docs. After a docs change is deployed, run
+the import with the backend environment (idempotent; `--dry-run` parses without
+touching the database). Staff articles are edited in the staff console and are
+never overwritten by the import.
+
+```bash
+sudo systemd-run --wait --pipe -p WorkingDirectory=/opt/talky/backend \
+  -p EnvironmentFile=/opt/talky/backend/.env \
+  /opt/talky/backend/venv/bin/python scripts/import_support_articles.py
 ```
 
 ## Rotations
