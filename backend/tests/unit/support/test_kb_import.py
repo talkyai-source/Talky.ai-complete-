@@ -151,3 +151,28 @@ def test_importer_refuses_registry_paths_outside_the_docs_folder():
         with _pytest.raises(SystemExit):
             module.safe_page_file(bad)
     assert module.safe_page_file("billing.md") == "billing.md"
+
+
+def test_git_source_trusts_only_its_own_repository_and_reports_git_errors(monkeypatch, tmp_path):
+    """systemd-run as root has no SUDO_UID, so git refuses an admin-owned repo
+    ("dubious ownership") unless this read names the repository as safe."""
+    import importlib.util
+    import subprocess
+    from pathlib import Path
+
+    import pytest as _pytest
+
+    script = Path(__file__).resolve().parents[3] / "scripts" / "import_support_articles.py"
+    spec = importlib.util.spec_from_file_location("import_support_articles", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    seen = []
+
+    def fake_run(args, **kwargs):
+        seen.append(args)
+        return subprocess.CompletedProcess(args, 128, b"", b"fatal: detected dubious ownership in repository\n")
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    source = module.GitSource(tmp_path, "HEAD")
+    with _pytest.raises(SystemExit, match="dubious ownership"):
+        module.load_sections(source)
+    assert seen[0][:3] == ["git", "-c", f"safe.directory={tmp_path}"]

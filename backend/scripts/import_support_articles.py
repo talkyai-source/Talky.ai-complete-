@@ -64,11 +64,20 @@ class GitSource:
         return f"git {self.ref}:{DOCS_PATH}"
 
     def read(self, name: str) -> str | None:
-        result = subprocess.run(["git", "-C", str(self.repo_root), "show", f"{self.ref}:{DOCS_PATH}/{name}"],
-                                capture_output=True, timeout=60)
-        if result.returncode != 0:
+        # Root under systemd-run has no SUDO_UID, so git refuses the admin-owned
+        # checkout ("dubious ownership"). Trust exactly this repository, for
+        # this read-only command only; never change global git configuration.
+        result = subprocess.run(
+            ["git", "-c", f"safe.directory={self.repo_root}", "-C", str(self.repo_root),
+             "show", f"{self.ref}:{DOCS_PATH}/{name}"],
+            capture_output=True, timeout=60)
+        if result.returncode == 0:
+            return result.stdout.decode("utf-8")
+        error = result.stderr.decode("utf-8", "replace").strip().splitlines()
+        message = error[0] if error else f"git exited {result.returncode}"
+        if "does not exist" in message or "exists on disk, but not in" in message:
             return None
-        return result.stdout.decode("utf-8")
+        raise SystemExit(f"could not read {name} from {self.describe()}: {message}")
 
 
 def load_sections(source) -> list[kb.ArticleSection]:
