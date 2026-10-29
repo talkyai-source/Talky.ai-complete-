@@ -1,0 +1,51 @@
+{
+  "run_id": 40941758534,
+  "run_url": "https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40941758534",
+  "artifact_id": 12926668872,
+  "requested_head_sha": "129324a2cdec2e0ab5e905777d6239c5b27ef238",
+  "tested_checkout_sha": "da8fe4bf13cb1ca900e183c978b2504c97f4f274",
+  "tested_checkout_parents": [
+    "0ef59596e9f6e46aea4050fc99e6ff202c6f9da3",
+    "129324a2cdec2e0ab5e905777d6239c5b27ef238"
+  ],
+  "tested_tree_sha": "ee3a2797887f278627b2577a39c7cdd0c62e89b7",
+  "requested_head_tree_sha": "ee3a2797887f278627b2577a39c7cdd0c62e89b7",
+  "tree_identity_verified_by_github_git_api_and_local_git": true,
+  "source_file_hashes_verified_against_candidate_git_blobs": 103,
+  "recovery_status": "passed",
+  "grants_status": "passed",
+  "source_worktree_dirty": false,
+  "schema_heads": [
+    "0083_customer_support_contracts"
+  ],
+  "canonical_table_count": 117,
+  "restored_table_count": 117,
+  "record_fingerprints_equal": true,
+  "sequences_equal": true,
+  "parsed_schema_fingerprints_equal": true,
+  "runtime_profile": "canonical-0083",
+  "preserved_profile": "production-0083-preserved-20261029",
+  "production_accessed": false,
+  "owned_resources_removed": true,
+  "native_junit": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "0",
+    "tests": "18",
+    "time": "9.507",
+    "timestamp": "2026-10-29T19:38:11.137080",
+    "hostname": "runnervm48cm3"
+  },
+  "scope_limits": [
+    "not off-host survivability, retention/PITR, RPO/RTO, or alert-delivery acceptance",
+    "no application lifespan, provider, payment, call, or recording/encryption-key recovery",
+    "runtime data-operation checks cover campaigns, leads and calls; grants are fixture-specific",
+    "schema equality compares PostgreSQL-parsed definitions, not byte-identical pre-restore expression rendering"
+  ],
+  "artifact_sha256": {
+    "canonical-runtime-grants.json": "399ac2fc70050f9758cee693fdb43016396af48e8d583b1bc22db637dea9f4b5",
+    "canonical-tls-recovery.json": "36b46ff0d48e012cf586b86e2048f3e6204b127a347a361eda92f07beea08262",
+    "customer-support-contracts.xml": "14f5e0cea67d24ee4a1c7a2231fa16921be461f444da8a167da2ccd7d048f18c"
+  }
+}

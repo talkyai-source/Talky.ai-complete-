@@ -1,0 +1,51 @@
+{
+  "run_id": 40941758489,
+  "job_id": 123686789156,
+  "candidate": "129324a2cdec2e0ab5e905777d6239c5b27ef238",
+  "failure": "0083 rejects existing emergency_access_requests table ownership/RLS flags during preserved baseline upgrade",
+  "log_sha256": "04fec0d44e20d2d66936fb288f080810e17ff062b39d14db7db0f09c1a41ff6f",
+  "isolated_postgresql_version": "16.1",
+  "query_columns": [
+    "relkind",
+    "owner_is_current_user",
+    "relrowsecurity",
+    "relforcerowsecurity",
+    "relpersistence",
+    "relispartition"
+  ],
+  "psycopg2_value_types": [
+    "str",
+    "bool",
+    "bool",
+    "bool",
+    "str",
+    "bool"
+  ],
+  "asyncpg_value_types": [
+    "bytes",
+    "bool",
+    "bool",
+    "bool",
+    "bytes",
+    "bool"
+  ],
+  "psycopg2_values": [
+    "r",
+    true,
+    false,
+    false,
+    "p",
+    false
+  ],
+  "asyncpg_values": [
+    "bytes:r",
+    true,
+    false,
+    false,
+    "bytes:p",
+    false
+  ],
+  "fix": "Explicit SQL ::text for internal catalog char flags; exact guards unchanged",
+  "production_accessed": false,
+  "owned_reproduction_cluster_removed": true
+}

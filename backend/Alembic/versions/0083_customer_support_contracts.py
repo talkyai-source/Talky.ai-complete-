@@ -142,14 +142,16 @@ def _refuse(condition, table, part):
 
 
 def _shape(conn, relation):
+    # PostgreSQL's internal "char" type is bytes under asyncpg and text under
+    # psycopg2. Cast catalog flags explicitly, preserving exact comparisons.
     columns = _rows(conn, """
-        SELECT attnum,attname,atttypid,atttypmod,attnotnull,attidentity,attgenerated,
+        SELECT attnum,attname,atttypid,atttypmod,attnotnull,attidentity::text,attgenerated::text,
                attcollation,pg_get_expr(d.adbin,d.adrelid)
         FROM pg_attribute a LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
         WHERE a.attrelid=to_regclass(:rel) AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attnum
     """, rel=relation)
     constraints = _rows(conn, """
-        SELECT contype,condeferrable,condeferred,convalidated,pg_get_constraintdef(oid,true)
+        SELECT contype::text,condeferrable,condeferred,convalidated,pg_get_constraintdef(oid,true)
         FROM pg_constraint WHERE conrelid=to_regclass(:rel) AND contype<>'f'
         ORDER BY contype,pg_get_constraintdef(oid,true)
     """, rel=relation)
@@ -177,7 +179,7 @@ def _create_reference(conn, table, contract):
 
 def _check_policy(conn, table, ref, contract):
     def policies(rel):
-        return _rows(conn, """SELECT polcmd,polpermissive,polroles::text,
+        return _rows(conn, """SELECT polcmd::text,polpermissive,polroles::text,
             pg_get_expr(polqual,polrelid),pg_get_expr(polwithcheck,polrelid)
             FROM pg_policy WHERE polrelid=to_regclass(:rel) ORDER BY polname""", rel=rel)
     _refuse(policies(f"public.{table}") == policies(ref), table, "RLS policy semantics")
@@ -188,9 +190,9 @@ def _check_policy(conn, table, ref, contract):
 
 def _check_touch_function(conn, table, must_exist):
     function = f"{table}_touch_updated_at"
-    rows = _rows(conn, """SELECT pg_get_userbyid(p.proowner)=current_user,p.prosecdef,p.prokind,
+    rows = _rows(conn, """SELECT pg_get_userbyid(p.proowner)=current_user,p.prosecdef,p.prokind::text,
         p.prorettype='trigger'::regtype,p.pronargs,p.prosrc,p.proconfig,l.lanname,
-        p.provolatile,p.proparallel
+        p.provolatile::text,p.proparallel::text
         FROM pg_proc p JOIN pg_language l ON l.oid=p.prolang
         WHERE p.pronamespace='public'::regnamespace AND p.proname=:name""", name=function)
     if not rows and not must_exist:
@@ -205,8 +207,8 @@ def _check_touch_function(conn, table, must_exist):
 def _check_existing(conn, table, ref, contract):
     # Locks precede catalog reads so concurrent DDL cannot invalidate the guard.
     conn.execute(text(f"LOCK TABLE public.{table} IN ACCESS EXCLUSIVE MODE"))
-    state = _rows(conn, """SELECT relkind,pg_get_userbyid(relowner)=current_user,
-        relrowsecurity,relforcerowsecurity,relpersistence,relispartition
+    state = _rows(conn, """SELECT relkind::text,pg_get_userbyid(relowner)=current_user,
+        relrowsecurity,relforcerowsecurity,relpersistence::text,relispartition
         FROM pg_class WHERE oid=to_regclass(:rel)""", rel=f"public.{table}")[0]
     tenant = contract["tenant"]
     _refuse(state == ('r', True, tenant, tenant, 'p', False), table, "table ownership/RLS flags")
@@ -224,7 +226,7 @@ def _check_existing(conn, table, ref, contract):
                           for fk in contract["foreign_keys"])
     _refuse(fks == expected_fks, table, "foreign keys")
     _check_policy(conn, table, ref, contract)
-    triggers = _rows(conn, """SELECT t.tgname,t.tgenabled,t.tgtype,t.tgnargs,t.tgargs,
+    triggers = _rows(conn, """SELECT t.tgname,t.tgenabled::text,t.tgtype,t.tgnargs,t.tgargs,
         t.tgattr::text,pg_get_expr(t.tgqual,t.tgrelid),n.nspname,p.proname
         FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid JOIN pg_namespace n ON n.oid=p.pronamespace
         WHERE t.tgrelid=to_regclass(:rel) AND NOT t.tgisinternal ORDER BY t.tgname""", rel=f"public.{table}")
@@ -248,7 +250,7 @@ def _check_selection_column(conn):
         CHECK (active_telephony_provider IN ('twilio','vonage','sip','none'))
     ) ON COMMIT DROP"""))
     def column(rel):
-        return _rows(conn, """SELECT a.atttypid,a.atttypmod,a.attnotnull,a.attidentity,a.attgenerated,
+        return _rows(conn, """SELECT a.atttypid,a.atttypmod,a.attnotnull,a.attidentity::text,a.attgenerated::text,
             a.attcollation,pg_get_expr(d.adbin,d.adrelid)
             FROM pg_attribute a LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
             WHERE a.attrelid=to_regclass(:rel) AND a.attname='active_telephony_provider'
@@ -257,7 +259,7 @@ def _check_selection_column(conn):
     if existing:
         _refuse(existing == column("pg_temp.support_0083_selection"), "tenants", "active provider column/default")
         def constraints(rel):
-            return _rows(conn, """SELECT c.contype,c.convalidated,c.condeferrable,c.condeferred,
+            return _rows(conn, """SELECT c.contype::text,c.convalidated,c.condeferrable,c.condeferred,
                 pg_get_constraintdef(c.oid,true)
                 FROM pg_constraint c JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=ANY(c.conkey)
                 WHERE c.conrelid=to_regclass(:rel) AND a.attname='active_telephony_provider'

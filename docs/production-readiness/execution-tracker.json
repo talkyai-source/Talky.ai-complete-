@@ -114,6 +114,9 @@
       "scope_scenarios": 22,
       "scope_gates": 15,
       "status": "targeted_repairs_locally_verified_complete_release_ci_pending_not_paid_acceptance",
+      "replacement_checkpoint_source": "129324a2cdec2e0ab5e905777d6239c5b27ef238",
+      "replacement_checkpoint": "Frontend/Admin and full backend unit-security suites, dependency audit, installer builds, monitoring and canonical TLS passed; main CI preserved historical bootstrap exposed asyncpg internal-char decoding. Repair and exact-candidate release qualification remain in progress. No end-to-end gate closed.",
+      "live_backend_observation": "docs/sessions/artifacts/customer-support-20261029/live-backend-observation.json",
       "production_mutations": false
     }
   },

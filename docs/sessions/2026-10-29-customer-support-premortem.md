@@ -101,6 +101,43 @@ the replacement candidate. The fast voice suite passed separately.
 The corrected secret-boundary, reset-truth and atomic send-limit modules
 passed all 96 focused checks locally before resubmission.
 
+### Replacement candidate checkpoint
+
+Candidate `129324a2cdec2e0ab5e905777d6239c5b27ef238` passed the patched
+dependency audit, frontend lint/typecheck/build (1,351 passed, two skipped),
+Admin lint/build (943 passed), and the complete backend unit/security suite
+(15,740 passed, 288 skipped, plus 20 passing subtests). Existing skip reasons
+remain in the CI logs; these are not live-provider or telephone acceptance.
+The fast voice suite, installer/dependency checks, gateway checks, both Linux
+frontend builds, monitoring and canonical TLS recovery also passed.
+
+The main CI run still failed the preserved historical bootstrap. Isolated
+PostgreSQL reproduction showed that psycopg2 returns catalog internal-char
+values as strings while asyncpg returns bytes. Migration 0083's strict
+existing-object guard therefore rejected an otherwise matching emergency
+table ([isolated reproduction](artifacts/customer-support-20261029/0083-asyncpg-character-reproduction.json)).
+Explicit SQL text casts repair this driver boundary without accepting
+different ownership, RLS, schema or trigger behavior. Native PostgreSQL
+verification covered 22 cases, including actual Alembic/asyncpg adoption,
+three drift refusals, and the unchanged complete historical dump through
+0082 to 0083. The first run passed 21 cases and exposed a test-loader session
+setting that real psql clears on exit. Disposing that loader connection pool
+fixed the fixture; the historical case then passed separately in 73.09 seconds.
+Both initial failure and successful rerun receipts are retained. No case was
+skipped, and no production guard or historical snapshot was weakened.
+
+Relevant immutable runs: [backend suite](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40941758490),
+[main CI with retained failure](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40941758489),
+[installer builds](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40941758484),
+and [TLS database acceptance](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40941758534).
+The [TLS manifest](artifacts/customer-support-20261029/patched-candidate-tls-manifest.json)
+binds the tested merge to the same candidate tree and verifies 103 source-file
+hashes; all 18 native tests passed, with no failures or skips.
+They apply to the named candidate, not automatically to subsequent source.
+The first candidate's Ubuntu fresh installation and reboot passed; its
+update/recovery job was cancelled when superseded and is not a completed
+recovery qualification.
+
 ## Operating acceptance still required
 
 The source repairs do not supply secure host administration, a designated
@@ -140,3 +177,13 @@ addressed within the recorded plan.
 ## Current public-site observation
 
 At 18:32 UTC on 29 October, the Vercel production alias was READY on main source `0ef59596e9f6e46aea4050fc99e6ff202c6f9da3`. This is the pre-repair deployment, not this candidate. Native workstation HTTP checks failed DNS resolution. Independent Google/Cloudflare DoH and TCP queries to both authoritative nameservers resolved the domain, while the local/network UDP path returned SERVFAIL. Using that verified address with the normal hostname and certificate validation, all nine known anonymous homepage/login/branding/protected-route checks passed at 18:39 UTC. No certificate check was bypassed and no DNS record was changed. This diagnoses a local/network resolution-path failure, not a proven global deployment outage.
+
+A separate read-only backend refresh at 19:39:49 UTC (00:39:49 PKT on
+30 October) returned HTTP 200 for health, ready and deep health. It still ran
+source `10a8b9f0f9d8e7d5c59140f1e4829790050161b9` with database head
+`0081_admin_payment_merge`. The observed connection had no TLS; the runtime
+role owned 123 public tables and retained CREATEDB, CREATEROLE and REPLICATION
+(not SUPERUSER or BYPASSRLS). Noninteractive administration was unavailable.
+No application records or secrets were exported and no live mutation was
+performed. These facts prevent treating local/CI repairs as a production
+cutover or paid-readiness sign-off.

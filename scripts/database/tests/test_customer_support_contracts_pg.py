@@ -197,6 +197,111 @@ def test_known_existing_contract_preserves_data_oid_policy_acl(database):
         assert conn.exec_driver_sql("SELECT encrypted_key FROM tenant_ai_credentials ORDER BY encrypted_key").scalars().all() == ["history-1", "history-2"]
 
 
+def run_alembic(port, name, *arguments):
+    """Exercise env.py and its real asyncpg driver, not only psycopg2 op.bind."""
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("PG") and k not in ("DATABASE_URL", "READ_DATABASE_URL")}
+    env.update(MIGRATION_DATABASE_URL=f"postgresql://support_owner@127.0.0.1:{port}/{name}",
+               PYTHON_DOTENV_DISABLED="1")
+    return subprocess.run([sys.executable, "-m", "alembic", *arguments], cwd=BACKEND,
+                          env=env, capture_output=True, text=True, timeout=180)
+
+
+def test_actual_alembic_adopts_existing_contracts_without_catalog_changes(database):
+    engine, _, port, name = database
+    with engine.begin() as conn:
+        legacy(conn)
+        before = conn.exec_driver_sql("""SELECT c.oid,c.relname,c.relacl::text,
+            c.relrowsecurity,c.relforcerowsecurity,p.oid,p.polname
+            FROM pg_class c LEFT JOIN pg_policy p ON p.polrelid=c.oid
+            WHERE c.relnamespace='public'::regnamespace ORDER BY c.oid,p.oid""").all()
+    result = run_alembic(port, name, "upgrade", "head")
+    assert result.returncode == 0, result.stderr[-5000:]
+    with engine.connect() as conn:
+        after = conn.exec_driver_sql("""SELECT c.oid,c.relname,c.relacl::text,
+            c.relrowsecurity,c.relforcerowsecurity,p.oid,p.polname
+            FROM pg_class c LEFT JOIN pg_policy p ON p.polrelid=c.oid
+            WHERE c.relnamespace='public'::regnamespace ORDER BY c.oid,p.oid""").all()
+        assert before == after
+        assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == migration.revision
+
+
+@pytest.mark.parametrize("drift,fragment", [
+    ("ALTER TABLE tenant_recording_policy NO FORCE ROW LEVEL SECURITY", "ownership/RLS"),
+    ("ALTER FUNCTION tenant_recording_policy_touch_updated_at() SECURITY DEFINER", "function body/ownership"),
+    ("ALTER TABLE tenant_ai_credentials DISABLE TRIGGER trg_tenant_ai_credentials_updated_at", "trigger behavior"),
+])
+def test_actual_alembic_still_refuses_existing_catalog_drift(database, drift, fragment):
+    engine, _, port, name = database
+    with engine.begin() as conn:
+        legacy(conn)
+        conn.exec_driver_sql(drift)
+        conn.exec_driver_sql("DROP TABLE emergency_access_requests")
+    result = run_alembic(port, name, "upgrade", "head")
+    assert result.returncode != 0
+    assert fragment in result.stderr
+    with engine.connect() as conn:
+        assert conn.exec_driver_sql("SELECT to_regclass('public.emergency_access_requests')").scalar() is None
+        assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == migration.down_revision
+
+
+def test_actual_alembic_upgrades_the_complete_preserved_baseline(cluster):
+    admin, port = cluster
+    name = "support_test_historical_" + uuid.uuid4().hex[:12]
+    with admin.connect() as conn:
+        conn.exec_driver_sql(f'CREATE DATABASE "{name}" OWNER support_owner TEMPLATE template0')
+    engine = create_engine(f"postgresql://support_owner@127.0.0.1:{port}/{name}")
+    try:
+        snapshot = (BACKEND / "database/schema/baseline_2026-06-02.sql").read_text(encoding="utf-8")
+        # Only these paired psql client guards are not SQL. Execute every SQL
+        # statement from the unchanged historical dump through the DBAPI.
+        guards = [line for line in snapshot.splitlines() if line.startswith("\\")]
+        assert len(guards) == 2 and guards[0].startswith("\\restrict ")
+        assert guards[1] == guards[0].replace("\\restrict ", "\\unrestrict ", 1)
+        sql = "\n".join(line for line in snapshot.splitlines() if line not in guards)
+        with engine.begin() as conn:
+            conn.exec_driver_sql(sql, execution_options={"no_parameters": True})
+        # The CI restore psql process exits here. Discard its session settings
+        # (including row_security=off) before ordinary restricted-owner DML.
+        engine.dispose()
+        for arguments in (("stamp", "0008_tenant_voice_tuning"),
+                          ("upgrade", migration.down_revision)):
+            result = run_alembic(port, name, *arguments)
+            assert result.returncode == 0, result.stderr[-5000:]
+        with engine.begin() as conn:
+            conn.exec_driver_sql("SET LOCAL app.bypass_rls='true'")
+            before = conn.exec_driver_sql("""SELECT c.oid,c.relname,c.relacl::text,
+                c.relrowsecurity,c.relforcerowsecurity,p.oid,p.polname
+                FROM pg_class c LEFT JOIN pg_policy p ON p.polrelid=c.oid
+                WHERE c.relnamespace='public'::regnamespace ORDER BY c.oid,p.oid""").all()
+            actor = conn.exec_driver_sql("INSERT INTO user_profiles(email) VALUES('synthetic-history@example.invalid') RETURNING id").scalar()
+            request = conn.execute(text("""INSERT INTO emergency_access_requests
+                (requestor_id,scenario,justification,requested_access,approvals,expires_at)
+                VALUES(:actor,'security_incident','Synthetic historical evidence',ARRAY['existing:permission'],
+                    '[{"verification_code":"012345","preserved":"audit"}]'::jsonb,now()) RETURNING request_id"""),
+                dict(actor=actor)).scalar()
+        result = run_alembic(port, name, "upgrade", "head")
+        assert result.returncode == 0, result.stderr[-5000:]
+        with engine.begin() as conn:
+            conn.exec_driver_sql("SET LOCAL app.bypass_rls='true'")
+            after = conn.exec_driver_sql("""SELECT c.oid,c.relname,c.relacl::text,
+                c.relrowsecurity,c.relforcerowsecurity,p.oid,p.polname
+                FROM pg_class c LEFT JOIN pg_policy p ON p.polrelid=c.oid
+                WHERE c.relnamespace='public'::regnamespace ORDER BY c.oid,p.oid""").all()
+            assert set(before) <= set(after)  # Add missing objects; preserve every existing identity/ACL/policy.
+            assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == migration.revision
+            assert conn.execute(text("SELECT approvals FROM emergency_access_requests WHERE request_id=:request"),
+                                dict(request=request)).scalar() == [{"preserved": "audit"}]
+            assert all(conn.execute(text("SELECT to_regclass(:rel)"), dict(rel="public." + table)).scalar()
+                       for table in migration.TABLES)
+            # Recheck every resulting shape, owner, policy, index and trigger.
+            upgrade(conn)
+    finally:
+        engine.dispose()
+        with admin.connect() as conn:
+            conn.exec_driver_sql(f'DROP DATABASE "{name}" WITH (FORCE)')
+
+
 @pytest.mark.parametrize("drift,fragment", [
     ("ALTER TABLE tenant_ai_credentials ADD COLUMN unexpected text", "columns/defaults"),
     ("ALTER TABLE tenant_recording_policy ALTER COLUMN retention_days SET DEFAULT 3650", "columns/defaults"),

@@ -1,0 +1,25 @@
+{
+  "read_only": true,
+  "application_rows_read": false,
+  "source_sha": "10a8b9f0f9d8e7d5c59140f1e4829790050161b9",
+  "noninteractive_admin_available": false,
+  "health": {
+    "/health": 200,
+    "/api/v1/healthz/ready": 200,
+    "/api/v1/healthz/deep": 200
+  },
+  "database_heads": [
+    "0081_admin_payment_merge"
+  ],
+  "database_tls": false,
+  "runtime_role_flags": {
+    "superuser": false,
+    "bypassrls": false,
+    "createdb": true,
+    "createrole": true,
+    "replication": true
+  },
+  "runtime_owned_public_tables": 123,
+  "checked_at": "2026-10-29T19:39:49.004467+00:00",
+  "production_mutations": false
+}
