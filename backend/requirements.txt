@@ -90,13 +90,12 @@ Pillow>=10.0.0
 webauthn==2.7.1
 
 # --- AI Assistant Agent ---
-# Compatible pinned stack: SDK 0.4.4 fixes GHSA-fvww-7h3r-vfhp.
-# LangGraph 1.2.4 is the first non-yanked parent accepting the patched SDK;
-# its core/prebuilt minimums must move together.
-langchain-core==1.4.0
-langgraph==1.2.4
+# Security floor: GHSA-3fx2-cqw9-xr3c / CVE-2026-118667.
+# LangGraph 1.2.14 requires SDK >=0.4.6 and core >=1.4.7.
+langchain-core==1.4.7
+langgraph==1.2.14
 langgraph-prebuilt==1.1.0
-langgraph-sdk==0.4.4
+langgraph-sdk==0.4.6
 langchain-groq==1.1.2
 # Security floor: 0.8.18 fixes GHSA-f4xh-w4cj-qxq8.
 langsmith==0.8.18

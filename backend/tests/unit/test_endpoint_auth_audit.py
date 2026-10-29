@@ -93,6 +93,10 @@ _PUBLIC = {
         "anonymous rate-limited, CSRF-checked enquiry intake; inserts platform-owned "
         "records and returns only its receipt, never tenant data"
     ),
+    "GET /api/v1/support/attachments/{attachment_id}/content": (
+        "local-storage support download; the HMAC-signed, 5-minute link minted only after "
+        "the authenticated GET /support/attachments/{id} permission check is the capability"
+    ),
 }
 
 KNOWN_PUBLIC_ROUTES: dict[str, str] = {

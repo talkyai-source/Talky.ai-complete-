@@ -261,10 +261,10 @@ def _rls_statements():
     yield "ALTER TABLE public.support_kb_articles FORCE ROW LEVEL SECURITY"
     yield (f"CREATE POLICY support_kb_articles_read ON public.support_kb_articles FOR SELECT "
            f"USING (published OR {BYPASS})")
-    for command in ("INSERT", "UPDATE", "DELETE"):
-        clause = "WITH CHECK" if command == "INSERT" else "USING"
-        yield (f"CREATE POLICY support_kb_articles_{command.lower()} ON public.support_kb_articles "
-               f"FOR {command} {clause} ({BYPASS})")
+    # Written out (not looped) so the RLS inventory reads each policy literally.
+    yield f"CREATE POLICY support_kb_articles_insert ON public.support_kb_articles FOR INSERT WITH CHECK ({BYPASS})"
+    yield f"CREATE POLICY support_kb_articles_update ON public.support_kb_articles FOR UPDATE USING ({BYPASS})"
+    yield f"CREATE POLICY support_kb_articles_delete ON public.support_kb_articles FOR DELETE USING ({BYPASS})"
 
 
 def _permission_statements():
