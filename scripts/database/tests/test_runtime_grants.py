@@ -19,6 +19,21 @@ def service(user="runtime", **values):
 
 
 class BoundaryTests(unittest.TestCase):
+    def test_preserved_profile_is_explicit_and_unknown_choices_never_connect(self):
+        self.assertEqual(len(grants.select_profile()["tables"]), 117)
+        selected = grants.select_profile(grants.PRESERVED_PROFILE["profile"])
+        self.assertEqual(len(selected["tables"]), 123)
+        self.assertEqual(len(selected["owner_only_tables"]), 6)
+        with patch.object(grants, "connect") as connect:
+            with self.assertRaisesRegex(grants.GrantsError, "Unknown reviewed profile"):
+                grants.execute(service("owner"), service(), "apply", "arbitrary-file.json")
+        connect.assert_not_called()
+
+    def test_preserved_profile_refuses_new_canonical_base_without_review(self):
+        with patch.dict(grants.PRESERVED_PROFILE, {"base_profile": "unreviewed-new-head"}):
+            with self.assertRaisesRegex(grants.GrantsError, "requires review"):
+                grants.select_profile(grants.PRESERVED_PROFILE["profile"])
+
     def test_same_role_is_refused_before_connecting(self):
         with patch.object(grants, "connect") as connect:
             with self.assertRaisesRegex(grants.GrantsError, "identities must differ"):

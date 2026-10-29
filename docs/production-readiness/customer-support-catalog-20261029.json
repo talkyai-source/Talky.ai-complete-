@@ -1,0 +1,213 @@
+{
+  "observed_utc": "2026-10-29T18:03:42.950988+00:00",
+  "read_only": true,
+  "source": "scripts/database/customer_support_catalog.sql",
+  "application_rows_read": false,
+  "scope": "Ten reviewed extra tables and one tenant selection column; not full production schema qualification",
+  "raw_metadata_sha256": "31d1ce68865247746d5c7e794a20407897abad4e181780867cd0e76b1dbaa9e9",
+  "referencing_routine_count": 0,
+  "dependent_view_count": 0,
+  "tables": [
+    {
+      "name": "audit_chain_state",
+      "column_count": 7,
+      "column_types": [
+        "bigint",
+        "boolean",
+        "character varying(64)",
+        "integer",
+        "timestamp with time zone",
+        "uuid"
+      ],
+      "constraint_count": 2,
+      "index_count": 1,
+      "trigger_count": 0,
+      "incoming_foreign_key_count": 0,
+      "rls": false,
+      "force_rls": false,
+      "proposed_runtime_access": "none; explicit preserved profile requires qualification before cutover",
+      "reviewed_definition_sha256": "fad5a432b02bcc900e86a7a7f131739435fc0e17497e4bdf238893324bac43f5"
+    },
+    {
+      "name": "audit_event_types",
+      "column_count": 5,
+      "column_types": [
+        "character varying(10)",
+        "character varying(30)",
+        "character varying(50)",
+        "integer",
+        "text"
+      ],
+      "constraint_count": 1,
+      "index_count": 1,
+      "trigger_count": 0,
+      "incoming_foreign_key_count": 0,
+      "rls": false,
+      "force_rls": false,
+      "proposed_runtime_access": "none; explicit preserved profile requires qualification before cutover",
+      "reviewed_definition_sha256": "dba6bc7c482d78bf9f5e81bcebe05caa0c5fcbb6503a1bc7df9788ebe95ac3ec"
+    },
+    {
+      "name": "emergency_access_requests",
+      "column_count": 18,
+      "column_types": [
+        "character varying(20)",
+        "character varying(50)",
+        "character varying(64)",
+        "integer",
+        "jsonb",
+        "text",
+        "text[]",
+        "timestamp with time zone",
+        "uuid"
+      ],
+      "constraint_count": 4,
+      "index_count": 5,
+      "trigger_count": 0,
+      "incoming_foreign_key_count": 0,
+      "rls": false,
+      "force_rls": false,
+      "proposed_runtime_access": "existing supported contract",
+      "reviewed_definition_sha256": "7cc03e8ae17c7a7a7f6be90e1f8472dd519a04e574775c3c36bd45902ebe2520"
+    },
+    {
+      "name": "rate_limit_events",
+      "column_count": 7,
+      "column_types": [
+        "jsonb",
+        "text",
+        "timestamp with time zone",
+        "uuid"
+      ],
+      "constraint_count": 3,
+      "index_count": 3,
+      "trigger_count": 0,
+      "incoming_foreign_key_count": 0,
+      "rls": false,
+      "force_rls": false,
+      "proposed_runtime_access": "none; explicit preserved profile requires qualification before cutover",
+      "reviewed_definition_sha256": "9d904e99a5ac6de92d1ac088af96bfca92a57caf2223104bffeae507e33d2c9d"
+    },
+    {
+      "name": "suspension_propagation_queue",
+      "column_count": 13,
+      "column_types": [
+        "character varying(20)",
+        "character varying(50)",
+        "integer",
+        "text",
+        "timestamp with time zone",
+        "uuid"
+      ],
+      "constraint_count": 4,
+      "index_count": 3,
+      "trigger_count": 0,
+      "incoming_foreign_key_count": 0,
+      "rls": false,
+      "force_rls": false,
+      "proposed_runtime_access": "none; explicit preserved profile requires qualification before cutover",
+      "reviewed_definition_sha256": "91f295413c931c2649b126018300a6e94da24f9ebf96679448f9ebbadb03201d"
+    },
+    {
+      "name": "tenant_ai_configs_backup_20260907",
+      "column_count": 21,
+      "column_types": [
+        "character varying(16)",
+        "character varying(50)",
+        "double precision",
+        "integer",
+        "jsonb",
+        "text",
+        "timestamp with time zone",
+        "uuid"
+      ],
+      "constraint_count": 0,
+      "index_count": 0,
+      "trigger_count": 0,
+      "incoming_foreign_key_count": 0,
+      "rls": true,
+      "force_rls": true,
+      "proposed_runtime_access": "none; explicit preserved profile requires qualification before cutover",
+      "reviewed_definition_sha256": "aa0e6ef0501fbfbdbfcb6b703ee384a6c4953dd640e9e4b71437e14d385b824f"
+    },
+    {
+      "name": "tenant_ai_credentials",
+      "column_count": 12,
+      "column_types": [
+        "text",
+        "timestamp with time zone",
+        "uuid"
+      ],
+      "constraint_count": 6,
+      "index_count": 3,
+      "trigger_count": 1,
+      "incoming_foreign_key_count": 0,
+      "rls": true,
+      "force_rls": true,
+      "proposed_runtime_access": "existing supported contract",
+      "reviewed_definition_sha256": "33db29215706df1673518c7512d368890d83c48093d3299669e3f28ca2e09e21"
+    },
+    {
+      "name": "tenant_recording_policy",
+      "column_count": 8,
+      "column_types": [
+        "integer",
+        "text",
+        "text[]",
+        "timestamp with time zone",
+        "uuid"
+      ],
+      "constraint_count": 5,
+      "index_count": 1,
+      "trigger_count": 1,
+      "incoming_foreign_key_count": 0,
+      "rls": true,
+      "force_rls": true,
+      "proposed_runtime_access": "existing supported contract",
+      "reviewed_definition_sha256": "4fbe01e66745a4c5a87b25648e0752546c01a688850a0e287d3ecd84793b8459"
+    },
+    {
+      "name": "tenant_telephony_credentials",
+      "column_count": 11,
+      "column_types": [
+        "jsonb",
+        "text",
+        "timestamp with time zone",
+        "uuid"
+      ],
+      "constraint_count": 5,
+      "index_count": 3,
+      "trigger_count": 0,
+      "incoming_foreign_key_count": 0,
+      "rls": true,
+      "force_rls": true,
+      "proposed_runtime_access": "existing supported contract",
+      "reviewed_definition_sha256": "62689363130ba7f55443743cf89548cf6c212714019ce4e33b26322725657646"
+    },
+    {
+      "name": "worker_status",
+      "column_count": 8,
+      "column_types": [
+        "integer",
+        "text",
+        "timestamp with time zone",
+        "uuid"
+      ],
+      "constraint_count": 1,
+      "index_count": 2,
+      "trigger_count": 0,
+      "incoming_foreign_key_count": 0,
+      "rls": false,
+      "force_rls": false,
+      "proposed_runtime_access": "none; explicit preserved profile requires qualification before cutover",
+      "reviewed_definition_sha256": "53e75f92e373173b4f486ae9f6b6c0b1e0c3276d03b03c4f86855c1cde3c61e9"
+    }
+  ],
+  "selection_column": {
+    "name": "active_telephony_provider",
+    "type": "text",
+    "not_null": false,
+    "constraint_count": 1,
+    "reviewed_definition_sha256": "614daa640579ae4af93c21c6edcedf081fbff14fbd99ab04776f5518c82983e4"
+  }
+}

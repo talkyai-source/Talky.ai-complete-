@@ -21,6 +21,10 @@ SPEC = importlib.util.spec_from_file_location("grants_recovery", HERE / "recover
 recovery = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(recovery)
 PROFILE = json.loads((HERE / "runtime_grants_profile.json").read_text(encoding="utf-8"))
+PRESERVED_PROFILE = json.loads((HERE / "runtime_grants_preserved_profile.json").read_text(encoding="utf-8"))
+PROFILE_NAMES = (PROFILE["profile"], PRESERVED_PROFILE["profile"])
+PRESERVED_SHAPE_KEYS = ("name", "kind", "rls", "force_rls", "columns", "constraints",
+                        "indexes", "policies", "triggers", "incoming_foreign_keys")
 
 # Reviewed canonical invoker triggers. Trigger execution does not require a
 # runtime EXECUTE grant; the owner already installed these triggers. Unknown
@@ -38,6 +42,7 @@ queue_call_crm_deliveries reject_invoice_snapshot_mutation
 reject_billing_refund_snapshot_change reject_action_resolution_mutation
 dnc_entries_fill_phone_number advance_admin_user_revision
 reject_supplier_evidence_rewrite
+tenant_ai_credentials_touch_updated_at tenant_recording_policy_touch_updated_at
 """.split())
 ROUTINES = {
     "update_call_status": ("uuid, text, integer", "json", True),
@@ -93,7 +98,49 @@ def rows(cursor, query, parameters=()):
     return [dict(zip(names, row)) for row in cursor.fetchall()]
 
 
-def inspect(cursor, owner, runtime):
+def select_profile(name=None):
+    """Two repository-reviewed choices; no arbitrary profile file or auto-adoption."""
+    if name is None or name == PROFILE["profile"]:
+        return PROFILE
+    require(name == PRESERVED_PROFILE["profile"], "Unknown reviewed profile")
+    require(PRESERVED_PROFILE["base_profile"] == PROFILE["profile"],
+            "Preserved inventory requires review for the current canonical profile")
+    return dict(PROFILE, profile=name,
+                tables=sorted(PROFILE["tables"] + list(PRESERVED_PROFILE["owner_only_tables"])),
+                sequences=sorted(PROFILE["sequences"] + PRESERVED_PROFILE["owner_only_sequences"]),
+                owner_only_tables=PRESERVED_PROFILE["owner_only_tables"],
+                owner_only_sequences=PRESERVED_PROFILE["owner_only_sequences"])
+
+
+def inspect_preserved(cursor, profile):
+    expected = profile.get("owner_only_tables", {})
+    if not expected:
+        return
+    # Identical read-only definition query used for the reviewed live metadata;
+    # neither relation rows nor secrets are fetched. ACL and role names are
+    # checked separately; they are deliberately outside structural signatures.
+    cursor.execute((HERE / "customer_support_catalog.sql").read_text(encoding="utf-8"))
+    catalog = cursor.fetchone()[0]
+    observed = {table["name"]: table for table in catalog["tables"]}
+    for name, digest in expected.items():
+        require(name in observed, "A reviewed preserved table is missing")
+        shape = {key: observed[name].get(key) for key in PRESERVED_SHAPE_KEYS}
+        actual = hashlib.sha256(json.dumps(shape, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        require(actual == digest, "Preserved table definition differs from its reviewed structural fingerprint")
+    require(not catalog.get("referencing_routines") and not catalog.get("dependent_views"),
+            "Preserved inventory has an unreviewed routine or view dependency")
+    cursor.execute("""SELECT s.seqtypid='integer'::regtype,s.seqstart,s.seqincrement,s.seqmax,s.seqmin,
+        s.seqcache,s.seqcycle,t.relname,a.attname,d.deptype
+        FROM pg_sequence s JOIN pg_class c ON c.oid=s.seqrelid
+        JOIN pg_depend d ON d.classid='pg_class'::regclass AND d.objid=c.oid AND d.deptype IN ('a','i')
+        JOIN pg_class t ON t.oid=d.refobjid JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=d.refobjsubid
+        WHERE c.oid=to_regclass('public.audit_chain_state_id_seq')""")
+    require(cursor.fetchall() == [(True, 1, 1, 2147483647, 1, 1, False, 'audit_chain_state', 'id', 'a')],
+            "Preserved sequence definition or ownership dependency differs from review")
+
+
+def inspect(cursor, owner, runtime, profile=None):
+    profile = profile or PROFILE
     identity = rows(cursor, """SELECT current_user AS identity, session_user AS login,
         current_database() AS database, inet_server_addr()::text AS address,
         inet_server_port() AS port, current_setting('server_version_num')::int AS version,
@@ -144,20 +191,21 @@ def inspect(cursor, owner, runtime):
         FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','S','f') ORDER BY c.relname""", (runtime_oid,))
     for kind, key in (("r", "tables"), ("v", "views"), ("S", "sequences")):
-        require({obj["name"] for obj in objects if obj["kind"] == kind} == set(PROFILE[key]),
+        require({obj["name"] for obj in objects if obj["kind"] == kind} == set(profile[key]),
                 "Database object inventory differs from the reviewed canonical profile")
     for obj in objects:
         require(obj["kind"] in {"r", "v", "S"} and obj["owner"] == owner_oid,
                 "Mixed object ownership or unsupported relation kind; no ownership changes performed")
-        require(not obj["column_acl"], "Column-specific runtime or PUBLIC grants require separate review")
+        require(not obj["column_acl"] or obj["name"] in profile.get("owner_only_tables", {}),
+                "Column-specific runtime or PUBLIC grants require separate review")
         if obj["kind"] == "r" and (obj["tenant"] or obj["rls"]):
             require(obj["rls"] and obj["force"] and obj["policies"],
                     "Tenant or protected table lacks enforced RLS policies")
     cursor.execute("SELECT version_num FROM public.alembic_version ORDER BY version_num")
-    require([row[0] for row in cursor.fetchall()] == PROFILE["heads"],
+    require([row[0] for row in cursor.fetchall()] == profile["heads"],
             "Migration head does not match the reviewed runtime grants profile")
     extensions = rows(cursor, "SELECT extname,extowner FROM pg_extension")
-    require({e["extname"] for e in extensions} == set(PROFILE["extensions"]),
+    require({e["extname"] for e in extensions} == set(profile["extensions"]),
             "Unexpected or missing PostgreSQL extension")
     require(all(e["extowner"] == owner_oid for e in extensions if e["extname"] != "plpgsql"),
             "Application extensions must be owned by the migration owner")
@@ -174,7 +222,7 @@ def inspect(cursor, owner, runtime):
         require(not function["definer"] and function["kind"] == "f",
                 "SECURITY DEFINER routines and non-functions require explicit separate review")
         if function["extension"]:
-            require(function["extension"] in PROFILE["extensions"], "Unreviewed extension function")
+            require(function["extension"] in profile["extensions"], "Unreviewed extension function")
             continue  # Trusted extensions may give their functions to the bootstrap owner.
         require(function["owner"] == owner_oid, "Mixed application function ownership")
         if function["name"] in TRIGGERS:
@@ -183,6 +231,7 @@ def inspect(cursor, owner, runtime):
             expected = ROUTINES.get(function["name"])
             require(expected and (function["args"], function["returns"]) == expected[:2],
                     "Unknown application function or overload requires a reviewed profile")
+    inspect_preserved(cursor, profile)
     cursor.execute("""SELECT json_agg(json_build_array(c.relname,c.relrowsecurity,c.relforcerowsecurity,
         p.polname,p.polcmd,p.polpermissive,p.polroles,pg_get_expr(p.polqual,p.polrelid),
         pg_get_expr(p.polwithcheck,p.polrelid)) ORDER BY c.relname,p.polname)
@@ -190,10 +239,11 @@ def inspect(cursor, owner, runtime):
         WHERE c.relnamespace='public'::regnamespace AND c.relkind='r'""")
     policy_hash = hashlib.sha256(json.dumps(cursor.fetchone()[0], sort_keys=True).encode()).hexdigest()
     return dict(identity=identity, owner_oid=owner_oid, runtime_oid=runtime_oid,
-                objects=objects, functions=functions, policy_hash=policy_hash)
+                objects=objects, functions=functions, policy_hash=policy_hash, profile=profile)
 
 
 def apply_acl(cursor, state, owner, runtime):
+    profile = state["profile"]
     owner_q, runtime_q = ident(owner), ident(runtime)
     database_q = ident(state["identity"]["database"])
     cursor.execute(f"REVOKE ALL ON DATABASE {database_q} FROM PUBLIC, {runtime_q}")
@@ -204,8 +254,10 @@ def apply_acl(cursor, state, owner, runtime):
         target = "public." + ident(obj["name"])
         kind = "SEQUENCE" if obj["kind"] == "S" else "TABLE"
         cursor.execute(f"REVOKE ALL ON {kind} {target} FROM PUBLIC, {runtime_q}")
+        if obj["name"] in profile.get("owner_only_tables", {}) or obj["name"] in profile.get("owner_only_sequences", ()):
+            continue  # Preserve the object; grant no runtime rights, including on its sequence.
         privileges = ("SELECT" if obj["name"] == "ai_config_migrations_id_seq" else "USAGE, SELECT" if kind == "SEQUENCE" else "SELECT" if
-                      obj["kind"] == "v" or obj["name"] in PROFILE["read_only_tables"] else "SELECT, INSERT, UPDATE, DELETE")
+                      obj["kind"] == "v" or obj["name"] in profile["read_only_tables"] else "SELECT, INSERT, UPDATE, DELETE")
         cursor.execute(f"GRANT {privileges} ON {kind} {target} TO {runtime_q}")
     for function in state["functions"]:
         if function["extension"]:
@@ -222,15 +274,22 @@ def apply_acl(cursor, state, owner, runtime):
 
 
 def verify_acl(cursor, state, runtime):
+    profile = state["profile"]
     for obj in state["objects"]:
         allowed = ({"SELECT"} if obj["name"] == "ai_config_migrations_id_seq" else {"USAGE", "SELECT"} if obj["kind"] == "S" else {"SELECT"} if
-                   obj["kind"] == "v" or obj["name"] in PROFILE["read_only_tables"] else {"SELECT", "INSERT", "UPDATE", "DELETE"})
+                   obj["kind"] == "v" or obj["name"] in profile["read_only_tables"] else {"SELECT", "INSERT", "UPDATE", "DELETE"})
+        if obj["name"] in profile.get("owner_only_tables", {}) or obj["name"] in profile.get("owner_only_sequences", ()):
+            allowed = set()
         function = "has_sequence_privilege" if obj["kind"] == "S" else "has_table_privilege"
         all_privileges = {"USAGE", "SELECT", "UPDATE"} if obj["kind"] == "S" else {"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"}
         for privilege in sorted(all_privileges):
             cursor.execute(f"SELECT {function}(%s,%s,%s),{function}(%s,%s,%s)",
                            (runtime, obj["oid"], privilege, runtime, obj["oid"], privilege + " WITH GRANT OPTION"))
             require(cursor.fetchone() == (privilege in allowed, False), "Runtime table or sequence ACL differs from supported profile")
+    cursor.execute("""SELECT count(*) FROM pg_attribute a,LATERAL aclexplode(a.attacl) x
+        WHERE a.attrelid IN (SELECT oid FROM pg_class WHERE relnamespace='public'::regnamespace)
+        AND x.grantee IN (0,%s)""", (state["runtime_oid"],))
+    require(cursor.fetchone()[0] == 0, "Runtime or PUBLIC retains column-specific application privileges")
     cursor.execute("""SELECT has_database_privilege(%s,current_database(),'CONNECT'),
         has_database_privilege(%s,current_database(),'CREATE'),has_database_privilege(%s,current_database(),'TEMP'),
         has_schema_privilege(%s,'public','USAGE'),has_schema_privilege(%s,'public','CREATE')""", (runtime,) * 5)
@@ -268,30 +327,32 @@ def verify_acl(cursor, state, runtime):
     require(cursor.fetchone()[0] == 1, "Global PUBLIC function default has not been revoked")
 
 
-def execute(owner_service, runtime_service, mode):
+def execute(owner_service, runtime_service, mode, profile_name=None):
     require(mode in {"plan", "apply", "verify"}, "Unknown mode")
+    profile = select_profile(profile_name)
     owner, runtime = owner_service.values["user"], runtime_service.values["user"]
     require(owner != runtime, "Migration and runtime identities must differ")
     for key in ("host", "hostaddr", "port", "dbname"):
         require(owner_service.values.get(key) == runtime_service.values.get(key),
                 "Owner and runtime services must select the same explicit endpoint and database")
-    result = dict(profile=PROFILE["profile"], mode=mode, status="failed", grants_committed=False,
-                  runtime_login_verified=False, schema_heads=PROFILE["heads"])
+    result = dict(profile=profile["profile"], mode=mode, status="failed", grants_committed=False,
+                  runtime_login_verified=False, schema_heads=profile["heads"])
     with connect(owner_service) as connection:
         with connection.cursor() as cursor:
             cursor.execute("SET TRANSACTION READ ONLY" if mode != "apply" else "SET TRANSACTION READ WRITE")
             # Diagnose an unowned relation before attempting LOCK on it. The
             # migration owner may have no SELECT privilege on a foreign-owned
             # table, so locking first hides the actual ownership refusal.
-            state = inspect(cursor, owner, runtime)
+            state = inspect(cursor, owner, runtime, profile)
             if mode == "apply":
                 cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended('talklee:runtime-grants',0))")
-                for table in PROFILE["tables"]:
+                for table in profile["tables"]:
                     cursor.execute("LOCK TABLE public." + ident(table) + " IN ACCESS SHARE MODE")
                 # Re-read after locks: preflight does not authorize a stale
                 # ownership/policy snapshot if DDL raced with acquisition.
-                state = inspect(cursor, owner, runtime)
-            result.update(tables=len(PROFILE["tables"]), sequences=len(PROFILE["sequences"]),
+                state = inspect(cursor, owner, runtime, profile)
+            result.update(tables=len(profile["tables"]), sequences=len(profile["sequences"]),
+                          preserved_tables=len(profile.get("owner_only_tables", {})),
                           policies_sha256=state["policy_hash"])
             if mode == "plan":
                 connection.rollback()
@@ -300,7 +361,7 @@ def execute(owner_service, runtime_service, mode):
             if mode == "apply":
                 apply_acl(cursor, state, owner, runtime)
             verify_acl(cursor, state, runtime)
-            require(inspect(cursor, owner, runtime)["policy_hash"] == state["policy_hash"],
+            require(inspect(cursor, owner, runtime, profile)["policy_hash"] == state["policy_hash"],
                     "Tenant policy definitions changed during grants operation")
         connection.commit()
         result["grants_committed"] = mode == "apply"
@@ -319,7 +380,7 @@ def execute(owner_service, runtime_service, mode):
                     FROM pg_roles r WHERE rolname=current_user""")
                 require(cursor.fetchone() == (True,), "Runtime LOGIN privilege posture changed")
                 cursor.execute("SELECT version_num FROM public.alembic_version ORDER BY version_num")
-                require([row[0] for row in cursor.fetchall()] == PROFILE["heads"], "Runtime cannot read the verified schema head")
+                require([row[0] for row in cursor.fetchall()] == profile["heads"], "Runtime cannot read the verified schema head")
                 verify_acl(cursor, state, runtime)
             connection.rollback()
     except Exception:
@@ -335,11 +396,12 @@ def main(argv=None):
     parser.add_argument("--service-file", type=Path, required=True)
     parser.add_argument("--owner-service", required=True)
     parser.add_argument("--runtime-service", required=True)
+    parser.add_argument("--profile", choices=PROFILE_NAMES, default=PROFILE["profile"])
     parser.add_argument("--receipt", type=Path, required=True)
     args = parser.parse_args(argv)
     require(not args.receipt.exists(), "Refusing to replace a prior receipt")
     result = execute(recovery.Service(args.service_file, args.owner_service),
-                     recovery.Service(args.service_file, args.runtime_service), args.mode)
+                     recovery.Service(args.service_file, args.runtime_service), args.mode, args.profile)
     recovery.write_json_new(args.receipt, result)
     print(json.dumps(result, sort_keys=True))
     return 0

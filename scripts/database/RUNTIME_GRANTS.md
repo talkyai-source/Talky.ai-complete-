@@ -1,19 +1,23 @@
 # External PostgreSQL runtime grants
 
 Use `runtime_grants.py` after canonical migrations and before starting the API
-or workers. It supports PostgreSQL 16, the `canonical-0082` schema profile, one
+or workers. It supports PostgreSQL 16, the default `canonical-0083` schema profile, one
 dedicated application database and its existing migration owner. It separates
 the runtime LOGIN from database/object ownership without granting superuser,
 BYPASSRLS, CREATEDB, CREATEROLE, REPLICATION or role membership.
 
-The existing production catalog is not this canonical fixture: the
+The existing production catalog is not the default canonical fixture: the
 [28 October read-only inventory](../../docs/sessions/2026-10-28-final-live-and-database-observation.md)
-contains 123 tables, including ten outside this profile. Reconcile their access
-and retention purpose on an isolated real-catalog restore before production
-conversion. Preserve the unknown-object and ownership refusals; do not delete
-objects, add blanket grants or treat a backup table as a runtime table to bypass
-them. The tested canonical profile supports prepared fresh databases, not an
-unreviewed privilege conversion of the current live catalog.
+contains 123 tables. Migration 0083 repairs four existing customer/support
+contracts absent from the old 113-table bootstrap, bringing the fresh profile
+to 117. A separate, explicitly selected `production-0083-preserved-20261029`
+profile retains the other six tables and the audit-chain sequence with no
+runtime/PUBLIC privileges. It checks their reviewed structural fingerprints;
+it does not silently adopt other objects. See the [catalog pre-mortem and
+sanitized evidence](../../docs/production-readiness/customer-support-database-premortem-20261029.md).
+The remaining production role/TLS/ownership cutover and recovery evidence are
+still required. Neither profile is an approval to operate the current live
+role unchanged or a claim that this work has been deployed.
 
 The backend is a trusted database client. Auth must look up a principal before
 knowing its tenant; admin and worker paths need cross-tenant access. Existing
@@ -72,6 +76,23 @@ python scripts/database/runtime_grants.py verify \
   --receipt /var/lib/talklee-release/grants-verify.json
 ```
 
+These commands select `canonical-0083` by default and refuse the six preserved
+objects. For the reviewed preserved inventory, pass the same explicit option to
+**each** `plan`, `apply` and `verify` command:
+
+```bash
+python scripts/database/runtime_grants.py plan \
+  --profile production-0083-preserved-20261029 \
+  --service-file /etc/talklee/secrets/pg_service.conf \
+  --owner-service migration --runtime-service runtime \
+  --receipt /var/lib/talklee-release/preserved-grants-plan.json
+```
+
+Then run `apply` and `verify` with that same profile and new receipt filenames.
+Only the two repository-pinned profile names are accepted; there is no arbitrary
+profile-file option or automatic selection. A future canonical revision requires
+another review of the preserved profile's pinned base before it can be used.
+
 `plan` is read-only catalog validation, not a runtime login or applied-grants
 receipt. `apply` validates first, changes ACLs in one transaction and then opens
 a real runtime TLS connection. `verify` checks catalog/effective privileges and
@@ -90,6 +111,13 @@ overwritten. Python uses the locked installer dependencies (`psycopg2-binary`).
   bookkeeping are SELECT-only. No TRUNCATE, REFERENCES, TRIGGER or grant options.
 - Application sequences receive USAGE and SELECT, allowing `nextval` but not
   `setval`. The migration bookkeeping sequence is SELECT-only.
+- The explicit preserved profile grants runtime no rights on `audit_chain_state`,
+  `audit_event_types`, `rate_limit_events`, `suspension_propagation_queue`,
+  `tenant_ai_configs_backup_20260907`, `worker_status`, or
+  `audit_chain_state_id_seq`. Rows, definitions, RLS and ownership are preserved.
+  Runtime/PUBLIC table and column rights are revoked and verified absent;
+  already-reviewed separate backup/operator grants are retained. Other unknown
+  tables, sequences or changed preserved definitions still refuse the operation.
 - Known invoker trigger functions have no direct runtime/PUBLIC EXECUTE. The
   existing `update_call_status(uuid,text,integer)` compatibility projection is
   the only application function explicitly executable by runtime. Maintenance
@@ -107,8 +135,13 @@ changes. They do not change that role's defaults in another database. This is wh
 the tool requires a dedicated application database and refuses extra application
 schemas; do not reuse its profile on a shared database without a separate review.
 
-The profile's table/sequence inventory derives from the retained verified 0082
-canonical TLS restore receipt. Functions are additionally checked for reviewed
+The canonical inventory extends the retained 0082 restore inventory with the
+four existing contracts repaired by 0083; its dedicated acceptance exercises
+the new schema and customer settings under restricted runtime access. The
+preserved inventory compares six table definitions against independently observed
+read-only catalog signatures, including columns/defaults, constraints, indexes,
+RLS and dependencies. Its sequence type/settings/owning-column relationship are
+also checked. Functions are additionally checked for reviewed
 names, exact argument/return signatures, SECURITY INVOKER and ownership. A profile
 match is not a full tamper-proof schema audit; the migration release and trusted
 owner are still part of the release boundary. RLS definitions are fingerprinted
@@ -119,6 +152,9 @@ revoke the built-in global PUBLIC EXECUTE by themselves: see
 [ALTER DEFAULT PRIVILEGES](https://www.postgresql.org/docs/16/sql-alterdefaultprivileges.html).
 The explicit function review also follows its
 [SECURITY DEFINER guidance](https://www.postgresql.org/docs/16/sql-createfunction.html#SQL-CREATEFUNCTION-SECURITY).
+Table-level revocation also removes the corresponding column grants; the tool
+separately verifies no runtime/PUBLIC column ACL survived. See
+[REVOKE](https://www.postgresql.org/docs/16/sql-revoke.html).
 
 ## Reproducible acceptance
 
@@ -130,6 +166,24 @@ scope, prohibited DDL/migration/role operations, fail-closed future objects,
 unsafe role and ownership refusals, function escalation/overloads, wrong heads,
 missing forced RLS and wrong runtime credentials. The initial-admin acceptance
 helper also runs on this generated schema with the supported restricted runtime.
+The customer-settings helper checks AI credential rotation history and active-key
+uniqueness, recording defaults, telephony selection, emergency schema, and tenant
+isolation. After canonical acceptance, the same disposable fixture reconstructs
+the six historical definitions from repository sources and reviewed nullable
+backup columns. The explicit 123-table profile must match the independently
+observed signatures, preserve synthetic contents across repeat apply, deny
+runtime reads even with application bypass enabled, remove column-only PUBLIC
+grants, and refuse unknown inventory or altered definitions. Receipt source
+hashes cover the profile files, catalog query and these helpers.
 Owned containers/network and generated secrets are cleaned up, and only a
 nonsecret receipt is retained. Ubuntu CI runs this alongside canonical recovery.
 An unexecuted test definition is not live deployment or operating acceptance.
+
+For the native schema/adoption regression suite, set `TEST_POSTGRES_BIN` to
+PostgreSQL16's binary directory and run
+`python -m pytest scripts/database/tests/test_customer_support_contracts_pg.py`.
+It creates only its own loopback cluster and synthetic databases, never accepts
+an existing DSN, and proves 0082→0083 repair plus refusal under schema/owner drift.
+Its disposable cluster disables fsync to reduce test overhead: these are
+transaction/schema tests, not crash-durability or RPO/RTO evidence. TLS/login
+and recovery qualification remain separate required drills.

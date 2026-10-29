@@ -1,7 +1,7 @@
 {
-  "profile": "canonical-0082",
+  "profile": "canonical-0083",
   "heads": [
-    "0082_ubuntu_admin_merge"
+    "0083_customer_support_contracts"
   ],
   "tables": [
     "abuse_detection_rules",
@@ -41,6 +41,7 @@
     "crm_deliveries",
     "dialer_jobs",
     "dnc_entries",
+    "emergency_access_requests",
     "inbound_audit_events",
     "inbound_billing_hold_finalize_approvals",
     "inbound_campaign_configs",
@@ -82,6 +83,7 @@
     "suspension_events",
     "talky_0041_contact_lists_adoption",
     "tenant_ai_configs",
+    "tenant_ai_credentials",
     "tenant_call_limits",
     "tenant_codec_policies",
     "tenant_inbound_controls",
@@ -89,6 +91,7 @@
     "tenant_policy_audit_log",
     "tenant_quota_usage",
     "tenant_quotas",
+    "tenant_recording_policy",
     "tenant_route_policies",
     "tenant_runtime_policy_events",
     "tenant_runtime_policy_versions",
@@ -99,6 +102,7 @@
     "tenant_telephony_concurrency_events",
     "tenant_telephony_concurrency_leases",
     "tenant_telephony_concurrency_policies",
+    "tenant_telephony_credentials",
     "tenant_telephony_idempotency",
     "tenant_telephony_quota_events",
     "tenant_telephony_threshold_policies",

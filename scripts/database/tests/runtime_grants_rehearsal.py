@@ -83,6 +83,7 @@ def checks(fixture, pg, receipt):
     grants.execute(owner, runtime, "apply")
     fixture_module.runtime_checks(fixture, "source", grants.PROFILE["heads"])
     results.append("real populated campaign/lead/call tenant CRUD, foreign-tenant refusal and blank-scope isolation")
+    results += module("grants_support_contracts", HERE / "support_contracts_acceptance.py").run_checks(runtime, fixture_module.TENANTS)
     import psycopg2
     with grants.connect(runtime) as connection:
         with connection.cursor() as cursor:
@@ -212,6 +213,9 @@ def checks(fixture, pg, receipt):
     results.append("actual runtime LOGIN is rejected when redirected to owner identity or the other real TLS server")
     receipt["stage"] = "final privilege and policy verification"
     require(grants.execute(owner, runtime, "verify")["policies_sha256"] == result["policies_sha256"], "Final policy fingerprint drift")
+    receipt["stage"] = "explicit preserved production inventory qualification"
+    results += module("grants_preserved_inventory", HERE / "preserved_inventory_acceptance.py").run_checks(grants, owner, runtime)
+    receipt["preserved_profile"] = grants.PRESERVED_PROFILE["profile"]
     return results
 
 
@@ -236,7 +240,9 @@ def main():
                    scope="canonical external-PostgreSQL runtime grants on generated local TLS fixtures")
     receipt["source_git_sha"] = fixture_module.run(["git", "rev-parse", "HEAD"], cwd=ROOT)
     receipt["source_sha256"] = {str(path.relative_to(ROOT)): recovery.digest(path) for path in
-        (HERE.parent / "runtime_grants.py", HERE.parent / "runtime_grants_profile.json", Path(__file__))}
+        (HERE.parent / "runtime_grants.py", HERE.parent / "runtime_grants_profile.json",
+         HERE.parent / "runtime_grants_preserved_profile.json", HERE.parent / "customer_support_catalog.sql",
+         HERE / "preserved_inventory_acceptance.py", HERE / "support_contracts_acceptance.py", Path(__file__))}
     try:
         fixture.prepare()
         receipt["postgres_image_digests"] = fixture.image_digests
