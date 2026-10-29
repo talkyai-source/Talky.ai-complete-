@@ -52,7 +52,7 @@ export default function RealEstateIndustryPage() {
     {
       title: "AI Call Automation",
       description:
-        "Handle incoming and outgoing calls automatically, answer common questions, capture lead details, and keep conversations moving without requiring your team to answer every call.",
+        "Handle inbound and outbound calls automatically, answer common questions, capture lead details, and keep conversations moving without requiring your team to answer every call.",
     },
     {
       title: "Property Inquiry Handling",
@@ -361,7 +361,7 @@ export default function RealEstateIndustryPage() {
             Turn Property Calls Into Real Opportunities
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Talk-Lee AI gives real estate teams an intelligent voice assistant that answers calls, understands property
+            Talk-Lee AI gives real estate teams an intelligent AI voice agent that answers calls, understands property
             inquiries, and qualifies prospects. It schedules appointments and keeps leads moving forward around the clock.
           </p>
           <div className={ctaPairClassName}>
