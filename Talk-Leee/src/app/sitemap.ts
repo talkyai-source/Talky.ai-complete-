@@ -1,49 +1,10 @@
 import type { MetadataRoute } from "next";
+import { PUBLIC_ROUTES } from "@/lib/public-routes";
 
 const SITE_URL = "https://talkleeai.com";
 
-// Every entry here must be a confirmed public, unauthenticated route (see
-// isPublicPath in src/proxy.ts and the static marketing pages under
-// industries/ and use-cases/). Do not add authenticated, admin, or
-// white-label paths.
-const PUBLIC_ROUTES = [
-  "/",
-  "/ai-voice-dialer",
-  "/ai-assist",
-  "/ai-voice-agent",
-  "/ai-voices",
-  "/contact",
-  "/pricing",
-  "/privacy",
-  "/terms",
-  "/docs",
-  "/docs/getting-started",
-  "/docs/outbound-campaigns",
-  "/docs/contacts",
-  "/docs/inbound",
-  "/docs/calls-and-recordings",
-  "/docs/follow-ups",
-  "/docs/connectors",
-  "/docs/ai-options",
-  "/docs/billing",
-  "/docs/settings-and-security",
-  "/docs/partners",
-  "/docs/workflows",
-  "/docs/troubleshooting",
-  "/docs/glossary",
-  "/industries/education",
-  "/industries/financial-services",
-  "/industries/healthcare",
-  "/industries/marketing-automation",
-  "/industries/professional-services",
-  "/industries/real-estate",
-  "/industries/recruitment",
-  "/industries/retail-ecommerce",
-  "/industries/software-tech-support",
-  "/industries/travel-industry",
-  "/use-cases/automated-lead-qualification",
-  "/use-cases/customer-services-support",
-];
+// The route list lives in src/lib/public-routes.ts, shared with the sign-up
+// popup so both change together.
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const lastModified = new Date();
