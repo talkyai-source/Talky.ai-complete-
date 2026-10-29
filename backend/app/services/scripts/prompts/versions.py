@@ -134,7 +134,9 @@ _VERSIONS: Final[Mapping[str, str]] = {
     # @18 / @16 (2026-10-14): numbers are read back exactly as the caller gave
     # them; no country code is added (owner decision, test call 3413d73c).
     "lead_gen": "lead_gen@18",
-    "customer_support": "customer_support@16",
+    # @17 (2026-10-28): remove unconditional escalation/message instructions;
+    # actual connected-action capabilities decide which next steps exist.
+    "customer_support": "customer_support@17",
     "receptionist": "receptionist@16",
 }
 

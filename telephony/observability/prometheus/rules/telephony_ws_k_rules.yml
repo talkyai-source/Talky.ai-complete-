@@ -1,4 +1,107 @@
 groups:
+  - name: talky_operational_signals
+    interval: 15s
+    rules:
+      - alert: TalkyOperationalSignalsMissing
+        expr: up{job="talky_backend_telephony"} == 1 unless on(job, instance) talky_operational_signal_contract == 1
+        for: 2m
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "Operational observations are missing from the metrics target"
+          description: "The target is reachable but lacks the worker, queue and backup signal contract. Check the deployed artifact and scraper."
+
+      - alert: TalkyWorkerObservationUnavailable
+        expr: talky_worker_observation_success == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "Worker heartbeat observation is unavailable"
+          description: "A worker role timestamp cannot be read or validated. This is unknown health; check Redis connectivity and clocks."
+
+      - alert: TalkyWorkerHeartbeatMissingOrStale
+        expr: talky_worker_heartbeat_healthy == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "Worker role heartbeat is missing or stale"
+          description: "No fresh heartbeat was observed for a required worker role. Inspect the worker service; a role timestamp does not inventory all replicas or prove job progress."
+
+      - alert: TalkyQueueObservationUnavailable
+        expr: talky_queue_observation_success == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "Dialer queue observation is unavailable"
+          description: "Queue reads failed, timed out, were invalid or exceeded the bounded inventory. No empty-queue conclusion is available."
+
+      - alert: TalkyScheduledQueueOverdue
+        expr: talky_scheduled_queue_overdue_seconds > 300
+        for: 2m
+        labels:
+          severity: warning
+          team: telephony
+        annotations:
+          summary: "Scheduled dialer work is overdue"
+          description: "The earliest retained scheduled due time is over five minutes old. Check worker progress and deliberate campaign/quota deferral; this is not ready-list enqueue age."
+
+      - alert: TalkyBackupObservationUnavailable
+        expr: talky_backup_observation_success == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "Backup status cannot be observed"
+          description: "The backup receipt is missing, unreadable or invalid. Verify the backup unit, status-directory configuration and read permissions."
+
+      - alert: TalkyBackupAttemptFailed
+        expr: talky_backup_last_attempt_success == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "The recorded backup attempt failed"
+          description: "The backup command exited nonzero, including failed verification or suspicious archive shrink. Inspect the backup journal and retained archive."
+
+      - alert: TalkyBackupSuccessNotRecorded
+        expr: talky_backup_success_recorded == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "No successful backup is recorded"
+          description: "The local backup status contains no successful publication. Historical archives and configured timers do not establish a successful current backup."
+
+      - alert: TalkyBackupSuccessStale
+        expr: time() - talky_backup_last_success_timestamp_seconds > 129600
+        for: 5m
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "The last successful local backup is over 36 hours old"
+          description: "Verify the daily timer and backup job. A fresh local archive alone does not establish off-host durability or successful restoration."
+
+      - alert: TalkyBackupAttemptStuck
+        expr: (time() - talky_backup_attempt_started_timestamp_seconds > 7200) and on(job, instance) (talky_backup_running == 1)
+        for: 5m
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "A backup has no completion receipt after two hours"
+          description: "The backup attempt may be interrupted or stalled. Inspect its unit and archive; do not infer successful completion from an old success receipt."
+
   - name: talky_telephony_ws_k_recording
     interval: 30s
     rules:

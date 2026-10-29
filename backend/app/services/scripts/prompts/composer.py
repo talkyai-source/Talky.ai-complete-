@@ -170,8 +170,7 @@ _KNOWLEDGE_DRIVEN_BODIES: dict[str, str] = {
     "customer_support": (
         "You are {agent_name}, a customer-support agent for {company_name}. "
         "Help the caller resolve their issue and answer their questions "
-        "accurately and patiently; escalate or take a message when you cannot "
-        "fully resolve something."
+        "accurately and patiently."
     ),
     "receptionist": (
         "You are {agent_name}, the receptionist for {company_name}. Greet "

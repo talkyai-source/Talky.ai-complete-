@@ -1,0 +1,723 @@
+{
+  "status": "passed",
+  "source_sha": "c6a18e3ee1d0dfb4f0f1a24a8ee6942e45b43be5",
+  "started_utc": "2026-10-28T12:54:35.056086+00:00",
+  "controlled_call_verified": false,
+  "live_provider_verified": false,
+  "paid_billing_verified": false,
+  "offhost_recovery_verified": false,
+  "public_dns_verified": false,
+  "independent_engineer_verified": false,
+  "installed_base_sha": "b216774648537e2e25afa550f9b227fc3283e089",
+  "stage": "complete",
+  "image_url": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
+  "image_sha256": "04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94",
+  "checksum_url": "https://cloud-images.ubuntu.com/noble/current/SHA256SUMS",
+  "postgres_image_id": "sha256:6a35283e53fbe883da6a6ffbce8d3999dc66076cc5c4e2f1d21bdbd9e26bf86f",
+  "postgres_image_digests": [
+    "postgres@sha256:e8a07d2c7579b038938cdba6c539e580e5001caf9ea203d397b5cc83e76bd938"
+  ],
+  "runtime_grants": {
+    "profile": "canonical-0082",
+    "mode": "apply",
+    "status": "verified",
+    "grants_committed": true,
+    "runtime_login_verified": true,
+    "schema_heads": [
+      "0082_ubuntu_admin_merge"
+    ],
+    "tables": 113,
+    "sequences": 5,
+    "policies_sha256": "b8918fbf0bb9a3e7f57c8a0373e5853955bc8b19328247e83a4e9754a2cb1cf7"
+  },
+  "guest_os": "PRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.5 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo",
+  "install": {
+    "status": "installed_health_checked",
+    "source_sha": "b216774648537e2e25afa550f9b227fc3283e089",
+    "frontend_mode": "linux",
+    "controlled_call_verified": false,
+    "production_recovery_verified": false,
+    "created_utc": "2026-10-28T13:01:16Z",
+    "python_lock_sha256": "8a3be035423ac7cf46d0f3cb2646eaa7592c3fdad0feb72c46957b18e77be9cb",
+    "apt_versions_sha256": "363e481b5cccfc2db647d93972d11eadcd2a3579d4b4aa2117116b544a14c791",
+    "redis_image": "redis:7.4-alpine@sha256:6ba19c50b56777f5c11c58eff8ddb69d0d5f27ba131cffb63f180ccfd43c66af"
+  },
+  "before_reboot": {
+    "provider_hostnames": [
+      "api.groq.com",
+      "api.deepgram.com",
+      "api.cartesia.ai"
+    ],
+    "provider_dns_confined_to_loopback": true,
+    "live_provider_verified": false,
+    "services": {
+      "talky-api": "active",
+      "talky-voice-gateway": "active",
+      "talky-voice-worker": "active",
+      "talky-dialer-worker": "active",
+      "talky-reminder-worker": "active",
+      "talky-dashboard": "active",
+      "talky-redis": "active",
+      "asterisk": "active",
+      "nginx": "active",
+      "talky-trunk-status": "active",
+      "talky-asterisk-reconcile.timer": "active",
+      "talky-healthwatch.timer": "active"
+    },
+    "application_identities": {
+      "talky-api": "talky",
+      "talky-voice-gateway": "talky",
+      "talky-voice-worker": "talky",
+      "talky-dialer-worker": "talky",
+      "talky-reminder-worker": "talky",
+      "talky-dashboard": "talky",
+      "talky-trunk-status": "talky"
+    },
+    "operator_identity_and_scheduling_verified": true,
+    "local_and_host_https_probes": true,
+    "database_route_device": "enp0s2",
+    "redis_host_loopback_verified": true,
+    "api_process_and_gateway_source_sha": "b216774648537e2e25afa550f9b227fc3283e089",
+    "asterisk_shared_endpoint_context_verified": true,
+    "dashboard_node_version": "v22.23.4",
+    "dashboard_node_executable": "/opt/node-v22.23.4-linux-x64/bin/node",
+    "dashboard_running_node_verified": true
+  },
+  "after_reboot": {
+    "provider_hostnames": [
+      "api.groq.com",
+      "api.deepgram.com",
+      "api.cartesia.ai"
+    ],
+    "provider_dns_confined_to_loopback": true,
+    "live_provider_verified": false,
+    "services": {
+      "talky-api": "active",
+      "talky-voice-gateway": "active",
+      "talky-voice-worker": "active",
+      "talky-dialer-worker": "active",
+      "talky-reminder-worker": "active",
+      "talky-dashboard": "active",
+      "talky-redis": "active",
+      "asterisk": "active",
+      "nginx": "active",
+      "talky-trunk-status": "active",
+      "talky-asterisk-reconcile.timer": "active",
+      "talky-healthwatch.timer": "active"
+    },
+    "application_identities": {
+      "talky-api": "talky",
+      "talky-voice-gateway": "talky",
+      "talky-voice-worker": "talky",
+      "talky-dialer-worker": "talky",
+      "talky-reminder-worker": "talky",
+      "talky-dashboard": "talky",
+      "talky-trunk-status": "talky"
+    },
+    "operator_identity_and_scheduling_verified": true,
+    "local_and_host_https_probes": true,
+    "database_route_device": "enp0s2",
+    "redis_host_loopback_verified": true,
+    "api_process_and_gateway_source_sha": "b216774648537e2e25afa550f9b227fc3283e089",
+    "asterisk_shared_endpoint_context_verified": true,
+    "dashboard_node_version": "v22.23.4",
+    "dashboard_node_executable": "/opt/node-v22.23.4-linux-x64/bin/node",
+    "dashboard_running_node_verified": true
+  },
+  "reboot_verified": true,
+  "release_rehearsal": {
+    "activation": {
+      "backup": {
+        "bytes": 665412,
+        "off_host_verified": false,
+        "restored": false,
+        "sha256": "7c332711905580d2d66f9429975d9719f6bdbe339325d66bf679ded09a49e732",
+        "status": "archive_verified"
+      },
+      "candidate_heads": [
+        "0082_ubuntu_admin_merge"
+      ],
+      "candidate_sha": "c6a18e3ee1d0dfb4f0f1a24a8ee6942e45b43be5",
+      "heads": [
+        "0082_ubuntu_admin_merge"
+      ],
+      "journal": "/var/lib/talky-release/transactions/accc6f463b4547028207b8ffb704d9b2/journal.json",
+      "manifest_id": "synthetic-vm-511c754265244c1bb613c7de3c6ac06e",
+      "manifest_sha256": "39446087da83c75aa0c1c86a2271735f19090012c47b6f78d18adac11d16a32e",
+      "migration_started": false,
+      "observation": {
+        "all_zero_observed": true,
+        "complete": true,
+        "deployment_authorized": false,
+        "finished_at": "2026-10-28T13:08:57.284625Z",
+        "kind": "read_only_non_atomic_observation",
+        "observations": {
+          "asterisk_legs": {
+            "count": 0,
+            "error": null,
+            "finished_at": "2026-10-28T13:08:57.050529Z",
+            "started_at": "2026-10-28T13:08:56.997768Z"
+          },
+          "db_live_calls": {
+            "count": 0,
+            "error": null,
+            "finished_at": "2026-10-28T13:08:57.284587Z",
+            "started_at": "2026-10-28T13:08:57.031781Z"
+          },
+          "gateway_sessions": {
+            "count": 0,
+            "error": null,
+            "finished_at": "2026-10-28T13:08:57.050482Z",
+            "started_at": "2026-10-28T13:08:56.919211Z"
+          },
+          "redis_leases": {
+            "active_set_count_after": 0,
+            "active_set_count_before": 0,
+            "consistent": true,
+            "count": 0,
+            "error": null,
+            "expired_during_read": 0,
+            "finished_at": "2026-10-28T13:08:57.051724Z",
+            "leases_without_expiry": 0,
+            "leases_without_scanned_member": 0,
+            "members_without_scanned_lease": 0,
+            "scanned_active_members": 0,
+            "started_at": "2026-10-28T13:08:57.010261Z"
+          }
+        },
+        "started_at": "2026-10-28T13:08:56.919158Z",
+        "traffic_freeze_verified": false
+      },
+      "previous_sha": "b216774648537e2e25afa550f9b227fc3283e089",
+      "status": "activated_health_checked",
+      "timers": {
+        "talky-asterisk-reconcile.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-cleanup.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-db-backup.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-healthwatch.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-inbound-synthetic.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-trunk-status.timer": {
+          "active": false,
+          "enabled": "disabled"
+        }
+      }
+    },
+    "after_activation": {
+      "admin_served_sha256": "969311ac1fb7e0bba94a87d755a25f2fed0ebb5b5b4de48e74ab0474db59cbfb",
+      "backend_process_versions": "c6a18e3ee1d0dfb4f0f1a24a8ee6942e45b43be5",
+      "configuration_keys_host_and_data_identity_preserved": true,
+      "dashboard_node_executable": "/opt/node-v22.23.4-linux-x64/bin/node",
+      "dashboard_node_version": "v22.23.4",
+      "dashboard_running_node_verified": true,
+      "dashboard_served_manifest_sha256": "8c65b4f3480d92d072b6d564c62d0b18ade73dc8fd8b2a52c1c5e23d55d258d1",
+      "gateway_source_protocol_ready": true,
+      "live_provider_verified": false,
+      "provider_dns_confined_to_loopback": true,
+      "provider_hostnames": [
+        "api.groq.com",
+        "api.deepgram.com",
+        "api.cartesia.ai"
+      ],
+      "schedules_still_frozen": true,
+      "service_users_and_protections": true,
+      "services": {
+        "talky-api": "active",
+        "talky-dashboard": "active",
+        "talky-dialer-worker": "active",
+        "talky-reminder-worker": "active",
+        "talky-trunk-status": "active",
+        "talky-voice-gateway": "active",
+        "talky-voice-worker": "active"
+      },
+      "three_https_hosts_checked": true
+    },
+    "after_migration_dsn_rejection": {
+      "admin_served_sha256": "969311ac1fb7e0bba94a87d755a25f2fed0ebb5b5b4de48e74ab0474db59cbfb",
+      "backend_process_versions": "c6a18e3ee1d0dfb4f0f1a24a8ee6942e45b43be5",
+      "configuration_keys_host_and_data_identity_preserved": true,
+      "dashboard_node_executable": "/opt/node-v22.23.4-linux-x64/bin/node",
+      "dashboard_node_version": "v22.23.4",
+      "dashboard_running_node_verified": true,
+      "dashboard_served_manifest_sha256": "8c65b4f3480d92d072b6d564c62d0b18ade73dc8fd8b2a52c1c5e23d55d258d1",
+      "gateway_source_protocol_ready": true,
+      "live_provider_verified": false,
+      "provider_dns_confined_to_loopback": true,
+      "provider_hostnames": [
+        "api.groq.com",
+        "api.deepgram.com",
+        "api.cartesia.ai"
+      ],
+      "schedules_still_frozen": true,
+      "service_users_and_protections": true,
+      "services": {
+        "talky-api": "active",
+        "talky-dashboard": "active",
+        "talky-dialer-worker": "active",
+        "talky-reminder-worker": "active",
+        "talky-trunk-status": "active",
+        "talky-voice-gateway": "active",
+        "talky-voice-worker": "active"
+      },
+      "three_https_hosts_checked": true
+    },
+    "after_rollback": {
+      "admin_served_sha256": "969311ac1fb7e0bba94a87d755a25f2fed0ebb5b5b4de48e74ab0474db59cbfb",
+      "backend_process_versions": "c6a18e3ee1d0dfb4f0f1a24a8ee6942e45b43be5",
+      "configuration_keys_host_and_data_identity_preserved": true,
+      "dashboard_node_executable": "/opt/node-v22.23.4-linux-x64/bin/node",
+      "dashboard_node_version": "v22.23.4",
+      "dashboard_running_node_verified": true,
+      "dashboard_served_manifest_sha256": "8c65b4f3480d92d072b6d564c62d0b18ade73dc8fd8b2a52c1c5e23d55d258d1",
+      "gateway_source_protocol_ready": true,
+      "live_provider_verified": false,
+      "provider_dns_confined_to_loopback": true,
+      "provider_hostnames": [
+        "api.groq.com",
+        "api.deepgram.com",
+        "api.cartesia.ai"
+      ],
+      "schedules_still_frozen": true,
+      "service_users_and_protections": true,
+      "services": {
+        "talky-api": "active",
+        "talky-dashboard": "active",
+        "talky-dialer-worker": "active",
+        "talky-reminder-worker": "active",
+        "talky-trunk-status": "active",
+        "talky-voice-gateway": "active",
+        "talky-voice-worker": "active"
+      },
+      "three_https_hosts_checked": true
+    },
+    "after_rollback_reboot": {
+      "admin_served_sha256": "969311ac1fb7e0bba94a87d755a25f2fed0ebb5b5b4de48e74ab0474db59cbfb",
+      "backend_process_versions": "c6a18e3ee1d0dfb4f0f1a24a8ee6942e45b43be5",
+      "configuration_keys_host_and_data_identity_preserved": true,
+      "dashboard_node_executable": "/opt/node-v22.23.4-linux-x64/bin/node",
+      "dashboard_node_version": "v22.23.4",
+      "dashboard_running_node_verified": true,
+      "dashboard_served_manifest_sha256": "8c65b4f3480d92d072b6d564c62d0b18ade73dc8fd8b2a52c1c5e23d55d258d1",
+      "gateway_source_protocol_ready": true,
+      "live_provider_verified": false,
+      "provider_dns_confined_to_loopback": true,
+      "provider_hostnames": [
+        "api.groq.com",
+        "api.deepgram.com",
+        "api.cartesia.ai"
+      ],
+      "schedules_still_frozen": true,
+      "service_users_and_protections": true,
+      "services": {
+        "talky-api": "active",
+        "talky-dashboard": "active",
+        "talky-dialer-worker": "active",
+        "talky-reminder-worker": "active",
+        "talky-trunk-status": "active",
+        "talky-voice-gateway": "active",
+        "talky-voice-worker": "active"
+      },
+      "three_https_hosts_checked": true
+    },
+    "after_update_reboot": {
+      "admin_served_sha256": "969311ac1fb7e0bba94a87d755a25f2fed0ebb5b5b4de48e74ab0474db59cbfb",
+      "backend_process_versions": "c6a18e3ee1d0dfb4f0f1a24a8ee6942e45b43be5",
+      "configuration_keys_host_and_data_identity_preserved": true,
+      "dashboard_node_executable": "/opt/node-v22.23.4-linux-x64/bin/node",
+      "dashboard_node_version": "v22.23.4",
+      "dashboard_running_node_verified": true,
+      "dashboard_served_manifest_sha256": "8c65b4f3480d92d072b6d564c62d0b18ade73dc8fd8b2a52c1c5e23d55d258d1",
+      "gateway_source_protocol_ready": true,
+      "live_provider_verified": false,
+      "provider_dns_confined_to_loopback": true,
+      "provider_hostnames": [
+        "api.groq.com",
+        "api.deepgram.com",
+        "api.cartesia.ai"
+      ],
+      "schedules_still_frozen": true,
+      "service_users_and_protections": true,
+      "services": {
+        "talky-api": "active",
+        "talky-dashboard": "active",
+        "talky-dialer-worker": "active",
+        "talky-reminder-worker": "active",
+        "talky-trunk-status": "active",
+        "talky-voice-gateway": "active",
+        "talky-voice-worker": "active"
+      },
+      "three_https_hosts_checked": true
+    },
+    "approval_identity": "synthetic-ci-fixture@installer.test",
+    "base_sha": "b216774648537e2e25afa550f9b227fc3283e089",
+    "boot_after_rollback": "f1497de0-0e67-4b96-a30c-f2d4729fdf98",
+    "boot_after_update": "9aee5c75-760a-4593-a0a7-6f3d2f895db4",
+    "boot_before_activation": "35af8e23-8d7a-4516-b25d-ba6d529c290f",
+    "boot_before_rollback_reboot": "9aee5c75-760a-4593-a0a7-6f3d2f895db4",
+    "candidate_sha": "c6a18e3ee1d0dfb4f0f1a24a8ee6942e45b43be5",
+    "customer_call_acceptance": false,
+    "fault_sha": "9a4e88935e46b269628b6e744e823cf376a5b3b3",
+    "finished_utc": "2026-10-28T13:26:41.118300Z",
+    "firewall_freeze": {
+      "sip_rtp_ingress_denied": true,
+      "ufw6_sha256": "5f27b3ca5c2c5e66b6863d6a1a7babba1efb695231e6fadd55dd67d4cfe70220",
+      "ufw_sha256": "7b29aaaa90fe8abb7107a7df3ff4c66faedcf866f42e4e7d7c9e31b2226de1ab"
+    },
+    "fixture_database": {
+      "database": "talky_synthetic_source",
+      "heads": [
+        "0082_ubuntu_admin_merge"
+      ],
+      "inbound_enabled": false,
+      "outbound_paused": true,
+      "owner_role": "fixture_migration",
+      "synthetic_business_records": {
+        "calls": {
+          "rows": 2,
+          "sha256": "11ceaba30b112b837dc641d64e9dc6d6567294174ddd9609ef9c6f57383c43a8"
+        },
+        "campaigns": {
+          "rows": 2,
+          "sha256": "cabe10fbec6e032509b3b6064952fa2c1772b993daa1f5b6e514fbbaa3158143"
+        },
+        "leads": {
+          "rows": 2,
+          "sha256": "1997c315981dc7d21d7a6bb439ae0f5d9b881578a09a78cdb3ce8a211d345558"
+        },
+        "tenants": {
+          "rows": 2,
+          "sha256": "73094e266a3c096d6587366dd18d7adfcfa9f9d7d01e910aba915c149bc524fc"
+        }
+      },
+      "tls": true
+    },
+    "helper_sha256": "4572ba98129b273e74fa1af059e2ba76f123512eb8ec0f279725f5e20a50e75f",
+    "human_owner_attestation": false,
+    "migration_dsn_override_rejection": {
+      "backup": {
+        "bytes": 665412,
+        "off_host_verified": false,
+        "restored": false,
+        "sha256": "db01e8f8ecdea25d7e8b7a198e242921bfe5680a3d8cb03c8ce7e4be85397886",
+        "status": "archive_verified"
+      },
+      "candidate_heads": [
+        "fixture_fail_eca30c4b"
+      ],
+      "candidate_sha": "10d3c084eabe7379e22373f9de3e8ecdb8abd0a1",
+      "heads": [
+        "0082_ubuntu_admin_merge"
+      ],
+      "journal": "/var/lib/talky-release/transactions/181fd06aef32437cb475af10f189c43e/journal.json",
+      "manifest_id": "synthetic-vm-df7ee1a293e54956a5640e3b0f5cac9f",
+      "manifest_sha256": "164629d6e59f6557d03deb3ca77feafab07d09ad4edf37f600625fa10f0cb89e",
+      "migration_started": false,
+      "observation": {
+        "all_zero_observed": true,
+        "complete": true,
+        "deployment_authorized": false,
+        "finished_at": "2026-10-28T13:24:59.582084Z",
+        "kind": "read_only_non_atomic_observation",
+        "observations": {
+          "asterisk_legs": {
+            "count": 0,
+            "error": null,
+            "finished_at": "2026-10-28T13:24:59.353344Z",
+            "started_at": "2026-10-28T13:24:59.304132Z"
+          },
+          "db_live_calls": {
+            "count": 0,
+            "error": null,
+            "finished_at": "2026-10-28T13:24:59.582045Z",
+            "started_at": "2026-10-28T13:24:59.334670Z"
+          },
+          "gateway_sessions": {
+            "count": 0,
+            "error": null,
+            "finished_at": "2026-10-28T13:24:59.353185Z",
+            "started_at": "2026-10-28T13:24:59.228623Z"
+          },
+          "redis_leases": {
+            "active_set_count_after": 0,
+            "active_set_count_before": 0,
+            "consistent": true,
+            "count": 0,
+            "error": null,
+            "expired_during_read": 0,
+            "finished_at": "2026-10-28T13:24:59.354136Z",
+            "leases_without_expiry": 0,
+            "leases_without_scanned_member": 0,
+            "members_without_scanned_lease": 0,
+            "scanned_active_members": 0,
+            "started_at": "2026-10-28T13:24:59.316119Z"
+          }
+        },
+        "started_at": "2026-10-28T13:24:59.228579Z",
+        "traffic_freeze_verified": false
+      },
+      "previous_sha": "c6a18e3ee1d0dfb4f0f1a24a8ee6942e45b43be5",
+      "status": "rolled_back_health_checked",
+      "timers": {
+        "talky-asterisk-reconcile.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-cleanup.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-db-backup.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-healthwatch.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-inbound-synthetic.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-trunk-status.timer": {
+          "active": false,
+          "enabled": "disabled"
+        }
+      }
+    },
+    "migration_failure_heads_unchanged": true,
+    "migration_fault_sha": "10d3c084eabe7379e22373f9de3e8ecdb8abd0a1",
+    "migration_refusal": {
+      "backup": {
+        "bytes": 665412,
+        "off_host_verified": false,
+        "restored": false,
+        "sha256": "783ab2c0c4fc629a378ea446a521f113c0b167b41fd2b94e1ac18479110695a7",
+        "status": "archive_verified"
+      },
+      "candidate_heads": [
+        "fixture_fail_eca30c4b"
+      ],
+      "candidate_sha": "10d3c084eabe7379e22373f9de3e8ecdb8abd0a1",
+      "heads": [
+        "0082_ubuntu_admin_merge"
+      ],
+      "journal": "/var/lib/talky-release/transactions/5bde050d1e8b46549fb68217255f3503/journal.json",
+      "manifest_id": "synthetic-vm-49f9587e6ae345f893326ed09a6fe7f1",
+      "manifest_sha256": "8959229f7e699481e30f68ef894641bc5135867b67f2944b79dbbe13c8527e80",
+      "migration_started": true,
+      "observation": {
+        "all_zero_observed": true,
+        "complete": true,
+        "deployment_authorized": false,
+        "finished_at": "2026-10-28T13:25:53.712265Z",
+        "kind": "read_only_non_atomic_observation",
+        "observations": {
+          "asterisk_legs": {
+            "count": 0,
+            "error": null,
+            "finished_at": "2026-10-28T13:25:53.495048Z",
+            "started_at": "2026-10-28T13:25:53.451804Z"
+          },
+          "db_live_calls": {
+            "count": 0,
+            "error": null,
+            "finished_at": "2026-10-28T13:25:53.712229Z",
+            "started_at": "2026-10-28T13:25:53.480258Z"
+          },
+          "gateway_sessions": {
+            "count": 0,
+            "error": null,
+            "finished_at": "2026-10-28T13:25:53.495016Z",
+            "started_at": "2026-10-28T13:25:53.386770Z"
+          },
+          "redis_leases": {
+            "active_set_count_after": 0,
+            "active_set_count_before": 0,
+            "consistent": true,
+            "count": 0,
+            "error": null,
+            "expired_during_read": 0,
+            "finished_at": "2026-10-28T13:25:53.496792Z",
+            "leases_without_expiry": 0,
+            "leases_without_scanned_member": 0,
+            "members_without_scanned_lease": 0,
+            "scanned_active_members": 0,
+            "started_at": "2026-10-28T13:25:53.463084Z"
+          }
+        },
+        "started_at": "2026-10-28T13:25:53.386719Z",
+        "traffic_freeze_verified": false
+      },
+      "previous_sha": "c6a18e3ee1d0dfb4f0f1a24a8ee6942e45b43be5",
+      "status": "failed_migration_started",
+      "timers": {
+        "talky-asterisk-reconcile.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-cleanup.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-db-backup.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-healthwatch.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-inbound-synthetic.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-trunk-status.timer": {
+          "active": false,
+          "enabled": "disabled"
+        }
+      }
+    },
+    "migration_refusal_verified": true,
+    "off_host_recovery_acceptance": false,
+    "outer_cleanup_verified": false,
+    "preactivation_rejections": {
+      "activating_oneshot_refused_before_runtime_stop": true,
+      "original_application_pids_preserved": true,
+      "unpublished_artifact_drift_refused_before_transaction": true
+    },
+    "production_acceptance": false,
+    "production_accessed": false,
+    "recovery_refused_after_migration_started": true,
+    "release_cli_sha256": "97c3b3e8e49f5ecc6f36e390eb262af43a116d3094f236e57ac46988dc994011",
+    "rollback": {
+      "backup": {
+        "bytes": 665412,
+        "off_host_verified": false,
+        "restored": false,
+        "sha256": "961c58a76cbbc8ba5feff90653b6908ab1d61329714dbc1d55564452c505132d",
+        "status": "archive_verified"
+      },
+      "candidate_heads": [
+        "0082_ubuntu_admin_merge"
+      ],
+      "candidate_sha": "9a4e88935e46b269628b6e744e823cf376a5b3b3",
+      "heads": [
+        "0082_ubuntu_admin_merge"
+      ],
+      "journal": "/var/lib/talky-release/transactions/47d66fdd7427493a85bedee300aa01e0/journal.json",
+      "manifest_id": "synthetic-vm-5e60ca68dee14fcbb31e0ffb406bb144",
+      "manifest_sha256": "6766b3e0b26eb317e5b376b4d8902e0a48dbf6d1418a7ecf7af679760deed0fc",
+      "migration_started": false,
+      "observation": {
+        "all_zero_observed": true,
+        "complete": true,
+        "deployment_authorized": false,
+        "finished_at": "2026-10-28T13:16:31.374012Z",
+        "kind": "read_only_non_atomic_observation",
+        "observations": {
+          "asterisk_legs": {
+            "count": 0,
+            "error": null,
+            "finished_at": "2026-10-28T13:16:31.148729Z",
+            "started_at": "2026-10-28T13:16:31.100908Z"
+          },
+          "db_live_calls": {
+            "count": 0,
+            "error": null,
+            "finished_at": "2026-10-28T13:16:31.373940Z",
+            "started_at": "2026-10-28T13:16:31.130869Z"
+          },
+          "gateway_sessions": {
+            "count": 0,
+            "error": null,
+            "finished_at": "2026-10-28T13:16:31.147602Z",
+            "started_at": "2026-10-28T13:16:31.025092Z"
+          },
+          "redis_leases": {
+            "active_set_count_after": 0,
+            "active_set_count_before": 0,
+            "consistent": true,
+            "count": 0,
+            "error": null,
+            "expired_during_read": 0,
+            "finished_at": "2026-10-28T13:16:31.149684Z",
+            "leases_without_expiry": 0,
+            "leases_without_scanned_member": 0,
+            "members_without_scanned_lease": 0,
+            "scanned_active_members": 0,
+            "started_at": "2026-10-28T13:16:31.112766Z"
+          }
+        },
+        "started_at": "2026-10-28T13:16:31.025048Z",
+        "traffic_freeze_verified": false
+      },
+      "previous_sha": "c6a18e3ee1d0dfb4f0f1a24a8ee6942e45b43be5",
+      "status": "rolled_back_health_checked",
+      "timers": {
+        "talky-asterisk-reconcile.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-cleanup.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-db-backup.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-healthwatch.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-inbound-synthetic.timer": {
+          "active": false,
+          "enabled": "disabled"
+        },
+        "talky-trunk-status.timer": {
+          "active": false,
+          "enabled": "disabled"
+        }
+      }
+    },
+    "rollback_reboot_verified": true,
+    "stage": "guest_checks_complete",
+    "started_utc": "2026-10-28T13:02:18.939795Z",
+    "status": "passed",
+    "stopped_after_migration_failure": {
+      "talky-api": "inactive",
+      "talky-asterisk-reconcile.timer": "inactive",
+      "talky-cleanup.timer": "inactive",
+      "talky-dashboard": "failed",
+      "talky-db-backup.timer": "inactive",
+      "talky-dialer-worker": "inactive",
+      "talky-healthwatch.timer": "inactive",
+      "talky-inbound-synthetic.timer": "inactive",
+      "talky-reminder-worker": "inactive",
+      "talky-trunk-status": "inactive",
+      "talky-trunk-status.timer": "inactive",
+      "talky-voice-gateway": "inactive",
+      "talky-voice-worker": "inactive"
+    },
+    "successful_forward_migration": false,
+    "update_reboot_verified": true,
+    "private_fingerprints_omitted": true,
+    "guest_receipt_sha256": "680084718e051d0c2d2f344a4b08a752747334756f44f5e4321ff3aaabf45b45"
+  },
+  "owned_resources_cleaned": true,
+  "finished_utc": "2026-10-28T13:26:44.264193+00:00"
+}

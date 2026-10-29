@@ -1,0 +1,107 @@
+{
+  "status": "passed",
+  "source_sha": "6a56921d5e44f52fc6cb7904d497239ecacaddee",
+  "started_utc": "2026-10-28T12:10:53.461360+00:00",
+  "controlled_call_verified": false,
+  "live_provider_verified": false,
+  "paid_billing_verified": false,
+  "offhost_recovery_verified": false,
+  "public_dns_verified": false,
+  "independent_engineer_verified": false,
+  "stage": "complete",
+  "image_url": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
+  "image_sha256": "04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94",
+  "checksum_url": "https://cloud-images.ubuntu.com/noble/current/SHA256SUMS",
+  "postgres_image_id": "sha256:6a35283e53fbe883da6a6ffbce8d3999dc66076cc5c4e2f1d21bdbd9e26bf86f",
+  "postgres_image_digests": [
+    "postgres@sha256:e8a07d2c7579b038938cdba6c539e580e5001caf9ea203d397b5cc83e76bd938"
+  ],
+  "runtime_grants": {
+    "profile": "canonical-0082",
+    "mode": "apply",
+    "status": "verified",
+    "grants_committed": true,
+    "runtime_login_verified": true,
+    "schema_heads": [
+      "0082_ubuntu_admin_merge"
+    ],
+    "tables": 113,
+    "sequences": 5,
+    "policies_sha256": "b8918fbf0bb9a3e7f57c8a0373e5853955bc8b19328247e83a4e9754a2cb1cf7"
+  },
+  "guest_os": "PRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.5 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo",
+  "install": {
+    "status": "installed_health_checked",
+    "source_sha": "6a56921d5e44f52fc6cb7904d497239ecacaddee",
+    "frontend_mode": "linux",
+    "controlled_call_verified": false,
+    "production_recovery_verified": false,
+    "created_utc": "2026-10-28T12:17:41Z",
+    "python_lock_sha256": "8a3be035423ac7cf46d0f3cb2646eaa7592c3fdad0feb72c46957b18e77be9cb",
+    "apt_versions_sha256": "363e481b5cccfc2db647d93972d11eadcd2a3579d4b4aa2117116b544a14c791",
+    "redis_image": "redis:7.4-alpine@sha256:6ba19c50b56777f5c11c58eff8ddb69d0d5f27ba131cffb63f180ccfd43c66af"
+  },
+  "before_reboot": {
+    "services": {
+      "talky-api": "active",
+      "talky-voice-gateway": "active",
+      "talky-voice-worker": "active",
+      "talky-dialer-worker": "active",
+      "talky-reminder-worker": "active",
+      "talky-dashboard": "active",
+      "talky-redis": "active",
+      "asterisk": "active",
+      "nginx": "active",
+      "talky-trunk-status": "active",
+      "talky-asterisk-reconcile.timer": "active",
+      "talky-healthwatch.timer": "active"
+    },
+    "application_identities": {
+      "talky-api": "talky",
+      "talky-voice-gateway": "talky",
+      "talky-voice-worker": "talky",
+      "talky-dialer-worker": "talky",
+      "talky-reminder-worker": "talky",
+      "talky-dashboard": "talky",
+      "talky-trunk-status": "talky"
+    },
+    "operator_identity_and_scheduling_verified": true,
+    "local_and_host_https_probes": true,
+    "database_route_device": "enp0s2",
+    "redis_host_loopback_verified": true,
+    "api_process_and_gateway_source_sha": "6a56921d5e44f52fc6cb7904d497239ecacaddee"
+  },
+  "after_reboot": {
+    "services": {
+      "talky-api": "active",
+      "talky-voice-gateway": "active",
+      "talky-voice-worker": "active",
+      "talky-dialer-worker": "active",
+      "talky-reminder-worker": "active",
+      "talky-dashboard": "active",
+      "talky-redis": "active",
+      "asterisk": "active",
+      "nginx": "active",
+      "talky-trunk-status": "active",
+      "talky-asterisk-reconcile.timer": "active",
+      "talky-healthwatch.timer": "active"
+    },
+    "application_identities": {
+      "talky-api": "talky",
+      "talky-voice-gateway": "talky",
+      "talky-voice-worker": "talky",
+      "talky-dialer-worker": "talky",
+      "talky-reminder-worker": "talky",
+      "talky-dashboard": "talky",
+      "talky-trunk-status": "talky"
+    },
+    "operator_identity_and_scheduling_verified": true,
+    "local_and_host_https_probes": true,
+    "database_route_device": "enp0s2",
+    "redis_host_loopback_verified": true,
+    "api_process_and_gateway_source_sha": "6a56921d5e44f52fc6cb7904d497239ecacaddee"
+  },
+  "reboot_verified": true,
+  "owned_resources_cleaned": true,
+  "finished_utc": "2026-10-28T12:18:43.406269+00:00"
+}

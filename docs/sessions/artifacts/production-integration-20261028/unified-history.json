@@ -1,0 +1,18 @@
+{
+  "migration_source": "03e1d79241b59ac50e99a468b378dac1b0a2b080",
+  "migration_sha256": "0187df92a96b968d6db4a64edbeeee9f9c03be7daa3f08d3292959510427a88e",
+  "start": "0075_release_history_merge",
+  "sole_head": "0082_ubuntu_admin_merge",
+  "fixtures": [
+    "c",
+    "d"
+  ],
+  "actual_upgrade_and_repeat_passed": true,
+  "restricted_owner_verified_tls": true,
+  "event_relation_rows_acl_policies_preserved": true,
+  "incident_oid_owner_acl_original_policy_and_existing_row_fields_preserved": true,
+  "incident_uuid_receipt_alertmanager_and_supplier_rls_verified": true,
+  "tenant_existing_fields_and_billing_rows_preserved": true,
+  "runtime_database_changed": false,
+  "production_accessed": false
+}

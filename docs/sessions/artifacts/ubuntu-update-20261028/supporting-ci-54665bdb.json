@@ -1,0 +1,350 @@
+{
+  "status": "passed",
+  "completed_at": "2026-10-28T13:10:55.934700+00:00",
+  "candidate_sha": "54665bdbe1ea074d23ecb3ab48d6f7bbf20b5aa6",
+  "tested_merge_sha": "c6a18e3ee1d0dfb4f0f1a24a8ee6942e45b43be5",
+  "identical_tree_sha": "1edc5a7fb21df590cfef317df4957c1901659bc8",
+  "candidate_tree_equals_tested_merge": true,
+  "scope": "Five supporting GitHub Actions workflows; Ubuntu VM acceptance is a separate receipt",
+  "artifact_base": "tmp/fresh-update-ci-54665bdb",
+  "workflows": {
+    "tls": {
+      "run_id": 40691622393,
+      "url": "https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40691622393",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "54665bdbe1ea074d23ecb3ab48d6f7bbf20b5aa6",
+      "jobs": [
+        {
+          "name": "canonical-tls-restore",
+          "job_id": 122827608098,
+          "conclusion": "success"
+        }
+      ]
+    },
+    "installer": {
+      "run_id": 40691622402,
+      "url": "https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40691622402",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "54665bdbe1ea074d23ecb3ab48d6f7bbf20b5aa6",
+      "jobs": [
+        {
+          "name": "frontends",
+          "job_id": 122827607963,
+          "conclusion": "success"
+        },
+        {
+          "name": "installer",
+          "job_id": 122827608148,
+          "conclusion": "success"
+        },
+        {
+          "name": "gateway",
+          "job_id": 122827608259,
+          "conclusion": "success"
+        }
+      ]
+    },
+    "voice": {
+      "run_id": 40691622405,
+      "url": "https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40691622405",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "54665bdbe1ea074d23ecb3ab48d6f7bbf20b5aa6",
+      "jobs": [
+        {
+          "name": "voice pipeline (fast)",
+          "job_id": 122827608240,
+          "conclusion": "success"
+        },
+        {
+          "name": "full unit + security suite",
+          "job_id": 122827608729,
+          "conclusion": "success"
+        }
+      ]
+    },
+    "monitoring": {
+      "run_id": 40691622434,
+      "url": "https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40691622434",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "54665bdbe1ea074d23ecb3ab48d6f7bbf20b5aa6",
+      "jobs": [
+        {
+          "name": "prometheus-rules",
+          "job_id": 122827608191,
+          "conclusion": "success"
+        }
+      ]
+    },
+    "main": {
+      "run_id": 40691622569,
+      "url": "https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40691622569",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "54665bdbe1ea074d23ecb3ab48d6f7bbf20b5aa6",
+      "jobs": [
+        {
+          "name": "Secret Scan (gitleaks)",
+          "job_id": 122827608091,
+          "conclusion": "success"
+        },
+        {
+          "name": "Secret Placeholder Guard",
+          "job_id": 122827608460,
+          "conclusion": "success"
+        },
+        {
+          "name": "Frontend",
+          "job_id": 122827708812,
+          "conclusion": "success"
+        },
+        {
+          "name": "Admin Frontend",
+          "job_id": 122827708813,
+          "conclusion": "success"
+        },
+        {
+          "name": "Telephony Ingress Safety",
+          "job_id": 122827708819,
+          "conclusion": "success"
+        },
+        {
+          "name": "SQL Schema Validation",
+          "job_id": 122827708841,
+          "conclusion": "success"
+        },
+        {
+          "name": "Backend",
+          "job_id": 122827709013,
+          "conclusion": "success"
+        },
+        {
+          "name": "Docker Build & Scan",
+          "job_id": 122834568585,
+          "conclusion": "success"
+        }
+      ]
+    }
+  },
+  "suites": {
+    "installer_normal_user": {
+      "tests": 106,
+      "passed": 85,
+      "skipped": 21,
+      "note": "Permission-dependent tests; root publication suite runs separately"
+    },
+    "installer_root_fresh_release": {
+      "tests": 33,
+      "passed": 33,
+      "skipped": 0
+    },
+    "installer_validation_subset": {
+      "tests": 58,
+      "passed": 58,
+      "skipped": 0,
+      "included_in": "installer_normal_user"
+    },
+    "installer_preparation_subset": {
+      "tests": 15,
+      "passed": 15,
+      "skipped": 0,
+      "included_in": "installer_normal_user"
+    },
+    "installer_frontend_builds": {
+      "status": "passed",
+      "actual_node_version": "22.23.4",
+      "customer_next_version": "16.4.1"
+    },
+    "database_script_boundaries": {
+      "tests": 47,
+      "passed": 47,
+      "skipped": 0
+    },
+    "alembic_connection_boundaries": {
+      "tests": 7,
+      "passed": 7,
+      "skipped": 0
+    },
+    "runtime_grants_connection_boundaries": {
+      "tests": 9,
+      "passed": 9,
+      "skipped": 0
+    },
+    "runtime_grants_and_first_admin_tls": {
+      "checks": 16,
+      "status": "passed",
+      "owned_resources_removed": true
+    },
+    "canonical_tls_restore": {
+      "status": "passed",
+      "tables": 113,
+      "sequences": 5,
+      "heads": [
+        "0082_ubuntu_admin_merge"
+      ],
+      "owned_resources_removed": true
+    },
+    "operational_alert_rules": {
+      "rules": 30,
+      "scenarios": 12,
+      "status": "passed",
+      "promtool_version": "2.54.1",
+      "official_archive_sha256": "31715ef65e8a898d0f97c8c08c03b6b9afe485ac84e1698bcfec90fc6e62924f",
+      "checksum_source": "https://github.com/prometheus/prometheus/releases/download/v2.54.1/sha256sums.txt",
+      "source_read_only_during_evaluation": true
+    },
+    "voice_focused": {
+      "passed": 218,
+      "skipped": 0
+    },
+    "voice_full_unit_security": {
+      "passed": 15682,
+      "skipped": 288,
+      "subtests_passed": 20
+    },
+    "customer_dashboard": {
+      "tests": 1333,
+      "passed": 1331,
+      "failed": 0,
+      "skipped": 2,
+      "skip_scope": "Two database-backed session expiry and rotation tests",
+      "lint_typecheck_build": "passed"
+    },
+    "admin_frontend": {
+      "tests": 943,
+      "passed": 943,
+      "failed": 0,
+      "skipped": 0,
+      "lint_typecheck_build": "passed"
+    },
+    "ubuntu_bootstrap_adoption_postgres": {
+      "passed": 68,
+      "skipped": 0,
+      "failed": 0
+    },
+    "preserved_baseline_bootstrap_contract": {
+      "passed": 14,
+      "skipped": 0,
+      "failed": 0
+    },
+    "preserved_baseline_inbound_hold_resolution": {
+      "passed": 1,
+      "skipped": 0,
+      "failed": 0
+    },
+    "migrated_inbound_billing_postgres": {
+      "passed": 503,
+      "skipped": 0,
+      "failed": 0
+    },
+    "migrated_admin_postgres_serial": {
+      "passed": 701,
+      "skipped": 0,
+      "failed": 0
+    },
+    "isolated_provider_admission_redis": {
+      "passed": 16,
+      "skipped": 0,
+      "failed": 0
+    },
+    "offline_conversation_contracts": {
+      "passed": 6,
+      "skipped": 0,
+      "failed": 0
+    },
+    "backend_unit_security_coverage": {
+      "passed": 15728,
+      "skipped": 242,
+      "failed": 0,
+      "reported_total_coverage_percent": 72.59,
+      "scope": "Full tests/unit and tests/security under the main CI database/Redis environment"
+    },
+    "legacy_false_stamp_repair_and_inbound_migration_round_trip": {
+      "status": "passed"
+    }
+  },
+  "audits": {
+    "exact_hashed_linux_runtime_lock": {
+      "dependencies": 156,
+      "known_vulnerabilities": 0
+    },
+    "customer_dashboard_production_dependencies": {
+      "known_vulnerabilities": 0
+    },
+    "admin_frontend_all_dependencies": {
+      "known_vulnerabilities": 0,
+      "command": "npm audit --audit-level=high"
+    },
+    "backend_requirements": {
+      "known_vulnerabilities": 0,
+      "command": "pip-audit -r requirements.txt"
+    },
+    "container_image": {
+      "status": "passed",
+      "scope": "Trivy OS and library HIGH/CRITICAL with ignore-unfixed=true; not an all-severity/no-CVE assertion"
+    }
+  },
+  "artifacts": [
+    {
+      "path": "source-binding.json",
+      "sha256": "94f7bb06732371d64ea27f7cb0d3249f201d4e822bca6511c80265eb2978a64e",
+      "bytes": 584
+    },
+    {
+      "path": "tls-artifact/canonical-runtime-grants.json",
+      "sha256": "efa2f2d9c0d61947d5d4d272c5303f3713da67eafe1cd9f676f0e013c2dd9123",
+      "bytes": 2190
+    },
+    {
+      "path": "tls-artifact/canonical-tls-recovery.json",
+      "sha256": "49bf6db45c5a615eae885dd473a125eb71567f35d8ebca4af7207a2f39de92f0",
+      "bytes": 23448
+    },
+    {
+      "path": "lock-audit-artifact/runtime-lock-audit.json",
+      "sha256": "c4f1426952b7b3da7b46b9a682172b615f09ba52556e559a226397db27442ddd",
+      "bytes": 9326
+    },
+    {
+      "path": "bootstrap-artifact/ubuntu-bootstrap-postgres-results.xml",
+      "sha256": "46967eb9019811ba1c1f5fb45e512763889e42d7f1a69437f63323622f4c41bf",
+      "bytes": 11976
+    },
+    {
+      "path": "main-backend-direct-log-summary.json",
+      "sha256": "fb5db244e1e16f2e4bf07bad5bc2f3478794aca488df58053940ccd4f40b78d6",
+      "bytes": 1014
+    },
+    {
+      "path": "main-frontend-direct-log-summary.json",
+      "sha256": "7ade73b0532a84becd6102cdba747f3b40c9d5159c8c27eeba72251bc60d9d7f",
+      "bytes": 491
+    },
+    {
+      "path": "main-admin-direct-log-summary.json",
+      "sha256": "ec92ea7d1ae965bdff05b9b7fdd293a32a157f095ce73e7f663ebf757247c7df",
+      "bytes": 544
+    },
+    {
+      "path": "voice-full-direct-log-summary.json",
+      "sha256": "56d0f97ee073bb6c92c5f84e949672cd1007018c6fd80169963782964e0dd4ac",
+      "bytes": 354
+    },
+    {
+      "path": "installer-core-direct-log-summary.json",
+      "sha256": "5799cbf25f4c54f1c3e993f696efc5a7b76dbb7eb7a25e311169a470ea40f3d5",
+      "bytes": 546
+    }
+  ],
+  "limits": [
+    "Suites overlap; counts must not be added into a unique total.",
+    "This receipt covers automated CI fixtures, not production activation or production database remediation.",
+    "These fixture checks do not exercise production credentials, external provider requests, real paid calls/payments or configured alert receivers.",
+    "No proof of alert delivery, off-host backup survivability, retention/PITR, RPO/RTO or live operating capacity.",
+    "Successful future schema-changing updates require qualification of their actual migration and grants profile.",
+    "Ubuntu VM installation/update/reboot/recovery acceptance is tracked separately."
+  ]
+}

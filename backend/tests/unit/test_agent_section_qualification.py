@@ -36,6 +36,30 @@ async def test_full_original_question_set_prepares_without_scope_rewriting(tmp_p
     assert all(row["human_approval"] is None for row in report["cases"])
 
 
+async def test_prepared_support_guide_has_no_unconditional_handoff_instruction(tmp_path):
+    report = await q.run(args(tmp_path, case=["Q43"]))
+    assert report["error"] is None
+    request = report["prepared_requests"][0]
+    guide = request["system_prompt"]
+    assert {tool["function"]["name"] for tool in request["tools"]} == {
+        "lookup_company_knowledge", "end_call",
+    }
+    assert "Available actions for this call: end_call." in guide
+    assert "an unlisted transfer or team follow-up route is unavailable" in guide
+    assert "escalate or take a message when you cannot" not in guide
+
+
+async def test_prepared_live_state_matches_declared_inbound_identity(tmp_path):
+    report = await q.run(args(tmp_path, case=["Q43"]))
+    assert report["error"] is None
+    guide = report["prepared_requests"][0]["system_prompt"]
+    assert "agent=Alex" in guide
+    assert "company=Fictional demonstration company" in guide
+    assert "direction=inbound" in guide
+    assert "agent=unknown" not in guide and "company=unknown" not in guide
+    assert "direction=outbound" not in guide
+
+
 async def test_provider_execution_requires_designated_key_without_ambient_fallback(tmp_path, monkeypatch):
     monkeypatch.setenv("GOOGLE_API_KEY", "ambient-not-designated")
     monkeypatch.setattr(q, "provider_for", lambda *_: pytest.fail("Undesignated provider initialized"))

@@ -60,7 +60,10 @@ async def prometheus_metrics(
     container = get_container()
     if container.is_initialized:
         await refresh_telephony_slo_metrics(container.db_pool)
-    return Response(content=render_prometheus_metrics(), media_type=prometheus_content_type())
+    from app.infrastructure.metrics.operational_signals import render_operational_signals
+
+    signals = await render_operational_signals(container.redis if container.is_initialized else None)
+    return Response(content=render_prometheus_metrics() + signals, media_type=prometheus_content_type())
 
 
 def register_operational_routes(app: FastAPI) -> None:

@@ -30,11 +30,11 @@ async def state_db(checkout_db):  # noqa: F811
         await conn.execute(f'GRANT SELECT,INSERT,UPDATE,DELETE ON invoices TO "{fixture.role}"')
         await conn.execute(f'GRANT SELECT,INSERT ON invoice_snapshots TO "{fixture.role}"')
         await conn.execute(f'GRANT USAGE ON SEQUENCE invoice_snapshots_id_seq TO "{fixture.role}"')
-        await conn.execute(f'GRANT SELECT ON user_profiles TO "{fixture.role}"')
+        await conn.execute(f'GRANT SELECT ON user_profiles,tenant_users,roles TO "{fixture.role}"')
         # A won dispute first looks for a disputed top-up order.
         await conn.execute(f'GRANT SELECT,UPDATE ON topup_orders TO "{fixture.role}"')
         await conn.execute(f'GRANT SELECT,INSERT,UPDATE,DELETE ON billing_webhook_notifications,processed_webhook_events TO "{fixture.role}"')
-    fixture.objects, fixture.reads = {}, []
+    fixture.objects, fixture.reads, fixture.notification_users = {}, [], []
 
     async def read(resource, method, identity, **kwargs):
         assert method == "retrieve", "No provider mutation in webhook state application"
@@ -59,6 +59,8 @@ async def state_db(checkout_db):  # noqa: F811
             await conn.execute(
                 "DELETE FROM processed_webhook_events WHERE tenant_id=ANY($1::uuid[])", fixture.tenants,
             )
+            await conn.execute("DELETE FROM tenant_users WHERE user_id=ANY($1::uuid[])", fixture.notification_users)
+            await conn.execute("DELETE FROM user_profiles WHERE id=ANY($1::uuid[])", fixture.notification_users)
 
 
 async def _paid(fixture):
@@ -88,6 +90,120 @@ async def _paid(fixture):
 async def _apply(fixture, kind, data):
     async with acquire_with_tenant(fixture.service_pool, None) as conn:
         return await apply_billing_event(conn, fixture.billing, kind, data)
+
+
+async def _recipient_profile(fixture, *, profile_role="tenant_admin", membership_role="tenant_admin",
+                             membership_status="active", active=True, verified=True,
+                             profile_tenant=0, membership_tenant=0, email=None):
+    user_id = uuid4()
+    email = f"cp06-{user_id.hex}@example.invalid" if email is None else email
+    fixture.notification_users.append(user_id)
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        await conn.execute(
+            """INSERT INTO user_profiles(id,email,tenant_id,role,is_active,is_verified,email_verified_at)
+               VALUES($1,$2,$3,$4,$5,$6,CASE WHEN $6 THEN NOW() ELSE NULL END)""",
+            user_id, email, fixture.tenants[profile_tenant] if profile_tenant is not None else None,
+            profile_role, active, verified,
+        )
+        if membership_role is not None:
+            role_id = await conn.fetchval("SELECT id FROM roles WHERE name=$1", membership_role)
+            assert role_id, "Canonical membership role must exist"
+            await conn.execute(
+                "INSERT INTO tenant_users(user_id,tenant_id,role_id,status) VALUES($1,$2,$3,$4)",
+                user_id, fixture.tenants[membership_tenant], role_id, membership_status,
+            )
+    return user_id, email
+
+
+@pytest.mark.parametrize("profile_role", ["tenant_admin", "user"])
+@pytest.mark.parametrize("event_type", ["invoice.paid", "invoice.payment_failed"])
+async def test_billing_notice_uses_single_current_verified_tenant_admin_membership(state_db, profile_role, event_type):
+    fixture = state_db
+    _, subscription, _, invoice = await _paid(fixture)
+    _user, email = await _recipient_profile(fixture, profile_role=profile_role)
+    # An otherwise valid non-admin does not make the administrator ambiguous.
+    await _recipient_profile(fixture, membership_role="user")
+    if event_type == "invoice.payment_failed":
+        fixture.objects[("Subscription", subscription["id"])]["status"] = "past_due"
+        fixture.objects[("Invoice", invoice["id"])].update({"status": "open", "amount_paid": 0})
+    result = await _apply(fixture, event_type, invoice)
+    assert result["notifications"][0]["recipient"] == email
+    assert result["notifications"][0]["tenant_id"] == str(fixture.tenants[0])
+
+
+@pytest.mark.parametrize("changes", [
+    {"membership_role": None},
+    {"membership_status": "removed"},
+    {"membership_status": "suspended"},
+    {"membership_status": "pending"},
+    {"active": False},
+    {"verified": False},
+    {"membership_tenant": 1},
+    {"profile_tenant": 1},
+    {"profile_tenant": None},
+    {"membership_role": "user"},
+    {"membership_role": "platform_admin"},
+    {"profile_role": "platform_admin"},
+    {"email": "   "},
+], ids=["no-membership", "removed", "suspended", "pending", "inactive", "unverified",
+        "foreign-membership", "foreign-profile", "no-current-tenant", "wrong-role",
+        "global-membership", "global-profile", "empty-email"])
+async def test_billing_notice_never_uses_ineligible_or_foreign_recipient(state_db, changes):
+    fixture = state_db
+    _, _, _, invoice = await _paid(fixture)
+    await _recipient_profile(fixture, **changes)
+    result = await _apply(fixture, "invoice.paid", invoice)
+    assert result["notifications"][0]["recipient"] is None
+
+
+async def test_multiple_eligible_admins_persist_missing_recipient_without_arbitrary_choice(state_db):
+    fixture = state_db
+    _, _, _, invoice = await _paid(fixture)
+    await _recipient_profile(fixture)
+    await _recipient_profile(fixture)
+    event_id = "evt_cp06_" + uuid4().hex
+    async with acquire_with_tenant(fixture.service_pool, None) as conn:
+        await conn.execute("INSERT INTO processed_webhook_events(event_id,event_type,state,tenant_id) VALUES($1,'invoice.paid','completed',$2)",
+                           event_id, fixture.tenants[0])
+        result = await apply_billing_event(conn, fixture.billing, "invoice.paid", invoice)
+        await store_notifications(conn, event_id, "invoice.paid", result["notifications"])
+        saved = await conn.fetchrow("SELECT recipient,status FROM billing_webhook_notifications WHERE event_id=$1", event_id)
+    assert dict(saved) == {"recipient": None, "status": "recipient_missing"}
+    assert (await _tenant(fixture))["subscription_status"] == "active"
+
+
+async def test_repeated_paid_webhooks_preserve_captured_recipient_and_financial_effects(state_db):
+    fixture = state_db
+    receipt, _, _, invoice = await _paid(fixture)
+    first_user, first_email = await _recipient_profile(fixture)
+    event_ids = ["evt_cp06_" + uuid4().hex for _ in range(2)]
+
+    async def apply_and_store(event_id):
+        async with acquire_with_tenant(fixture.service_pool, None) as conn:
+            await conn.execute("INSERT INTO processed_webhook_events(event_id,event_type,state,tenant_id) VALUES($1,'invoice.paid','completed',$2) ON CONFLICT DO NOTHING",
+                               event_id, fixture.tenants[0])
+            result = await apply_billing_event(conn, fixture.billing, "invoice.paid", invoice)
+            await store_notifications(conn, event_id, "invoice.paid", result["notifications"])
+            return result
+
+    first = await apply_and_store(event_ids[0])
+    assert first["notifications"][0]["recipient"] == first_email
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        before_ledger = await conn.fetchval("SELECT count(*) FROM billing_ledger WHERE tenant_id=$1", fixture.tenants[0])
+        await conn.execute("UPDATE tenants SET minutes_used=37 WHERE id=$1", fixture.tenants[0])
+        await conn.execute("UPDATE tenant_users SET status='removed' WHERE user_id=$1", first_user)
+    _new_user, second_email = await _recipient_profile(fixture)
+    for event_id in (event_ids[0], event_ids[1]):
+        repeated = await apply_and_store(event_id)
+        assert repeated["notifications"][0]["recipient"] == second_email
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        notifications = await conn.fetch("SELECT recipient,status FROM billing_webhook_notifications WHERE tenant_id=$1", fixture.tenants[0])
+        assert [dict(row) for row in notifications] == [{"recipient": first_email, "status": "pending"}]
+        assert await conn.fetchval("SELECT count(*) FROM invoices WHERE stripe_invoice_id=$1", invoice["id"]) == 1
+        assert await conn.fetchval("SELECT count(*) FROM billing_ledger WHERE tenant_id=$1", fixture.tenants[0]) == before_ledger
+    tenant = await _tenant(fixture)
+    assert tenant["minutes_allocated"] == 120 and tenant["minutes_used"] == 37
+    assert (await fixture.service._get(fixture.tenants[0], receipt["request_id"]))["status"] == "completed"
 
 
 async def test_paid_invoice_first_recovers_missing_session_then_checkout_never_resets_usage(state_db):

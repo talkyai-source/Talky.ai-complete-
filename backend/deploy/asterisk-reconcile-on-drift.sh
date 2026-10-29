@@ -23,15 +23,14 @@ ENV_FILE="${TALKY_BACKEND_ENV_FILE:-${BACKEND_DIR}/.env}"
 PYTHON_BIN="${TALKY_BACKEND_PYTHON:-${BACKEND_DIR}/venv/bin/python}"
 RECONCILER="${TALKY_RECONCILER:-${BACKEND_DIR}/scripts/reconcile_pjsip_configs.py}"
 APPLY_SCRIPT="${TALKY_RECONCILE_APPLY:-${BACKEND_DIR}/scripts/reconcile_asterisk_release.sh}"
+ENV_RUNNER="${SCRIPT_DIR}/../scripts/run_with_backend_env.py"
 
 if [ ! -r "${ENV_FILE}" ]; then
     echo "ERROR: backend environment file is not readable." >&2
     exit 1
 fi
-set -a
-# shellcheck disable=SC1090 -- same environment loading as reconcile_asterisk_release.sh.
-. "${ENV_FILE}"
-set +a
+# Values are dotenv data, including TLS URLs containing '&'; never shell code.
+# Load only into the child, preserving this wrapper's fixed command structure.
 
 # One line about a reconciler result: what differs, or why it was refused. The
 # reconciler's JSON holds file names, counts and fixed error strings only.
@@ -61,7 +60,7 @@ retry_later() {
 }
 
 set +e
-CHECK_OUTPUT="$(cd -- "${BACKEND_DIR}" && "${PYTHON_BIN}" "${RECONCILER}" 2>&1)"
+CHECK_OUTPUT="$(cd -- "${BACKEND_DIR}" && "${PYTHON_BIN}" "${ENV_RUNNER}" "${ENV_FILE}" "${PYTHON_BIN}" "${RECONCILER}" 2>&1)"
 CHECK_STATUS=$?
 set -e
 
@@ -84,7 +83,7 @@ case "${CHECK_STATUS}" in
 esac
 
 set +e
-APPLY_OUTPUT="$(bash "${APPLY_SCRIPT}" 2>&1)"
+APPLY_OUTPUT="$("${PYTHON_BIN}" "${ENV_RUNNER}" "${ENV_FILE}" bash "${APPLY_SCRIPT}" 2>&1)"
 APPLY_STATUS=$?
 set -e
 if [ "${APPLY_STATUS}" -eq 0 ]; then

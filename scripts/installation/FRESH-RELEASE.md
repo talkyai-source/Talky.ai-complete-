@@ -1,0 +1,221 @@
+# Updates and recovery on the fresh Ubuntu profile
+
+`fresh_release.py` is the bounded release path for a host created by this
+repository's Ubuntu 24.04 amd64 installer with both frontends on Linux. It is
+separate from the legacy `admins` deployment script. Candidate
+`54665bdbe1ea074d23ecb3ab48d6f7bbf20b5aa6` passed the actual Ubuntu
+install/update/recovery matrix in
+[run 40691622408](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40691622408).
+It is published on the [PR 26 release branch](https://github.com/talkyai-source/Talky.ai-complete-/pull/26);
+the combined backend has not been deployed to production.
+
+The tested PR merge was `c6a18e3ee1d0dfb4f0f1a24a8ee6942e45b43be5`,
+with the same tree `1edc5a7fb21df590cfef317df4957c1901659bc8` as the
+candidate. The update base was `b216774648537e2e25afa550f9b227fc3283e089`,
+installed and reboot-verified in that run before the descendant update.
+This qualifies the recorded synthetic same-schema update and failure handling,
+not a future successful schema migration, production activation or paid use.
+
+It preserves the existing OS packages, Node version, Redis image/network/data,
+firewall, domains, certificates and carrier topology. Changing those requires a
+separately reviewed host rebuild. Run only one coordinated migration operator
+per database: the local release lock does not fence another host or DBA.
+
+## Prepare the exact candidate
+
+Retain a reviewed clean root-owned checkout with the full Git history needed
+to prove that the candidate descends from the installed source. The runtime
+receipt and `git -C /opt/talky rev-parse HEAD` identify the current source;
+the original installation receipt is retained as the bootstrap record.
+
+Run inside a root shell with `umask 0022`. Commands below use illustrative
+values; substitute the real reviewed SHAs and existing certificate names.
+
+```bash
+umask 0022
+export PYTHONDONTWRITEBYTECODE=1
+python3 /root/reviewed-candidate/scripts/installation/fresh_release.py prepare \
+  --source /root/reviewed-candidate \
+  --sha FULL_REVIEWED_CANDIDATE_SHA \
+  --expected-current-sha FULL_INSTALLED_SHA \
+  --domains api.example.com app.example.com admin.example.com
+```
+
+Preparation creates `/opt/talky-releases/<SHA>` and leaves the running release
+alone. It installs the candidate's exact hashed Python closure and checks it,
+builds/tests the native gateway, and runs locked installation plus production
+builds for both frontends. Frontend builds use a separate `talky-build` system
+account with no login shell, privileged supplementary groups or application
+UID. Its write access is removed before preparation finishes. Protected
+environment copies are private from creation; they are never shell-sourced.
+Privileged Python/native preparation uses the root operator's home and disables
+Python user-site and pip configuration discovery, so the running application
+cannot supply configuration or executable hooks through its writable home.
+The [pip configuration contract](https://pip.pypa.io/en/stable/topics/configuration/#pip-config-file)
+defines the null config-file setting used for this boundary.
+
+The private preparation receipt binds source, one Alembic head, both frontend
+builds, native binary and Python environment, the installed configuration and
+key fingerprints. Only Next's declared runtime cache is excluded from build
+artifact hashing. Existing migration files must retain their exact published
+bytes, and the old head must occur in the candidate's forward graph. A failed
+prepare retains its directory for inspection and cannot overwrite it on retry.
+
+Keep enough disk for the complete candidate, prior release and a fresh backup.
+Do not prune old release directories: their explicit recording/upload/state
+paths can remain the shared data location for later releases.
+
+## Freeze, back up and activate
+
+Use the real topology's ingress and outbound freeze, four-counter drain and
+candidate-bound immutable manifest described in
+[DEPLOYMENT.md](../../docs/DEPLOYMENT.md#production-drain-manifest-contract).
+The existing version-1 and owner-authorized version-2 verification code is
+reused, including freshness, exact digest, exact candidate and single-use
+replay rules. A synthetic test manifest is not production approval.
+
+Supply protected libpq services for the same runtime database:
+
+- A restricted runtime login matching the installed `DATABASE_URL`.
+- A separate schema-owner login matching `/etc/talky/migration.env` if a
+  forward migration is required.
+- The approved backup login with the read/snapshot/control-system access
+  required by [database recovery](../database/README.md).
+
+The service file and explicit password files must be root-owned mode `0600`.
+Use verified TLS with the installed CA. Passwords stay in protected files,
+never command arguments. Runtime, owner and backup services must select the
+same explicit endpoint/database. URL query options cannot override the
+endpoint, database, identity or TLS policy.
+
+```bash
+python3 /root/reviewed-candidate/scripts/installation/fresh_release.py activate \
+  --sha FULL_REVIEWED_CANDIDATE_SHA \
+  --manifest /root/release/drain.json \
+  --manifest-sha256 EXACT_SHA256_OF_MANIFEST_BYTES \
+  --service-file /etc/talky/pg_service.conf \
+  --runtime-service talklee_runtime \
+  --owner-service talklee_owner \
+  --backup-service talklee_backup
+```
+
+Add `--allow-forward-migration` only for an explicitly reviewed forward schema
+change. A changed schema without that flag is refused before consuming the
+manifest or stopping services.
+
+Activation checks the prepared artifacts and installed configuration again.
+It pins the actual database name, endpoint fingerprint and schema heads in the
+private journal before stopping application services. The backup and migration
+connection must match that original identity.
+It records and disables all known application/backup/retention/synthetic timers
+before confirming maintenance oneshots are fully stopped. Unknown application
+timers are refused. The existing observer must then read four complete zero
+counts; that observation does not replace the real external freeze.
+
+With application processes stopped, the existing recovery implementation takes
+a fresh consistent database backup. The updater independently reopens and
+checks the published archive, checksum, receipt, actual source endpoint and
+schema. This is local backup evidence, not an off-host copy or a restore claim.
+Required off-host/key recovery and RPO/RTO evidence remain separate.
+
+Before any migration, the old schema's complete runtime-grant verifier checks
+the owner and runtime logins. The actual migration DSN also has to prove its
+restricted owner identity, current/session user, endpoint, database, TLS and
+schema. The journal records `migration_started` **before** Alembic runs.
+Forward migration is followed by the candidate's reviewed grants profile and
+exact-head check; no downgrade command exists.
+
+The first activation moves the original `/opt/talky` directory into the
+root-owned release store on the same filesystem. It then publishes the stable
+`/opt/talky` symlink atomically. Applications stay stopped during the initial
+directory-to-link transition. Later switches replace only that link. Protected
+configuration and the explicit data directories are shared with the prior
+release; seeded candidate data is retained privately rather than merged over
+customer files. No recordings, uploads or Redis volume are deleted.
+
+Candidate systemd files retain the installer's `talky` application and root
+operator identities and `NoNewPrivileges` protections. The updater preserves
+fresh-host drop-ins, publishes only `APP_VERSION`, reconciles Asterisk through
+the existing guarded wrapper, then verifies gateway build/protocol, actual API
+process version, readiness and all three local HTTPS virtual hosts. It checks
+build artifacts, keys, configuration metadata and data-directory identities
+again before publishing a successful receipt.
+
+## Failure and recovery
+
+Private journals, protected configuration copies, database archives and command
+failure diagnostics remain under `/var/lib/talky-release`, root-only. Raw
+diagnostic files can contain secrets and must not be uploaded as public CI
+artifacts or pasted into chat. Error messages do not echo subprocess output.
+
+Before migration starts, failure attempts to restore the prior source and unit
+files, then reruns exact-version and health checks. Recovery first verifies the
+prior source, artifacts, protected configuration, keys and host/data identity;
+its read-only database check must match the original endpoint, database and old
+heads before any service or timer changes. Once migration has started—even when Alembic reports failure—the
+updater forbids automatic or manual code rollback through this command. It
+keeps application services stopped for a reviewed code-forward release or a
+separately approved compatible restore. A failed recovery is not success.
+
+An interrupted same-schema release can be recovered using its private journal
+and a **new** real manifest bound to the previous source SHA:
+
+```bash
+python3 /root/reviewed-candidate/scripts/installation/fresh_release.py recover \
+  --journal /var/lib/talky-release/transactions/TRANSACTION_ID/journal.json \
+  --manifest /root/release/recovery-drain.json \
+  --manifest-sha256 EXACT_RECOVERY_MANIFEST_SHA256
+```
+
+Successful activation or recovery leaves producer/maintenance timers disabled,
+including across reboot. It does not reopen external traffic. After the owner
+has completed the approved health/business checks and chosen the reopening
+window, restore exactly the recorded enabled/active timer states. Reopening
+rechecks protected configuration, artifacts and the pinned database identity
+with the successfully activated or recovered schema before starting services
+or timers:
+
+```bash
+python3 /root/reviewed-candidate/scripts/installation/fresh_release.py resume-schedules \
+  --journal /var/lib/talky-release/transactions/TRANSACTION_ID/journal.json \
+  --acknowledge-traffic-window
+```
+
+This command rechecks the current source, schema and health. The operator still
+owns the external ingress/origination controls. Restoring a synthetic-call timer
+can place its configured real call; do not run this command before its approved
+window. The release receipt does not claim customer-call, provider, billing,
+off-host recovery or load acceptance.
+
+## Recorded disposable-VM acceptance
+
+The matching matrix used two disposable Ubuntu 24.04 amd64 VMs and separate
+synthetic TLS PostgreSQL owner/runtime/backup identities. Direct installation
+and reboot passed independently. The update job verified:
+
+1. Preparation and activation of the real descendant, proving matching API/gateway source,
+   both frontends, immutable artifacts, protected keys, retained data and prior
+   timer disposition before and after reboot.
+2. A deliberately broken voice-worker descendant with unchanged schema,
+   automatic restoration of the previous healthy release and another real reboot.
+3. A deliberately failing migration after the migration-start boundary:
+   the old head remained, application services stayed stopped, and explicit
+   code recovery was refused.
+4. Refusal of modified prepared artifacts, an activating maintenance oneshot
+   and a migration URL destination override at their guarded boundaries.
+
+Configuration, keys, persistent data, exact process/frontend artifacts and
+Node 22.23.4 identity were checked across the allowed update/recovery phases.
+Schedules stayed frozen. Both jobs cleaned their owned resources before
+reporting success. The update receipt SHA-256 is
+`dde3a2a1be5d840d9bbf2c6946b569de7ecdaa2167d9734c287680b4f0d1d146`.
+The [acceptance record](../../docs/sessions/2026-10-28-fresh-update-acceptance.md)
+also preserves the earlier Asterisk failure and its native reproduction.
+
+The 33 native root tests separately cover filesystem, source, manifest and
+database-boundary regressions with explicitly mocked service-fault boundaries.
+They are not counted as additional VM scenarios. Synthetic approvals are not
+human operating approval. Real calls, provider/billing effects, public DNS,
+independent handover, off-host recovery and measured RPO/RTO remain unverified
+by this matrix. Every future schema change needs its own migration/grants
+qualification, and every actual release needs fresh operating evidence.

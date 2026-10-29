@@ -1,0 +1,260 @@
+{
+  "status": "failed",
+  "source_sha": "6a56921d5e44f52fc6cb7904d497239ecacaddee",
+  "started_utc": "2026-10-28T12:10:58.758120+00:00",
+  "controlled_call_verified": false,
+  "live_provider_verified": false,
+  "paid_billing_verified": false,
+  "offhost_recovery_verified": false,
+  "public_dns_verified": false,
+  "independent_engineer_verified": false,
+  "installed_base_sha": "9c06d8c6510b288b190a20a6a17354259c8bb6b6",
+  "stage": "update_rollback",
+  "image_url": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
+  "image_sha256": "04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94",
+  "checksum_url": "https://cloud-images.ubuntu.com/noble/current/SHA256SUMS",
+  "postgres_image_id": "sha256:6a35283e53fbe883da6a6ffbce8d3999dc66076cc5c4e2f1d21bdbd9e26bf86f",
+  "postgres_image_digests": [
+    "postgres@sha256:e8a07d2c7579b038938cdba6c539e580e5001caf9ea203d397b5cc83e76bd938"
+  ],
+  "runtime_grants": {
+    "profile": "canonical-0082",
+    "mode": "apply",
+    "status": "verified",
+    "grants_committed": true,
+    "runtime_login_verified": true,
+    "schema_heads": [
+      "0082_ubuntu_admin_merge"
+    ],
+    "tables": 113,
+    "sequences": 5,
+    "policies_sha256": "b8918fbf0bb9a3e7f57c8a0373e5853955bc8b19328247e83a4e9754a2cb1cf7"
+  },
+  "guest_os": "PRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.5 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo",
+  "install": {
+    "status": "installed_health_checked",
+    "source_sha": "9c06d8c6510b288b190a20a6a17354259c8bb6b6",
+    "frontend_mode": "linux",
+    "controlled_call_verified": false,
+    "production_recovery_verified": false,
+    "created_utc": "2026-10-28T12:19:12Z",
+    "python_lock_sha256": "8a3be035423ac7cf46d0f3cb2646eaa7592c3fdad0feb72c46957b18e77be9cb",
+    "apt_versions_sha256": "363e481b5cccfc2db647d93972d11eadcd2a3579d4b4aa2117116b544a14c791",
+    "redis_image": "redis:7.4-alpine@sha256:6ba19c50b56777f5c11c58eff8ddb69d0d5f27ba131cffb63f180ccfd43c66af"
+  },
+  "before_reboot": {
+    "services": {
+      "talky-api": "active",
+      "talky-voice-gateway": "active",
+      "talky-voice-worker": "active",
+      "talky-dialer-worker": "active",
+      "talky-reminder-worker": "active",
+      "talky-dashboard": "active",
+      "talky-redis": "active",
+      "asterisk": "active",
+      "nginx": "active",
+      "talky-trunk-status": "active",
+      "talky-asterisk-reconcile.timer": "active",
+      "talky-healthwatch.timer": "active"
+    },
+    "application_identities": {
+      "talky-api": "talky",
+      "talky-voice-gateway": "talky",
+      "talky-voice-worker": "talky",
+      "talky-dialer-worker": "talky",
+      "talky-reminder-worker": "talky",
+      "talky-dashboard": "talky",
+      "talky-trunk-status": "talky"
+    },
+    "operator_identity_and_scheduling_verified": true,
+    "local_and_host_https_probes": true,
+    "database_route_device": "enp0s2",
+    "redis_host_loopback_verified": true,
+    "api_process_and_gateway_source_sha": "9c06d8c6510b288b190a20a6a17354259c8bb6b6"
+  },
+  "after_reboot": {
+    "services": {
+      "talky-api": "active",
+      "talky-voice-gateway": "active",
+      "talky-voice-worker": "active",
+      "talky-dialer-worker": "active",
+      "talky-reminder-worker": "active",
+      "talky-dashboard": "active",
+      "talky-redis": "active",
+      "asterisk": "active",
+      "nginx": "active",
+      "talky-trunk-status": "active",
+      "talky-asterisk-reconcile.timer": "active",
+      "talky-healthwatch.timer": "active"
+    },
+    "application_identities": {
+      "talky-api": "talky",
+      "talky-voice-gateway": "talky",
+      "talky-voice-worker": "talky",
+      "talky-dialer-worker": "talky",
+      "talky-reminder-worker": "talky",
+      "talky-dashboard": "talky",
+      "talky-trunk-status": "talky"
+    },
+    "operator_identity_and_scheduling_verified": true,
+    "local_and_host_https_probes": true,
+    "database_route_device": "enp0s2",
+    "redis_host_loopback_verified": true,
+    "api_process_and_gateway_source_sha": "9c06d8c6510b288b190a20a6a17354259c8bb6b6"
+  },
+  "reboot_verified": true,
+  "release_rehearsal": {
+    "approval_identity": "synthetic-ci-fixture@installer.test",
+    "base_sha": "9c06d8c6510b288b190a20a6a17354259c8bb6b6",
+    "boot_before_activation": "83a966a1-4dab-4da1-9502-4f7d75e13ba7",
+    "candidate_sha": "6a56921d5e44f52fc6cb7904d497239ecacaddee",
+    "customer_call_acceptance": false,
+    "error_detail": "Rehearsal child returned an unexpected exit code",
+    "error_type": "RehearsalError",
+    "firewall_freeze": {
+      "sip_rtp_ingress_denied": true,
+      "ufw6_sha256": "5f27b3ca5c2c5e66b6863d6a1a7babba1efb695231e6fadd55dd67d4cfe70220",
+      "ufw_sha256": "7b29aaaa90fe8abb7107a7df3ff4c66faedcf866f42e4e7d7c9e31b2226de1ab"
+    },
+    "fixture_database": {
+      "database": "talky_synthetic_source",
+      "heads": [
+        "0082_ubuntu_admin_merge"
+      ],
+      "inbound_enabled": false,
+      "outbound_paused": true,
+      "owner_role": "fixture_migration",
+      "synthetic_business_records": {
+        "calls": {
+          "rows": 2,
+          "sha256": "984da15cf79fc69e617bc553bb4c68e2fcd543304e0dbc7579ee6382a642a794"
+        },
+        "campaigns": {
+          "rows": 2,
+          "sha256": "a0cda8755386438846e98a796ebc67e155432cadcaadb6c80c45817482208707"
+        },
+        "leads": {
+          "rows": 2,
+          "sha256": "75e63429c0958121c3df27af266b88492fc6faae621e149ac2384c599a1d1ed6"
+        },
+        "tenants": {
+          "rows": 2,
+          "sha256": "0c0d01fa38163332b579824484275becdecefb128422d98471586e30750cfeb9"
+        }
+      },
+      "tls": true
+    },
+    "helper_sha256": "c6f0a9ea3824d6f9e0cb448b8256a4ac2cccefa2b8b985f0cdc86434cc4ccb58",
+    "human_owner_attestation": false,
+    "last_child_diagnostic": {
+      "binary": "python3",
+      "expected_return_code": 0,
+      "private_diagnostic": "child-failure-05d76351ecc143cd9223815c89066aa6.json",
+      "return_code": 2,
+      "timed_out": false
+    },
+    "migration_refusal_verified": false,
+    "off_host_recovery_acceptance": false,
+    "outer_cleanup_verified": false,
+    "preactivation_rejections": {
+      "activating_oneshot_refused_before_runtime_stop": true,
+      "original_application_pids_preserved": true,
+      "unpublished_artifact_drift_refused_before_transaction": true
+    },
+    "production_acceptance": false,
+    "production_accessed": false,
+    "release_cli_sha256": "97c3b3e8e49f5ecc6f36e390eb262af43a116d3094f236e57ac46988dc994011",
+    "rollback_reboot_verified": false,
+    "stage": "activate",
+    "started_utc": "2026-10-28T12:20:26.053717Z",
+    "status": "failed",
+    "update_reboot_verified": false,
+    "private_fingerprints_omitted": true,
+    "guest_receipt_sha256": "763d60f5fa038bbb357d1deeac77f5d2ecf17f0d11d32bbd38e963f814078217"
+  },
+  "diagnostics": {
+    "talky-api": {
+      "state": "Result=success\nExecMainStatus=0\nUser=talky\nGroup=talky\nActiveState=inactive\nSubState=dead",
+      "sanitized_journal": "INFO:     Uvicorn running on [redacted synthetic credential] (Press CTRL+C to quit)\nINFO:     127.0.0.1:52504 - \"GET /health HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:52506 - \"GET /api/v1/healthz/ready HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:52518 - \"GET /api/v1/healthz/deep HTTP/1.1\" 200 OK\nINFO:     10.0.2.2:0 - \"GET /health HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:39632 - \"GET /api/v1/healthz/workers HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:47270 - \"GET /api/v1/healthz/workers HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:41822 - \"GET /api/v1/healthz/workers HTTP/1.1\" 200 OK\nINFO:     127.0.0.1:39422 - \"GET /api/v1/healthz/workers HTTP/1.1\" 200 OK\nStopping talky-api.service - Talky.ai API Server (call process: owns telephony)...\nINFO:     Shutting down\nINFO:     Waiting for application shutdown.\n12:30:07 INFO     [app.main] [req=-] [call=-] lifespan_drain_begin active=0 timeout_s=300\n12:30:07 INFO     [app.main] [req=-] [call=-] telephony_shutdown_termination total=0 confirmed=0 deferred=0\n12:30:07 INFO     [app.main] [req=-] [call=-] redis_coordination_listeners_stopped\n12:30:07 INFO     [app.main] [req=-] [call=-] Shutting down Talky.ai...\n12:30:07 INFO     [app.main] [req=-] [call=-] inbound_admission_watchdog_stopped\n12:30:07 INFO     [app.core.container] [req=-] [call=-] Shutting down service container...\n12:30:07 INFO     [app.infrastructure.telephony.adapter_factory] [req=-] [call=-] AdapterRegistry: shutdown complete\n12:30:07 INFO     [app.core.container] [req=-] [call=-] Adapter registry stopped\n12:30:07 INFO     [app.domain.services.session_manager] [req=-] [call=-] Shutting down SessionManager...\n12:30:07 INFO     [app.domain.services.session_manager] [req=-] [call=-] Periodic sync task cancelled\n12:30:07 INFO     [app.domain.services.session_manager] [req=-] [call=-] SessionManager shutdown complete\n12:30:07 INFO     [app.core.container] [req=-] [call=-] SessionManager shutdown complete\n12:30:07 INFO     [app.core.container] [req=-] [call=-] Queue service closed\n12:30:07 INFO     [app.core.container] [req=-] [call=-] Redis connection closed\n12:30:07 INFO     [app.core.db] [req=-] [call=-] PostgreSQL connection pools closed\n12:30:07 INFO     [app.core.container] [req=-] [call=-] PostgreSQL pool closed\n12:30:07 INFO     [app.core.container] [req=-] [call=-] Service container shutdown complete\n12:30:07 INFO     [app.main] [req=-] [call=-] Talky.ai shutdown complete\nINFO:     Application shutdown complete.\nINFO:     Finished server process [1355]\ntalky-api.service: Deactivated successfully.\nStopped talky-api.service - Talky.ai API Server (call process: owns telephony).\ntalky-api.service: Consumed 11.812s CPU time, 227.5M memory peak, 0B memory swap peak.\n"
+    },
+    "talky-voice-gateway": {
+      "state": "Result=success\nExecMainStatus=0\nUser=talky\nGroup=talky\nActiveState=inactive\nSubState=dead",
+      "sanitized_journal": "Starting talky-voice-gateway.service - Talky.ai Voice Media Gateway (C++)...\nStarted talky-voice-gateway.service - Talky.ai Voice Media Gateway (C++).\nvoice-gateway-cpp started host=127.0.0.1 port=18080 build_sha=9c06d8c6510b288b190a20a6a17354259c8bb6b6 codec=pcmu ptime_ms=20\nStopping talky-voice-gateway.service - Talky.ai Voice Media Gateway (C++)...\nvoice-gateway-cpp shutting down (signal received)\nvoice-gateway-cpp stopped\ntalky-voice-gateway.service: Deactivated successfully.\nStopped talky-voice-gateway.service - Talky.ai Voice Media Gateway (C++).\nStarting talky-voice-gateway.service - Talky.ai Voice Media Gateway (C++)...\nvoice-gateway-cpp started host=127.0.0.1 port=18080 build_sha=9c06d8c6510b288b190a20a6a17354259c8bb6b6 codec=pcmu ptime_ms=20\nStarted talky-voice-gateway.service - Talky.ai Voice Media Gateway (C++).\nStopping talky-voice-gateway.service - Talky.ai Voice Media Gateway (C++)...\nvoice-gateway-cpp shutting down (signal received)\nvoice-gateway-cpp stopped\ntalky-voice-gateway.service: Deactivated successfully.\nStopped talky-voice-gateway.service - Talky.ai Voice Media Gateway (C++).\n"
+    },
+    "talky-voice-worker": {
+      "state": "Result=success\nExecMainStatus=0\nUser=talky\nGroup=talky\nActiveState=inactive\nSubState=dead",
+      "sanitized_journal": "2026-10-28 12:20:08,619 - app.infrastructure.providers.provider_concurrency - INFO - provider_guard_init provider=groq max_concurrent=80\n2026-10-28 12:20:08,731 - app.infrastructure.providers.provider_concurrency - INFO - provider_guard_init provider=cartesia max_concurrent=80\n2026-10-28 12:20:08,732 - app.infrastructure.tts.cartesia - INFO - [Cartesia] Initialized: model=sonic-3, voice=6ccbfb76-1fc6-48f7-b71d-91ac6298247b, sample_rate=24000\n2026-10-28 12:20:08,732 - app.infrastructure.telephony.browser_media_gateway - INFO - BrowserMediaGateway initialized: output=24000Hz, input=24000Hz, 16-bit, telephony_mode=False, tts_source_format=f32le, max_queue_size=100, target_buffer_ms=100, max_buffer_ms=400, ws_send_timeout_ms=300\n2026-10-28 12:20:08,733 - __main__ - INFO - AI providers initialized\n2026-10-28 12:20:08,733 - __main__ - INFO - Voice Pipeline Worker initialized successfully\n2026-10-28 12:20:08,807 - __main__ - INFO - Voice Pipeline Worker started - listening on voice:calls:active\n2026-10-28 12:20:08,809 - __main__ - INFO - heartbeat: active_pipelines=0, calls_handled=0, calls_failed=0\nStarted talky-voice-worker.service - Talky.ai Voice Pipeline Worker.\n2026-10-28 12:20:08,958 - httpx - INFO - HTTP Request: POST https://api.groq.com/openai/v1/chat/completions \"HTTP/1.1 401 Unauthorized\"\n2026-10-28 12:20:08,959 - app.infrastructure.llm.groq - WARNING - groq_warmup_failed model=openai/gpt-oss-20b: Error code: 401 - {'error': {'message': 'Invalid API Key', 'type': 'invalid_request_error', 'code': 'invalid_api_key'}}\n2026-10-28 12:21:08,887 - __main__ - INFO - heartbeat: active_pipelines=0, calls_handled=0, calls_failed=0\n2026-10-28 12:22:08,890 - __main__ - INFO - heartbeat: active_pipelines=0, calls_handled=0, calls_failed=0\n2026-10-28 12:23:08,895 - __main__ - INFO - heartbeat: active_pipelines=0, calls_handled=0, calls_failed=0\n2026-10-28 12:24:08,901 - __main__ - INFO - heartbeat: active_pipelines=0, calls_handled=0, calls_failed=0\n2026-10-28 12:25:08,907 - __main__ - INFO - heartbeat: active_pipelines=0, calls_handled=0, calls_failed=0\n2026-10-28 12:26:08,915 - __main__ - INFO - heartbeat: active_pipelines=0, calls_handled=0, calls_failed=0\n2026-10-28 12:27:08,923 - __main__ - INFO - heartbeat: active_pipelines=0, calls_handled=0, calls_failed=0\n2026-10-28 12:28:08,930 - __main__ - INFO - heartbeat: active_pipelines=0, calls_handled=0, calls_failed=0\n2026-10-28 12:29:08,936 - __main__ - INFO - heartbeat: active_pipelines=0, calls_handled=0, calls_failed=0\n2026-10-28 12:30:06,903 - __main__ - INFO - Received shutdown signal\n2026-10-28 12:30:06,903 - __main__ - INFO - Worker received cancellation signal\n2026-10-28 12:30:06,904 - __main__ - INFO - Shutting down Voice Pipeline Worker...\n/opt/talky/backend/app/workers/voice_worker.py:329: DeprecationWarning: Call to deprecated close. (Use aclose() instead) -- Deprecated since version 5.0.0.\n  await self._redis.close()\nStopping talky-voice-worker.service - Talky.ai Voice Pipeline Worker...\n2026-10-28 12:30:06,904 - app.domain.services.session_manager - INFO - Shutting down SessionManager...\n2026-10-28 12:30:06,904 - app.domain.services.session_manager - INFO - Periodic sync task cancelled\n2026-10-28 12:30:06,905 - app.domain.services.session_manager - INFO - SessionManager shutdown complete\n2026-10-28 12:30:06,905 - app.infrastructure.stt.deepgram_flux - INFO - DeepgramFlux cleaned up\n2026-10-28 12:30:06,905 - app.infrastructure.telephony.browser_media_gateway - INFO - BrowserMediaGateway cleaned up\n2026-10-28 12:30:06,905 - __main__ - INFO - Voice Pipeline Worker shutdown complete. Handled: 0, Failed: 0\ntalky-voice-worker.service: Deactivated successfully.\nStopped talky-voice-worker.service - Talky.ai Voice Pipeline Worker.\ntalky-voice-worker.service: Consumed 2.126s CPU time, 127.6M memory peak, 0B memory swap peak.\n"
+    },
+    "talky-dialer-worker": {
+      "state": "Result=success\nExecMainStatus=0\nUser=talky\nGroup=talky\nActiveState=inactive\nSubState=dead",
+      "sanitized_journal": "2026-10-28 12:19:25,968 - app.core.db - INFO - PostgreSQL connection pools closed\n2026-10-28 12:19:25,968 - __main__ - INFO - Dialer Worker shutdown complete. Processed: 0, Failed: 0\n2026-10-28 12:19:25,968 - __main__ - INFO - Shutting down Dialer Worker...\n2026-10-28 12:19:25,968 - __main__ - INFO - Dialer Worker shutdown complete. Processed: 0, Failed: 0\ntalky-dialer-worker.service: Deactivated successfully.\nStopped talky-dialer-worker.service - Talky.ai Dialer Worker.\nStarting talky-dialer-worker.service - Talky.ai Dialer Worker...\n2026-10-28 12:20:06,000 - __main__ - INFO - Initializing Dialer Worker...\n2026-10-28 12:20:06,015 - app.domain.services.queue_service - INFO - DialerQueueService connected to Redis: [redacted connection]\n2026-10-28 12:20:06,367 - app.core.db - INFO - PostgreSQL primary pool initialized min=1 max=10\n2026-10-28 12:20:06,367 - __main__ - INFO - Dialer Worker created standalone DB pool\n2026-10-28 12:20:06,367 - __main__ - INFO - Dialer Worker initialized successfully\n2026-10-28 12:20:06,367 - __main__ - INFO - Dialer Worker started - listening for jobs\n2026-10-28 12:20:06,371 - __main__ - INFO - heartbeat: jobs_processed=0, jobs_failed=0\nStarted talky-dialer-worker.service - Talky.ai Dialer Worker.\n2026-10-28 12:21:06,385 - __main__ - INFO - heartbeat: jobs_processed=0, jobs_failed=0\n2026-10-28 12:22:06,387 - __main__ - INFO - heartbeat: jobs_processed=0, jobs_failed=0\n2026-10-28 12:23:06,392 - __main__ - INFO - heartbeat: jobs_processed=0, jobs_failed=0\n2026-10-28 12:24:06,394 - __main__ - INFO - heartbeat: jobs_processed=0, jobs_failed=0\n2026-10-28 12:25:06,395 - __main__ - INFO - heartbeat: jobs_processed=0, jobs_failed=0\n2026-10-28 12:26:06,398 - __main__ - INFO - heartbeat: jobs_processed=0, jobs_failed=0\n2026-10-28 12:27:06,400 - __main__ - INFO - heartbeat: jobs_processed=0, jobs_failed=0\n2026-10-28 12:28:06,403 - __main__ - INFO - heartbeat: jobs_processed=0, jobs_failed=0\n2026-10-28 12:29:06,405 - __main__ - INFO - heartbeat: jobs_processed=0, jobs_failed=0\n2026-10-28 12:30:06,408 - __main__ - INFO - heartbeat: jobs_processed=0, jobs_failed=0\n2026-10-28 12:30:06,906 - __main__ - INFO - Received shutdown signal\nStopping talky-dialer-worker.service - Talky.ai Dialer Worker...\n2026-10-28 12:30:07,871 - __main__ - INFO - Shutting down Dialer Worker...\n2026-10-28 12:30:07,874 - app.core.db - INFO - PostgreSQL connection pools closed\n2026-10-28 12:30:07,874 - __main__ - INFO - Dialer Worker shutdown complete. Processed: 0, Failed: 0\n2026-10-28 12:30:07,874 - __main__ - INFO - Shutting down Dialer Worker...\n2026-10-28 12:30:07,874 - __main__ - INFO - Dialer Worker shutdown complete. Processed: 0, Failed: 0\ntalky-dialer-worker.service: Deactivated successfully.\nStopped talky-dialer-worker.service - Talky.ai Dialer Worker.\ntalky-dialer-worker.service: Consumed 1.847s CPU time, 49.8M memory peak, 0B memory swap peak.\n"
+    },
+    "talky-reminder-worker": {
+      "state": "Result=success\nExecMainStatus=0\nUser=talky\nGroup=talky\nActiveState=inactive\nSubState=dead",
+      "sanitized_journal": "2026-10-28 12:21:38,036 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\n2026-10-28 12:22:07,925 - __main__ - INFO - heartbeat: reminders_sent=0, emails_sent=0, reminders_failed=0\n2026-10-28 12:22:08,047 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\n2026-10-28 12:22:38,072 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\n2026-10-28 12:23:07,954 - __main__ - INFO - heartbeat: reminders_sent=0, emails_sent=0, reminders_failed=0\n2026-10-28 12:23:08,081 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\n2026-10-28 12:23:38,111 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\n2026-10-28 12:24:07,985 - __main__ - INFO - heartbeat: reminders_sent=0, emails_sent=0, reminders_failed=0\n2026-10-28 12:24:08,119 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\n2026-10-28 12:24:38,153 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\n2026-10-28 12:25:07,987 - __main__ - INFO - heartbeat: reminders_sent=0, emails_sent=0, reminders_failed=0\n2026-10-28 12:25:08,164 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\n2026-10-28 12:25:38,170 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\n2026-10-28 12:26:08,018 - __main__ - INFO - heartbeat: reminders_sent=0, emails_sent=0, reminders_failed=0\n2026-10-28 12:26:08,176 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\n2026-10-28 12:26:38,183 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\n2026-10-28 12:27:08,042 - __main__ - INFO - heartbeat: reminders_sent=0, emails_sent=0, reminders_failed=0\n2026-10-28 12:27:08,189 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\n2026-10-28 12:27:38,195 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\n2026-10-28 12:28:08,074 - __main__ - INFO - heartbeat: reminders_sent=0, emails_sent=0, reminders_failed=0\n2026-10-28 12:28:08,202 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\n2026-10-28 12:28:38,223 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\n2026-10-28 12:29:08,105 - __main__ - INFO - heartbeat: reminders_sent=0, emails_sent=0, reminders_failed=0\n2026-10-28 12:29:08,233 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\n2026-10-28 12:29:38,266 - app.domain.services.notification_service - INFO - NotificationService initialized (email=True, slack=True)\nStopping talky-reminder-worker.service - Talky.ai Reminder Worker...\n2026-10-28 12:30:06,907 - __main__ - INFO - Received shutdown signal\n2026-10-28 12:30:08,271 - __main__ - INFO - Shutting down Reminder Worker...\n2026-10-28 12:30:08,275 - app.core.db - INFO - PostgreSQL connection pools closed\n2026-10-28 12:30:08,275 - __main__ - INFO - Reminder Worker shutdown complete. SMS Sent: 0, Emails Sent: 0, Failed: 0\n2026-10-28 12:30:08,275 - __main__ - INFO - Shutting down Reminder Worker...\n2026-10-28 12:30:08,275 - __main__ - INFO - Reminder Worker shutdown complete. SMS Sent: 0, Emails Sent: 0, Failed: 0\ntalky-reminder-worker.service: Deactivated successfully.\nStopped talky-reminder-worker.service - Talky.ai Reminder Worker.\ntalky-reminder-worker.service: Consumed 1.767s CPU time, 80.7M memory peak, 0B memory swap peak.\n"
+    },
+    "talky-dashboard": {
+      "state": "Result=exit-code\nExecMainStatus=143\nUser=talky\nGroup=talky\nActiveState=failed\nSubState=failed",
+      "sanitized_journal": "Started talky-dashboard.service - Talky dashboard.\n\u25b2 Next.js 16.4.1\n- Local:         http://127.0.0.1:3000\n- Network:       http://127.0.0.1:3000\n\u2713 Ready in 345ms\n[@sentry/nextjs] Importing `withSentryConfig` from `@sentry/nextjs` is deprecated and will stop working in v11. Import it from `@sentry/nextjs/config` instead:\n  import { withSentryConfig } from '@sentry/nextjs/config';\n\u2713 Running next.config.ts took 914ms\nStopping talky-dashboard.service - Talky dashboard...\ntalky-dashboard.service: Main process exited, code=exited, status=143/n/a\ntalky-dashboard.service: Failed with result 'exit-code'.\nStopped talky-dashboard.service - Talky dashboard.\ntalky-dashboard.service: Consumed 2.197s CPU time, 146.6M memory peak, 0B memory swap peak.\nStarted talky-dashboard.service - Talky dashboard.\n\u25b2 Next.js 16.4.1\n- Local:         http://127.0.0.1:3000\n- Network:       http://127.0.0.1:3000\n\u2713 Ready in 605ms\n[@sentry/nextjs] Importing `withSentryConfig` from `@sentry/nextjs` is deprecated and will stop working in v11. Import it from `@sentry/nextjs/config` instead:\n  import { withSentryConfig } from '@sentry/nextjs/config';\n\u2713 Running next.config.ts took 3.0s\nStopping talky-dashboard.service - Talky dashboard...\ntalky-dashboard.service: Main process exited, code=exited, status=143/n/a\ntalky-dashboard.service: Failed with result 'exit-code'.\nStopped talky-dashboard.service - Talky dashboard.\ntalky-dashboard.service: Consumed 2.846s CPU time, 288.4M memory peak, 0B memory swap peak.\n"
+    },
+    "talky-redis": {
+      "state": "Result=success\nExecMainStatus=0\nUser=\nGroup=\nActiveState=active\nSubState=exited",
+      "sanitized_journal": " 1ea868e596ec Downloading [==================================================>]  12.42MB/12.42MB\n 759efa4719c9 Extracting 1 s\n 1ea868e596ec Download complete\n cef7ad5a05c6 Extracting 1 s\n a239ec2b8fe1 Pull complete\n 759efa4719c9 Pull complete\n cef7ad5a05c6 Pull complete\n 1ea868e596ec Extracting 1 s\n 1ea868e596ec Extracting 1 s\n 1ea868e596ec Extracting 1 s\n ae75cb664c8f Pull complete\n 4f4fb700ef54 Pull complete\n 1ea868e596ec Pull complete\n e25d07126ba7 Pull complete\n redis Pulled\n Volume talky-rebuild_talky_redis  Creating\n Volume talky-rebuild_talky_redis  Created\n Container talky-rebuild-redis-1  Creating\n Container talky-rebuild-redis-1  Created\n Container talky-rebuild-redis-1  Starting\n Container talky-rebuild-redis-1  Started\n Container talky-rebuild-redis-1  Waiting\n Container talky-rebuild-redis-1  Healthy\nFinished talky-redis.service - Talky Redis.\nStopping talky-redis.service - Talky Redis...\n Container talky-rebuild-redis-1  Stopping\n Container talky-rebuild-redis-1  Stopped\ntalky-redis.service: Deactivated successfully.\nStopped talky-redis.service - Talky Redis.\nStarting talky-redis.service - Talky Redis...\n Container talky-rebuild-redis-1  Starting\n Container talky-rebuild-redis-1  Started\n Container talky-rebuild-redis-1  Waiting\n Container talky-rebuild-redis-1  Healthy\nFinished talky-redis.service - Talky Redis.\n"
+    },
+    "asterisk": {
+      "state": "Result=success\nExecMainStatus=0\nUser=\nGroup=\nActiveState=active\nSubState=running",
+      "sanitized_journal": "Starting asterisk.service - Asterisk PBX...\nradcli: rc_read_config: rc_read_config: can't open /etc/radiusclient-ng/radiusclient.conf: No such file or directory\nradcli: rc_read_config: rc_read_config: can't open /etc/radiusclient-ng/radiusclient.conf: No such file or directory\nStarted asterisk.service - Asterisk PBX.\nStopping asterisk.service - Asterisk PBX...\nasterisk.service: Deactivated successfully.\nStopped asterisk.service - Asterisk PBX.\nasterisk.service: Consumed 1.237s CPU time, 79.7M memory peak, 0B memory swap peak.\nStarting asterisk.service - Asterisk PBX...\nradcli: rc_read_config: rc_read_config: can't open /etc/radiusclient-ng/radiusclient.conf: No such file or directory\nradcli: rc_read_config: rc_read_config: can't open /etc/radiusclient-ng/radiusclient.conf: No such file or directory\nStarted asterisk.service - Asterisk PBX.\n"
+    },
+    "nginx": {
+      "state": "Result=success\nExecMainStatus=0\nUser=\nGroup=\nActiveState=active\nSubState=running",
+      "sanitized_journal": "Starting nginx.service - A high performance web server and a reverse proxy server...\nStarted nginx.service - A high performance web server and a reverse proxy server.\nStopping nginx.service - A high performance web server and a reverse proxy server...\nnginx.service: Deactivated successfully.\nStopped nginx.service - A high performance web server and a reverse proxy server.\nStarting nginx.service - A high performance web server and a reverse proxy server...\nStarted nginx.service - A high performance web server and a reverse proxy server.\n"
+    },
+    "talky-trunk-status": {
+      "state": "Result=success\nExecMainStatus=15\nUser=talky\nGroup=talky\nActiveState=inactive\nSubState=dead",
+      "sanitized_journal": "trunk status pass failed (exit 2); retrying\ntrunk status updater read 0 trunks \u2014 refusing to report success. Check that app.bypass_rls is honoured by the 0013 policy for this role, or that tenant_sip_trunks is genuinely empty.\ntrunk status pass failed (exit 2); retrying\ntrunk status updater read 0 trunks \u2014 refusing to report success. Check that app.bypass_rls is honoured by the 0013 policy for this role, or that tenant_sip_trunks is genuinely empty.\ntrunk status pass failed (exit 2); retrying\ntrunk status updater read 0 trunks \u2014 refusing to report success. Check that app.bypass_rls is honoured by the 0013 policy for this role, or that tenant_sip_trunks is genuinely empty.\ntrunk status pass failed (exit 2); retrying\ntrunk status updater read 0 trunks \u2014 refusing to report success. Check that app.bypass_rls is honoured by the 0013 policy for this role, or that tenant_sip_trunks is genuinely empty.\ntrunk status pass failed (exit 2); retrying\ntrunk status updater read 0 trunks \u2014 refusing to report success. Check that app.bypass_rls is honoured by the 0013 policy for this role, or that tenant_sip_trunks is genuinely empty.\ntrunk status pass failed (exit 2); retrying\ntrunk status updater read 0 trunks \u2014 refusing to report success. Check that app.bypass_rls is honoured by the 0013 policy for this role, or that tenant_sip_trunks is genuinely empty.\ntrunk status pass failed (exit 2); retrying\ntrunk status updater read 0 trunks \u2014 refusing to report success. Check that app.bypass_rls is honoured by the 0013 policy for this role, or that tenant_sip_trunks is genuinely empty.\ntrunk status pass failed (exit 2); retrying\ntrunk status updater read 0 trunks \u2014 refusing to report success. Check that app.bypass_rls is honoured by the 0013 policy for this role, or that tenant_sip_trunks is genuinely empty.\ntrunk status pass failed (exit 2); retrying\ntrunk status updater read 0 trunks \u2014 refusing to report success. Check that app.bypass_rls is honoured by the 0013 policy for this role, or that tenant_sip_trunks is genuinely empty.\ntrunk status pass failed (exit 2); retrying\ntrunk status updater read 0 trunks \u2014 refusing to report success. Check that app.bypass_rls is honoured by the 0013 policy for this role, or that tenant_sip_trunks is genuinely empty.\ntrunk status pass failed (exit 2); retrying\ntrunk status updater read 0 trunks \u2014 refusing to report success. Check that app.bypass_rls is honoured by the 0013 policy for this role, or that tenant_sip_trunks is genuinely empty.\ntrunk status pass failed (exit 2); retrying\ntrunk status updater read 0 trunks \u2014 refusing to report success. Check that app.bypass_rls is honoured by the 0013 policy for this role, or that tenant_sip_trunks is genuinely empty.\ntrunk status pass failed (exit 2); retrying\ntrunk status updater read 0 trunks \u2014 refusing to report success. Check that app.bypass_rls is honoured by the 0013 policy for this role, or that tenant_sip_trunks is genuinely empty.\ntrunk status pass failed (exit 2); retrying\ntrunk status updater read 0 trunks \u2014 refusing to report success. Check that app.bypass_rls is honoured by the 0013 policy for this role, or that tenant_sip_trunks is genuinely empty.\ntrunk status pass failed (exit 2); retrying\ntrunk status updater read 0 trunks \u2014 refusing to report success. Check that app.bypass_rls is honoured by the 0013 policy for this role, or that tenant_sip_trunks is genuinely empty.\ntrunk status pass failed (exit 2); retrying\nStopping talky-trunk-status.service - Talky SIP-trunk live endpoint and registration status updater...\ntalky-trunk-status.service: Deactivated successfully.\nStopped talky-trunk-status.service - Talky SIP-trunk live endpoint and registration status updater.\ntalky-trunk-status.service: Consumed 3.455s CPU time, 19.7M memory peak, 0B memory swap peak.\n"
+    },
+    "talky-asterisk-reconcile": {
+      "state": "Result=success\nExecMainStatus=0\nUser=root\nGroup=root\nActiveState=inactive\nSubState=dead",
+      "sanitized_journal": "Starting talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ)...\ncall plan differs from the database (changed=[] missing=['extensions.d/talky-inbound.conf'] unexpected=[] routes=0); applying\ntalky-asterisk-reconcile.service: Main process exited, code=killed, status=15/TERM\ntalky-asterisk-reconcile.service: Failed with result 'signal'.\nStopped talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ).\ntalky-asterisk-reconcile.service: Consumed 2.537s CPU time, 42.9M memory peak, 0B memory swap peak.\nStarting talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ)...\ntalky-asterisk-reconcile.service: Deactivated successfully.\nFinished talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ).\nStarting talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ)...\ntalky-asterisk-reconcile.service: Deactivated successfully.\nFinished talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ).\nStarting talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ)...\ntalky-asterisk-reconcile.service: Deactivated successfully.\nFinished talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ).\nStarting talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ)...\ntalky-asterisk-reconcile.service: Deactivated successfully.\nFinished talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ).\nStarting talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ)...\ntalky-asterisk-reconcile.service: Deactivated successfully.\nFinished talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ).\nStarting talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ)...\ntalky-asterisk-reconcile.service: Deactivated successfully.\nFinished talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ).\nStarting talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ)...\ntalky-asterisk-reconcile.service: Deactivated successfully.\nFinished talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ).\nStarting talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ)...\ntalky-asterisk-reconcile.service: Deactivated successfully.\nFinished talky-asterisk-reconcile.service - Talky: apply website line/number/inbound-campaign changes to Asterisk (only when they differ).\n"
+    },
+    "talky-healthwatch": {
+      "state": "Result=success\nExecMainStatus=0\nUser=talky\nGroup=talky\nActiveState=inactive\nSubState=dead",
+      "sanitized_journal": "Starting talky-healthwatch.service - Talky.ai Worker Health Watch (heartbeat probe)...\nhealthwatch: attempt 1/6 failed (possible restart window), retrying in 10s: could not reach http://localhost:8000/api/v1/healthz/workers: curl: (7) Failed to connect to localhost port 8000 after 0 ms: Couldn't connect to server\n000\nhealthwatch: all workers healthy\ntalky-healthwatch.service: Deactivated successfully.\nFinished talky-healthwatch.service - Talky.ai Worker Health Watch (heartbeat probe).\nStarting talky-healthwatch.service - Talky.ai Worker Health Watch (heartbeat probe)...\nhealthwatch: all workers healthy\ntalky-healthwatch.service: Deactivated successfully.\nFinished talky-healthwatch.service - Talky.ai Worker Health Watch (heartbeat probe).\nStarting talky-healthwatch.service - Talky.ai Worker Health Watch (heartbeat probe)...\nhealthwatch: all workers healthy\ntalky-healthwatch.service: Deactivated successfully.\nFinished talky-healthwatch.service - Talky.ai Worker Health Watch (heartbeat probe).\nStarting talky-healthwatch.service - Talky.ai Worker Health Watch (heartbeat probe)...\nhealthwatch: all workers healthy\ntalky-healthwatch.service: Deactivated successfully.\nFinished talky-healthwatch.service - Talky.ai Worker Health Watch (heartbeat probe).\nStarting talky-healthwatch.service - Talky.ai Worker Health Watch (heartbeat probe)...\nhealthwatch: all workers healthy\ntalky-healthwatch.service: Deactivated successfully.\nFinished talky-healthwatch.service - Talky.ai Worker Health Watch (heartbeat probe).\n"
+    },
+    "sanitized_install_failures": [],
+    "sanitized_release_failures": [
+      "STDOUT (last 64 KiB)\n\nSTDERR (last 64 KiB)\n{\"cause\": [\"the shared carrier endpoint is not bound to the managed inbound context\"], \"error\": \"Asterisk runtime verification failed; files were restored but rollback reload failed\", \"mode\": \"apply\", \"status\": \"blocked\"}\n",
+      "STDOUT (last 64 KiB)\n\nSTDERR (last 64 KiB)\n{\"cause\": [\"the shared carrier endpoint is not bound to the managed inbound context\"], \"error\": \"Asterisk runtime verification failed; files were restored but rollback reload failed\", \"mode\": \"apply\", \"status\": \"blocked\"}\n"
+    ],
+    "sanitized_rehearsal_failures": [
+      {
+        "binary": "python3",
+        "return_code": "2",
+        "expected_return_code": "2",
+        "timed_out": "False",
+        "stdout_tail": "",
+        "stderr_tail": "RELEASE REFUSED: Prepared binary/dependency/frontend artifacts changed\n"
+      },
+      {
+        "binary": "python3",
+        "return_code": "2",
+        "expected_return_code": "2",
+        "timed_out": "False",
+        "stdout_tail": "",
+        "stderr_tail": "RELEASE REFUSED: Release failed; traffic remains frozen. Inspect the private transaction journal before recovery\n"
+      },
+      {
+        "binary": "python3",
+        "return_code": "2",
+        "expected_return_code": "0",
+        "timed_out": "False",
+        "stdout_tail": "",
+        "stderr_tail": "RELEASE REFUSED: Release failed; traffic remains frozen. Inspect the private transaction journal before recovery\n"
+      }
+    ]
+  },
+  "owned_resources_cleaned": true,
+  "error_type": "RuntimeError",
+  "error": "ssh failed (exit 2); output withheld",
+  "finished_utc": "2026-10-28T12:31:54.453371+00:00"
+}

@@ -32,12 +32,16 @@ SUPPLIER = "0079_supplier_evidence"
 ALLOWANCE = "0072_allowance_anchor"
 SUPPLIER_ALLOWANCE = "0080_supplier_allowance_merge"
 PAYMENT = "0073_payment_test_plan"
-HEAD = "0081_admin_payment_merge"
+PAYMENT_MERGE = "0081_admin_payment_merge"
+BOOTSTRAP = "0074_incidents_bootstrap"
+UBUNTU = "0075_release_history_merge"
+HEAD = "0082_ubuntu_admin_merge"
 CURRENT_ADMIN_REVISIONS = {
     "0070_trunk_soft_delete", "0071_connector_lifecycle",
     "0072_admin_incidents", "0073_alertmanager_incidents", "0074_contact_enquiry_revision",
     "0075_admin_user_review", "0076_admin_user_operations", ADMIN, PAID,
-    PREVIOUS_HEAD, SUPPLIER, ALLOWANCE, SUPPLIER_ALLOWANCE, PAYMENT, HEAD,
+    PREVIOUS_HEAD, SUPPLIER, ALLOWANCE, SUPPLIER_ALLOWANCE, PAYMENT, PAYMENT_MERGE,
+    "0073_stream_events_bootstrap", BOOTSTRAP, UBUNTU, HEAD,
 }
 RUN_EVIDENCE = []
 pytestmark = pytest.mark.integration
@@ -266,6 +270,7 @@ async def billing_state(dsn, tenant):
 @pytest.mark.parametrize("start_heads", [
     (PAID,), (ADMIN,), (ADMIN, PAID), (ALLOWANCE,), (SUPPLIER,), (SUPPLIER, ALLOWANCE),
     (PAYMENT,), (SUPPLIER_ALLOWANCE,), (SUPPLIER_ALLOWANCE, PAYMENT), (SUPPLIER, PAYMENT),
+    (BOOTSTRAP,), (UBUNTU,), (PAYMENT_MERGE,), (UBUNTU, PAYMENT_MERGE),
 ])
 def test_actual_admin_billing_merge_preserves_applied_terms_and_allowances(monkeypatch, start_heads):
     admin_dsn = os.getenv("TALKY_RELEASE_MERGE_ADMIN_DSN", "")

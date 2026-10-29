@@ -6,9 +6,11 @@ shrink guard is exercised for real instead of being grepped.
 from __future__ import annotations
 
 import os
+import json
 import shutil
 import subprocess
 import time
+import sys
 from pathlib import Path
 
 import pytest
@@ -27,6 +29,9 @@ esac
 # Snapshot/client semantics are exercised by test_backup_snapshot.py and the
 # real PostgreSQL roundtrip. Here the helper boundary controls publication.
 FAKE_PYTHON = """#!/usr/bin/env bash
+if [[ "$1" == */backup_status.py ]]; then
+  exec "$REAL_TEST_PYTHON" "$@"
+fi
 head -c "${FAKE_DUMP_BYTES}" /dev/zero
 exit "${FAKE_HELPER_EXIT:-0}"
 """
@@ -36,6 +41,14 @@ exit "${FAKE_HELPER_EXIT:-0}"
 # pre-seeded backup dir under Windows Git Bash; the mode is not under test.
 FAKE_INSTALL = """#!/usr/bin/env bash
 mkdir -p "${@: -1}"
+"""
+
+FAKE_DATE = """#!/usr/bin/env bash
+if [[ -n "${FAKE_BACKUP_STAMP:-}" && "$*" == "-u +%Y%m%dT%H%M%SZ" ]]; then
+  printf '%s\\n' "$FAKE_BACKUP_STAMP"
+else
+  exec /usr/bin/date "$@"
+fi
 """
 
 
@@ -52,16 +65,17 @@ def _real_bash() -> str | None:
 pytestmark = pytest.mark.skipif(_real_bash() is None, reason="no POSIX bash available")
 
 
-def _run_backup(tmp_path: Path, dump_bytes: int, table_data: int = 60, *, helper_exit=0, principal="00000000-0000-4000-8000-000000000001"):
+def _run_backup(tmp_path: Path, dump_bytes: int, table_data: int = 60, *, helper_exit=0, principal="00000000-0000-4000-8000-000000000001", stamp="", status_directory=None):
     shim = tmp_path / "shim"
     shim.mkdir(exist_ok=True)
     docker = shim / "docker"
     docker.write_text(FAKE_DOCKER, encoding="utf-8", newline="\n")
     (shim / "install").write_text(FAKE_INSTALL, encoding="utf-8", newline="\n")
     (shim / "python3").write_text(FAKE_PYTHON, encoding="utf-8", newline="\n")
+    (shim / "date").write_text(FAKE_DATE, encoding="utf-8", newline="\n")
     # Linux PATH lookup skips files without the execute bit and would run the real
     # docker/install instead (Git Bash on Windows does not check it).
-    for name in ("docker", "install", "python3"):
+    for name in ("docker", "install", "python3", "date"):
         (shim / name).chmod(0o755)
     backups = tmp_path / "backups"
     env = dict(os.environ)
@@ -69,10 +83,13 @@ def _run_backup(tmp_path: Path, dump_bytes: int, table_data: int = 60, *, helper
         SHIM_DIR=str(shim),
         SCRIPT_UNDER_TEST=str(SCRIPT),
         TALKY_BACKUP_DIR=backups.as_posix(),
+        TALKY_BACKUP_STATUS_DIR=(status_directory or tmp_path / "monitoring").as_posix(),
         FAKE_DUMP_BYTES=str(dump_bytes),
         FAKE_TABLE_DATA=str(table_data),
         FAKE_HELPER_EXIT=str(helper_exit),
         TALKY_BACKUP_PRINCIPAL_ID=principal,
+        FAKE_BACKUP_STAMP=stamp,
+        REAL_TEST_PYTHON=sys.executable,
     )
     # Git Bash re-prepends /usr/bin to PATH at startup, which would shadow shims
     # for ``install``; put the shim dir first from inside the shell instead.
@@ -114,6 +131,8 @@ def test_a_shrunken_dump_is_kept_and_alerts_once_not_discarded(tmp_path):
     assert Path(str(fresh[0]) + ".sha256").is_file()
     assert not list((tmp_path / "backups").glob("*.partial"))
     assert previous.exists(), "the last good dump must never be removed by a shrink"
+    assert json.loads((tmp_path / "monitoring/backup-attempt.json").read_text())["result"] == "failed"
+    assert json.loads((tmp_path / "monitoring/backup-attempt.json").read_text())["last_success_at"] is None
 
 
 def test_the_night_after_a_shrink_succeeds_because_the_baseline_moved(tmp_path):
@@ -156,6 +175,10 @@ def test_a_healthy_dump_publishes_and_exits_zero(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert "db-backup: ok" in result.stdout
+    receipt = json.loads((tmp_path / "monitoring/backup-attempt.json").read_text())
+    assert receipt["result"] == "succeeded"
+    assert receipt["completed_at"] >= receipt["started_at"]
+    assert receipt["last_success_at"] == receipt["completed_at"]
 
 
 @pytest.mark.parametrize("helper_exit,principal", [(1, "00000000-0000-4000-8000-000000000001"), (0, "")])
@@ -166,3 +189,40 @@ def test_keeper_or_configuration_failure_never_publishes_or_runs_retention(tmp_p
     assert _published(tmp_path) == [previous]
     assert previous.exists()
     assert not list((tmp_path / "backups").glob("*.partial"))
+    receipt = json.loads((tmp_path / "monitoring/backup-attempt.json").read_text())
+    assert receipt["result"] == "failed"
+    assert receipt["last_success_at"] is None
+
+
+def test_failed_attempt_preserves_last_success_timestamp(tmp_path):
+    assert _run_backup(tmp_path, 9000).returncode == 0
+    recorded = json.loads((tmp_path / "monitoring/backup-attempt.json").read_text())["last_success_at"]
+    # Missing principal fails before archive naming, even in the same second.
+    assert _run_backup(tmp_path, 9000, principal="").returncode != 0
+    assert json.loads((tmp_path / "monitoring/backup-attempt.json").read_text())["last_success_at"] == recorded
+    assert json.loads((tmp_path / "monitoring/backup-attempt.json").read_text())["result"] == "failed"
+
+
+def test_collision_preserves_preexisting_partial_and_records_failure(tmp_path):
+    backups = tmp_path / "backups"
+    backups.mkdir()
+    existing = backups / "talky-20261028T000000Z.dump.partial"
+    existing.write_bytes(b"existing interrupted archive")
+    result = _run_backup(tmp_path, 9000, stamp="20261028T000000Z")
+    assert result.returncode != 0
+    assert existing.read_bytes() == b"existing interrupted archive"
+    assert json.loads((tmp_path / "monitoring/backup-attempt.json").read_text())["result"] == "failed"
+
+
+@pytest.mark.parametrize("child", ["", "monitoring"])
+def test_status_directory_cannot_open_private_backup_path_on_early_failure(tmp_path, child):
+    prior = _seed_previous(tmp_path, 1000, 1, "talky-prior.dump")
+    backups = prior.parent
+    backups.chmod(0o700)
+    result = _run_backup(tmp_path, 9000, principal="", status_directory=backups / child)
+    assert result.returncode != 0
+    assert "outside the private archive" in result.stderr
+    assert not (backups / child / "backup-attempt.json").exists()
+    assert prior.stat().st_size == 1000
+    if os.name == "posix":
+        assert backups.stat().st_mode & 0o777 == 0o700
