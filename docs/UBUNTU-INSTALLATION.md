@@ -1228,7 +1228,10 @@ While support is off for that tenant the body is:
 
 Every other `/api/v1/support/...` route answers 404 while off (comment in
 `.env.example`). How you obtain `$TOKEN` is the normal login flow; this guide
-does not document it. The exact status for a missing token is **Not verified**.
+does not document it. Without a token every support route answers **401**
+(verified on production on 29 October 2026: `/support/config`,
+`/support/tickets` and `/admin/support/tickets` on both API units and through
+the public HTTPS name), which also proves the routes are mounted.
 
 Also check the migration and timer:
 
