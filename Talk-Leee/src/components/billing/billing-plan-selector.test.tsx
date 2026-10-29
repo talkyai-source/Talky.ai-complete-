@@ -125,6 +125,19 @@ test("lost response survives reload and retries the identical tenant-scoped requ
   assert.equal(screen.queryByText(/Saved purchase:/), null);
 });
 
+test("failed purchase exposes the API support reference and retains its recovery request", async () => {
+  handleWrite = async () => { throw new ApiClientError({ code: "INTERNAL_ERROR", status: 500,
+    message: "The request could not be completed.", requestId: REQUEST,
+    details: { private_provider_diagnostic: "must-not-render" },
+    url: "/billing/create-checkout-session", method: "POST" }); };
+  mount(); fireEvent.click(await screen.findByRole("button", { name: "Select Starter" }));
+  await screen.findByText(`The request could not be completed. Support reference: ${REQUEST}.`);
+  assert.equal(screen.queryByText(/must-not-render/), null);
+  assert.equal(writes.length, 1);
+  assert.ok(window.sessionStorage.length > 0);
+  assert.equal(navigations.length, 0);
+});
+
 test("browser cancellation keeps the saved request frozen until confirmed terminal", async () => {
   const saved: SavedPurchase = { request_id: REQUEST, price_option: snapshot() }; storeSavedPurchase(scope, saved);
   window.history.replaceState({}, "", "/billing/plans?checkout=cancelled");

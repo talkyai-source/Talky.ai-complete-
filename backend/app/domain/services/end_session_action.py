@@ -319,7 +319,7 @@ def _repair_action_json(candidate: str) -> Optional[dict]:
         return None
     logger.warning(
         "end_session_action: model emitted malformed JSON; repaired rather "
-        "than speaking it aloud. raw=%r", candidate[:160],
+        "than speaking it aloud. chars=%d", len(candidate),
     )
     return repaired
 

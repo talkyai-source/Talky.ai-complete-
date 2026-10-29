@@ -141,11 +141,25 @@ def remember_recent_knowledge(session, evidence) -> None:
     the model looked up a different section. Called once per turn, before the
     turn's evidence is reset.
     """
+    catalog = _session_catalog(session)
     recent = getattr(session, "_recent_knowledge", None)
+    if catalog is None or (isinstance(recent, dict) and recent.get("catalog") is not catalog):
+        session._recent_knowledge = None
+        recent = None
     if isinstance(evidence, dict) and evidence.get("status") == "available" and evidence.get("text"):
-        ids = [p["section_id"] for p in evidence.get("passages") or () if isinstance(p, dict) and p.get("section_id")]
-        session._recent_knowledge = {"text": str(evidence["text"])[:RECENT_KNOWLEDGE_MAX_CHARS],
-                                     "section_ids": ids, "turns_left": RECENT_KNOWLEDGE_TURNS}
+        context = getattr(session, "_knowledge_evidence_context", None)
+        # A previous catalog's result must not become facts for a different
+        # tenant/campaign or source revision, even when section IDs coincide.
+        if not catalog or not isinstance(context, dict) or context.get("catalog") is not catalog:
+            session._recent_knowledge = None
+            return
+        text = str(evidence["text"])
+        oversized = len(text) > RECENT_KNOWLEDGE_MAX_CHARS
+        # Never preserve a price/policy prefix while silently losing its terms.
+        # Keep the exact original selection as navigation for another full read.
+        session._recent_knowledge = {"text": "" if oversized else text,
+                                     "section_ids": context["section_ids"], "reread_required": oversized,
+                                     "catalog": catalog, "turns_left": RECENT_KNOWLEDGE_TURNS}
     elif isinstance(recent, dict):
         left = int(recent.get("turns_left", 0)) - 1
         session._recent_knowledge = {**recent, "turns_left": left} if left > 0 else None
@@ -153,7 +167,14 @@ def remember_recent_knowledge(session, evidence) -> None:
 
 def _recent_knowledge_block(session) -> str:
     recent = getattr(session, "_recent_knowledge", None)
-    if not isinstance(recent, dict) or not recent.get("text") or recent.get("turns_left", 0) <= 0:
+    if (not isinstance(recent, dict) or recent.get("turns_left", 0) <= 0
+            or recent.get("catalog") is not _session_catalog(session)):
+        return ""
+    if recent.get("reread_required"):
+        return ("\nEarlier source text exceeded the follow-up memory limit and is not retained. "
+                "These section_ids are navigation only; read the needed source again before using it.\n"
+                + fence_untrusted(", ".join(recent["section_ids"]), tag="recent_company_knowledge_sections"))
+    if not recent.get("text"):
         return ""
     return ("\nRead earlier in this call; the caller may be following up on it. If it does "
             "not cover the question, read the section you need.\n"
@@ -221,8 +242,14 @@ def knowledge_navigation_continuation(session):
 
 async def run_knowledge_lookup(session, arguments: dict) -> str:
     """Read the cached call snapshot; a new request supersedes previous facts."""
-    result = run_section_request(_session_catalog(session), arguments)
+    catalog = _session_catalog(session)
+    result = run_section_request(catalog, arguments)
     session._knowledge_evidence = result
+    args = arguments if isinstance(arguments, dict) else {}
+    refs = {row["section_id"] for row in catalog.nodes} if catalog else set()
+    requested = args.get("section_ids")
+    valid_refs = [ref for ref in requested if isinstance(ref, str) and ref in refs][:3] if isinstance(requested, list) else []
+    session._knowledge_evidence_context = {"catalog": catalog, "section_ids": valid_refs}
     if result["status"] == "available":
         session._knowledge_grounding = [p["text"] for p in result["passages"]]
     elif result["status"] == "source_page" and result.get("source_text"):
@@ -231,13 +258,21 @@ async def run_knowledge_lookup(session, arguments: dict) -> str:
         session._knowledge_grounding = [result["source_text"]]
     else:
         session._knowledge_grounding = []
-    # One line per lookup: what the model asked for and what it got (ids and
-    # sizes only, never source text). Diagnosing call c8df9107 needed probes.
-    args = arguments if isinstance(arguments, dict) else {}
+    # Invalid model arguments can contain caller speech. Only emit IDs known
+    # to this scoped snapshot, counts, and integer cursors, never raw arguments.
+    diagnostic = {"section_ids": valid_refs}
+    if isinstance(requested, list):
+        diagnostic["requested_section_count"] = len(requested)
+    parent = args.get("catalog_parent")
+    if isinstance(parent, str) and (parent == "" or parent in refs):
+        diagnostic["catalog_parent"] = parent
+    for key in ("catalog_offset", "source_offset"):
+        if type(args.get(key)) is int:
+            diagnostic[key] = args[key]
     logger.info(
         "knowledge_lookup call_id=%s args=%s status=%s reason=%s passages=%d chars=%d",
         str(getattr(session, "call_id", "?"))[:12],
-        {k: args[k] for k in ("section_ids", "catalog_parent", "catalog_offset", "source_offset") if k in args},
+        diagnostic,
         result.get("status"), result.get("reason"),
         len(result.get("passages") or ()), len(result.get("text") or ""),
     )

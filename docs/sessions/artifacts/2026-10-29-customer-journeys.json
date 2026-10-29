@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-29",
+  "scope": "Frozen CP01-CP09 customer support journeys; reseller operations and staff invitations remain outside the first paid release",
+  "status": "candidate_repairs_verified_not_release_acceptance",
+  "production_mutations": false,
+  "findings": [
+    {
+      "id": "CS-C01",
+      "package": "CP01",
+      "risk": "Intake accepts an enquiry, its response is lost, and browser storage failure leaves no stable reference after reload",
+      "reproduction": "Two component regressions dispatched one request despite denied storage or quota failure; expected zero",
+      "repair": "Persist the request reference before dispatch. On failure preserve the editable unsent draft and expose the existing email alternative without a sent claim",
+      "status": "candidate_verified",
+      "files": ["Talk-Leee/src/components/home/contact-section.tsx", "Talk-Leee/src/components/home/contact-section.test.tsx"]
+    },
+    {
+      "id": "CS-C02",
+      "package": "CP08",
+      "risk": "A customer loses the authenticator but cannot submit a saved recovery code because login strips non-digits and always sends the TOTP field",
+      "reproduction": "Three recovery-mode behavior tests failed; the advertised recovery action was absent. Existing ownership tests remained green",
+      "repair": "Expose the existing recovery-code API through a keyboard-accessible mode switch. Preserve alphanumeric codes, clear the prior credential when switching, and retain challenge, identity, duplicate-submit and unknown-outcome guards",
+      "status": "candidate_verified",
+      "files": ["Talk-Leee/src/components/auth/mfa-verification.tsx", "Talk-Leee/src/components/auth/mfa-verification.ownership.test.tsx"]
+    },
+    {
+      "id": "CS-C03",
+      "package": "CP08",
+      "risk": "Interrupted password-reset INCR/EXPIRE leaves a counter with no expiry, permanently suppressing later recovery messages",
+      "reproduction": "A legacy counter at the send cap retained TTL -1 after another request. The prior rate limiter also authorized sends when the rate claim failed",
+      "repair": "Use one Redis Lua operation for increment and expiry, repair missing legacy TTLs without resetting recorded attempts or extending healthy windows, and deny unconfirmed send claims behind the unchanged generic response",
+      "status": "candidate_verified",
+      "files": ["backend/app/api/v1/endpoints/auth/password_reset.py", "backend/tests/security/test_password_reset_send_limit.py"]
+    }
+  ],
+  "verification": {
+    "contact_red": {"passed": 11, "failed": 2},
+    "mfa_red_with_contact_green": {"passed": 29, "failed": 3},
+    "frontend_green": {
+      "passed": 32,
+      "failed": 0,
+      "command": "node --test --test-concurrency=1 --import tsx --import ./src/test-utils/setup.ts src/components/home/contact-section.test.tsx src/components/auth/mfa-verification.ownership.test.tsx",
+      "environment": "Talklee-Installer-Test WSL, Node 22.22.0, fresh /tmp/talklee-customer-journeys-20261029 fixture, real copied source/import graph and direct dependencies selected from candidate package-lock.json",
+      "limitations": "Component/HTTP-boundary tests only; no Next build, real browser, owned mailbox or provider acceptance. Release CI must use the qualified runtime and complete lockfile"
+    },
+    "billing_support_green": {
+      "passed": 59,
+      "failed": 0,
+      "command": "node --test --test-concurrency=1 --import tsx --import ./src/test-utils/setup.ts src/components/billing/billing-plan-selector.test.tsx src/components/billing/billing-overview.test.tsx src/components/billing/invoice-view.test.tsx",
+      "environment": "Same isolated WSL dependency fixture, with source under Talk-Leee and sibling historical CP04 JSON artifacts. Added candidate-locked Next, React Query and user-event dependencies",
+      "coverage": "Includes integration lead's rendered support reference, retained uncertain purchase, hidden raw details, account-switch ownership, cancellation, delayed activation, invoice totals and refund semantics",
+      "fixture_preparation": "An initial attempt reported two missing historical fixture paths and one missing test dependency; corrected fixture layout/dependency before the 59/59 run",
+      "limitations": "Captured historical PostgreSQL contracts and mocked provider HTTP, not a new provider payment or refund test"
+    },
+    "reset_send_limit_red": {"passed": 2, "failed": 2},
+    "backend_green": {
+      "passed": 42,
+      "failed": 0,
+      "command": "python -m pytest tests/security/test_password_reset_send_limit.py tests/security/test_password_reset_attempt_cap.py tests/unit/test_signup_recovery_delivery_failures.py tests/security/test_recovery.py -q",
+      "environment": "Windows Python 3.12.12, existing tmp/inbound-test-venv; candidate backend source, pytest 7.4.4, fakeredis 2.40.0",
+      "limitations": "Local simulated Redis Lua and service-boundary verification. No live reset mail, production Redis or customer credentials used"
+    }
+  },
+  "reviewed_controls_and_open_acceptance": [
+    {"packages": ["CP01"], "review": "Contact labels, draft preservation, replay identity, durable receipt validation, expired-draft privacy and unknown response states", "remaining": "Designated real intake receipt, reachable mailbox, accountable owner and retention acceptance"},
+    {"packages": ["CP02", "CP03"], "review": "Billing routes key purchase components by tenant:user; delayed prior-owner results are retired. This ruled out the suspected scope race. Activation and unknown-purchase retries remain server-receipt driven", "remaining": "Designated Stripe account, authoritative purchased offer and actual payment/event reconciliation acceptance"},
+    {"packages": ["CP04", "CP06"], "review": "Existing invoices and top-ups distinguish provider refund/accounting facts from bank receipt. Existing billing contact is documented; portal is the supported cancellation route", "remaining": "Mailbox operation, billing recipient and cancellation/effective-date acceptance; an unavailable portal cannot count as operating cancellation"},
+    {"packages": ["CP05"], "review": "Reseller operations and staff invitations are not reintroduced", "remaining": "Keep explicit first-release exclusion"},
+    {"packages": ["CP07"], "review": "Existing notification tests and code maintain verified tenant:user scope, revoke stale callbacks and isolate shared-browser identities", "remaining": "Actual supported notification delivery and shared-browser release acceptance; no new delivery or response-time promise"},
+    {"packages": ["CP08"], "review": "Recovery-code login and reset limiter repaired; signup/recovery mail-failure, reset-attempt and recovery-code regressions passed. First-call checklist remains navigation guidance, not readiness proof", "remaining": "Designated signup/reset mailbox, real recovery and first telephone call; support identity-verification procedure for customers without any recovery factor"},
+    {"packages": ["CP09"], "review": "Integration lead repaired checkout/billing support-reference rendering; independently verified in the 59 passing billing tests", "remaining": "Deployed support-reference correlation, incident ownership, approved data-export/deletion escalation, customer acceptance and user-facing recovery documentation"}
+  ],
+  "release_statement": "These repairs do not close CP packages, lift the feature freeze, establish live deployment, or certify paid production readiness. Existing operational, database, model-profile, provider and customer-acceptance gates remain explicit."
+}

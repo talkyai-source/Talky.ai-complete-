@@ -59,6 +59,25 @@ def test_mangled_variants_still_parse(envelope):
     assert parse_end_session_action(envelope) is not None
 
 
+@pytest.mark.parametrize("action", ["end_session", "unrecognized_action"])
+def test_malformed_envelope_diagnostics_never_log_caller_content(caplog, action):
+    """Repair runs before action validation; neither path may disclose its text."""
+    from app.core.log_redact import install_pii_log_redaction
+
+    install_pii_log_redaction()
+    private_text = "My private health concern is cobalt syndrome"
+    envelope = '{"action":"' + action + '","farewell:"' + private_text + '"}'
+    with caplog.at_level("WARNING", logger="app.domain.services.end_session_action"):
+        parsed = parse_end_session_action(envelope)
+
+    assert (parsed is not None) is (action == "end_session")
+    if parsed:
+        assert parsed["farewell"] == private_text
+    assert private_text not in caplog.text
+    assert "malformed JSON" in caplog.text
+    assert "chars=" in caplog.text
+
+
 def test_fully_single_quoted_json_is_DELIBERATELY_not_repaired():
     """A limit of the repair, encoded so nobody "fixes" it later.
 

@@ -59,10 +59,21 @@ _RESET_REDIS_KEY_PREFIX = "pwreset:pending:"
 # (also avoids burning the M365 SMTP quota on noreply@talkleeai.com).
 # 3 codes / hour is generous enough for a legitimate user retrying
 # after a delayed delivery; combined with the 15-minute code TTL it
-# means an attacker can flood at most ~12 codes/day per address.
+# means an attacker cannot request more than 3 codes in one hourly window.
 _RESET_RATE_LIMIT_KEY_PREFIX = "pwreset:rl:"
 _RESET_RATE_LIMIT_WINDOW_SECONDS = 60 * 60  # 1 hour
 _RESET_RATE_LIMIT_MAX = 3
+
+# A separate INCR then EXPIRE can leave a permanent block if the process or
+# connection fails between commands. Repair old counters that lost their TTL
+# without extending healthy windows or discarding their recorded attempts.
+_CLAIM_RESET_SEND = """
+local n = redis.call('INCR', KEYS[1])
+if n == 1 or redis.call('TTL', KEYS[1]) < 0 then
+  redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
+end
+return n
+"""
 
 
 def _reset_rate_limit_key(email: str) -> str:
@@ -74,22 +85,19 @@ async def _check_reset_rate_limit(redis, email: str) -> bool:
     Returns True if the caller may issue another reset code for this
     email, False if they've hit the cap. Increments+sets-TTL atomically.
 
-    We INCR first, then EXPIRE only on the first hit. A stale key with
-    no TTL would be a degraded mode but never a security loss — worst
-    case, the next hour starts ~59 minutes earlier than expected.
+    Legacy counters without expiry receive a bounded recovery window.
+    Unconfirmed claims do not authorize email; the caller keeps the same
+    generic response for existing and unknown addresses.
     """
     key = _reset_rate_limit_key(email)
     try:
-        count = await redis.incr(key)
-        if count == 1:
-            await redis.expire(key, _RESET_RATE_LIMIT_WINDOW_SECONDS)
+        count = await redis.eval(
+            _CLAIM_RESET_SEND, 1, key, _RESET_RATE_LIMIT_WINDOW_SECONDS
+        )
         return int(count) <= _RESET_RATE_LIMIT_MAX
     except Exception as exc:
-        # Fail-open on Redis hiccups — better to serve a legitimate
-        # reset than to lock everyone out. We log so anomalies still
-        # surface in ops.
-        logger.warning("forgot_password_rate_limit_redis_error key=%s err=%s", key, exc)
-        return True
+        logger.warning("forgot_password_rate_limit_redis_error err=%s", type(exc).__name__)
+        return False
 
 
 # ---------------------------------------------------------------------------
