@@ -47,7 +47,7 @@ export function SecondaryHero() {
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-primary dark:text-foreground">Custom AI Voice Agents</div>
                     <div className="mt-1 text-sm text-gray-700 dark:text-muted-foreground leading-relaxed">
-                      Fine‑tuned with your recordings and transcriptions. Deliver automated phone calls AI, inbound/outbound support, and appointment scheduling that sound truly human.
+                      Fine‑tuned with your recordings and transcriptions. Deliver automated phone calls, inbound and outbound support, and appointment scheduling that sound truly human.
                     </div>
                   </div>
                 </div>
@@ -87,7 +87,7 @@ export function SecondaryHero() {
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-primary dark:text-foreground">Unique Brand Voice</div>
                     <div className="mt-1 text-sm text-gray-700 dark:text-muted-foreground leading-relaxed">
-                      Choose a voice actor. Turn your AI voice assistant for call centers into the voice of your brand.
+                      Choose a voice actor. Turn your AI voice agent into the voice of your brand.
                     </div>
                   </div>
                 </div>

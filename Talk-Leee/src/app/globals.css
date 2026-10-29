@@ -702,6 +702,16 @@ details > summary.home-menu-toggle {
   z-index: 71;
 }
 
+/* While the drawer is open the summary is an empty, invisible 40px box that
+   still paints above the panel (z-index 71 over 70). From 768px the navbar's
+   md:px-5 inner padding carries it over the centre of the drawer's own
+   Talk-Lee link, so taps there hit the toggle instead of the link. Let
+   pointer hits pass through; the toggle stays focusable and Enter/Space on
+   it still close the drawer. */
+details[open] > summary.home-menu-toggle {
+  pointer-events: none;
+}
+
 .home-navbar-menu-open[data-theme="light"] {
   background: rgba(0, 0, 0, 0.95);
   color: #fff;

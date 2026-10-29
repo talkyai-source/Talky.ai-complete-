@@ -18,7 +18,7 @@ const services = [
   },
   {
     icon: Mic,
-    title: "White‑Label Autocalls",
+    title: "White‑Label Program",
     description: "Resell Talk-Lee AI under your own brand with dedicated access (limited spots).",
   },
   {
@@ -49,7 +49,7 @@ export function FeaturesSection() {
       <div className="max-w-7xl mx-auto">
         <div className="text-center max-w-3xl mx-auto mb-16 space-y-4">
           <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-gray-950 dark:text-foreground">
-            Talk-Lee AI — The Complete Platform for Automated Phone Calls AI
+            Talk-Lee AI — The Complete Platform for Automated Phone Calls
           </h2>
           <p className="text-base sm:text-lg font-light text-gray-700 dark:text-muted-foreground">
             Talk-Lee AI is the all‑in‑one platform to automate and scale phone calls with intelligent voice agents.

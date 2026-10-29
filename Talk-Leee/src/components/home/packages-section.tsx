@@ -232,7 +232,7 @@ export function PackagesSection() {
               viewport={{ once: true }}
               className="text-3xl md:text-4xl font-bold tracking-tight text-primary dark:text-foreground"
             >
-              Limitless AI Call Automation Use Cases
+              Use Cases for AI Call Automation
             </motion.h2>
           </div>
 
@@ -242,13 +242,13 @@ export function PackagesSection() {
                 icon: PhoneOutgoing,
                 title: "Outbound Calls",
                 description:
-                  "Automate and optimize outbound calling with AI call automation to boost team efficiency and reach more customers faster.",
+                  "Automate and optimize outbound calling to boost team efficiency and reach more customers faster.",
               },
               {
                 icon: PhoneIncoming,
                 title: "Inbound Calls",
                 description:
-                  "Streamline inbound call management with AI call automation to deliver faster responses and improve customer satisfaction.",
+                  "Streamline inbound call management to deliver faster responses and improve customer satisfaction.",
               },
             ].map((item) => (
               <div

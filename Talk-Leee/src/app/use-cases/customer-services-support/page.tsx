@@ -6,9 +6,9 @@ import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = {
-  title: "AI Customer Support Services & Solutions | Talk Lee AI",
+  title: "AI Customer Support Services & Solutions | Talk-Lee AI",
   description:
-    "Need faster customer support? Talk Lee AI handles conversations, answers questions, resolves issues, and provides 24/7 support. See It in Action.",
+    "Need faster customer support? Talk-Lee AI handles conversations, answers questions, resolves issues, and provides 24/7 support. See It in Action.",
 };
 
 export default function CustomerServicesSupportUseCasePage() {
@@ -270,7 +270,7 @@ export default function CustomerServicesSupportUseCasePage() {
             AI Customer Support
           </h1>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Talk Lee AI understands customer requests and resolves them using your knowledge base &mdash; handing off to a human
+            Talk-Lee AI understands customer requests and resolves them using your knowledge base &mdash; handing off to a human
             the moment it matters, across voice, chat, SMS, and email.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">

@@ -67,7 +67,7 @@ export default function EducationIndustryPage() {
     {
       title: "AI Call Automation for Education",
       description:
-        "Automate incoming and outgoing calls for admissions, reminders, student inquiries, notifications, and routine communication.",
+        "Automate inbound and outbound calls for admissions, reminders, student inquiries, notifications, and routine communication.",
     },
     {
       title: "AI Admission Inquiry Handling",

@@ -4,6 +4,7 @@ import "./globals.css";
 import { SuspensionStateProvider } from "@/components/admin/suspension-state-provider";
 import { AppProviders } from "@/components/providers/app-providers";
 import { CallEndedNotice } from "@/components/ui/call-ended-notice";
+import { SignupPopup } from "@/components/ui/signup-popup";
 import { sharedMetadata } from "@/lib/site-metadata";
 
 // Manrope is the navbar's typeface (navbar.tsx sets `font-family: var(--font-manrope)`
@@ -65,6 +66,9 @@ export default function RootLayout({
         {/* Renders null unless the Ask AI popup flagged a call as dropped by
             navigation — see ASKAI_CALL_ENDED_FLAG in call-ended-notice.tsx. */}
         <CallEndedNotice />
+        {/* Mounted once here, outside any page, so its 10 s timer and per-page
+            cancel state survive client-side navigation and reset on reload. */}
+        <SignupPopup />
       </body>
     </html>
   );
