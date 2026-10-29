@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "requirements_path": "backend/requirements.txt",
-  "requirements_sha256": "8c367532927aab138854463a19d666fe923fa367713b2de293f3ec8eb91986e9",
-  "lock_sha256": "8a3be035423ac7cf46d0f3cb2646eaa7592c3fdad0feb72c46957b18e77be9cb",
+  "requirements_sha256": "ff56c571d5e788fdc28c3fb03d38e6d2f0ccaaeb184a7f3f4d562c4aaee8c972",
+  "lock_sha256": "926d94400cac2e045fa93f09303f2ac772c55ed758af241b982e683c815481c1",
   "hash_normalization": "UTF-8 text with LF newlines",
   "python_version": "3.12",
   "python_platform": "x86_64-unknown-linux-gnu",

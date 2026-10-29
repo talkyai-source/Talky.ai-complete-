@@ -61,6 +61,30 @@ The explicit preserved-inventory profile keeps all 123 reviewed production table
 
 See the [AI/security owner record](2026-10-29-support-ai-emergency-premortem.md), [customer journey evidence](artifacts/2026-10-29-customer-journeys.json), and [real Redis evidence](artifacts/2026-10-29-emergency-redis-budget.json). The local database unittest discovery ran 49 checks with two platform-dependent skips; these are not the real PostgreSQL acceptance tests.
 
+## Security audit follow-up (30 October)
+
+The first candidate, `523db18b2a7558e03e7470866b9e329f108bd9ef`, passed
+canonical database TLS recovery, operational monitoring, frontend tests/build
+and Admin tests/build, but failed dependency auditing. The affected pinned
+LangGraph SDK was reported as CVE-2026-118667
+([maintainer advisory](https://github.com/langchain-ai/langgraph/security/advisories/GHSA-3fx2-cqw9-xr3c)).
+The failure was retained; the audit was not waived.
+
+The replacement pins are LangGraph 1.2.14, SDK 0.4.6 and langchain-core 1.4.7.
+The Linux/Python 3.12 hash lock and its provenance were regenerated with the
+recorded resolver command. Exactly three of 157 resolved packages changed;
+154 remained unchanged. Independent metadata review checked active Linux
+dependency constraints and published package hashes. The local hash-locked
+audit with pip-audit 2.10.1 found no known vulnerabilities, and all 15 installer
+preparation/provenance checks passed. These results do not replace clean
+runtime compatibility tests or exact-candidate Ubuntu acceptance.
+
+The earlier TLS workflow, run 40937477959, retained 18 native PostgreSQL
+acceptance checks with no failures or skips, canonical 117-table recovery,
+and canonical/preserved-inventory restricted-role verification. It used
+synthetic databases on separate TLS containers on one runner. It does not
+qualify off-host production disaster recovery or the patched candidate.
+
 ## Operating acceptance still required
 
 The source repairs do not supply secure host administration, a designated
