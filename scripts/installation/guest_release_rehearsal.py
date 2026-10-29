@@ -194,6 +194,7 @@ def guard(candidate):
 
 DATABASE_SCRIPT = r'''
 import hashlib,json,sys,psycopg2
+from psycopg2 import sql
 p=json.load(sys.stdin)
 with psycopg2.connect(p['owner_url'],connect_timeout=10) as connection:
  with connection.cursor() as cursor:
@@ -210,19 +211,25 @@ with psycopg2.connect(p['owner_url'],connect_timeout=10) as connection:
   cursor.execute("SELECT version_num FROM public.alembic_version ORDER BY version_num")
   heads=[r[0] for r in cursor.fetchall()]
   business={}
+  columns={}
   for table in ('tenants','campaigns','leads','calls'):
-   cursor.execute("SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id),'[]'::jsonb)::text FROM public."+table+" t")
+   cursor.execute("SELECT attname FROM pg_attribute WHERE attrelid=%s::regclass AND attnum>0 AND NOT attisdropped ORDER BY attnum",('public.'+table,))
+   available=[r[0] for r in cursor.fetchall()]
+   selected=p.get('columns',{}).get(table,available)
+   assert isinstance(selected,list) and selected and len(set(selected))==len(selected) and set(selected)<=set(available)
+   columns[table]=selected
+   cursor.execute(sql.SQL("SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id),'[]'::jsonb)::text FROM (SELECT {} FROM public.{}) t").format(sql.SQL(',').join(map(sql.Identifier,selected)),sql.Identifier(table)))
    value=cursor.fetchone()[0]
    rows=len(json.loads(value))
    assert rows>=2
    business[table]={'rows':rows,'sha256':hashlib.sha256(value.encode()).hexdigest()}
-  print(json.dumps({'database':'talky_synthetic_source','tls':True,'owner_role':'fixture_migration','outbound_paused':True,'inbound_enabled':False,'heads':heads,'synthetic_business_records':business}))
+  print(json.dumps({'database':'talky_synthetic_source','tls':True,'owner_role':'fixture_migration','outbound_paused':True,'inbound_enabled':False,'heads':heads,'columns':columns,'synthetic_business_records':business}))
 '''
 
 
-def fixture_database(payload, *, freeze=False):
+def fixture_database(payload, *, freeze=False, columns=None):
     return json.loads(command([CURRENT / 'backend/venv/bin/python', '-B', '-c', DATABASE_SCRIPT],
-        input=json.dumps({'owner_url': payload['owner_url'], 'freeze': freeze}).encode()))
+        input=json.dumps({'owner_url': payload['owner_url'], 'freeze': freeze, 'columns': columns or {}}).encode()))
 
 
 def freeze_ingress():
@@ -281,7 +288,8 @@ def activate(release, recovery, sha, label, *, expected=0, migration_failure=Fal
     journal_path = created.pop()
     protected(journal_path)
     journal = json.loads(journal_path.read_text())
-    require(journal['candidate_sha'] == sha and journal['migration_started'] is migration_failure
+    started = migration_failure or (forward_migration and expected == 0)
+    require(journal['candidate_sha'] == sha and journal['migration_started'] is started
             and (journal['old_heads'] != journal['new_heads']) is schema_change and not journal['traffic_reopened'],
             'Release transaction did not preserve the expected schema/freeze boundary')
     wanted_status = ('failed_migration_started' if migration_failure else
@@ -316,14 +324,15 @@ def application_pids():
     return result
 
 
-def preactivation_rejections(release, candidate):
+def preactivation_rejections(release, candidate, *, forward_migration=False):
     def rejected(label):
         path, checksum, _ = manifest(release, candidate, label)
         before = set(Path('/var/lib/talky-release/transactions').glob('*/journal.json'))
         pids = application_pids()
+        extra = ['--allow-forward-migration'] if forward_migration else []
         cli(SOURCE, 'activate', '--sha', candidate, '--manifest', path, '--manifest-sha256', checksum,
             '--service-file', SERVICE_FILE, '--runtime-service', 'source_runtime',
-            '--owner-service', 'source_migration', '--backup-service', 'source_backup', expected=2)
+            '--owner-service', 'source_migration', '--backup-service', 'source_backup', *extra, expected=2)
         require(application_pids() == pids, 'Rejected activation restarted or stopped the current application')
         return path, set(Path('/var/lib/talky-release/transactions').glob('*/journal.json')) - before
 
@@ -546,7 +555,7 @@ def migration_refusal(payload, release, recovery, receipt):
         stopped[unit] = state
     receipt.update(migration_refusal=transaction, migration_refusal_verified=True,
         migration_failure_heads_unchanged=True, recovery_refused_after_migration_started=True,
-        stopped_after_migration_failure=stopped, successful_forward_migration=False,
+        stopped_after_migration_failure=stopped,
         status='passed', stage='guest_checks_complete', finished_utc=now())
 
 
@@ -596,10 +605,21 @@ def main(argv=None):
             prepare(SOURCE, args.candidate_sha, args.base_sha)
             receipt['stage'] = 'preactivation_guard_probes'
             write_receipt(receipt)
-            receipt['preactivation_rejections'] = preactivation_rejections(release, args.candidate_sha)
+            before = receipt['fixture_database']
+            candidate_heads = release.schema_heads(release.Layout().release(args.candidate_sha))
+            forward = before['heads'] != candidate_heads
+            receipt['preactivation_rejections'] = preactivation_rejections(
+                release, args.candidate_sha, forward_migration=forward)
             receipt['stage'] = 'activate'
             write_receipt(receipt)
-            receipt['activation'] = activate(release, recovery, args.candidate_sha, 'update')
+            receipt['activation'] = activate(release, recovery, args.candidate_sha, 'update',
+                                             forward_migration=forward)
+            after = fixture_database(payload, columns=before['columns'])
+            require(after == {**before, 'heads': candidate_heads},
+                    'Forward update changed pre-existing customer records or database identity')
+            receipt['pre_update_database'] = before
+            receipt['fixture_database'] = after
+            receipt['successful_forward_migration'] = forward
             receipt['after_activation'] = health(release, args.candidate_sha, receipt['baseline'], receipt['activation'])
             receipt.update(status='awaiting_update_reboot', stage='awaiting_update_reboot')
         else:
@@ -611,7 +631,7 @@ def main(argv=None):
                     'Receipt source binding changed')
             require(receipt['release_cli_sha256'] == digest(SOURCE / 'scripts/installation/fresh_release.py'),
                     'Release CLI changed between phases')
-            database = fixture_database(payload)
+            database = fixture_database(payload, columns=receipt['fixture_database']['columns'])
             require(database == receipt['fixture_database'], 'Synthetic database records/schema/freeze changed')
             require(digest(Path('/etc/ufw/user.rules')) == receipt['firewall_freeze']['ufw_sha256']
                     and digest(Path('/etc/ufw/user6.rules')) == receipt['firewall_freeze']['ufw6_sha256'],

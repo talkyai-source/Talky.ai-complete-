@@ -35,13 +35,14 @@ PAYMENT = "0073_payment_test_plan"
 PAYMENT_MERGE = "0081_admin_payment_merge"
 BOOTSTRAP = "0074_incidents_bootstrap"
 UBUNTU = "0075_release_history_merge"
-HEAD = "0082_ubuntu_admin_merge"
+UBUNTU_ADMIN_MERGE = "0082_ubuntu_admin_merge"
+HEAD = "0083_customer_support_contracts"
 CURRENT_ADMIN_REVISIONS = {
     "0070_trunk_soft_delete", "0071_connector_lifecycle",
     "0072_admin_incidents", "0073_alertmanager_incidents", "0074_contact_enquiry_revision",
     "0075_admin_user_review", "0076_admin_user_operations", ADMIN, PAID,
     PREVIOUS_HEAD, SUPPLIER, ALLOWANCE, SUPPLIER_ALLOWANCE, PAYMENT, PAYMENT_MERGE,
-    "0073_stream_events_bootstrap", BOOTSTRAP, UBUNTU, HEAD,
+    "0073_stream_events_bootstrap", BOOTSTRAP, UBUNTU, UBUNTU_ADMIN_MERGE, HEAD,
 }
 RUN_EVIDENCE = []
 pytestmark = pytest.mark.integration
@@ -138,10 +139,19 @@ async def verify_merged(dsn, tenant, trunk, report):
         # merely accept a changed version marker after the historical merge.
         columns = await conn.fetch("""SELECT table_name,column_name FROM information_schema.columns
             WHERE table_schema='public' AND table_name=ANY($1::text[])""",
-            ["tenants", "tenant_sip_trunks", "connector_accounts", "connectors", "incidents", "public_contact_enquiries", "user_profiles", "tenant_users"])
+            ["tenants", "tenant_sip_trunks", "connector_accounts", "connectors", "incidents", "public_contact_enquiries", "user_profiles", "tenant_users",
+             "tenant_ai_credentials", "tenant_recording_policy", "tenant_telephony_credentials", "emergency_access_requests"])
         present = {(row["table_name"],row["column_name"]) for row in columns}
         required = {
             ("tenants", "allowance_anchor_at"),
+            ("tenants", "active_telephony_provider"),
+            ("tenant_ai_credentials", "encrypted_key"),
+            ("tenant_ai_credentials", "credential_kind"),
+            ("tenant_recording_policy", "default_consent_mode"),
+            ("tenant_recording_policy", "retention_days"),
+            ("tenant_telephony_credentials", "credentials_encrypted"),
+            ("emergency_access_requests", "approvals"),
+            ("emergency_access_requests", "session_token_hash"),
             ("tenant_sip_trunks","deleted_at"),
             ("connectors","provider_revocation_status"),
             ("public_contact_enquiries", "revision"),
@@ -202,6 +212,21 @@ async def verify_merged(dsn, tenant, trunk, report):
                 "SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE oid=$1::regclass", "public." + table)
             assert posture["relrowsecurity"] and posture["relforcerowsecurity"]
         report["supplier_tables_forced_rls"] = True
+        for table in ("tenant_ai_credentials", "tenant_recording_policy", "tenant_telephony_credentials"):
+            posture = await conn.fetchrow(
+                "SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE oid=$1::regclass", "public." + table)
+            assert posture["relrowsecurity"] and posture["relforcerowsecurity"]
+            assert await conn.fetchval("""SELECT count(*) FROM pg_policies
+                WHERE schemaname='public' AND tablename=$1 AND policyname=$2""",
+                table, table + "_tenant_isolation") == 1
+        selection = await conn.fetchrow("""SELECT is_nullable,column_default,data_type
+            FROM information_schema.columns WHERE table_schema='public'
+            AND table_name='tenants' AND column_name='active_telephony_provider'""")
+        assert dict(selection) == {"is_nullable": "YES", "column_default": "'none'::text", "data_type": "text"}
+        active_key = await conn.fetchrow("""SELECT i.indisunique,pg_get_expr(i.indpred,i.indrelid) AS predicate
+            FROM pg_index i WHERE i.indexrelid='public.uq_tenant_ai_credentials_active'::regclass""")
+        assert active_key["indisunique"] and "status = 'active'::text" in active_key["predicate"]
+        report["customer_support_contracts_and_tenant_isolation"] = True
 
 
 @pytest.mark.parametrize("start", [HEARTBEAT, RECEIPTS, BASELINE])
@@ -221,6 +246,8 @@ def test_actual_upgrade_retains_both_histories_and_audit_evidence(monkeypatch, s
     config.set_main_option("script_location", str(BACKEND / "Alembic"))
     scripts = ScriptDirectory.from_config(config)
     assert scripts.get_heads() == [HEAD]
+    assert scripts.get_revision(HEAD).down_revision == UBUNTU_ADMIN_MERGE
+    assert set(scripts.get_revision(UBUNTU_ADMIN_MERGE).down_revision) == {PAYMENT_MERGE, UBUNTU}
     assert set(scripts.get_revision(MERGE).down_revision) == {HEARTBEAT, RECEIPTS}
     assert CURRENT_ADMIN_REVISIONS <= {
         revision.revision for revision in scripts.iterate_revisions(HEAD, BASELINE, implicit_base=True)
@@ -252,9 +279,12 @@ async def billing_state(dsn, tenant):
     async with connection(dsn) as conn:
         return {
             "heads": sorted(row["version_num"] for row in await conn.fetch("SELECT version_num FROM alembic_version")),
-            # The additive anchor is absent before paid0072. Compare every old
-            # field exactly, and assert the new/persisted anchor separately.
-            "tenant": await conn.fetchval("SELECT (to_jsonb(t)-'allowance_anchor_at')::text FROM tenants t WHERE id=$1", tenant),
+            # The anchor and telephony selection are additive contracts. Compare
+            # every old field exactly, then assert new/persisted values separately.
+            "tenant": await conn.fetchval("SELECT (to_jsonb(t)-'allowance_anchor_at'-'active_telephony_provider')::text FROM tenants t WHERE id=$1", tenant),
+            "active_telephony_provider": await conn.fetchval("SELECT to_jsonb(t)->>'active_telephony_provider' FROM tenants t WHERE id=$1", tenant),
+            "telephony_selection_column": await conn.fetchval("""SELECT EXISTS(SELECT 1 FROM information_schema.columns
+                WHERE table_schema='public' AND table_name='tenants' AND column_name='active_telephony_provider')"""),
             "allowance_anchor_at": await conn.fetchval("SELECT to_jsonb(t)->>'allowance_anchor_at' FROM tenants t WHERE id=$1", tenant),
             "allowance_column": await conn.fetchval("""SELECT EXISTS(SELECT 1 FROM information_schema.columns
                 WHERE table_schema='public' AND table_name='tenants' AND column_name='allowance_anchor_at')"""),
@@ -270,7 +300,7 @@ async def billing_state(dsn, tenant):
 @pytest.mark.parametrize("start_heads", [
     (PAID,), (ADMIN,), (ADMIN, PAID), (ALLOWANCE,), (SUPPLIER,), (SUPPLIER, ALLOWANCE),
     (PAYMENT,), (SUPPLIER_ALLOWANCE,), (SUPPLIER_ALLOWANCE, PAYMENT), (SUPPLIER, PAYMENT),
-    (BOOTSTRAP,), (UBUNTU,), (PAYMENT_MERGE,), (UBUNTU, PAYMENT_MERGE),
+    (BOOTSTRAP,), (UBUNTU,), (PAYMENT_MERGE,), (UBUNTU, PAYMENT_MERGE), (UBUNTU_ADMIN_MERGE,),
 ])
 def test_actual_admin_billing_merge_preserves_applied_terms_and_allowances(monkeypatch, start_heads):
     admin_dsn = os.getenv("TALKY_RELEASE_MERGE_ADMIN_DSN", "")
@@ -323,6 +353,10 @@ def test_actual_admin_billing_merge_preserves_applied_terms_and_allowances(monke
         after = asyncio.run(billing_state(dsn, tenant))
         assert after["heads"] == [HEAD]
         assert after["tenant"] == before["tenant"]
+        assert after["telephony_selection_column"] is True
+        assert after["active_telephony_provider"] == (
+            before["active_telephony_provider"] if before["telephony_selection_column"] else "none"
+        )
         assert after["allowance_column"] is True
         assert after["allowance_anchor_at"] == before["allowance_anchor_at"]
         if allowance_applied:
@@ -346,6 +380,7 @@ def test_actual_admin_billing_merge_preserves_applied_terms_and_allowances(monke
         command.upgrade(config, "head")
         assert asyncio.run(billing_state(dsn, tenant)) == after
         report["tenant_allowance_retained"] = True
+        report["telephony_selection_added_or_retained"] = True
         report["existing_allowance_anchor_retained"] = before["allowance_anchor_at"] is not None
         report["new_allowance_anchor_null"] = before["allowance_anchor_at"] is None
         report["repeat_upgrade_unchanged"] = True

@@ -104,6 +104,17 @@
       "production_observed_at": "2026-10-07T20:26:07.726382+00:00",
       "production_activated_by_this_release": false,
       "release_gate_closed": false
+    },
+    "customer_support_premortem_20261029": {
+      "report": "docs/production-readiness/customer-support-premortem-2026-10-29.md",
+      "validation_record": "docs/sessions/2026-10-29-customer-support-premortem.md",
+      "integrated_base": "069b24d8415d6c5ac9e5edb4e6214176e499b1bf",
+      "preserved_main": "0ef59596",
+      "scope_features": 45,
+      "scope_scenarios": 22,
+      "scope_gates": 15,
+      "status": "targeted_repairs_locally_verified_complete_release_ci_pending_not_paid_acceptance",
+      "production_mutations": false
     }
   },
   "status_rules": {
@@ -166,6 +177,11 @@
         {
           "path": "docs/sessions/2026-10-05-op07-data-lifecycle-inventory.md",
           "kind": "bounded_local_followup_not_release_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-29-customer-support-premortem.md",
+          "kind": "premortem_reproductions_and_targeted_repairs",
+          "status": "local_targeted_verification_complete_release_ci_pending_not_gate_closure"
         }
       ],
       "blocker": "Code and local boundary checks complete. Automatic approval review blocked final loopback Next preview launch (blocked by policy). Production configuration, intake owner/retention and release acceptance remain unverified.",
@@ -205,6 +221,11 @@
         {
           "path": "docs/sessions/artifacts/cp02/backend-postgres.txt",
           "kind": "disposable_database_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-29-customer-support-premortem.md",
+          "kind": "premortem_reproductions_and_targeted_repairs",
+          "status": "local_targeted_verification_complete_release_ci_pending_not_gate_closure"
         }
       ],
       "blocker": "Approved monthly/annual provider price mappings and designated-account signed lifecycle evidence are unverified. CP03 webhook recovery/order, CP04 invoice truth, CP06 communication/cancellation and legacy open-checkout reconciliation remain release dependencies. Annual containment and card-only checkout are not full billing completion.",
@@ -246,6 +267,11 @@
           "path": "docs/sessions/artifacts/cp03/verification.json",
           "kind": "commands_and_artifact_digests",
           "candidate": "9eb2ac8d49442619dbdd26235c67de264a2e8e79"
+        },
+        {
+          "path": "docs/sessions/2026-10-29-customer-support-premortem.md",
+          "kind": "premortem_reproductions_and_targeted_repairs",
+          "status": "local_targeted_verification_complete_release_ci_pending_not_gate_closure"
         }
       ],
       "blocker": "Local implementation and final synthetic verification passed. Designated Stripe/mail-account acceptance, deployed configuration, legacy reconciliation, partial-refund allocation policy and operational ownership remain unverified. CP06 recipients and CP04 invoice truth remain billing-journey dependencies.",
@@ -289,6 +315,11 @@
           "path": "docs/sessions/artifacts/cp04/verification.json",
           "kind": "commands_and_artifact_digests",
           "candidate": "4ec7f51eb05ed00b4ffea68fd77c2ba5649c3c5d"
+        },
+        {
+          "path": "docs/sessions/2026-10-29-customer-support-premortem.md",
+          "kind": "premortem_reproductions_and_targeted_repairs",
+          "status": "local_targeted_verification_complete_release_ci_pending_not_gate_closure"
         }
       ],
       "blocker": "Local implementation and final synthetic verification passed. Designated provider-account reconciliation, named finance acceptance, deployed grants/event configuration, support operation, retention ownership and partial-refund allocation policy remain unverified.",
@@ -351,6 +382,11 @@
           "path": "docs/sessions/2026-10-28-paid-readiness-followup.md",
           "kind": "bounded_paid_readiness_followup",
           "status": "implementation_and_acceptance_in_progress_not_release_closure"
+        },
+        {
+          "path": "docs/sessions/2026-10-29-customer-support-premortem.md",
+          "kind": "premortem_reproductions_and_targeted_repairs",
+          "status": "local_targeted_verification_complete_release_ci_pending_not_gate_closure"
         }
       ],
       "blocker": "Unique verified current tenant-administrator receipt selection is repaired locally; ambiguous recipients remain explicit. Native PostgreSQL/replay validation, designated inbox acceptance and authoritative portal/cancellation lifecycle remain required. Final live Stripe account integration is intentionally reserved for the user-requested last step.",
@@ -447,6 +483,11 @@
           "path": "docs/sessions/2026-10-28-paid-readiness-followup.md",
           "kind": "bounded_paid_readiness_followup",
           "status": "implementation_and_acceptance_in_progress_not_release_closure"
+        },
+        {
+          "path": "docs/sessions/2026-10-29-customer-support-premortem.md",
+          "kind": "premortem_reproductions_and_targeted_repairs",
+          "status": "local_targeted_verification_complete_release_ci_pending_not_gate_closure"
         }
       ],
       "blocker": "Designated inbox/device/browser recovery, cross-tab cookie behavior, deployed compatibility, first authorized call and operator reconciliation remain unverified. The user explicitly excluded staff invitations from the first paid release on 28 October; the missing invitation capability remains future work, not a completed feature.",
@@ -1252,6 +1293,11 @@
         {
           "path": "docs/sessions/2026-10-28-admin-live-release.md",
           "kind": "owner_authorized_coordinated_admin_release_and_hosted_contract_results"
+        },
+        {
+          "path": "docs/sessions/2026-10-29-customer-support-premortem.md",
+          "kind": "premortem_reproductions_and_targeted_repairs",
+          "status": "local_targeted_verification_complete_release_ci_pending_not_gate_closure"
         }
       ],
       "blocker": "The coordinated Admin release at 10a8b9f0 is live and merged through PR 22. The customer frontend is READY at merge a99e11d9 with its production alias verified; the Admin alias is unchanged. All 14 CI checks, the five formerly failing hosted contracts across six views and all 19 final read-only checks passed. The owner explicitly authorized the single-owner procedure; actual traffic freeze/drain and a verified backup preceded activation. Maintenance reopened with original controls restored, the owned firewall/drop-in removed and the configured synthetic timer restored. Browser and private-process cleanup passed. These deployment and read-contract gates are closed; a restored timer is not proof of a real call. Remaining limitations include runtime CREATEROLE/CREATEDB and table ownership; zero active PBX routes and one verified but unrouted trunk with an existing inactive assignment; designated MFA, current-role and business-operation journeys; real call, connector, media and provider effects; supplier source mappings, account allocation and finance review; alert delivery/fault testing; off-host recovery with measured RTO/RPO; load and policy/customer acceptance. CP09 and CP06 remain in progress; the user accepted excluding reseller operations and staff invitations from this first paid release, retained as future work. The feature freeze stays active.",
@@ -1391,6 +1437,11 @@
           "path": "docs/sessions/2026-10-08-agent-limitations.md",
           "kind": "bounded_agent_limit_repairs_and_local_storage_ui_verification_not_live_acceptance",
           "candidate": "408481f1041a26ea53a55dea8d2ad63f313147cd"
+        },
+        {
+          "path": "docs/sessions/2026-10-29-customer-support-premortem.md",
+          "kind": "premortem_reproductions_and_targeted_repairs",
+          "status": "local_targeted_verification_complete_release_ci_pending_not_gate_closure"
         }
       ],
       "blocker": "Current authored-section selection supports bounded branch browsing and complete-context-validated source pages. Local routing/source tests and an 80-question dry plan pass, but actual-model answers, campaign profile, voice timing and human/customer acceptance remain unqualified. The retired query runner and historical raw scores do not qualify this architecture. Existing model/account designation remains unanswered; no provider credential was used.",
@@ -1551,6 +1602,11 @@
           "path": "docs/sessions/2026-10-08-agent-limitations.md",
           "kind": "bounded_agent_limit_repairs_and_local_storage_ui_verification_not_live_acceptance",
           "candidate": "408481f1041a26ea53a55dea8d2ad63f313147cd"
+        },
+        {
+          "path": "docs/sessions/2026-10-29-customer-support-premortem.md",
+          "kind": "premortem_reproductions_and_targeted_repairs",
+          "status": "local_targeted_verification_complete_release_ci_pending_not_gate_closure"
         }
       ],
       "blocker": "Concise guides and model-owned speech replace the old output semantic judge; deterministic privacy/effect/transport controls remain. Historical replay mappings and preserved Groq semantic failure are retained, but do not qualify this revised prompt/runtime. Actual model, acoustic, interruption, unsupported-fact and premature-success behavior needs new profile acceptance.",
@@ -1752,6 +1808,11 @@
           "kind": "actual_react_lifecycle_auth_race_repair",
           "candidate_commit": "1bf6eaee",
           "status": "local_verified_not_browser_or_customer_acceptance"
+        },
+        {
+          "path": "docs/sessions/2026-10-29-customer-support-premortem.md",
+          "kind": "premortem_reproductions_and_targeted_repairs",
+          "status": "local_targeted_verification_complete_release_ci_pending_not_gate_closure"
         }
       ],
       "blocker": "Original-account CRM/Gmail/calendar inspection and narrow recovery of a canonical saved successful Gmail acknowledgement are implemented locally. Recovery preserves original unknown evidence in an atomic audit, checks current platform-admin session and never resends. Combined knowledge/privacy/action checks passed 539 tests. Separate canonical bootstrap/migration/authenticated-route checks passed ten controls; actual ReactDOM checks reproduced and repaired three stale authentication response races, with twelve focused and 171 aggregate Admin tests passing. Broader unresolved outcomes without authoritative evidence stay held. Production grants/deployment, real browser, designated live-provider, retention/deletion and customer acceptance remain open.",
@@ -1839,6 +1900,11 @@
           "path": "docs/sessions/2026-10-08-agent-limitations.md",
           "kind": "bounded_agent_limit_repairs_and_local_storage_ui_verification_not_live_acceptance",
           "candidate": "408481f1041a26ea53a55dea8d2ad63f313147cd"
+        },
+        {
+          "path": "docs/sessions/2026-10-29-customer-support-premortem.md",
+          "kind": "premortem_reproductions_and_targeted_repairs",
+          "status": "local_targeted_verification_complete_release_ci_pending_not_gate_closure"
         }
       ],
       "blocker": "A05 cleanup and documented crash contract are locally verified; remaining architecture dispositions follow lifecycle/provider/configuration owning repairs. No full architecture or live/release claim.",
@@ -2182,6 +2248,11 @@
           "path": "docs/sessions/2026-10-05-exact-integration-verification.md",
           "kind": "combined_selection_action_guard_and_audio_storage_regression",
           "candidate": "bbbb9450dfbff9e0436493a3b7b870a64481b77a"
+        },
+        {
+          "path": "docs/sessions/2026-10-29-customer-support-premortem.md",
+          "kind": "premortem_reproductions_and_targeted_repairs",
+          "status": "local_targeted_verification_complete_release_ci_pending_not_gate_closure"
         }
       ],
       "blocker": "Native DNC persistence/speech, durable lead/retry settlement, truthful bulk suppression and recording creation are repaired locally. Approved retention/export/delete rules, per-store execution and deployed supplier/storage evidence remain open.",
@@ -2302,7 +2373,12 @@
         },
         "docs/sessions/2026-10-28-ci-false-positive-review.md",
         "docs/sessions/2026-10-28-fresh-update-acceptance.md",
-        "docs/sessions/2026-10-28-final-live-and-database-observation.md"
+        "docs/sessions/2026-10-28-final-live-and-database-observation.md",
+        {
+          "path": "docs/sessions/2026-10-29-customer-support-premortem.md",
+          "kind": "premortem_reproductions_and_targeted_repairs",
+          "status": "local_targeted_verification_complete_release_ci_pending_not_gate_closure"
+        }
       ],
       "blocker": "Real Ubuntu rehearsals on two TLS PostgreSQL containers passed for both the earlier 0075 source and combined 0082 candidate. The latter preserved all 113 public-table records and five sequence states, verified restricted runtime access, source invariance and cleanup. Both containers share one runner. The observed production database remains on the application server without TLS; a designated external database, off-host archive/restore target, retention/PITR policy, recovery objectives and operator are still required.",
       "next_action": "Use the designated separate production PostgreSQL destination and an isolated real-catalog restore. The live 0081 catalog contains 123 tables, ten beyond canonical-0082; review their application/retention purpose and prepare an explicit owner/runtime access profile without dropping objects or granting blanket access. Then qualify actual TLS, data/key preservation, cutover, off-host recovery and measured RPO/RTO. Canonical TLS/grants tests and the successful synthetic Ubuntu update are bounded evidence, not production conversion.",
@@ -2361,7 +2437,12 @@
         },
         "docs/sessions/2026-10-28-blank-ubuntu-acceptance.md",
         "docs/sessions/2026-10-28-fresh-update-acceptance.md",
-        "docs/sessions/2026-10-28-final-live-and-database-observation.md"
+        "docs/sessions/2026-10-28-final-live-and-database-observation.md",
+        {
+          "path": "docs/sessions/2026-10-29-customer-support-premortem.md",
+          "kind": "premortem_reproductions_and_targeted_repairs",
+          "status": "local_targeted_verification_complete_release_ci_pending_not_gate_closure"
+        }
       ],
       "blocker": "Supplier-cost ingestion/reconciliation is unavailable. Source permission inventory is complete, but approved deployment identity/topology, permission matrix and positive/negative host acceptance are outstanding.",
       "next_action": "Apply the reviewed runtime/migration/service-identity separation on the actual production topology. Fresh Ubuntu Node 22.23.4, service identities and guarded startup/update passed real VM checks; the live runtime still owns 123 tables with CREATEDB/CREATEROLE/REPLICATION and no TLS. Preserve its additional objects through a reviewed production profile and verify least privileges after migration. Complete actual supplier/account-period financial reconciliation and operating ownership; do not infer these from synthetic checks.",
@@ -2418,7 +2499,12 @@
         "docs/sessions/2026-10-28-blank-ubuntu-acceptance.md",
         "docs/sessions/2026-10-28-customer-first-paid-release-scope.md",
         "docs/sessions/2026-10-28-fresh-update-acceptance.md",
-        "docs/sessions/2026-10-28-final-live-and-database-observation.md"
+        "docs/sessions/2026-10-28-final-live-and-database-observation.md",
+        {
+          "path": "docs/sessions/2026-10-29-customer-support-premortem.md",
+          "kind": "premortem_reproductions_and_targeted_repairs",
+          "status": "local_targeted_verification_complete_release_ci_pending_not_gate_closure"
+        }
       ],
       "blocker": "Candidate 54665bdb passed all six workflows including real patched Ubuntu install/reboot, update/reboot, worker-failure rollback/reboot and post-migration code-rollback refusal. Customer 80b52743 is live; backend 10a8b9f0 and database 0081 remain unchanged. Secure privileged access, designated separate PostgreSQL destination, reviewed real-catalog privileges, fresh freeze/drain/backup, coordinated activation and actual call/customer/operating/handover acceptance remain outstanding.",
       "next_action": "Preserve the exact 54665bdb/c6a18e3e Ubuntu and CI receipts and the independent customer-only live release. Use designated access and database destination to complete reviewed real-catalog conversion and backend activation with fresh release/drain/backup records. Controlled calls, failed model-profile qualification, off-host recovery, independent handover and the three videos retain separate evidence requirements. Future successful schema migrations need exact-change acceptance. The feature freeze remains active.",

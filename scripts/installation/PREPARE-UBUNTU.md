@@ -191,7 +191,7 @@ archived SQL migrations, `fresh_schema.sql` or development seed scripts as
 additional installation steps. A failed bootstrap needs diagnosis and a new
 empty database; these instructions do not authorize dropping an existing one.
 
-For the supported dedicated PostgreSQL 16 canonical-0082 profile, follow the
+For the supported dedicated PostgreSQL 16 canonical-0083 profile, follow the
 [runtime-grants procedure](../database/RUNTIME_GRANTS.md): inspect with `plan`,
 apply the reviewed ACLs with `apply`, then retain a successful `verify` receipt
 from the actual runtime LOGIN. The tool checks database/schema, table, sequence
@@ -204,6 +204,15 @@ writes with the real runtime role and populated own/foreign-tenant fixtures to
 verify permissions and tenant isolation. Review bootstrap plan/catalog data
 against the approved billing configuration; schema seeds are not proof of a
 working Stripe subscription or a configured administrator account.
+
+The separate backup login also needs reviewed read access to tables and
+sequences added by future migrations. Runtime grants do not grant backup-role
+access. Before a forward upgrade, verify that the migration owner's defaults
+or the reviewed migration procedure cover that backup login. Keep runtime and
+PUBLIC excluded. Before reopening traffic, take and verify a new backup of the
+upgraded schema using the actual backup login. The disposable Ubuntu rehearsal
+uses explicit SELECT defaults for its named synthetic backup role and exercises
+backups again after 0083; this does not provision a production backup account.
 
 For a new database without an administrator, use the supported
 [first-administrator procedure](../../docs/operations/FIRST-ADMIN.md) after

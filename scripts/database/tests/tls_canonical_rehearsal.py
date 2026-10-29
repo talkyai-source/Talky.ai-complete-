@@ -210,7 +210,10 @@ def wait_ready(pg, service):
     raise RuntimeError("Synthetic PostgreSQL did not become TLS-ready")
 
 
-def bootstrap(pg, fixture):
+def bootstrap(pg, fixture, *, source_root=ROOT):
+    # Update rehearsals must start at the installed release's actual schema.
+    # Bootstrapping today's head would silently skip its forward migration.
+    source_root = Path(source_root)
     for label in ("source", "target"):
         admin = fixture.service(f"{label}_admin")
         wait_ready(pg, admin)
@@ -227,7 +230,7 @@ def bootstrap(pg, fixture):
     source_admin = fixture.service("source_admin")
     pg.sql(source_admin, f"CREATE DATABASE {SOURCE_DB} OWNER fixture_migration TEMPLATE template0;", readonly=False)
     migration = fixture.service("source_migration")
-    pg.sql(migration, "SET app.bypass_rls='true';\n" + (ROOT / "backend/database/complete_schema.sql").read_text(encoding="utf-8"),
+    pg.sql(migration, "SET app.bypass_rls='true';\n" + (source_root / "backend/database/complete_schema.sql").read_text(encoding="utf-8"),
            readonly=False)
     query = urlencode({"sslmode": "verify-full", "sslrootcert": str(fixture.work / "ca.crt")})
     # No credential on argv or in the Alembic config/logging URL.
@@ -235,7 +238,7 @@ def bootstrap(pg, fixture):
                f"postgresql://fixture_migration:{fixture.passwords['fixture_migration']}@{migration.values['host']}:"
                f"{migration.values['port']}/{SOURCE_DB}?{query}", PYTHON_DOTENV_DISABLED="1")
     for arguments in (("stamp", "0008_tenant_voice_tuning"), ("upgrade", "heads")):
-        run([sys.executable, "-m", "alembic", *arguments], env=env, cwd=ROOT / "backend", timeout=180)
+        run([sys.executable, "-m", "alembic", *arguments], env=env, cwd=source_root / "backend", timeout=180)
     observed = pg.json(migration, recovery.AUDIT_SQL)
     require(observed["tls"] and not any(observed[key] for key in
             ("superuser", "bypass_rls", "create_role", "create_database")),

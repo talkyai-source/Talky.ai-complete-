@@ -20,5 +20,8 @@
   "fixture_process_stopped": true,
   "installed_redis_accessed": false,
   "production_accessed": false,
-  "limits": "Budget behavior only; PostgreSQL authorization/transaction behavior and actual operational emergency access require their separate tests and acceptance"
+  "limits": "Budget behavior only; PostgreSQL authorization/transaction behavior and actual operational emergency access require their separate tests and acceptance",
+  "source_hash_convention": "Original Windows working-tree bytes; Git normalizes line endings",
+  "source_commit": "696ef6bc6d3a0c2cef42807caff2dc9e2ab5b4d8",
+  "source_git_blob_sha256": "f67d968ccc320fe4b41cd7928f34774409af424ed3fc47e5097662cff497b975"
 }

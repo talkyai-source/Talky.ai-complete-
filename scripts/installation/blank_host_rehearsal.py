@@ -62,6 +62,21 @@ def port():
         return listener.getsockname()[1]
 
 
+def baseline_source(folder, sha):
+    """Own a separate clean checkout of the sole permitted installation base."""
+    require(sha == PINNED_BASE_SHA, 'Unreviewed installation baseline')
+    source = folder / 'baseline-source'
+    require(not source.exists(), 'Baseline fixture already exists')
+    run(['git', 'init', '--quiet', str(source)])
+    run(['git', '-C', str(source), 'remote', 'add', 'origin', REPOSITORY])
+    run(['git', '-C', str(source), 'fetch', '--quiet', '--depth=1', 'origin', sha], timeout=300)
+    run(['git', '-C', str(source), 'checkout', '--quiet', '--detach', 'FETCH_HEAD'])
+    require(run(['git', '-C', str(source), 'rev-parse', 'HEAD']) == sha
+            and not run(['git', '-C', str(source), 'status', '--porcelain']),
+            'Database baseline checkout differs from installed source')
+    return source
+
+
 def download_image(folder):
     with urlopen(IMAGE_BASE + 'SHA256SUMS', timeout=45) as response:
         manifest = response.read(1024 * 1024).decode()
@@ -318,12 +333,22 @@ def main():
                 fixture.prepare()
                 receipt.update(postgres_image_id=fixture.image_id, postgres_image_digests=fixture.image_digests)
                 pg = tls.recovery.Postgres(Path('/usr/lib/postgresql/16/bin'), timeout=180)
-                tls.bootstrap(pg, fixture)
+                schema_source = baseline_source(folder, install_sha) if args.update_from_sha else ROOT
+                tls.bootstrap(pg, fixture, source_root=schema_source)
+                receipt['database_bootstrap_sha'] = install_sha
                 if args.update_from_sha:
                     # Synthetic completed calls/draft campaigns also prove the
                     # release backup sees data. No runnable customer work exists.
                     tls.seed(pg, fixture)
-                grants_spec = importlib.util.spec_from_file_location('vm_runtime_grants', ROOT / 'scripts/database/runtime_grants.py')
+                    # Subsequent fault drills back up the upgraded schema too.
+                    # Only this fixture's separate backup login inherits SELECT
+                    # on objects created by its restricted migration owner.
+                    pg.sql(fixture.service('source_migration'),
+                           'ALTER DEFAULT PRIVILEGES FOR ROLE fixture_migration IN SCHEMA public '
+                           'GRANT SELECT ON TABLES TO fixture_backup; '
+                           'ALTER DEFAULT PRIVILEGES FOR ROLE fixture_migration IN SCHEMA public '
+                           'GRANT SELECT ON SEQUENCES TO fixture_backup;', readonly=False)
+                grants_spec = importlib.util.spec_from_file_location('vm_runtime_grants', schema_source / 'scripts/database/runtime_grants.py')
                 grants = importlib.util.module_from_spec(grants_spec)
                 grants_spec.loader.exec_module(grants)
                 receipt['runtime_grants'] = grants.execute(fixture.service('source_migration'), fixture.service('source_runtime'), 'apply')
@@ -400,7 +425,8 @@ def main():
                     require(release.get('status') == 'passed' and release.get('candidate_sha') == sha
                             and release.get('base_sha') == install_sha and release.get('production_accessed') is False
                             and all(release.get(key) is True for key in ('update_reboot_verified',
-                                    'rollback_reboot_verified', 'migration_refusal_verified')),
+                                    'rollback_reboot_verified', 'migration_refusal_verified',
+                                    'successful_forward_migration')),
                             'Guest release receipt did not prove every required phase')
                     receipt['release_rehearsal'] = release
             except Exception:
