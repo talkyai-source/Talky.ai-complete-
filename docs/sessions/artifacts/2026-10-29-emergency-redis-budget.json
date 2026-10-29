@@ -1,0 +1,24 @@
+{
+  "date": "2026-10-29",
+  "status": "passed",
+  "method": "Execute candidate _CLAIM_APPROVAL_ATTEMPT and EmergencyAccess._claim_approval_attempt extracted from their actual AST against a newly created private Redis server; no rewritten business logic",
+  "command": "wsl.exe -d Talklee-Installer-Test -- /opt/talklee-local/venv/bin/python /mnt/c/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/customer-support-premortem-20261029/tmp/verify-emergency-redis.py",
+  "redis_version": "7.0.15",
+  "checks": [
+    "20 concurrent attempts admitted exactly 5 and refused 15",
+    "Another account retained its independent allowance",
+    "A denied attempt did not extend an existing expiry",
+    "Actual key expiry permitted a fresh bounded window",
+    "A legacy persistent counter received an expiry without clearing its consumed attempts",
+    "A lost reply after EVAL committed returned 503 and did not refund the attempt",
+    "Missing and unreachable Redis clients both failed closed with 503"
+  ],
+  "source_file": "backend/app/core/security/emergency_access.py",
+  "source_sha256": "f67d968ccc320fe4b41cd7928f34774409af424ed3fc47e5097662cff497b975",
+  "lua_sha256": "23867c8699d570a409c9c018c01d4157908ac7b0f2f1a162e9666fa2bbe58f90",
+  "fixture": "Owned temporary directory, private Unix socket with mode0700, TCP port disabled, persistence disabled",
+  "fixture_process_stopped": true,
+  "installed_redis_accessed": false,
+  "production_accessed": false,
+  "limits": "Budget behavior only; PostgreSQL authorization/transaction behavior and actual operational emergency access require their separate tests and acceptance"
+}
