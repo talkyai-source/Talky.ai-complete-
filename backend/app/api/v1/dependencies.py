@@ -687,6 +687,12 @@ async def get_emergency_access(
 ) -> EmergencyAccess:
     """Factory for EmergencyAccess service"""
     global _emergency_access_service
-    if _emergency_access_service is None:
-        _emergency_access_service = EmergencyAccess(db_pool)
+    from app.core.container import get_container
+    redis_client = getattr(get_container(), "redis", None)
+    if _emergency_access_service is None or _emergency_access_service.db_pool is not db_pool:
+        _emergency_access_service = EmergencyAccess(db_pool, redis_client=redis_client)
+    else:
+        # Missing/replaced Redis must affect the proof budget immediately;
+        # approval fails closed while read-only support remains available.
+        _emergency_access_service.redis = redis_client
     return _emergency_access_service

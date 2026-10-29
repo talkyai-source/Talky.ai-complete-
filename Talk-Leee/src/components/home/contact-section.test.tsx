@@ -100,7 +100,7 @@ describe("ContactSection", () => {
     assert.equal(requests[0], requests[1]);
   });
 
-  it("supports safe in-memory retry when session storage is blocked", async () => {
+  it("does not submit without a restorable request reference and recovers when storage is available", async () => {
     const proto = Object.getPrototypeOf(window.sessionStorage);
     const originalGet = proto.getItem, originalSet = proto.setItem;
     const requests: string[] = [];
@@ -110,11 +110,40 @@ describe("ContactSection", () => {
       globalThis.fetch = async (_url, init) => { requests.push(String(init?.body)); throw new TypeError("offline"); };
       render(React.createElement(ContactSection)); fill(); submit();
       await waitFor(() => assert.ok(screen.getByRole("alert")));
+      assert.equal(requests.length, 0, "A request that cannot survive reload must not reach intake");
       assert.ok(screen.getByText(/browser cannot save this draft/));
+      assert.match(screen.getByRole("alert").textContent ?? "", /Nothing was submitted/);
+      assert.equal((screen.getByLabelText("Message") as HTMLTextAreaElement).readOnly, false);
+      fireEvent.change(screen.getByLabelText("Message"), { target: { value: "My corrected enquiry." } });
+      proto.getItem = originalGet; proto.setItem = originalSet;
+      submit();
+      await waitFor(() => assert.equal(requests.length, 1));
+      await waitFor(() => assert.ok(screen.getByRole("button", { name: "Retry saved message" })));
+      cleanup(); render(React.createElement(ContactSection));
+      assert.equal((screen.getByLabelText("Message") as HTMLTextAreaElement).value, "My corrected enquiry.");
       fireEvent.click(screen.getByRole("button", { name: "Retry saved message" }));
       await waitFor(() => assert.equal(requests.length, 2));
       assert.equal(requests[0], requests[1]);
     } finally { proto.getItem = originalGet; proto.setItem = originalSet; }
+  });
+
+  it("preserves an unsent draft if saving the request identity exhausts storage", async () => {
+    const proto = Object.getPrototypeOf(window.sessionStorage);
+    const originalSet = proto.setItem;
+    let calls = 0;
+    globalThis.fetch = async () => { calls++; throw new TypeError("offline"); };
+    render(React.createElement(ContactSection)); fill();
+    try {
+      proto.setItem = () => { throw new DOMException("Storage full", "QuotaExceededError"); };
+      submit();
+      await waitFor(() => assert.ok(screen.getByRole("alert")));
+      assert.equal(calls, 0);
+      assert.equal(screen.queryByRole("button", { name: "Retry saved message" }), null);
+      cleanup(); render(React.createElement(ContactSection));
+      assert.equal((screen.getByLabelText("Message") as HTMLTextAreaElement).value, "Please explain your plans.");
+      assert.equal((screen.getByLabelText("Message") as HTMLTextAreaElement).readOnly, false);
+      assert.equal(calls, 0);
+    } finally { proto.setItem = originalSet; }
   });
 
   it("removes expired personal data but does not create a new ID for an unknown request", () => {

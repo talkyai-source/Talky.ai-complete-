@@ -1,0 +1,15 @@
+{
+  "profile": "production-0083-preserved-20261029",
+  "base_profile": "canonical-0083",
+  "owner_only_tables": {
+    "audit_chain_state": "66353bf66ac54d807a701b292575b59ef2f83b850cd8da436cd9d4c66e2122b4",
+    "audit_event_types": "a728982723d750cc435201d82bdc5ce1d7cba5cfe9aa4f188ac25e59f52134eb",
+    "rate_limit_events": "5cb3734dbd91482b9db6e602b377fdb75d33430e93f390b5b8eae0ecfa7b3e2f",
+    "suspension_propagation_queue": "31e6b0bedb914caf67a824b7b64c5521ab51a21c8f523d556b27f659a25fb20d",
+    "tenant_ai_configs_backup_20260907": "3bc504089693c262d80e89dbeff9ab672ea8954172d84f6bbf54abce04a0369c",
+    "worker_status": "7f4cd1ad4a889c9f00556d6a99eb5c8595d1a705b825f4a45ad1b0588fb7a16b"
+  },
+  "owner_only_sequences": [
+    "audit_chain_state_id_seq"
+  ]
+}

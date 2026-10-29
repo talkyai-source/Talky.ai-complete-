@@ -285,6 +285,43 @@ jobs:
           JWT_SECRET: ci-test-secret-key-not-for-production-32chars
           ENVIRONMENT: test
 
+      - name: Ubuntu bootstrap and Admin adoption PostgreSQL contracts
+        # Every case uses the shared empty-database/restricted-login guard and
+        # rolls back its DDL. Do not point these at the populated Admin fixture.
+        run: |
+          PGPASSWORD=testpassword psql -h localhost -U talky -d postgres \
+            -v ON_ERROR_STOP=1 -c \
+            "CREATE ROLE talklee_bootstrap_test LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD 'testpassword';"
+          PGPASSWORD=testpassword psql -h localhost -U talky -d postgres \
+            -v ON_ERROR_STOP=1 -c \
+            "CREATE DATABASE talklee_stream_events_test_ci OWNER talklee_bootstrap_test;"
+          pytest tests/unit/test_stream_events_bootstrap_migration.py \
+            tests/unit/test_incidents_bootstrap_migration.py \
+            tests/unit/test_ubuntu_admin_incident_adoption.py \
+            -q --junitxml=ubuntu-bootstrap-postgres-results.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          suites = list(ET.parse("ubuntu-bootstrap-postgres-results.xml").getroot().iter("testsuite"))
+          assert sum(int(suite.get("tests", "0")) for suite in suites) >= 55
+          for outcome in ("skipped", "errors", "failures"):
+              assert sum(int(suite.get(outcome, "0")) for suite in suites) == 0, outcome
+          PY
+        env:
+          STREAM_EVENTS_TEST_DATABASE_URL: postgresql://talklee_bootstrap_test:testpassword@127.0.0.1:5432/talklee_stream_events_test_ci
+          PYTHON_DOTENV_DISABLED: "1"
+          PYTHONDONTWRITEBYTECODE: "1"
+          JWT_SECRET: ci-test-secret-key-not-for-production-32chars
+          ENVIRONMENT: test
+
+      - name: Upload Ubuntu bootstrap PostgreSQL evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-bootstrap-postgres-results
+          path: backend/ubuntu-bootstrap-postgres-results.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Migrated Admin PostgreSQL control contracts (serial)
         # These fixtures exercise global administrator invariants. Keep them
         # in one serial invocation after migration/inbound fixtures finish;

@@ -1,0 +1,159 @@
+{
+  "observed_utc": "2026-10-29T18:39:11.408438+00:00",
+  "read_only": true,
+  "production_mutations": false,
+  "production_source": "0ef59596e9f6e46aea4050fc99e6ff202c6f9da3",
+  "deployment_id": "dpl_CDnyZfJGDdaAGnADf1JG6wKAfgHV",
+  "alias_ready": true,
+  "native_dns_checks": [
+    {
+      "path": "/",
+      "passed": false,
+      "failure": "URLError"
+    },
+    {
+      "path": "/auth/login/",
+      "passed": false,
+      "failure": "URLError"
+    },
+    {
+      "path": "/white-label/acme/preview/",
+      "passed": false,
+      "failure": "URLError"
+    },
+    {
+      "path": "/white-label/dashboard/",
+      "passed": false,
+      "failure": "URLError"
+    },
+    {
+      "path": "/white-label/acme/tenants/",
+      "passed": false,
+      "failure": "URLError"
+    },
+    {
+      "path": "/white-label/acme/billing/",
+      "passed": false,
+      "failure": "URLError"
+    },
+    {
+      "path": "/white-label/acme/tenants/synthetic-local-id/agent-settings/",
+      "passed": false,
+      "failure": "URLError"
+    },
+    {
+      "path": "/white-label/acme/dashboard/",
+      "passed": false,
+      "failure": "URLError"
+    },
+    {
+      "path": "/white-label/acme/analytics/",
+      "passed": false,
+      "failure": "URLError"
+    }
+  ],
+  "independent_resolution": {
+    "public_resolvers": [
+      "Google DoH",
+      "Cloudflare DoH"
+    ],
+    "authoritative_nameservers": [
+      "ns35.domaincontrol.com",
+      "ns36.domaincontrol.com"
+    ],
+    "tcp_answers_verified": true,
+    "ipv4": "216.198.79.1",
+    "diagnosis": "Local/network UDP DNS path returned SERVFAIL; exact device/provider not established. Public DoH and authoritative TCP resolved successfully."
+  },
+  "tls_hostname_checks_with_verified_resolution": [
+    {
+      "path": "/",
+      "status": 200,
+      "expected": "public",
+      "passed": true,
+      "curl_exit": 0,
+      "redirect_path": "",
+      "tls_verified": true
+    },
+    {
+      "path": "/auth/login/",
+      "status": 200,
+      "expected": "public",
+      "passed": true,
+      "curl_exit": 0,
+      "redirect_path": "",
+      "tls_verified": true
+    },
+    {
+      "path": "/white-label/acme/preview/",
+      "status": 200,
+      "expected": "public",
+      "passed": true,
+      "curl_exit": 0,
+      "redirect_path": "",
+      "tls_verified": true
+    },
+    {
+      "path": "/white-label/dashboard/",
+      "status": 307,
+      "expected": "login",
+      "passed": true,
+      "curl_exit": 0,
+      "redirect_path": "/auth/login",
+      "tls_verified": true
+    },
+    {
+      "path": "/white-label/acme/tenants/",
+      "status": 307,
+      "expected": "login",
+      "passed": true,
+      "curl_exit": 0,
+      "redirect_path": "/auth/login",
+      "tls_verified": true
+    },
+    {
+      "path": "/white-label/acme/billing/",
+      "status": 307,
+      "expected": "login",
+      "passed": true,
+      "curl_exit": 0,
+      "redirect_path": "/auth/login",
+      "tls_verified": true
+    },
+    {
+      "path": "/white-label/acme/tenants/synthetic-local-id/agent-settings/",
+      "status": 307,
+      "expected": "login",
+      "passed": true,
+      "curl_exit": 0,
+      "redirect_path": "/auth/login",
+      "tls_verified": true
+    },
+    {
+      "path": "/white-label/acme/dashboard/",
+      "status": 307,
+      "expected": "login",
+      "passed": true,
+      "curl_exit": 0,
+      "redirect_path": "/auth/login",
+      "tls_verified": true
+    },
+    {
+      "path": "/white-label/acme/analytics/",
+      "status": 307,
+      "expected": "login",
+      "passed": true,
+      "curl_exit": 0,
+      "redirect_path": "/auth/login",
+      "tls_verified": true
+    }
+  ],
+  "status": "passed_with_verified_dns_override",
+  "limits": [
+    "Anonymous HTTP and TLS only; no business writes",
+    "DNS address verified by independent public and authoritative resolvers; workstation UDP resolution still failed",
+    "No DNS, alias, deployment, backend or database mutation",
+    "Pre-repair production source; does not establish this candidate is deployed",
+    "No authenticated journey or backend/database acceptance"
+  ]
+}

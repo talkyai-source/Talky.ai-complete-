@@ -56,6 +56,52 @@ test("late MFA result after unmount cannot adopt credentials", async () => {
   assert.equal(f.seen.successes, 0);
 });
 
+test("a saved alphanumeric recovery code reaches the existing recovery field unchanged", async () => {
+  const f = setup();
+  const reviewed: unknown[] = [];
+  api.verifyMfaChallenge = async (challenge, code, recovery, options) => {
+    reviewed.push([challenge, code, recovery]);
+    assert.equal(options?.ownsOperation?.(), true);
+    return response;
+  };
+  fireEvent.click(screen.getByRole("button", { name: "Use a recovery code" }));
+  const input = screen.getByLabelText("Recovery Code") as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "AbCd_EfG-hIjK-LmN0" } });
+  assert.equal(input.value, "AbCd_EfG-hIjK-LmN0");
+  assert.equal(input.inputMode, "text");
+  assert.equal(screen.queryByText(/Expires in/), null);
+  await act(async () => { fireEvent.submit(input.closest("form")!); });
+  assert.deepEqual(reviewed, [["challenge-a", undefined, "AbCd_EfG-hIjK-LmN0"]]);
+  assert.equal(f.seen.successes, 1);
+});
+
+test("recovery verification retains ownership, duplicate and unknown-outcome safeguards", async () => {
+  const f = setup();
+  fireEvent.click(screen.getByRole("button", { name: "Use a recovery code" }));
+  const input = screen.getByLabelText("Recovery Code");
+  fireEvent.change(input, { target: { value: "AbCdEfGh-IjKlMnOp" } });
+  await act(async () => { fireEvent.submit(input.closest("form")!); fireEvent.submit(input.closest("form")!); });
+  assert.equal(f.seen.requests, 1);
+  assert.equal((screen.getByRole("button", { name: "Use an authenticator code" }) as HTMLButtonElement).disabled, true);
+  f.pending.reject(apiError(503)); await settle();
+  assert.match(screen.getByRole("alert").textContent ?? "", /could not confirm whether verification completed/i);
+  assert.equal((screen.getByRole("button", { name: "Verify" }) as HTMLButtonElement).disabled, true);
+  fireEvent.submit(input.closest("form")!);
+  assert.equal(f.seen.requests, 1);
+  f.view.rerender(<MFAVerification {...f.props} challengeToken="challenge-b" />);
+  assert.equal((screen.getByLabelText("Authentication Code") as HTMLInputElement).value, "");
+});
+
+test("switching between recovery and authenticator discards the previous secret", () => {
+  setup();
+  fireEvent.click(screen.getByRole("button", { name: "Use a recovery code" }));
+  assert.equal((screen.getByLabelText("Recovery Code") as HTMLInputElement).value, "");
+  fireEvent.change(screen.getByLabelText("Recovery Code"), { target: { value: "AbCdEfGh-IjKlMnOp" } });
+  fireEvent.click(screen.getByRole("button", { name: "Use an authenticator code" }));
+  assert.equal((screen.getByLabelText("Authentication Code") as HTMLInputElement).value, "");
+  assert.equal((screen.getByRole("button", { name: "Verify" }) as HTMLButtonElement).disabled, true);
+});
+
 test("challenge replacement rejects old result and admits only the newly entered code", async () => {
   const f = setup(); await submit();
   f.view.rerender(<MFAVerification {...f.props} challengeToken="challenge-b" />);

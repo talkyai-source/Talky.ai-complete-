@@ -2,8 +2,11 @@
 Emergency Access Module - Break-glass dual-control access
 """
 import hashlib
+import asyncio
 import json
+import logging
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional
@@ -12,6 +15,36 @@ from uuid import UUID, uuid4
 import redis.asyncio as aioredis
 import asyncpg
 from pydantic import BaseModel
+from fastapi import HTTPException
+
+from app.core.db_utils import acquire_with_tenant
+from app.core.security.credential_issuance import lock_authenticated_credential_change
+from app.core.security.totp import decrypt_totp_secret, verify_totp_step
+from app.core.security.rbac import UserRole, normalize_role
+
+logger = logging.getLogger(__name__)
+
+APPROVAL_ATTEMPT_LIMIT = 5
+APPROVAL_ATTEMPT_WINDOW_SECONDS = 300
+APPROVAL_ATTEMPT_TIMEOUT_SECONDS = 2.0
+# Same fixed-window atomic claim/TTL repair used by password-reset sends.
+# The independent Redis claim survives a rejected database transaction.
+_CLAIM_APPROVAL_ATTEMPT = """
+local n = redis.call('INCR', KEYS[1])
+if n == 1 or redis.call('TTL', KEYS[1]) < 0 then
+  redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
+end
+return n
+"""
+
+
+def _verified_approver_ids(row):
+    approvals = row["approvals"]
+    if isinstance(approvals, str):
+        approvals = json.loads(approvals)
+    return {str(approval["approver_id"]) for approval in (approvals or [])
+            if approval.get("verification") == "totp_step_up" and approval.get("method") == "totp"
+            and str(approval["approver_id"]) != str(row["requestor_id"])}
 
 
 class EmergencyScenario(str, Enum):
@@ -36,8 +69,8 @@ class ApprovalInfo(BaseModel):
     """Approval information"""
     approver_id: UUID
     approved_at: datetime
-    method: str  # sms, email, totp, in_person
-    verification_code: Optional[str]
+    method: str
+    verification: Optional[str] = None
 
 
 class EmergencyAccessRequest(BaseModel):
@@ -107,12 +140,48 @@ class EmergencyAccess:
         self.db_pool = db_pool
         self.redis = redis_client
 
+    async def _publish(self, channel, payload):
+        """The committed approval/session stays authoritative during Redis loss."""
+        try:
+            await self.redis.publish(channel, payload)
+        except Exception as exc:
+            logger.warning("emergency_notification_failed error_type=%s", type(exc).__name__)
+
+    async def _claim_approval_attempt(self, user_id):
+        if self.redis is None:
+            raise HTTPException(503, "Emergency approval verification is temporarily unavailable")
+        try:
+            count = await asyncio.wait_for(self.redis.eval(
+                _CLAIM_APPROVAL_ATTEMPT, 1, f"emergency:approval-attempts:{user_id}",
+                APPROVAL_ATTEMPT_WINDOW_SECONDS,
+            ), timeout=APPROVAL_ATTEMPT_TIMEOUT_SECONDS)
+            if type(count) is not int or count < 1:
+                raise ValueError("Unconfirmed verification-attempt claim")
+        except Exception as exc:
+            logger.warning("emergency_approval_budget_unavailable error_type=%s", type(exc).__name__)
+            raise HTTPException(503, "Emergency approval verification is temporarily unavailable") from exc
+        if count > APPROVAL_ATTEMPT_LIMIT:
+            raise HTTPException(429, "Too many verification attempts. Try again later.",
+                                headers={"Retry-After": str(APPROVAL_ATTEMPT_WINDOW_SECONDS)})
+
+    @asynccontextmanager
+    async def _authorized_write(self, auth_request, current_user):
+        """Keep the authenticated profile/session fence through the mutation."""
+        if auth_request is None or current_user is None:
+            raise HTTPException(403, "Authenticated platform administrator required")
+        async with acquire_with_tenant(self.db_pool, current_user.tenant_id) as conn:
+            locked = await lock_authenticated_credential_change(conn, auth_request, current_user)
+            if normalize_role(locked["role"]) != UserRole.PLATFORM_ADMIN:
+                raise HTTPException(403, "Platform admin access required")
+            yield conn
+
     async def request(
         self,
         requestor_id: UUID | str,
         scenario: EmergencyScenario,
         justification: str,
         required_access: list[str],
+        *, auth_request=None, current_user=None,
     ) -> EmergencyAccessRequest:
         """
         Request emergency break-glass access.
@@ -149,13 +218,16 @@ class EmergencyAccess:
             session_created_at=None,
             session_terminated_at=None,
             session_token_hash=None,
-            actions_taken=[],
+            actions_taken=[{"action": "requested", "actor_id": str(requestor_uuid),
+                            "at": datetime.now(timezone.utc).isoformat()}],
             reviewed_at=None,
             reviewed_by=None,
             review_notes=None,
         )
 
-        async with self.db_pool.acquire() as conn:
+        async with self._authorized_write(auth_request, current_user) as conn:
+            if str(requestor_uuid) != str(current_user.id):
+                raise HTTPException(403, "Requestor does not match the authenticated administrator")
             await conn.execute(
                 """
                 INSERT INTO emergency_access_requests (
@@ -171,12 +243,12 @@ class EmergencyAccess:
                 # json.dumps on write. Passing an already-serialized string
                 # here would get double-encoded into a JSON string scalar.
                 [], EmergencyStatus.PENDING.value, expires_at,
-                []
+                request.actions_taken
             )
 
         # Notify potential approvers via Redis
         if self.redis:
-            await self.redis.publish(
+            await self._publish(
                 "emergency:requests",
                 json.dumps({
                     "type": "request_created",
@@ -193,8 +265,9 @@ class EmergencyAccess:
         self,
         request_id: UUID | str,
         approver_id: UUID | str,
-        method: str = "totp",  # sms, email, totp, in_person
+        method: str = "totp",
         verification_code: Optional[str] = None,
+        *, auth_request=None, current_user=None,
     ) -> dict:
         """
         Approve an emergency access request.
@@ -211,23 +284,37 @@ class EmergencyAccess:
         request_uuid = UUID(request_id) if isinstance(request_id, str) else request_id
         approver_uuid = UUID(approver_id) if isinstance(approver_id, str) else approver_id
 
-        async with self.db_pool.acquire() as conn:
+        if method != "totp" or not verification_code:
+            raise HTTPException(400, "A current TOTP code is required")
+        async with self._authorized_write(auth_request, current_user) as conn:
+            if str(approver_uuid) != str(current_user.id):
+                raise HTTPException(403, "Approver does not match the authenticated administrator")
+            await self._claim_approval_attempt(approver_uuid)
+            mfa = await conn.fetchrow(
+                "SELECT totp_secret_enc, enabled, last_used_at FROM user_mfa WHERE user_id=$1 FOR UPDATE",
+                str(approver_uuid),
+            )
+            if not mfa or not mfa["enabled"]:
+                raise HTTPException(400, "Enabled TOTP MFA is required for emergency approval")
+            try:
+                step = verify_totp_step(decrypt_totp_secret(mfa["totp_secret_enc"]), verification_code,
+                                        last_used_at=mfa["last_used_at"])
+            except RuntimeError as exc:
+                raise HTTPException(503, "MFA verification is temporarily unavailable") from exc
+            if step is None:
+                raise HTTPException(401, "Invalid or already used TOTP code")
             row = await conn.fetchrow(
-                "SELECT * FROM emergency_access_requests WHERE request_id = $1",
+                "SELECT * FROM emergency_access_requests WHERE request_id = $1 FOR UPDATE",
                 request_uuid
             )
 
             if not row:
                 raise ValueError("Request not found")
 
-            if row["status"] not in [EmergencyStatus.PENDING.value, EmergencyStatus.APPROVED.value]:
+            if row["status"] != EmergencyStatus.PENDING.value:
                 raise ValueError(f"Request cannot be approved (status: {row['status']})")
 
             if row["expires_at"] < datetime.now(timezone.utc):
-                await conn.execute(
-                    "UPDATE emergency_access_requests SET status = $1 WHERE request_id = $2",
-                    EmergencyStatus.EXPIRED.value, request_uuid
-                )
                 raise ValueError("Request has expired")
 
             # Check if approver is the requestor (can't approve own request)
@@ -241,9 +328,14 @@ class EmergencyAccess:
             approvals = raw_approvals if isinstance(raw_approvals, list) else (
                 json.loads(raw_approvals) if raw_approvals else []
             )
+            # Legacy records did not verify their submitted code. Preserve
+            # non-secret audit metadata, but never count those as MFA proof.
+            approvals = [{k: v for k, v in approval.items() if k != "verification_code"}
+                         for approval in approvals]
 
             # Check if already approved by this person
-            if any(a["approver_id"] == str(approver_uuid) for a in approvals):
+            if any(a["approver_id"] == str(approver_uuid) and a.get("verification") == "totp_step_up"
+                   for a in approvals):
                 raise ValueError("You have already approved this request")
 
             # Add approval
@@ -251,13 +343,17 @@ class EmergencyAccess:
                 "approver_id": str(approver_uuid),
                 "approved_at": datetime.now(timezone.utc).isoformat(),
                 "method": method,
-                "verification_code": verification_code,
+                "verification": "totp_step_up",
             }
             approvals.append(approval)
+            audit_action = [{"action": "approval_verified", "actor_id": str(approver_uuid),
+                             "at": approval["approved_at"]}]
 
             # Check if fully approved
             approvers_required = row["approvers_required"]
-            is_fully_approved = len(approvals) >= approvers_required
+            verified_count = len(_verified_approver_ids({**dict(row), "approvals": approvals}))
+            is_fully_approved = verified_count >= approvers_required
+            await conn.execute("UPDATE user_mfa SET last_used_at=$2 WHERE user_id=$1", str(approver_uuid), step)
 
             if is_fully_approved:
                 # Calculate session expiration
@@ -268,26 +364,27 @@ class EmergencyAccess:
                 await conn.execute(
                     """
                     UPDATE emergency_access_requests
-                    SET approvals = $1, status = $2, approved_at = $3, expires_at = $4
+                    SET approvals = $1, status = $2, approved_at = $3, expires_at = $4,
+                        actions_taken = actions_taken || $6::jsonb
                     WHERE request_id = $5
                     """,
                     approvals, EmergencyStatus.APPROVED.value,
-                    datetime.now(timezone.utc), new_expires_at, request_uuid
+                    datetime.now(timezone.utc), new_expires_at, request_uuid, audit_action
                 )
             else:
                 await conn.execute(
-                    "UPDATE emergency_access_requests SET approvals = $1 WHERE request_id = $2",
-                    approvals, request_uuid
+                    "UPDATE emergency_access_requests SET approvals = $1, actions_taken = actions_taken || $3::jsonb WHERE request_id = $2",
+                    approvals, request_uuid, audit_action
                 )
 
         # Notify requestor if fully approved
         if is_fully_approved and self.redis:
-            await self.redis.publish(
+            await self._publish(
                 f"emergency:user:{row['requestor_id']}",
                 json.dumps({
                     "type": "request_approved",
                     "request_id": str(request_uuid),
-                    "approvals_received": len(approvals),
+                    "approvals_received": verified_count,
                     "session_ready": True
                 })
             )
@@ -296,7 +393,7 @@ class EmergencyAccess:
             "request_id": request_uuid,
             "approved": True,
             "fully_approved": is_fully_approved,
-            "approvals_received": len(approvals),
+            "approvals_received": verified_count,
             "approvals_required": approvers_required,
         }
 
@@ -305,27 +402,35 @@ class EmergencyAccess:
         request_id: UUID | str,
         denied_by: UUID | str,
         reason: str,
+        *, auth_request=None, current_user=None,
     ) -> dict:
         """Deny an emergency access request"""
         request_uuid = UUID(request_id) if isinstance(request_id, str) else request_id
         denier_uuid = UUID(denied_by) if isinstance(denied_by, str) else denied_by
 
-        async with self.db_pool.acquire() as conn:
-            await conn.execute(
+        async with self._authorized_write(auth_request, current_user) as conn:
+            if str(denier_uuid) != str(current_user.id):
+                raise HTTPException(403, "Denier does not match the authenticated administrator")
+            updated = await conn.execute(
                 """
                 UPDATE emergency_access_requests
-                SET status = $1, reviewed_by = $2, reviewed_at = $3, review_notes = $4
-                WHERE request_id = $5
+                SET status = $1, reviewed_by = $2, reviewed_at = $3, review_notes = $4,
+                    actions_taken = actions_taken || $6::jsonb
+                WHERE request_id = $5 AND status IN ('pending', 'approved')
                 """,
                 EmergencyStatus.DENIED.value, denier_uuid, datetime.now(timezone.utc),
-                reason, request_uuid
+                reason, request_uuid, [{"action": "denied", "actor_id": str(denier_uuid),
+                                       "at": datetime.now(timezone.utc).isoformat()}],
             )
+            if updated != "UPDATE 1":
+                raise ValueError("Request is not pending or approved")
 
         return {"request_id": request_uuid, "denied": True}
 
     async def create_session(
         self,
         request_id: UUID | str,
+        *, auth_request=None, current_user=None,
     ) -> EmergencySession:
         """
         Create an emergency access session after approval.
@@ -338,14 +443,17 @@ class EmergencyAccess:
         """
         request_uuid = UUID(request_id) if isinstance(request_id, str) else request_id
 
-        async with self.db_pool.acquire() as conn:
+        async with self._authorized_write(auth_request, current_user) as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM emergency_access_requests WHERE request_id = $1",
+                "SELECT * FROM emergency_access_requests WHERE request_id = $1 FOR UPDATE",
                 request_uuid
             )
 
             if not row:
                 raise ValueError("Request not found")
+
+            if str(row["requestor_id"]) != str(current_user.id):
+                raise HTTPException(403, "Only the requestor can create the session")
 
             if row["status"] != EmergencyStatus.APPROVED.value:
                 raise ValueError("Request not approved")
@@ -356,6 +464,9 @@ class EmergencyAccess:
             if row["session_created_at"]:
                 raise ValueError("Session already created")
 
+            if len(_verified_approver_ids(row)) < row["approvers_required"]:
+                raise ValueError("Verified approvals are required; create a new request for legacy approvals")
+
             # Generate session token
             session_token = secrets.token_urlsafe(64)
             token_hash = hashlib.sha256(session_token.encode()).hexdigest()
@@ -364,16 +475,18 @@ class EmergencyAccess:
             await conn.execute(
                 """
                 UPDATE emergency_access_requests
-                SET session_created_at = $1, session_token_hash = $2, status = $3
+                SET session_created_at = $1, session_token_hash = $2, status = $3,
+                    actions_taken = actions_taken || $5::jsonb
                 WHERE request_id = $4
                 """,
                 datetime.now(timezone.utc), token_hash, EmergencyStatus.USED.value,
-                request_uuid
+                request_uuid, [{"action": "session_created", "actor_id": str(current_user.id),
+                                "at": datetime.now(timezone.utc).isoformat()}],
             )
 
         # Publish emergency access used alert
         if self.redis:
-            await self.redis.publish(
+            await self._publish(
                 "security:alerts",
                 json.dumps({
                     "type": "emergency_access_used",
@@ -412,7 +525,7 @@ class EmergencyAccess:
                 token_hash, EmergencyStatus.USED.value
             )
 
-        if not row:
+        if not row or len(_verified_approver_ids(row)) < row["approvers_required"]:
             return None
 
         return EmergencySession(
@@ -429,17 +542,20 @@ class EmergencyAccess:
         request_id: UUID | str,
         terminated_by: Optional[UUID | str] = None,
         reason: str = "Session completed",
+        *, auth_request=None, current_user=None,
     ) -> bool:
         """Terminate an emergency session early"""
         request_uuid = UUID(request_id) if isinstance(request_id, str) else request_id
         terminator_uuid = UUID(terminated_by) if isinstance(terminated_by, str) else terminated_by
 
-        async with self.db_pool.acquire() as conn:
-            await conn.execute(
+        async with self._authorized_write(auth_request, current_user) as conn:
+            if str(terminator_uuid) != str(current_user.id):
+                raise HTTPException(403, "Terminator does not match the authenticated administrator")
+            updated = await conn.execute(
                 """
                 UPDATE emergency_access_requests
                 SET session_terminated_at = $1, actions_taken = actions_taken || $2::jsonb
-                WHERE request_id = $3
+                WHERE request_id = $3 AND status = 'used' AND session_terminated_at IS NULL
                 """,
                 datetime.now(timezone.utc),
                 [{
@@ -450,6 +566,8 @@ class EmergencyAccess:
                 }],
                 request_uuid
             )
+            if updated != "UPDATE 1":
+                raise ValueError("No active emergency session was terminated")
 
         return True
 
@@ -485,47 +603,62 @@ class EmergencyAccess:
         request_id: UUID | str,
         reviewed_by: UUID | str,
         notes: str,
+        *, auth_request=None, current_user=None,
     ) -> bool:
         """Complete post-incident review of emergency access"""
         request_uuid = UUID(request_id) if isinstance(request_id, str) else request_id
         reviewer_uuid = UUID(reviewed_by) if isinstance(reviewed_by, str) else reviewed_by
 
-        async with self.db_pool.acquire() as conn:
-            await conn.execute(
+        async with self._authorized_write(auth_request, current_user) as conn:
+            if str(reviewer_uuid) != str(current_user.id):
+                raise HTTPException(403, "Reviewer does not match the authenticated administrator")
+            updated = await conn.execute(
                 """
                 UPDATE emergency_access_requests
-                SET reviewed_at = $1, reviewed_by = $2, review_notes = $3
+                SET reviewed_at = $1, reviewed_by = $2, review_notes = $3,
+                    actions_taken = actions_taken || $5::jsonb
                 WHERE request_id = $4
                 """,
-                datetime.now(timezone.utc), reviewer_uuid, notes, request_uuid
+                datetime.now(timezone.utc), reviewer_uuid, notes, request_uuid,
+                [{"action": "review_completed", "actor_id": str(reviewer_uuid),
+                  "at": datetime.now(timezone.utc).isoformat()}],
             )
+            if updated != "UPDATE 1":
+                raise ValueError("Request not found")
 
         return True
 
     async def get_pending_requests(
         self,
+        *, auth_request=None, current_user=None,
     ) -> list[EmergencyAccessRequest]:
         """Get all pending emergency access requests"""
-        async with self.db_pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT * FROM emergency_access_requests
-                WHERE status = $1 AND expires_at > NOW()
-                ORDER BY created_at DESC
-                """,
-                EmergencyStatus.PENDING.value
-            )
+        return await self.list_requests(status=EmergencyStatus.PENDING, auth_request=auth_request, current_user=current_user)
 
+    async def list_requests(self, *, status: EmergencyStatus | None = None, limit=50, offset=0,
+                            auth_request=None, current_user=None):
+        if not 1 <= limit <= 100 or not 0 <= offset <= 10000:
+            raise ValueError("Invalid request page")
+        async with self._authorized_write(auth_request, current_user) as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM (
+                    SELECT *, CASE WHEN status IN ('pending', 'approved') AND expires_at <= NOW()
+                        THEN 'expired' ELSE status END AS effective_status
+                    FROM emergency_access_requests
+                ) requests WHERE ($1::text IS NULL OR effective_status=$1)
+                ORDER BY created_at DESC, request_id DESC LIMIT $2 OFFSET $3
+            """, status.value if status is not None else None, limit, offset)
         return [self._row_to_model(row) for row in rows]
 
     async def get_request(
         self,
         request_id: UUID | str,
+        *, auth_request=None, current_user=None,
     ) -> Optional[EmergencyAccessRequest]:
         """Get a specific emergency access request"""
         request_uuid = UUID(request_id) if isinstance(request_id, str) else request_id
 
-        async with self.db_pool.acquire() as conn:
+        async with self._authorized_write(auth_request, current_user) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM emergency_access_requests WHERE request_id = $1",
                 request_uuid
@@ -535,6 +668,11 @@ class EmergencyAccess:
 
     def _row_to_model(self, row: asyncpg.Record) -> EmergencyAccessRequest:
         """Convert database row to EmergencyAccessRequest"""
+        # Expiry is derived consistently for both detail and paginated listing.
+        # A rejected mutation rolls back; it must not pretend to persist expiry.
+        status = row["status"]
+        if status in {EmergencyStatus.PENDING.value, EmergencyStatus.APPROVED.value} and row["expires_at"] <= datetime.now(timezone.utc):
+            status = EmergencyStatus.EXPIRED.value
         raw_approvals = row["approvals"]
         approvals_data = raw_approvals if isinstance(raw_approvals, list) else (
             json.loads(raw_approvals) if raw_approvals else []
@@ -544,7 +682,7 @@ class EmergencyAccess:
                 approver_id=a["approver_id"],
                 approved_at=a["approved_at"],
                 method=a["method"],
-                verification_code=a.get("verification_code")
+                verification=a.get("verification")
             )
             for a in approvals_data
         ]
@@ -558,7 +696,7 @@ class EmergencyAccess:
             requested_access=row["requested_access"],
             approvers_required=row["approvers_required"],
             approvals=approvals,
-            status=EmergencyStatus(row["status"]),
+            status=EmergencyStatus(status),
             approved_at=row["approved_at"],
             expires_at=row["expires_at"],
             session_created_at=row["session_created_at"],

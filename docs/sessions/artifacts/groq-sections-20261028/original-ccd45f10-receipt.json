@@ -1,0 +1,218 @@
+{
+  "case_ids": [
+    "Q01",
+    "Q43",
+    "Q60",
+    "H04",
+    "H11",
+    "H13"
+  ],
+  "completed_case_ids": [
+    "Q01",
+    "Q43",
+    "Q60",
+    "H04",
+    "H11",
+    "H13"
+  ],
+  "credential_provenance": {
+    "account_id": "unknown",
+    "host": "144.76.17.150",
+    "project_id": "unknown",
+    "source": "/opt/talky/backend/.env:GROQ_API_KEY",
+    "transport": "remote-process-memory-only"
+  },
+  "elapsed_seconds": 6.233,
+  "evaluator_error": null,
+  "http_attempts": 11,
+  "http_statuses": [
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200
+  ],
+  "human_approval": null,
+  "limits": {
+    "hard_wall_seconds": 1200,
+    "http_attempts": 24,
+    "reserved_output_tokens": 30720
+  },
+  "observed_dollar_cost": null,
+  "production_approved": false,
+  "provider": "groq",
+  "reported_usage_totals": {
+    "completion_tokens": 537,
+    "prompt_tokens": 22918,
+    "total_tokens": 23455
+  },
+  "requested_model": "openai/gpt-oss-20b",
+  "reserved_output_tokens": 14080,
+  "response_models": [
+    "openai/gpt-oss-20b"
+  ],
+  "result_sha256": "f55a23bf443cd8238cc32a9d230a5f60d0050424da092302101191cbdbbfc45e",
+  "return_code": 0,
+  "scope": "Synthetic current-source traditional model text/tool evaluation only; no audio, real contacts, app DB, production service mutation or external action execution.",
+  "source_sha": "ccd45f10d70f91d5284b47eab49c0e6e9b13d1fe",
+  "source_unchanged": true,
+  "task_directory": "/home/admins/talklee-model-qualification-20261028-ccd45f10-sixcase-a1",
+  "timeout": false,
+  "usage_by_attempt": [
+    {
+      "completion_time": 0.049234022,
+      "completion_tokens": 45,
+      "completion_tokens_details": {
+        "reasoning_tokens": 12
+      },
+      "prompt_time": 0.104122719,
+      "prompt_tokens": 2075,
+      "queue_time": 0.094499913,
+      "total_time": 0.153356741,
+      "total_tokens": 2120
+    },
+    {
+      "completion_time": 0.059046282,
+      "completion_tokens": 54,
+      "completion_tokens_details": {
+        "reasoning_tokens": 5
+      },
+      "prompt_time": 0.130191526,
+      "prompt_tokens": 2230,
+      "queue_time": 0.177620291,
+      "total_time": 0.189237808,
+      "total_tokens": 2284
+    },
+    {
+      "completion_time": 0.038476912,
+      "completion_tokens": 37,
+      "completion_tokens_details": {
+        "reasoning_tokens": 4
+      },
+      "prompt_time": 0.125690648,
+      "prompt_tokens": 2076,
+      "queue_time": 0.015663635,
+      "total_time": 0.16416756,
+      "total_tokens": 2113
+    },
+    {
+      "completion_time": 0.079849707,
+      "completion_tokens": 78,
+      "completion_tokens_details": {
+        "reasoning_tokens": 17
+      },
+      "prompt_time": 0.035931181,
+      "prompt_tokens": 2231,
+      "prompt_tokens_details": {
+        "cached_tokens": 2048
+      },
+      "queue_time": 0.019351435,
+      "total_time": 0.115780888,
+      "total_tokens": 2309
+    },
+    {
+      "completion_time": 0.033902493,
+      "completion_tokens": 33,
+      "completion_tokens_details": {
+        "reasoning_tokens": 13
+      },
+      "prompt_time": 0.157955501,
+      "prompt_tokens": 2079,
+      "queue_time": 0.046234093,
+      "total_time": 0.191857994,
+      "total_tokens": 2112
+    },
+    {
+      "completion_time": 0.046896017,
+      "completion_tokens": 44,
+      "completion_tokens_details": {
+        "reasoning_tokens": 11
+      },
+      "prompt_time": 0.114050216,
+      "prompt_tokens": 1949,
+      "queue_time": 0.016362943,
+      "total_time": 0.160946233,
+      "total_tokens": 1993
+    },
+    {
+      "completion_time": 0.049949814,
+      "completion_tokens": 49,
+      "completion_tokens_details": {
+        "reasoning_tokens": 10
+      },
+      "prompt_time": 0.071771016,
+      "prompt_tokens": 2106,
+      "prompt_tokens_details": {
+        "cached_tokens": 1536
+      },
+      "queue_time": 0.019389496,
+      "total_time": 0.12172083,
+      "total_tokens": 2155
+    },
+    {
+      "completion_time": 0.042864659,
+      "completion_tokens": 42,
+      "completion_tokens_details": {
+        "reasoning_tokens": 10
+      },
+      "prompt_time": 0.097872578,
+      "prompt_tokens": 1964,
+      "queue_time": 0.01988132,
+      "total_time": 0.140737237,
+      "total_tokens": 2006
+    },
+    {
+      "completion_time": 0.084385391,
+      "completion_tokens": 70,
+      "completion_tokens_details": {
+        "reasoning_tokens": 14
+      },
+      "prompt_time": 0.491331058,
+      "prompt_tokens": 2118,
+      "prompt_tokens_details": {
+        "cached_tokens": 1536
+      },
+      "queue_time": 0.018863774,
+      "total_time": 0.575716449,
+      "total_tokens": 2188
+    },
+    {
+      "completion_time": 0.085778998,
+      "completion_tokens": 43,
+      "completion_tokens_details": {
+        "reasoning_tokens": 8
+      },
+      "prompt_time": 0.031092154,
+      "prompt_tokens": 1971,
+      "prompt_tokens_details": {
+        "cached_tokens": 1536
+      },
+      "queue_time": 0.046520631,
+      "total_time": 0.116871152,
+      "total_tokens": 2014
+    },
+    {
+      "completion_time": 0.070485103,
+      "completion_tokens": 42,
+      "completion_tokens_details": {
+        "reasoning_tokens": 5
+      },
+      "prompt_time": 0.057684322,
+      "prompt_tokens": 2119,
+      "prompt_tokens_details": {
+        "cached_tokens": 1536
+      },
+      "queue_time": 0.016880605,
+      "total_time": 0.128169425,
+      "total_tokens": 2161
+    }
+  ],
+  "usage_known_attempts": 11,
+  "wrapper_child_sha256": "8affc182f2f551d8044a84474e8bc601427a2b331ea7e9a638855e231776c223"
+}

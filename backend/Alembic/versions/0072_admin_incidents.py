@@ -2,8 +2,10 @@
 
 Rollback refuses to discard incident history. Export/retain records and keep
 this additive table when rolling back application code after incidents exist.
-The manually applied 20260706_add_admin_health_tables.sql is adopted only in its known shape;
+The manually applied 20260706_add_admin_health_tables.sql and the published
+0074_incidents_bootstrap security variant are adopted only in their known shapes;
 existing identifiers and receipts must already satisfy the durable contract.
+This backward-compatible guard extension preserves the revision and its parents.
 """
 from alembic import op
 
@@ -39,6 +41,9 @@ DECLARE
     relation oid;
     shape jsonb;
     expected jsonb;
+    bootstrap_security boolean;
+    actual_policy jsonb;
+    expected_policy jsonb;
 BEGIN
     IF target IS NULL THEN
         """ + CREATE_TABLE_SQL + """;
@@ -47,9 +52,8 @@ BEGIN
     LOCK TABLE public.incidents IN ACCESS EXCLUSIVE MODE;
     target := 'public.incidents'::regclass;
     IF NOT EXISTS (SELECT 1 FROM pg_class WHERE oid=target AND relkind='r'
-        AND relpersistence='p' AND NOT relispartition AND NOT relrowsecurity
-        AND NOT relforcerowsecurity AND relreplident='d' AND reloptions IS NULL)
-       OR EXISTS (SELECT 1 FROM pg_policy WHERE polrelid=target)
+        AND relpersistence='p' AND NOT relispartition
+        AND relreplident='d' AND reloptions IS NULL)
        OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=target)
        OR EXISTS (SELECT 1 FROM pg_inherits WHERE inhrelid=target OR inhparent=target)
        OR EXISTS (SELECT 1 FROM pg_rewrite WHERE ev_class=target)
@@ -70,6 +74,25 @@ BEGIN
     CREATE INDEX admin_0072_severity ON admin_0072_incidents_reference (severity);
     CREATE INDEX admin_0072_triggered ON admin_0072_incidents_reference (triggered_at DESC);
     reference := 'pg_temp.admin_0072_incidents_reference'::regclass;
+    -- Compare PostgreSQL's parsed policy, including its identity, command,
+    -- roles and permissiveness. Merely having RLS or a familiar name is not
+    -- sufficient. The protected variant retains its original policy in place.
+    CREATE POLICY incidents_platform_only ON admin_0072_incidents_reference FOR ALL
+        USING (COALESCE(NULLIF(current_setting('app.bypass_rls', true), '')::boolean, false))
+        WITH CHECK (COALESCE(NULLIF(current_setting('app.bypass_rls', true), '')::boolean, false));
+    SELECT jsonb_agg(jsonb_build_array(polname,polcmd,polpermissive,polroles::text,
+        pg_get_expr(polqual,polrelid),pg_get_expr(polwithcheck,polrelid)) ORDER BY polname)
+      INTO expected_policy FROM pg_policy WHERE polrelid=reference;
+    SELECT jsonb_agg(jsonb_build_array(polname,polcmd,polpermissive,polroles::text,
+        pg_get_expr(polqual,polrelid),pg_get_expr(polwithcheck,polrelid)) ORDER BY polname)
+      INTO actual_policy FROM pg_policy WHERE polrelid=target;
+    SELECT relrowsecurity AND relforcerowsecurity INTO bootstrap_security
+      FROM pg_class WHERE oid=target;
+    IF NOT ((bootstrap_security AND actual_policy IS NOT DISTINCT FROM expected_policy)
+        OR (NOT (SELECT relrowsecurity OR relforcerowsecurity FROM pg_class WHERE oid=target)
+            AND actual_policy IS NULL)) THEN
+        RAISE EXCEPTION '0072 refuses unknown legacy incidents security or dependency shape';
+    END IF;
     FOREACH relation IN ARRAY ARRAY[reference, target] LOOP
         SELECT jsonb_build_object(
             'columns', (SELECT jsonb_agg(jsonb_build_array(
@@ -131,9 +154,16 @@ UPGRADE_STATEMENTS = (
     "CREATE INDEX incidents_severity_status_idx ON public.incidents (severity, status)",
     "ALTER TABLE public.incidents ENABLE ROW LEVEL SECURITY",
     "ALTER TABLE public.incidents FORCE ROW LEVEL SECURITY",
-    """CREATE POLICY incidents_platform_only ON public.incidents
-        USING (COALESCE(NULLIF(current_setting('app.bypass_rls', true), '')::boolean, false))
-        WITH CHECK (COALESCE(NULLIF(current_setting('app.bypass_rls', true), '')::boolean, false))""",
+    # ADOPT_OR_CREATE_SQL has either created the fresh table, validated a
+    # policy-free legacy table, or validated the exact protected bootstrap.
+    # Never drop/recreate an existing policy or weaken RLS during adoption.
+    """DO $policy$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polrelid='public.incidents'::regclass) THEN
+            CREATE POLICY incidents_platform_only ON public.incidents
+                USING (COALESCE(NULLIF(current_setting('app.bypass_rls', true), '')::boolean, false))
+                WITH CHECK (COALESCE(NULLIF(current_setting('app.bypass_rls', true), '')::boolean, false));
+        END IF;
+    END $policy$""",
 )
 
 

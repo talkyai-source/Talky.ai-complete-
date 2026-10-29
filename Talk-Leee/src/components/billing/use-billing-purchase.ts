@@ -2,13 +2,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { isApiClientError } from "@/lib/http-client";
+import { withSupportReference } from "@/lib/support-reference";
 import {
   approvedCheckoutUrl, readBillingCheckout, readSavedPurchase, requireBillingBackend,
   startBillingCheckout, storeSavedPurchase, validateOutstandingAttempt, type BillingCatalog, type BillingPrice,
   type CheckoutAttempt, type SavedPurchase,
 } from "@/lib/billing-purchase";
 
-export const purchaseErrorText = (error: unknown) => error instanceof Error ? error.message : "Receipt is unconfirmed. Check the saved purchase again.";
+export const purchaseErrorText = (error: unknown) => withSupportReference(error,
+  error instanceof Error ? error.message : "Receipt is unconfirmed. Check the saved purchase again.");
 export function useBillingPurchase(scope: string, onNavigate: (url: string) => void) {
   const qc = useQueryClient();
   const [saved, setSaved] = useState<SavedPurchase | null>(null);

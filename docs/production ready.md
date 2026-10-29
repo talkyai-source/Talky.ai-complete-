@@ -1,5 +1,46 @@
 # production ready
 
+**Patched Ubuntu qualification — 28 October 2026:** Candidate `54665bdb`
+passed all six Linux workflows, including corrected actual blank Ubuntu
+installation/reboot and full update/recovery tests. The [release acceptance record](sessions/2026-10-28-fresh-update-acceptance.md)
+retains the earlier Asterisk failure and native reproduction, exact Node
+22.23.4 security pin, mandatory synchronous PBX verification before application
+startup, actual process identities and provider-isolated fixture evidence.
+The VM proved update/reboot, worker-failure rollback/reboot and refusal of
+code rollback after a migration started and failed. Older Node 22.22.0
+receipts remain functional historical evidence. This does not change the live
+backend, production database, paid-use gates or feature-freeze status.
+
+**Verified Ubuntu and customer release — 28 October 2026:** The
+[blank Ubuntu acceptance](sessions/2026-10-28-blank-ubuntu-acceptance.md)
+passed actual installation, both frontend builds, service/source/identity and
+HTTPS checks, reboot and cleanup. Combined candidate `ce93fc6a` subsequently
+passed all six configured Linux workflows. The separately reviewed
+[customer-only release](sessions/2026-10-28-customer-first-paid-release-scope.md)
+is live at merge `80b52743`, with exact Vercel production source/alias identity
+and nine anonymous route checks. This deploys the accepted reseller-scope
+exclusion without claiming those capabilities are built. The new fresh-host
+update/rollback procedure is undergoing its own full VM qualification.
+Production database separation and privilege conversion, backend activation,
+failed real-model qualification and the remaining operating/customer/handover
+acceptance remain open. No paid-readiness sign-off or feature-freeze exit is
+implied by these results.
+
+**Paid-use completion instruction — 28 October 2026:** The user requested all
+required work completed with final Stripe account integration as the only
+intended handover item. This resumes the required CP05/CP06 work previously
+deferred. [The follow-up record](sessions/2026-10-28-paid-readiness-followup.md)
+tracks runtime database grants, MFA-protected initial administrator setup,
+installer service isolation, billing-recipient repair and actual blank-Ubuntu
+acceptance. Missing infrastructure, designated destinations and feature-scope
+decisions remain explicit. The user subsequently accepted excluding reseller
+operations and staff invitations from the first paid release, retaining them as
+future work. Apply this explicit launch-scope revision without marking those
+features built. No deployment, final acceptance gate or feature-freeze exit is
+implied by implementation or CI alone.
+
+**Production deliverables integration — 28 October 2026:** [The combined checkpoint](sessions/2026-10-28-production-deliverables-integration.md) joins current billing, Admin and Ubuntu installation work at schema 0082, records restricted-owner TLS migration and incident-history preservation, adds real two-cluster TLS recovery validation, and exposes measured worker/queue/backup faults. Exact-candidate Linux CI is tracked on [PR 26](https://github.com/talkyai-source/Talky.ai-complete-/pull/26). The observed production database is still on the application server without TLS, Stripe uses test credentials, and coordinated activation plus the documented operating and handover demonstrations remain outstanding. CP09 and OP09/OP10/OP12 stay in progress; no final acceptance gate or feature-freeze status changes.
+
 **Release preparation — 8 October 2026:** [The release checkpoint](sessions/2026-10-08-release-preparation.md) integrates newer main changes, preserves both database histories, patches available vulnerable dependencies, and records 2,158 affected backend tests plus 74 dashboard tests. Git/preview results are distinct from server activation. Production activation remains pending operator sudo access, the required measured drain record, backup verification and final release checks; the unpatched frontend tooling audit remains explicit. No acceptance gate or feature-freeze status changes.
 
 

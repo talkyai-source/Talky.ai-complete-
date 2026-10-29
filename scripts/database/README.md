@@ -152,6 +152,39 @@ files readable only by that user before installing the units. The scheduled
 entry point locks the backup root and compares to the previous bundle. It does
 not enable itself or alter existing units.
 
+The scheduled wrapper publishes the same nonsecret monitoring receipt as the
+existing Docker backup job. `backup-attempt.json` contains numeric `started_at`,
+`completed_at` (null while running), `last_success_at` (null until verified),
+and the fixed `result` value `running`, `succeeded` or `failed`. One atomic file
+holds both outcome and last success; a failed write cannot publish half a
+success. Failed backups preserve the prior successful timestamp. A second run
+that cannot acquire the existing lock cannot replace the active run's receipt.
+No archive paths, service credentials, database identifiers or row counts are
+copied into that public status file.
+
+The opt-in backup service creates `StateDirectory=talklee-backup-monitoring`
+with mode 0755, owned by `talklee-backup`, and writes receipt files with mode
+0644. Its protected filesystem permits writes to that directory and the
+private backup root only. The API account receives read/traversal access,
+never backup ownership or write membership. For this external-database
+profile, set **`TALKY_BACKUP_STATUS_DIR=/var/lib/talklee-backup-monitoring`**
+in the API's existing protected backend environment before its normal release
+restart. The fresh installer copies that supplied environment but does not
+enable this optional backup schedule. For direct wrapper invocation use
+`--status-directory` with the same dedicated path; it must be outside the
+private archive root. The older Docker backup path uses
+`/var/lib/talky/monitoring` by default. Select the one actual backup producer
+for the observed API; do not combine unrelated hosts or run both producers
+against the same status file.
+
+Authenticated `/metrics` reports missing, malformed or unreadable status as
+`talky_backup_observation_success 0`; no installer-generated success receipt
+is permitted. Success means this wrapper completed its existing verified-bundle
+publication. It still does not apply retention, copy off-host, prove restoration
+or detect later archive deletion/corruption. The hourly integrity check below
+remains required. Review the Prometheus freshness threshold against the same
+recovery objective as this health timer and prove the approved receiver route.
+
 The daily timer proposes 02:00 UTC; the hourly health timer checks the latest
 bundle's checksum and a maximum age of 26 hours. Change those values only to
 match the approved recovery objectives. A successful daily job does not prove
@@ -185,3 +218,57 @@ The implementation follows PostgreSQL's [connection service rules](https://www.p
 [password file guidance](https://www.postgresql.org/docs/current/libpq-envars.html),
 [exported snapshot support in pg_dump](https://www.postgresql.org/docs/current/app-pgdump.html)
 and [pg_restore behavior](https://www.postgresql.org/docs/current/app-pgrestore.html).
+
+### Canonical schema with TLS
+
+The opt-in Linux fixture below creates two PostgreSQL16 Docker containers on a
+private internal network, with assigned private bridge addresses, generated
+passwords and a temporary certificate authority. No database ports are published
+on host interfaces. It accepts no existing database
+endpoint. Use a local Linux Docker daemon, OpenSSL, PostgreSQL16 client binaries,
+and the Python dependencies from the installer's qualified lock.
+
+```bash
+python scripts/database/tests/tls_canonical_rehearsal.py --run \
+  --bin-dir /usr/lib/postgresql/16/bin \
+  --receipt /tmp/canonical-tls-recovery.json
+```
+
+The fixture loads the actual `complete_schema.sql` as a restricted migration
+owner, stamps the documented 0008 floor, then upgrades to the checked-out
+release's dynamic Alembic heads. It seeds two synthetic tenants with campaigns,
+leads and calls. Separate backup and restore identities have the full-row
+access required by the existing recovery commands; migration and runtime
+identities have neither PostgreSQL superuser nor `BYPASSRLS` privileges.
+
+The actual `recovery.py backup`, `restore` and `health` commands run over
+`sslmode=verify-full`. The fixture compares every public table's records and
+sequence state. It independently exports source schema-only SQL into a new
+empty comparison database on the target fixture server and requires its exact
+re-dump to match the full restore's schema. PostgreSQL can re-render existing
+CHECK expressions during SQL replay (array casts and nested conjunctions);
+using its parser preserves every definition without regex equivalence rules.
+The original, reference and restored definition hashes remain in the receipt.
+The fixture then reapplies explicit scratch-database ownership
+and runtime grants, and checks actual restricted-login reads and writes for
+both tenants. Untrusted CA, wrong server name and plaintext connections must
+fail for the expected TLS/HBA reason. Runtime checks also reject unset tenant
+visibility, foreign-tenant inserts/updates, table ownership, truncation and
+schema/revision modification privileges. Verification writes are rolled back;
+the source schema and all public-table records must remain unchanged.
+
+Cleanup verifies the invocation's unique labels and names before removing its
+containers and network. Only a nonsecret receipt is uploaded by
+[`database-recovery-acceptance.yml`](../../.github/workflows/database-recovery-acceptance.yml);
+passwords, certificate keys and database archives are temporary and are never
+uploaded. The receipt records the actual image digest, schema heads, Git revision,
+source-file hashes, worktree state and results.
+The default image is the official `postgres:16-bookworm`; `--image
+postgres@sha256:REVIEWED_DIGEST` can replay a recorded official image digest.
+
+This is one-host CI regression coverage with synthetic data. It does not prove
+independent-host survival, production grants for every business workflow,
+recording/key recovery, retention/PITR, RPO/RTO, alert delivery, or a running
+application. Its receipt must not close those operating acceptance gates.
+TLS follows PostgreSQL16's [server configuration](https://www.postgresql.org/docs/16/ssl-tcp.html)
+and [certificate/hostname verification](https://www.postgresql.org/docs/16/libpq-ssl.html).

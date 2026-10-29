@@ -9,6 +9,8 @@ shell-evaluated or passed as command-line arguments.
 from __future__ import annotations
 
 import argparse
+import ast
+import base64
 import configparser
 import hashlib
 import ipaddress
@@ -30,12 +32,25 @@ from urllib.request import urlopen
 ROOT = Path(__file__).resolve().parents[2]
 TARGET = Path('/opt/talky')
 STATE = Path('/var/lib/talky-install')
+FAILURE_LOG_DIRECTORY: Path | None = None
 PACKAGES = ('asterisk', 'build-essential', 'ca-certificates', 'cmake', 'curl',
             'docker.io', 'docker-compose-v2', 'git', 'libffi-dev', 'libpq-dev',
             'libssl-dev', 'nginx', 'postgresql-client-16', 'python3.12',
             'python3.12-dev', 'python3.12-venv', 'ufw', 'xz-utils')
 SERVICES = ('talky-api', 'talky-voice-worker', 'talky-dialer-worker',
             'talky-reminder-worker', 'talky-voice-gateway')
+# Operator oneshots retain a different OS identity from application code.
+# In particular, an API process must not be able to read a migration process's
+# privileged database environment through a shared UID.
+OPERATOR_SERVICES = frozenset({'talky-migrate', 'talky-asterisk-reconcile',
+                               'talky-db-backup', 'talky-inbound-synthetic'})
+SYSTEMCTL_DIAGNOSTIC_UNITS = frozenset({
+    'asterisk', 'docker', 'nginx', 'talky-redis', 'talky-dashboard',
+    'talky-trunk-status', *SERVICES,
+    *(unit + '.service' for unit in ('asterisk', 'docker', 'nginx', 'talky-redis',
+                                   'talky-dashboard', 'talky-trunk-status', *SERVICES)),
+    'talky-healthwatch.timer', 'talky-trunk-status.timer', 'talky-asterisk-reconcile.timer',
+})
 AST_FILES = ('asterisk.conf', 'pjsip.conf', 'extensions.conf', 'http.conf',
              'ari.conf', 'rtp.conf', 'modules.conf')
 SECRET_FIELDS = ('backend_env_file', 'tls_private_key_file')
@@ -91,6 +106,49 @@ def secure_input(path: Path, secret: bool = False) -> None:
                 f'Secret input must be mode 0600 or stricter: {path}')
 
 
+def valid_lock_row(line: str) -> bool:
+    """Accept exact hashed requirements, including pip-compile platform markers.
+
+    Markers are parsed but never evaluated here. pip applies them on the target.
+    Restrict this profile to standard string comparisons joined by and/or;
+    requirement options, URLs and executable Python are not marker syntax.
+    """
+    match = re.fullmatch(
+        r'[A-Za-z0-9_.-]+(?:\[[A-Za-z0-9_,.-]+\])?==[A-Za-z0-9_.+!-]+'
+        r'(?:\s*;\s*(?P<marker>.+?))?(?:\s+--hash=sha256:[a-f0-9]{64})+', line)
+    if not match:
+        return False
+    marker = match.group('marker')
+    if not marker:
+        return True
+    try:
+        tree = ast.parse(marker, mode='eval')
+    except (SyntaxError, ValueError):
+        return False
+    variables = {'python_version', 'python_full_version', 'os_name', 'sys_platform',
+                 'platform_release', 'platform_system', 'platform_version',
+                 'platform_machine', 'platform_python_implementation',
+                 'implementation_name', 'implementation_version', 'extra'}
+    allowed = (ast.Expression, ast.BoolOp, ast.Compare, ast.And, ast.Or, ast.Eq,
+               ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn,
+               ast.Name, ast.Load, ast.Constant)
+    if any(not isinstance(node, allowed) for node in ast.walk(tree)):
+        return False
+    if not isinstance(tree.body, (ast.Compare, ast.BoolOp)):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id not in variables:
+            return False
+        if isinstance(node, ast.Constant) and not isinstance(node.value, str):
+            return False
+        if isinstance(node, ast.BoolOp) and any(not isinstance(item, (ast.Compare, ast.BoolOp)) for item in node.values):
+            return False
+        if isinstance(node, ast.Compare) and (len(node.ops) != 1 or
+                not all(isinstance(item, (ast.Name, ast.Constant)) for item in (node.left, *node.comparators))):
+            return False
+    return True
+
+
 def validate_config(config: dict, *, inputs: bool = False) -> dict:
     require(isinstance(config, dict), 'Configuration must be a JSON object')
     require(set(config) == KEYS, 'Configuration keys differ from install.example.json')
@@ -129,8 +187,8 @@ def validate_config(config: dict, *, inputs: bool = False) -> dict:
              'python_requirements_lock', 'apt_versions_file']
     if config['frontend_mode'] == 'linux':
         paths += ['dashboard_env_file', 'admin_env_file']
-        require(re.fullmatch(r'22\.(?:1[89]|[2-9][0-9])\.\d+', config['node_version']) is not None,
-                'Linux frontends require a pinned Node 22 version >=22.18')
+        require(config['node_version'] == '22.23.4',
+                'Linux frontends require the reviewed Node 22.23.4 runtime pin')
         require(re.fullmatch(r'[a-f0-9]{64}', config['node_archive_sha256']) is not None,
                 'Pin the official Node Linux x64 archive SHA256')
     for name in paths:
@@ -156,9 +214,8 @@ def validate_config(config: dict, *, inputs: bool = False) -> dict:
     lock = Path(config['python_requirements_lock']).read_text()
     logical = lock.replace('\\\n', ' ').replace('\\\r\n', ' ').splitlines()
     rows = [line.strip() for line in logical if line.strip() and not line.lstrip().startswith('#')]
-    require(rows and all(re.fullmatch(
-        r'[A-Za-z0-9_.-]+(?:\[[A-Za-z0-9_,.-]+\])?==[A-Za-z0-9_.+!-]+(?:\s+--hash=sha256:[a-f0-9]{64})+',
-        line) for line in rows), 'Python lock must contain exact versions with SHA256 hashes only')
+    require(rows and all(valid_lock_row(line) for line in rows),
+            'Python lock must contain exact versions with SHA256 hashes and supported environment markers only')
     asterisk = Path(config['asterisk_config_directory'])
     require(asterisk.is_absolute() and asterisk.is_dir() and not asterisk.is_symlink(),
             'Supply an absolute directory of reviewed production Asterisk configuration')
@@ -173,32 +230,51 @@ def validate_config(config: dict, *, inputs: bool = False) -> dict:
         require(not re.search(r'^\s*#(?:exec|include|tryinclude)\s+[/~]', text, re.M),
                 'Asterisk includes must be relative to the supplied config directory')
         require(not re.search(r'^\s*#exec\b', text, re.M), 'Asterisk #exec is not accepted')
-        for include in re.findall(r'^\s*#(?:include|tryinclude)\s+(.+)', text, re.M):
+        for directive, include in re.findall(r'^\s*#(include|tryinclude)\s+(.+)', text, re.M):
             include = include.strip().strip('"')
-            require(include == 'pjsip.d/*.conf' or
+            require((path.name == 'pjsip.conf' and directive == 'tryinclude' and include == 'pjsip.d/*.conf') or
+                    (path.name == 'extensions.conf' and directive == 'tryinclude' and
+                     include == 'extensions.d/talky-inbound.conf') or
                     (re.fullmatch(r'[A-Za-z0-9_-]+\.conf', include) and (asterisk / include).is_file()),
-                    'Asterisk include must resolve inside the supplied config or generated pjsip.d')
+                    'Asterisk include must resolve inside the supplied config or the supported generated paths')
     http = (asterisk / 'http.conf').read_text()
     require(re.search(r'^\s*bindaddr\s*=\s*127\.0\.0\.1\s*(?:;.*)?$', http, re.M) is not None,
             'Asterisk HTTP/ARI must bind to 127.0.0.1')
     ast_main = (asterisk / 'asterisk.conf').read_text()
+    module_directories = re.findall(r'^\s*astmoddir\s*=\s*([^;\n]+)', ast_main, re.M)
+    require(all(value.strip() == '/usr/lib/x86_64-linux-gnu/asterisk/modules' for value in module_directories),
+            'Asterisk astmoddir must match the Ubuntu 24.04 amd64 package module directory')
     for key, value in (('astctlpermissions', '0660'), ('astctlowner', 'asterisk'),
                        ('astctlgroup', 'asterisk'), ('runuser', 'asterisk'), ('rungroup', 'asterisk')):
         require(re.search(r'^\s*' + key + r'\s*=\s*' + value + r'\s*(?:;.*)?$', ast_main, re.M) is not None,
                 f'Asterisk config must set {key}={value} for the service account')
-    require('#include pjsip.d/*.conf' in (asterisk / 'pjsip.conf').read_text(),
-            'pjsip.conf must include generated pjsip.d/*.conf')
+    require(re.search(r'^\s*#tryinclude\s+(?:"pjsip\.d/\*\.conf"|pjsip\.d/\*\.conf)\s*$',
+                      (asterisk / 'pjsip.conf').read_text(), re.M) is not None,
+            'pjsip.conf must tryinclude generated pjsip.d/*.conf for empty first startup')
+    require(re.search(r'^\s*#tryinclude\s+"?extensions\.d/talky-inbound\.conf"?\s*$',
+                      (asterisk / 'extensions.conf').read_text(), re.M) is not None,
+            'extensions.conf must tryinclude generated extensions.d/talky-inbound.conf')
     env = read_env(Path(config['backend_env_file']))
     require('MIGRATION_DATABASE_URL' not in env, 'Keep migration credentials out of the runtime environment')
     require(not env.get('READ_DATABASE_URL'),
             'READ_DATABASE_URL needs separate qualification; leave it unset for this fresh-host profile')
+    # Match the existing production API's provider configuration requirements
+    # before apply mutates the host. This does not verify provider credentials.
     for name in ('DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'SECRET_KEY',
-                 'CONNECTOR_ENCRYPTION_KEY', 'SECRETS_MASTER_KEY', 'TELEPHONY_METRICS_TOKEN', 'INTERNAL_SERVICE_TOKEN',
+                 'DEEPGRAM_API_KEY', 'CARTESIA_API_KEY', 'GROQ_API_KEY',
+                 'CONNECTOR_ENCRYPTION_KEY', 'TOTP_ENCRYPTION_KEY', 'SECRETS_MASTER_KEY', 'TELEPHONY_METRICS_TOKEN', 'INTERNAL_SERVICE_TOKEN',
                  'VOICE_GATEWAY_AUTH_TOKEN', 'BACKEND_INTERNAL_URL',
                  'VOICE_GATEWAY_CALLBACK_HOST', 'ASTERISK_ARI_USER',
                  'ASTERISK_ARI_PASSWORD', 'FRONTEND_URL', 'API_BASE_URL'):
         require(bool(env.get(name, '').strip()) and 'REPLACE' not in env[name] and 'change_me' not in env[name],
                 f'Configure backend {name}')
+    totp_key = env['TOTP_ENCRYPTION_KEY']
+    require(re.fullmatch(r'[A-Za-z0-9_-]{43}=', totp_key) is not None,
+            'TOTP_ENCRYPTION_KEY must be a URL-safe base64 Fernet key encoding exactly 32 bytes')
+    decoded_totp_key = base64.b64decode(totp_key, altchars=b'-_', validate=True)
+    require(len(decoded_totp_key) == 32 and
+            base64.urlsafe_b64encode(decoded_totp_key).decode('ascii') == totp_key,
+            'TOTP_ENCRYPTION_KEY must be a URL-safe base64 Fernet key encoding exactly 32 bytes')
     require(env.get('ENVIRONMENT') == 'production', 'ENVIRONMENT must be production')
     validate_production_gate_inputs(env, rows)
     require(env['FRONTEND_URL'] == f"https://{config['dashboard_domain']}" and
@@ -253,7 +329,7 @@ def validate_config(config: dict, *, inputs: bool = False) -> dict:
         require(len({key for key, _ in query_pairs}) == len(query_pairs),
                 'DATABASE_URL query options must not be duplicated')
         require(not {'host', 'hostaddr', 'port', 'user', 'password', 'dbname', 'database',
-                     'service', 'passfile', 'ssl'} & {key.lower() for key, _ in query_pairs},
+                     'service', 'passfile', 'ssl', 'options'} & {key.lower() for key, _ in query_pairs},
                 'DATABASE_URL query must not override target, identity or SSL policy')
         try:
             address = ipaddress.ip_address(db.hostname)
@@ -298,14 +374,23 @@ def validate_production_gate_inputs(env: dict[str, str], lock_rows: list[str]) -
         require(env.get(key, '').strip().lower() not in ('0', 'false', 'no', 'off', 'disabled'),
                 f'{key} cannot disable production tenant routing')
     stripe_key = env.get('STRIPE_SECRET_KEY', '').strip()
-    billing_disabled = env.get('STRIPE_BILLING_DISABLED', '').strip().lower() in ('1', 'true', 'yes')
+    true_values = ('1', 'true', 'yes', 'on')
+    billing_disabled = env.get('STRIPE_BILLING_DISABLED', '').strip().lower() in true_values
+    if billing_disabled:
+        return
+    require(env.get('STRIPE_MOCK_MODE', '').strip().lower() not in true_values,
+            'STRIPE_MOCK_MODE is prohibited in production')
     require(stripe_key or billing_disabled,
             'STRIPE_SECRET_KEY is required unless STRIPE_BILLING_DISABLED is explicitly acknowledged')
-    require(not stripe_key or stripe_key.startswith('sk_live_'),
-            'Production STRIPE_SECRET_KEY must be a live key; test keys are refused')
+    acknowledged_test = env.get('STRIPE_TEST_MODE_IN_PRODUCTION', '').strip().lower() in true_values
+    require((stripe_key.startswith('sk_live_') and len(stripe_key) > len('sk_live_')) or
+            (acknowledged_test and stripe_key.startswith('sk_test_') and len(stripe_key) > len('sk_test_')),
+            'Use a live key or explicitly acknowledge STRIPE_TEST_MODE_IN_PRODUCTION with a test key')
     if stripe_key:
         packages = {line.split('==', 1)[0].split('[', 1)[0].lower().replace('_', '-') for line in lock_rows}
         require('stripe' in packages, 'The qualified Python lock must include Stripe when billing is configured')
+    require(bool(env.get('STRIPE_WEBHOOK_SECRET', '').strip()),
+            'STRIPE_WEBHOOK_SECRET is required when billing is configured')
 
 
 def steps(config: dict) -> list[str]:
@@ -325,14 +410,58 @@ def steps(config: dict) -> list[str]:
     ]
 
 
+def systemctl_diagnostic(args: list[str]) -> str:
+    """Expose only the installer's fixed actions and reviewed service names."""
+    if args == ['systemctl', 'daemon-reload']:
+        return 'systemctl daemon-reload'
+    if len(args) < 4 or args[0] != 'systemctl':
+        return ''
+    if tuple(args[1:3]) not in {('enable', '--now'), ('disable', '--now'), ('is-active', '--quiet')}:
+        return ''
+    units = args[3:]
+    if len(units) > len(SYSTEMCTL_DIAGNOSTIC_UNITS) or any(
+            not isinstance(unit, str)
+            or re.fullmatch(r'[a-z0-9][a-z0-9-]*(?:\.(?:service|timer))?', unit) is None
+            or unit not in SYSTEMCTL_DIAGNOSTIC_UNITS for unit in units):
+        return ''
+    return ' '.join(args)
+
+
+def record_command_failure(binary: str, result) -> Path | None:
+    """Retain bounded private diagnostics only during an actual installation.
+
+    Tool output can contain credentials. Never echo it or include argv/env.
+    Read-only commands and imported helper callers do not enable this sink.
+    """
+    if FAILURE_LOG_DIRECTORY is None or not hasattr(os, 'geteuid') or os.geteuid() != 0:
+        return None
+    try:
+        metadata = FAILURE_LOG_DIRECTORY.lstat()
+        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0 or stat.S_IMODE(metadata.st_mode) != 0o700:
+            return None
+        descriptor, name = tempfile.mkstemp(prefix='command-failure-', suffix='.json', dir=FAILURE_LOG_DIRECTORY)
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
+            json.dump({'binary': binary, 'exit_code': result.returncode,
+                       'stdout_tail': result.stdout[-65536:], 'stderr_tail': result.stderr[-65536:]}, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        return Path(name)
+    except OSError:
+        # Logging must not replace the original command failure or disclose output.
+        return None
+
+
 def run(args: list[str], *, cwd: Path | None = None, env: dict | None = None,
         capture: bool = False) -> str:
     # Capture rather than echo commands/environment: package tools may reveal URLs.
     result = subprocess.run(args, cwd=cwd, env=env, text=True, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, check=False)
     if result.returncode:
-        raise InstallError(f'{Path(args[0]).name} failed (exit {result.returncode}); '
-                           'inspect the service/package locally; command output was suppressed to protect secrets')
+        command = systemctl_diagnostic(args) or Path(args[0]).name
+        log_path = record_command_failure(Path(args[0]).name, result)
+        inspection = f'root-private diagnostics: {log_path}' if log_path else 'inspect the service/package locally'
+        raise InstallError(f'{command} failed (exit {result.returncode}); '
+                           f'{inspection}; command output was suppressed to protect secrets')
     return result.stdout if capture else ''
 
 
@@ -344,16 +473,115 @@ def write(path: Path, content: str, mode: int = 0o644) -> None:
 
 def copy_secret(source: str | Path, target: Path, mode: int = 0o600) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, target)
-    target.chmod(mode)
+    # NamedTemporaryFile creates mode 0600 regardless of the host umask. Never
+    # expose a new backend .env as 0644 between copyfile and chmod.
+    with tempfile.NamedTemporaryFile(dir=target.parent, prefix='.talky-input-', delete=False) as handle:
+        staged = Path(handle.name)
+    try:
+        shutil.copyfile(source, staged)
+        staged.chmod(mode)
+        staged.replace(target)
+    finally:
+        staged.unlink(missing_ok=True)
 
 
-def unit_dropin(*, asterisk: bool = False) -> str:
+def require_install_umask() -> None:
+    current = os.umask(0o022)
+    os.umask(current)
+    require(current == 0o022,
+            'Apply requires umask 0022 inside the root shell so services can read the installed source; '
+            'secret files are created separately with protected modes')
+
+
+def unit_dropin(*, asterisk: bool = False, operator: bool = False) -> str:
+    identity = 'root' if operator else 'talky'
     return ('[Unit]\nAfter=network-online.target talky-redis.service asterisk.service\n'
             'Wants=network-online.target talky-redis.service\n[Service]\n'
-            'User=talky\nGroup=talky\n' +
+            f'User={identity}\nGroup={identity}\n' +
             ('SupplementaryGroups=asterisk\n' if asterisk else '') +
-            'UMask=0027\nNoNewPrivileges=true\nPrivateTmp=true\n')
+            ('UMask=0077\n' if operator else 'UMask=0027\n') +
+            'NoNewPrivileges=true\nPrivateTmp=true\n')
+
+
+def check_migration_identity(path: Path = Path('/etc/talky/migration.env')) -> None:
+    """Read-only preflight for the manually invoked privileged migration unit."""
+    require(getattr(os, 'geteuid', lambda: -1)() == 0,
+            'Database migrations require the root operator identity')
+    metadata = path.lstat()
+    require(stat.S_ISREG(metadata.st_mode) and metadata.st_uid == 0
+            and stat.S_IMODE(metadata.st_mode) == 0o600,
+            'migration.env must be a root-owned regular file with mode 0600')
+    values = read_env(path)
+    require(set(values) == {'MIGRATION_DATABASE_URL'} and bool(values['MIGRATION_DATABASE_URL'])
+            and os.environ.get('MIGRATION_DATABASE_URL') == values['MIGRATION_DATABASE_URL'],
+            'migration.env must contain only the loaded nonempty MIGRATION_DATABASE_URL')
+
+
+def install_service_units(backend: Path, systemd_dir: Path = Path('/etc/systemd/system')) -> None:
+    for path in (backend / 'systemd').iterdir():
+        if path.suffix in ('.service', '.timer', '.target'):
+            shutil.copyfile(path, systemd_dir / path.name)
+            if path.suffix == '.service':
+                write(systemd_dir / (path.name + '.d') / '10-fresh-host.conf',
+                      unit_dropin(asterisk=path.stem == 'talky-trunk-status',
+                                  operator=path.stem in OPERATOR_SERVICES))
+    write(systemd_dir / 'talky-migrate.service.d/20-migration-identity.conf',
+          '[Service]\nEnvironmentFile=/etc/talky/migration.env\n'
+          'ExecStartPre=/opt/talky/backend/venv/bin/python '
+          '/opt/talky/scripts/installation/install.py check-migration-identity\n')
+
+
+def start_host_services(frontend_mode: str) -> None:
+    run(['systemctl', 'daemon-reload'])
+    # The service owns its loop; this compatibility timer must stay disabled.
+    run(['systemctl', 'disable', '--now', 'talky-trunk-status.timer'])
+    # First startup must complete the guarded apply/runtime proof itself;
+    # merely scheduling a retrying timer is not installation acceptance.
+    run(['systemctl', 'disable', '--now', 'talky-asterisk-reconcile.timer'])
+    run(['systemctl', 'enable', '--now', 'docker', 'talky-redis', 'asterisk'])
+    backend = TARGET / 'backend'
+    run(['bash', str(backend / 'scripts/reconcile_asterisk_release.sh')], cwd=backend,
+        env={'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+             'HOME': '/root', 'PYTHONNOUSERSITE': '1', 'PYTHON_DOTENV_DISABLED': '1',
+             'PYTHONDONTWRITEBYTECODE': '1', 'TALKY_BACKEND_ENV_FILE': str(backend / '.env'),
+             'TALKY_BACKEND_PYTHON': str(backend / 'venv/bin/python')})
+    run(['systemctl', 'enable', '--now', 'talky-voice-gateway'])
+    run(['systemctl', 'enable', '--now', *SERVICES[:-1], 'talky-healthwatch.timer',
+         'talky-trunk-status.service', 'talky-asterisk-reconcile.timer', 'nginx'])
+    if frontend_mode == 'linux':
+        run(['systemctl', 'enable', '--now', 'talky-dashboard'])
+    # No automatic migration, legacy Docker DB backup, retention deletion or
+    # carrier synthetic-call schedule. Those require their own operating inputs.
+
+
+def install_redis_runtime(redis_image: str, password: str, etc: Path = Path('/etc')) -> None:
+    # This installer admits an empty host with no existing Docker state/config.
+    # Docker's automatic private bridges can shadow a valid external DB subnet.
+    write(etc / 'docker/daemon.json', json.dumps({
+        'bridge': 'none', 'iptables': False, 'ip6tables': False, 'ip-forward': False,
+    }) + '\n')
+    (etc / 'talky').mkdir(mode=0o700, exist_ok=True)
+    (etc / 'talky').chmod(0o700)
+    write(etc / 'talky/redis.conf', 'bind 127.0.0.1\nprotected-mode yes\nport 6379\n'
+          'appendonly yes\nappendfsync everysec\nmaxmemory-policy noeviction\n'
+          f'requirepass {password}\n', 0o444)
+    # The host's root-only directory protects this read-only container mount.
+    # Host networking creates no bridge route and Redis itself stays loopback-only.
+    write(etc / 'talky/compose.yml',
+          'name: talky-rebuild\nservices:\n  redis:\n    image: ' + redis_image + '\n'
+          '    restart: unless-stopped\n    network_mode: host\n'
+          '    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]\n'
+          '    volumes:\n      - /etc/talky/redis.conf:/usr/local/etc/redis/redis.conf:ro\n'
+          '      - talky_redis:/data\n'
+          '    healthcheck:\n      test: ["CMD-SHELL", "redis-cli ping | grep -q NOAUTH"]\n'
+          '      interval: 10s\n      timeout: 3s\n      retries: 5\n'
+          'volumes:\n  talky_redis:\n', 0o600)
+    write(etc / 'systemd/system/talky-redis.service',
+          '[Unit]\nDescription=Talky Redis\nRequires=docker.service\nAfter=docker.service\n'
+          '[Service]\nType=oneshot\nRemainAfterExit=yes\n'
+          'ExecStart=/usr/bin/docker compose -f /etc/talky/compose.yml up -d --wait\n'
+          'ExecStop=/usr/bin/docker compose -f /etc/talky/compose.yml stop\n'
+          '[Install]\nWantedBy=multi-user.target\n')
 
 
 def nginx_site(config: dict) -> str:
@@ -385,8 +613,40 @@ def nginx_site(config: dict) -> str:
     return body
 
 
+def source_git(source: Path, args: list[str]) -> str:
+    # The operator explicitly selected this reviewed checkout. Root may differ
+    # from its owner; grant trust for this command and this resolved path only.
+    source = source.resolve()
+    return run(['git', '-c', 'safe.directory=', '-c', f'safe.directory={source}', *args],
+               cwd=source, capture=True)
+
+
+def clone_source(source: Path, target: Path) -> None:
+    source = source.resolve()
+    git_directory = Path(source_git(source, ['rev-parse', '--absolute-git-dir']).strip()).resolve()
+    # Ubuntu's Git clears command-line config before its local upload-pack
+    # child. A private temporary config reaches that child without changing
+    # the operator's global config or trusting any other repository.
+    repo_overrides = {'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE',
+                      'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+                      'GIT_SHALLOW_FILE', 'GIT_GRAFT_FILE', 'GIT_REPLACE_REF_BASE',
+                      'GIT_PREFIX', 'GIT_NAMESPACE'}
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith('GIT_CONFIG') and key not in repo_overrides}
+    with tempfile.TemporaryDirectory(prefix='talky-source-trust-') as folder:
+        trust = Path(folder) / 'config'
+        trust.touch(mode=0o600)
+        env.update(GIT_CONFIG_GLOBAL=str(trust), GIT_CONFIG_NOSYSTEM='1')
+        for entry in ('', str(source), str(git_directory)):
+            run(['git', 'config', '--file', str(trust), '--add', 'safe.directory', entry],
+                env=env, cwd=Path(folder))
+        trust.chmod(0o600)
+        run(['git', 'clone', '--no-hardlinks', '--no-checkout', str(source), str(target)],
+            env=env, cwd=Path(folder))
+
+
 def checked_origin(source: Path) -> str:
-    origin = run(['git', 'remote', 'get-url', 'origin'], cwd=source, capture=True).strip()
+    origin = source_git(source, ['remote', 'get-url', 'origin']).strip()
     if re.fullmatch(r'git@[A-Za-z0-9.-]+:[A-Za-z0-9_./-]+', origin):
         return origin
     parsed = urlsplit(origin)
@@ -407,12 +667,15 @@ def ensure_fresh_host(config: dict, source: Path) -> None:
             release.get('VERSION_ID', '').strip('"') == '24.04', 'Ubuntu 24.04 is required')
     require(Path('/run/systemd/system').is_dir(), 'A systemd VM/server is required')
     for path in (TARGET, STATE, Path('/etc/talky'), Path('/etc/systemd/system/talky-api.service'),
-                 Path('/etc/nginx'), Path('/etc/asterisk'), Path('/var/lib/docker'),
+                 Path('/etc/nginx'), Path('/etc/asterisk'), Path('/var/lib/docker'), Path('/etc/docker/daemon.json'),
                  Path('/usr/sbin/policy-rc.d')):
         require(not path.exists() and not path.is_symlink(), f'Refusing existing path: {path}')
-    require(not run(['git', 'status', '--porcelain'], cwd=source, capture=True).strip(),
+    require_install_umask()
+    require(Path(source_git(source, ['rev-parse', '--show-toplevel']).strip()).resolve() == source.resolve(),
+            'Source must be the reviewed repository root')
+    require(not source_git(source, ['status', '--porcelain', '--untracked-files=all']).strip(),
             'Installer source checkout must be completely clean')
-    require(run(['git', 'rev-parse', 'HEAD'], cwd=source, capture=True).strip() == config['source_sha'],
+    require(source_git(source, ['rev-parse', 'HEAD']).strip() == config['source_sha'],
             'Source checkout must equal the reviewed source_sha')
     checked_origin(source)
     # Existing runtime services are evidence that this is not an empty host.
@@ -440,9 +703,11 @@ with psycopg2.connect(os.environ["DATABASE_URL"], connect_timeout=10) as c:
         q.execute("SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname=current_user")
         role=q.fetchone()
         check(role and not any(role), "runtime role cannot be superuser/BYPASSRLS/CREATEDB/CREATEROLE")
+        q.execute("SELECT current_user=session_user")
+        check(q.fetchone()==(True,), "runtime connection must use its own login role")
         q.execute("SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()")
         check(q.fetchone()==(True,), "TLS required")
-        q.execute("SELECT version_num FROM alembic_version")
+        q.execute("SELECT version_num FROM public.alembic_version")
         actual={r[0] for r in q.fetchall()}
         expected=set(ScriptDirectory.from_config(Config("alembic.ini")).get_heads())
         check(expected and actual==expected, "prepare and verify schema before install")
@@ -461,12 +726,20 @@ def database_check(env: dict, backend: Path) -> None:
         env=runtime_environment(env))
 
 
+def frontend_build_environment(env_file: Path) -> dict[str, str]:
+    # Next and Vite give exported variables precedence over dotenv files. Only
+    # reviewed values may select API/auth settings in the resulting bundles.
+    return {**runtime_environment(read_env(env_file)), 'NODE_ENV': 'production'}
+
+
 def apply(config: dict, source: Path) -> None:
+    global FAILURE_LOG_DIRECTORY
     validate_config(config, inputs=True)
     ensure_fresh_host(config, source)
     versions = json.loads(Path(config['apt_versions_file']).read_text())
     env = read_env(Path(config['backend_env_file']))
     STATE.mkdir(mode=0o700)
+    FAILURE_LOG_DIRECTORY = STATE
     write(STATE / 'state.json', json.dumps({'status': 'installing', 'source_sha': config['source_sha']}) + '\n', 0o600)
     # Prevent package installation from exposing default Asterisk/nginx configs.
     policy = Path('/usr/sbin/policy-rc.d')
@@ -482,7 +755,7 @@ def apply(config: dict, source: Path) -> None:
     run(['useradd', '--system', '--create-home', '--home-dir', '/var/lib/talky',
          '--shell', '/usr/sbin/nologin', '--user-group', 'talky'])
     run(['usermod', '--append', '--groups', 'asterisk', 'talky'])
-    run(['git', 'clone', '--no-hardlinks', '--no-checkout', str(source), str(TARGET)])
+    clone_source(source, TARGET)
     run(['git', 'remote', 'set-url', 'origin', checked_origin(source)], cwd=TARGET)
     run(['git', 'checkout', '--detach', config['source_sha']], cwd=TARGET)
     require(run(['git', 'rev-parse', 'HEAD'], cwd=TARGET, capture=True).strip() == config['source_sha'],
@@ -503,6 +776,9 @@ def apply(config: dict, source: Path) -> None:
     run([str(backend / 'venv/bin/python'), '-m', 'pip', 'install', '--require-hashes',
          '-r', config['python_requirements_lock']])
     run([str(backend / 'venv/bin/python'), '-m', 'pip', 'check'])
+    run([str(backend / 'venv/bin/python'), str(backend / 'scripts/set_release_version.py'),
+         '--candidate-sha', config['source_sha'], '--env-file', str(backend / '.env')])
+    env['APP_VERSION'] = config['source_sha']
     run([str(backend / 'venv/bin/python'), '-c',
          'from app.core.prod_gate import enforce_production_gate; enforce_production_gate()'],
         cwd=backend, env=runtime_environment(env))
@@ -522,38 +798,8 @@ def apply(config: dict, source: Path) -> None:
     run(['chown', 'asterisk:asterisk', str(generated_sip)])
     generated_sip.chmod(0o2770)
     redis_password = urlsplit(env['REDIS_URL']).password
-    Path('/etc/talky').mkdir(mode=0o700, exist_ok=True)
-    Path('/etc/talky').chmod(0o700)
-    write(Path('/etc/talky/redis.conf'), 'bind 0.0.0.0\nprotected-mode yes\nport 6379\n'
-          'appendonly yes\nappendfsync everysec\nmaxmemory-policy noeviction\n'
-          f'requirepass {redis_password}\n', 0o444)
-    # The root-only host directory protects this file. The container's redis
-    # account must be able to read its read-only bind mount after dropping root.
-    write(Path('/etc/talky/compose.yml'),
-          'name: talky-rebuild\nservices:\n  redis:\n    image: ' + config['redis_image'] + '\n'
-          '    restart: unless-stopped\n    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]\n'
-          '    ports: ["127.0.0.1:6379:6379"]\n'
-          '    volumes:\n      - /etc/talky/redis.conf:/usr/local/etc/redis/redis.conf:ro\n'
-          '      - talky_redis:/data\n'
-          '    healthcheck:\n      test: ["CMD-SHELL", "redis-cli ping | grep -q NOAUTH"]\n'
-          '      interval: 10s\n      timeout: 3s\n      retries: 5\n'
-          'volumes:\n  talky_redis:\n', 0o600)
-    write(Path('/etc/systemd/system/talky-redis.service'),
-          '[Unit]\nDescription=Talky Redis\nRequires=docker.service\nAfter=docker.service\n'
-          '[Service]\nType=oneshot\nRemainAfterExit=yes\n'
-          'ExecStart=/usr/bin/docker compose -f /etc/talky/compose.yml up -d --wait\n'
-          'ExecStop=/usr/bin/docker compose -f /etc/talky/compose.yml stop\n'
-          '[Install]\nWantedBy=multi-user.target\n')
-    for path in (backend / 'systemd').iterdir():
-        if path.suffix in ('.service', '.timer', '.target'):
-            shutil.copyfile(path, Path('/etc/systemd/system') / path.name)
-            if path.suffix == '.service':
-                write(Path('/etc/systemd/system') / (path.name + '.d') / '10-fresh-host.conf',
-                      unit_dropin(asterisk=path.stem == 'talky-trunk-status'))
-    write(Path('/etc/systemd/system/talky-migrate.service.d/20-migration-identity.conf'),
-          '[Service]\nEnvironmentFile=/etc/talky/migration.env\n'
-          'ExecStartPre=/opt/talky/backend/venv/bin/python -c "import os,sys; '
-          "sys.exit(0 if os.environ.get('MIGRATION_DATABASE_URL') else 'MIGRATION_DATABASE_URL is required')" + '"\n')
+    install_redis_runtime(config['redis_image'], redis_password)
+    install_service_units(backend)
     # Loopback bind; nginx is the only public HTTP listener.
     write(Path('/etc/systemd/system/talky-api.service.d/20-loopback.conf'),
           '[Service]\nExecStart=\nExecStart=/opt/talky/backend/venv/bin/uvicorn app.main:app '
@@ -571,14 +817,9 @@ def apply(config: dict, source: Path) -> None:
     run(['nginx', '-t'])
     configure_firewall(config)
     print('Starting services and checking readiness...', flush=True)
-    run(['systemctl', 'daemon-reload'])
-    run(['systemctl', 'enable', '--now', 'docker', 'talky-redis', 'asterisk'])
-    run(['systemctl', 'enable', '--now', 'talky-voice-gateway'])
-    run(['systemctl', 'enable', '--now', *SERVICES[:-1], 'talky-healthwatch.timer',
-         'talky-trunk-status.timer', 'nginx'])
-    if config['frontend_mode'] == 'linux':
-        run(['systemctl', 'enable', '--now', 'talky-dashboard'])
-    for unit in ('asterisk', 'nginx', 'talky-redis', *SERVICES):
+    start_host_services(config['frontend_mode'])
+    for unit in ('asterisk', 'nginx', 'talky-redis', *SERVICES,
+                 'talky-trunk-status', 'talky-asterisk-reconcile.timer', 'talky-healthwatch.timer'):
         run(['systemctl', 'is-active', '--quiet', unit])
     for url in ('http://127.0.0.1:18080/ready', 'http://127.0.0.1:8000/health',
                 'http://127.0.0.1:8000/api/v1/healthz/ready',
@@ -591,13 +832,17 @@ def apply(config: dict, source: Path) -> None:
                     if url.endswith(':18080/ready'):
                         payload = json.load(response)
                         healthy = healthy and payload.get('ready') is True and payload.get('protocol_version') == 2 \
-                            and 'pcmu' in payload.get('codecs', [])
+                            and 'pcmu' in payload.get('codecs', []) and payload.get('build_sha') == config['source_sha']
                 if healthy:
                     break
             except OSError:
                 pass
             time.sleep(5)
         require(healthy, f'Health check failed: {url}')
+    api_pid = run(['systemctl', 'show', 'talky-api.service', '--property=MainPID', '--value'], capture=True).strip()
+    require(re.fullmatch(r'[1-9][0-9]{0,9}', api_pid) is not None, 'API must have a running process')
+    run([str(backend / 'venv/bin/python'), str(backend / 'scripts/set_release_version.py'),
+         '--candidate-sha', config['source_sha'], '--check-pid', api_pid])
     # Resolve to this new host while validating the supplied certificate name.
     run(['curl', '--fail', '--silent', '--show-error', '--max-time', '15', '--resolve',
          f"{config['api_domain']}:443:127.0.0.1", f"https://{config['api_domain']}/health"])
@@ -656,7 +901,7 @@ def install_frontends(config: dict) -> None:
         require((directory / 'package-lock.json').is_file(), f'Missing {relative} lockfile')
         copy_secret(config[key], directory / '.env.production', 0o600)
         run(['chown', '-R', 'talky:talky', str(directory)])
-        build_env = {**os.environ, 'NODE_ENV': 'production'}
+        build_env = frontend_build_environment(Path(config[key]))
         run(['runuser', '-u', 'talky', '--', '/usr/local/bin/npm', 'ci', '--include=dev'], cwd=directory, env=build_env)
         run(['runuser', '-u', 'talky', '--', '/usr/local/bin/npm', 'run', 'build'], cwd=directory, env=build_env)
         run(['chown', '-R', 'root:talky', str(directory)])
@@ -677,12 +922,16 @@ def install_frontends(config: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', nargs='?', choices=('plan', 'validate', 'packages', 'apply'), default='plan')
+    parser.add_argument('command', nargs='?',
+                        choices=('plan', 'validate', 'packages', 'apply', 'check-migration-identity'), default='plan')
     parser.add_argument('--config', type=Path, default=Path(__file__).with_name('install.example.json'))
     parser.add_argument('--source', type=Path, default=ROOT)
     parser.add_argument('--confirm-new-host', action='store_true')
     args = parser.parse_args(argv)
     try:
+        if args.command == 'check-migration-identity':
+            check_migration_identity()
+            return 0
         if args.command == 'packages':
             print(json.dumps(list(PACKAGES), indent=2))
             return 0

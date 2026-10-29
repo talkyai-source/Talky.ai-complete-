@@ -22,6 +22,7 @@ interface MFAVerificationProps {
 
 export default function MFAVerification({ challengeToken, onSuccess, onBackClick, onError }: MFAVerificationProps) {
   const [totpCode, setTotpCode] = useState("");
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [timeRemaining, setTimeRemaining] = useState(30);
@@ -58,6 +59,7 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
       restart.current = true;
       setRestartRequired(true);
       setTotpCode("");
+      setUseRecoveryCode(false);
       setError("Your sign-in changed. Return to login to start again.");
     });
     return () => { mounted.current = false; retire(); unsubscribe(); };
@@ -72,6 +74,7 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
       setRestartRequired(false);
       setFinished(false);
       setTotpCode("");
+      setUseRecoveryCode(false);
       setError("");
       setLoading(false);
     }
@@ -119,8 +122,8 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
       return;
     }
 
-    if (!validateTotpCode(totpCode)) {
-      const errorMsg = "Please enter a valid 6-8 digit code";
+    if (useRecoveryCode ? !totpCode.trim() : !validateTotpCode(totpCode)) {
+      const errorMsg = useRecoveryCode ? "Enter a saved recovery code." : "Please enter a valid 6-8 digit code";
       setError(errorMsg);
       onError?.(errorMsg);
       return;
@@ -134,7 +137,7 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
       && currentChallenge.current === operation.challenge;
 
     try {
-      const response = await api.verifyMfaChallenge(challengeToken, totpCode, undefined, {
+      const response = await api.verifyMfaChallenge(challengeToken, useRecoveryCode ? undefined : totpCode, useRecoveryCode ? totpCode.trim() : undefined, {
         signal: operation.controller.signal, ownsOperation,
       });
       if (!ownsOperation()) return;
@@ -177,34 +180,47 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
     callbacks.current.onBackClick();
   }
 
+  function switchCodeType() {
+    if (!mounted.current || !available.current || active.current || restart.current || completed.current) return;
+    // Retire the previous input before React commits the mode change, so a
+    // synchronous submit cannot send it as the other kind of credential.
+    currentCode.current = "";
+    setTotpCode("");
+    setError("");
+    setUseRecoveryCode(value => !value);
+    inputRef.current?.focus();
+  }
+
   return (
     <Card>
       <CardHeader className="text-center">
         <CardTitle asChild>
           <h2>Two-Factor Authentication</h2>
         </CardTitle>
-        <CardDescription>Enter the code from your authenticator app</CardDescription>
+        <CardDescription>{useRecoveryCode ? "Enter one of your saved recovery codes" : "Enter the code from your authenticator app"}</CardDescription>
       </CardHeader>
 
       <form onSubmit={handleSubmit} aria-busy={loading} aria-describedby={error ? errorId : undefined}>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label htmlFor="totp">Authentication Code</Label>
-              <span className="text-xs text-muted-foreground">Expires in {timeRemaining}s</span>
+              <Label htmlFor="totp">{useRecoveryCode ? "Recovery Code" : "Authentication Code"}</Label>
+              {!useRecoveryCode && <span className="text-xs text-muted-foreground">Expires in {timeRemaining}s</span>}
             </div>
             <div className="relative">
               <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden />
               <Input
                 id="totp"
                 type="text"
-                placeholder="000000"
+                placeholder={useRecoveryCode ? "Your saved recovery code" : "000000"}
                 value={totpCode}
-                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
+                onChange={(e) => setTotpCode(useRecoveryCode ? e.target.value.slice(0, 64) : e.target.value.replace(/\D/g, "").slice(0, 8))}
                 className="pl-10 text-center text-lg tracking-widest font-mono"
-                maxLength={8}
-                inputMode="numeric"
-                pattern="[0-9]*"
+                maxLength={useRecoveryCode ? 64 : 8}
+                inputMode={useRecoveryCode ? "text" : "numeric"}
+                pattern={useRecoveryCode ? undefined : "[0-9]*"}
+                autoCapitalize="none"
+                spellCheck={false}
                 autoComplete="one-time-code"
                 required
                 disabled={loading || restartRequired || finished || !isPresent}
@@ -214,7 +230,7 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
               />
             </div>
             <p className="text-xs text-muted-foreground text-center">
-              Open your authenticator app and enter the 6-digit code
+              {useRecoveryCode ? "Each recovery code can be used once. Paste it exactly as saved." : "Open your authenticator app and enter the 6-digit code"}
             </p>
           </div>
 
@@ -231,13 +247,18 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
 
           <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-md p-3">
             <p className="text-xs text-blue-700 dark:text-blue-300">
-              Don&apos;t have access to your authenticator? Use a recovery code instead.
+              {useRecoveryCode ? "Have access to your authenticator?" : "Don't have access to your authenticator?"}
             </p>
+            <button type="button" onClick={switchCodeType}
+              disabled={loading || restartRequired || finished || !isPresent}
+              className="mt-2 text-sm underline underline-offset-4 disabled:opacity-50">
+              {useRecoveryCode ? "Use an authenticator code" : "Use a recovery code"}
+            </button>
           </div>
         </CardContent>
 
         <CardFooter className="flex flex-col gap-3">
-          <Button type="submit" className="w-full" disabled={loading || restartRequired || finished || !isPresent || totpCode.length < 6}>
+          <Button type="submit" className="w-full" disabled={loading || restartRequired || finished || !isPresent || (useRecoveryCode ? !totpCode.trim() : totpCode.length < 6)}>
             {loading ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden />

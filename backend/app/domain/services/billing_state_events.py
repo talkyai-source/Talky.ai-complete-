@@ -328,10 +328,17 @@ async def _apply_invoice(conn, billing, event_type, data, *, source_reference=No
     else:
         kind = None
     if kind:
-        # Retain the existing owner-only recipient policy. CP06 owns replacing
-        # its known gap; no guessed admin/global recipient is introduced here.
+        # Canonical tenant authority comes from the current membership role,
+        # not the historical profile label. A global administrator is never a
+        # fallback billing contact. Ambiguity stays recipient_missing; the
+        # outbox freezes the first captured recipient through delivery_key.
         recipients = await conn.fetch(
-            "SELECT email FROM user_profiles WHERE tenant_id=$1::uuid AND role='owner' LIMIT 2", tenant_id,
+            """SELECT up.email FROM user_profiles up
+               JOIN tenant_users tu ON tu.user_id=up.id AND tu.tenant_id=up.tenant_id
+               JOIN roles r ON r.id=tu.role_id
+               WHERE up.tenant_id=$1::uuid AND tu.status='active' AND r.name='tenant_admin'
+                 AND up.role<>'platform_admin' AND up.is_active IS TRUE AND up.is_verified IS TRUE
+                 AND btrim(up.email)<>'' LIMIT 2""", tenant_id,
         )
         recipient = recipients[0]["email"] if len(recipients) == 1 else None
         suffix = "paid" if paid else "payment_failed"

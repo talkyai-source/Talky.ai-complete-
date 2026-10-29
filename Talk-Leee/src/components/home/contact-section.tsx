@@ -68,10 +68,20 @@ export function ContactSection({ sectionClassName }: ContactSectionProps = {}) {
         return;
       }
       payload = { ...parsed.data, request_id: crypto.randomUUID() };
+      // A lost response can only be retried safely after reload when the
+      // request identity was saved before dispatch. Keep an unsent draft
+      // editable if the browser refuses that write.
+      const saved = saveContactDraft(parsed.data, payload);
+      setStorageAvailable(saved);
+      if (!saved) {
+        setErrors({});
+        setReceipt(undefined);
+        setFailure("Nothing was submitted because this browser could not save a retry reference. Allow session storage and try again, or email contact@talk-lee.com.");
+        return;
+      }
       pending.current = payload;
       setSubmission(payload);
       setFormData(parsed.data);
-      setStorageAvailable(saveContactDraft(parsed.data, payload));
     }
     // A ref closes the gap before React commits disabled/loading state.
     submitting.current = true;
@@ -211,7 +221,7 @@ export function ContactSection({ sectionClassName }: ContactSectionProps = {}) {
                    {failure && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{failure}</p>}
                    {submission && <p className="text-xs text-muted-foreground break-all">Saved message details are locked for safe retry. Request reference: {submission.request_id}</p>}
                    {expiredRequestId && <p role="alert" className="text-sm text-muted-foreground">The saved details expired after the 24-hour restore limit. Receipt is still unconfirmed. Contact us with request reference {expiredRequestId} before submitting again.</p>}
-                   {!storageAvailable && <p role="status" className="text-sm text-muted-foreground">{receipt ? "Receipt is confirmed, but your browser could not clear the stored draft. Keep the receipt reference." : "Your browser cannot save this draft. Keep this page open to retry; it may be lost after reload."}</p>}
+                   {!storageAvailable && <p role="status" className="text-sm text-muted-foreground">{receipt ? "Receipt is confirmed, but your browser could not clear the stored draft. Keep the receipt reference." : "Your browser cannot save this draft. Copy your message before leaving or reloading this page."}</p>}
                    {receipt && <p role="status" aria-live="polite" className="text-emerald-600 dark:text-emerald-400 text-center font-medium bg-emerald-500/10 p-3 rounded-lg border border-emerald-500/20 break-all" data-testid="success-message">Message received. Reference: {receipt.receipt_id}</p>}
                 </form>
              </motion.div>

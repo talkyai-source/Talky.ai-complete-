@@ -71,7 +71,7 @@ function FAQSection() {
     },
     {
       question: "Can I resell Talk-Lee AI under my own brand?",
-      answer: "Yes. Our white‑label program lets you offer AI voice solutions as your own. Limited spots available.",
+      answer: "Branding previews are available. Reseller operations and staff invitations are not included in this release.",
     },
     {
       question: "Do you provide phone numbers for campaigns?",

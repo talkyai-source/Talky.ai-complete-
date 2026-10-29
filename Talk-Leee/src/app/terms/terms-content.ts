@@ -29,7 +29,7 @@ export const termsBlocks: LegalBlock[] = [
       `Manage contact lists, campaigns, analytics, call recordings, and transcripts`,
       `Integrate with HubSpot CRM for contact and deal management`,
       `Issue API keys for developers to build on top of Talk-Lee`,
-      `Provide partner/reseller accounts for agencies and platform partners`,
+      `Provide branding previews; partner/reseller account operations are not included in this release`,
     ],
   },
   {
@@ -198,7 +198,7 @@ export const termsBlocks: LegalBlock[] = [
   { type: "h2", text: "7. Partner and Reseller Accounts" },
   {
     type: "p",
-    text: `Talk-Lee offers partner accounts for agencies and resellers who wish to provide Talk-Lee services to their own clients. Partner accounts are subject to:`,
+    text: `Partner and reseller account operations are not included in this release. If partner accounts are made available, they are subject to:`,
   },
   {
     type: "ul",

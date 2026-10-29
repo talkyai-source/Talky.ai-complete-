@@ -17,6 +17,11 @@ ALLOWANCE = "0072_allowance_anchor"
 SUPPLIER_ALLOWANCE = "0080_supplier_allowance_merge"
 PAYMENT = "0073_payment_test_plan"
 HEAD = "0081_admin_payment_merge"
+STREAM = "0073_stream_events_bootstrap"
+BOOTSTRAP = "0074_incidents_bootstrap"
+UBUNTU = "0075_release_history_merge"
+FINAL_HEAD = "0082_ubuntu_admin_merge"
+CURRENT_HEAD = "0083_customer_support_contracts"
 
 
 def test_release_exposes_one_head_containing_both_existing_histories():
@@ -25,7 +30,12 @@ def test_release_exposes_one_head_containing_both_existing_histories():
     # history, API-key lookup hash), 0069 (AssemblyAI settings) and 0070 (PBX
     # line soft delete) remain common ancestors. Published paid billing and
     # connector/Admin histories now join through a metadata-only merge.
-    assert SCRIPTS.get_heads() == [HEAD]
+    assert SCRIPTS.get_heads() == [CURRENT_HEAD]
+    assert SCRIPTS.get_revision(CURRENT_HEAD).down_revision == FINAL_HEAD
+    assert set(SCRIPTS.get_revision(FINAL_HEAD).down_revision) == {HEAD, UBUNTU}
+    assert set(SCRIPTS.get_revision(UBUNTU).down_revision) == {BOOTSTRAP, PAYMENT}
+    assert SCRIPTS.get_revision(BOOTSTRAP).down_revision == STREAM
+    assert SCRIPTS.get_revision(STREAM).down_revision == ALLOWANCE
     assert set(SCRIPTS.get_revision(HEAD).down_revision) == {SUPPLIER_ALLOWANCE, PAYMENT}
     assert set(SCRIPTS.get_revision(SUPPLIER_ALLOWANCE).down_revision) == {SUPPLIER, ALLOWANCE}
     assert SCRIPTS.get_revision(PAYMENT).down_revision == ALLOWANCE
@@ -64,12 +74,13 @@ def test_upgrade_plan_runs_only_the_missing_branch(start, required, already_pres
     assert required <= revisions
     assert already_present not in revisions
     # The current deployment must also retain both branches behind its new head.
-    head_revisions = {r.revision for r in SCRIPTS.iterate_revisions(HEAD, start, implicit_base=True)}
+    head_revisions = {r.revision for r in SCRIPTS.iterate_revisions(CURRENT_HEAD, start, implicit_base=True)}
     assert required | {
         "0070_trunk_soft_delete", "0071_connector_lifecycle",
         "0072_admin_incidents", "0073_alertmanager_incidents", "0074_contact_enquiry_revision",
         "0075_admin_user_review", "0076_admin_user_operations", ADMIN, PAID,
         PREVIOUS_HEAD, SUPPLIER, ALLOWANCE, SUPPLIER_ALLOWANCE, PAYMENT, HEAD,
+        STREAM, BOOTSTRAP, UBUNTU, FINAL_HEAD, CURRENT_HEAD,
     } <= head_revisions
     assert already_present not in head_revisions
 
@@ -143,7 +154,7 @@ def test_supplier_allowance_merge_has_no_business_sql_and_refuses_history_split(
     (HEAD, set()),
 ])
 def test_payment_merge_runs_only_missing_revisions(start, expected):
-    revisions = [step.revision.revision for step in SCRIPTS._upgrade_revs("head", start)]
+    revisions = [step.revision.revision for step in SCRIPTS._upgrade_revs(HEAD, start)]
     assert set(revisions) == expected and len(revisions) == len(expected)
     assert PAID not in revisions and ALLOWANCE not in revisions
     applied = {start} if isinstance(start, str) else set(start)
@@ -154,6 +165,48 @@ def test_payment_merge_runs_only_missing_revisions(start, expected):
 
 def test_payment_merge_has_no_business_sql_and_refuses_history_split():
     migration = import_module("Alembic.versions.0081_admin_payment_merge")
+    assert migration.upgrade() is None
+    with pytest.raises(RuntimeError, match="forward migration"):
+        migration.downgrade()
+
+
+ADMIN_BRANCH = {
+    "0071_connector_lifecycle", "0072_admin_incidents", "0073_alertmanager_incidents",
+    "0074_contact_enquiry_revision", "0075_admin_user_review", "0076_admin_user_operations",
+    ADMIN, PREVIOUS_HEAD, SUPPLIER, SUPPLIER_ALLOWANCE, HEAD,
+}
+
+
+@pytest.mark.parametrize("start,expected", [
+    (ALLOWANCE, ADMIN_BRANCH | {PAYMENT, STREAM, BOOTSTRAP, UBUNTU, FINAL_HEAD}),
+    (PAYMENT, ADMIN_BRANCH | {STREAM, BOOTSTRAP, UBUNTU, FINAL_HEAD}),
+    (BOOTSTRAP, ADMIN_BRANCH | {PAYMENT, UBUNTU, FINAL_HEAD}),
+    (UBUNTU, ADMIN_BRANCH | {FINAL_HEAD}),
+    (HEAD, {STREAM, BOOTSTRAP, UBUNTU, FINAL_HEAD}),
+    ((UBUNTU, HEAD), {FINAL_HEAD}),
+    (FINAL_HEAD, set()),
+])
+def test_ubuntu_admin_merge_runs_each_missing_revision_once(start, expected):
+    # This test pins the published 0082 merge; later additive revisions must
+    # not change its already-released history or expected branch traversal.
+    revisions = [step.revision.revision for step in SCRIPTS._upgrade_revs(FINAL_HEAD, start)]
+    assert set(revisions) == expected and len(revisions) == len(expected)
+    assert PAID not in revisions and ALLOWANCE not in revisions
+    applied = {start} if isinstance(start, str) else set(start)
+    assert not applied.intersection(revisions)
+    if revisions:
+        assert revisions[-1] == FINAL_HEAD
+
+
+@pytest.mark.parametrize("start,expected", [(FINAL_HEAD, [CURRENT_HEAD]), (CURRENT_HEAD, [])])
+def test_customer_support_repair_advances_head_without_replaying_history(start, expected):
+    revisions = [step.revision.revision for step in SCRIPTS._upgrade_revs("head", start)]
+    assert revisions == expected
+
+
+@pytest.mark.parametrize("module", ["0075_release_history_merge", "0082_ubuntu_admin_merge"])
+def test_ubuntu_merge_markers_have_no_business_sql_and_refuse_history_split(module):
+    migration = import_module("Alembic.versions." + module)
     assert migration.upgrade() is None
     with pytest.raises(RuntimeError, match="forward migration"):
         migration.downgrade()

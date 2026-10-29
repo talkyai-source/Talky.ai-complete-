@@ -1,0 +1,24 @@
+{
+  "observed_utc": "2026-10-28T13:33:25.062101+00:00",
+  "read_only": true,
+  "connection": {
+    "database_name": "talkyai",
+    "runtime_role": "talkyai",
+    "server_address": "172.19.0.2/32",
+    "server_port": 5432,
+    "tls": false,
+    "transaction_read_only": "on"
+  },
+  "schema_heads": [
+    "0081_admin_payment_merge"
+  ],
+  "runtime_role_flags": {
+    "rolsuper": false,
+    "rolcreatedb": true,
+    "rolcreaterole": true,
+    "rolbypassrls": false,
+    "rolreplication": true
+  },
+  "public_tables_owned_by_runtime": 123,
+  "status": "observed"
+}

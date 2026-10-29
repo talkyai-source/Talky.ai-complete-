@@ -2,9 +2,26 @@
 
 This package prepares a new Ubuntu 24.04 amd64 VM/server using the existing
 systemd backend, workers and C++ gateway, bare-metal Asterisk, Docker Redis,
-and an external PostgreSQL database. `external` frontend mode preserves the
-documented Vercel topology. `linux` builds and serves both frontends on this
-host. Choosing a mode does not move the existing production frontends.
+and an external PostgreSQL database. The example defaults to `linux`, which
+builds and serves both the dashboard and Admin on this host. Set
+`frontend_mode` to `external` to retain the documented Vercel topology.
+Choosing a mode does not move the existing production frontends.
+
+The tested release is `54665bdbe1ea074d23ecb3ab48d6f7bbf20b5aa6` on
+[PR 26](https://github.com/talkyai-source/Talky.ai-complete-/pull/26).
+[Ubuntu matrix 40691622408](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40691622408)
+passed fresh installation/reboot, a same-schema update/reboot, deliberate
+worker-failure recovery/reboot and refusal of code recovery after migration
+began. The [fresh-release guide](FRESH-RELEASE.md) binds the exact base, tested
+merge and limits. The combined backend is not deployed; this synthetic evidence
+does not establish paid-use or production-recovery acceptance.
+
+If an installation command fails, its bounded output is retained in a root-only
+`/var/lib/talky-install/command-failure-*.json` file. The terminal reports the
+private path and exit status, without printing command arguments, environment
+or tool output. Inspect it as the authorized host operator; tool output may
+contain credentials, so do not upload the raw file. The marked synthetic CI VM
+redacts its generated secrets before retaining any diagnostic excerpt.
 
 The default command is a read-only plan. It does not install packages, read
 secret inputs, access a database, contact a server, or make calls:
@@ -36,7 +53,7 @@ Required input | Contract
 `backend_env_file` | Mode 0600 regular dotenv file; no shell commands, duplicate keys or escapes. Runtime credentials only; `MIGRATION_DATABASE_URL` is rejected.
 `database_prepared` | Set true only after separate bootstrap/restore/migration and schema acceptance; installer performs no database migration or restore.
 `database_ca_file` | Trusted CA bundle copied to `/etc/ssl/certs/talky-db-ca.pem`; runtime DSN must specify that path and `sslmode=verify-full`.
-`python_requirements_lock` | Full Linux/Python 3.12 dependency closure, exact `==` versions and SHA256 hashes. No URLs, nested requirement includes, index directives or unresolved version ranges.
+`python_requirements_lock` | Full Linux/Python 3.12 dependency closure, exact `==` versions and SHA256 hashes. Standard string environment-marker comparisons joined by `and`/`or` are accepted, including the repository's Linux/x86_64 denoiser marker. No URLs, nested includes, index directives or unresolved version ranges.
 `apt_versions_file` | JSON mapping each name from `packages` to an exact Ubuntu package version. Review against the target Ubuntu repositories and preserve the package artifacts/mirror for later reproduction.
 `redis_image` | Approved Redis image tag with `@sha256:` manifest digest. No unpinned `latest` or tag-only input.
 `asterisk_config_directory` | Reviewed `.conf` files for the real carrier/PBX topology, including `asterisk.conf`, `pjsip.conf`, `extensions.conf`, `http.conf`, `ari.conf`, `rtp.conf`, `modules.conf`. Lab defaults are rejected.
@@ -82,7 +99,9 @@ separate read database needs its own role/TLS/schema/location qualification.
 Query parameters cannot override the database hostname, identity or SSL policy.
 For Linux frontends, start from the adjacent `dashboard.env.example` and
 `admin.env.example`. The installer checks production mode, the public API URL
-and disabled Admin development authentication before any changes.
+and disabled Admin development authentication before any changes. Builds use
+these reviewed environment files; exported variables from the invoking shell
+cannot override the API URL or enable development authentication in a bundle.
 
 Use distinct strong `JWT_SECRET`, `SECRET_KEY`, `INTERNAL_SERVICE_TOKEN`,
 `VOICE_GATEWAY_AUTH_TOKEN`, `TELEPHONY_METRICS_TOKEN`, a valid
@@ -97,24 +116,45 @@ Preserve the original `SECRETS_MASTER_KEY` and connector-encryption key when
 restoring customer data; generating replacement keys makes stored credentials
 unreadable. The installer neither generates nor rotates these keys.
 
-Production startup also requires a live `STRIPE_SECRET_KEY` and the Stripe SDK
-in the hash lock, unless `STRIPE_BILLING_DISABLED=1` explicitly acknowledges a
-non-billing environment. A set test key is refused even when that flag is set.
-Disabling billing does not complete the Stripe deliverable. Development guard
+Active billing requires the Stripe SDK in the hash lock and
+`STRIPE_WEBHOOK_SECRET`, with either a live `STRIPE_SECRET_KEY` or a test key
+plus the existing explicit `STRIPE_TEST_MODE_IN_PRODUCTION=1` acknowledgement.
+The latter takes no real payment and retains the application's test-checkout
+restrictions. `STRIPE_BILLING_DISABLED=1` acknowledges a non-billing environment
+and does not need a key or Stripe SDK. Mock billing is rejected when billing
+is active. These checks match the current application's production gate;
+test/disabled billing does not complete the paid billing deliverable. Development guard
 bypasses, staging transfer proof flags/scopes, weakened caller-ID enforcement
 and disabled strict tenant routing are refused before any host mutation. The
 actual application production gate runs again after package installation.
 
 In `asterisk.conf`, configure `runuser=asterisk`, `rungroup=asterisk`,
 `astctlpermissions=0660`, `astctlowner=asterisk` and `astctlgroup=asterisk` in
-their appropriate Asterisk sections. The installer creates the dedicated
+their appropriate Asterisk sections.
+If `astmoddir` is explicitly supplied, it must be
+`/usr/lib/x86_64-linux-gnu/asterisk/modules`, matching the supported Ubuntu
+24.04 amd64 package. Omit it to use Asterisk's compiled package default.
+The installer creates the dedicated
 `pjsip.d` directory with group inheritance and adds `talky` to `asterisk` so
 existing trunk generation and CLI reload can work without running the entire
-backend as root. `pjsip.conf` must include `#include pjsip.d/*.conf` and define
-the transports needed by the real trunks. Existing generated configs must be
-reconciled from the restored authoritative database through the application's
-supported lifecycle before controlled calls; the installer does not decrypt
-or fabricate customer trunks.
+backend as root. `pjsip.conf` must contain `#tryinclude pjsip.d/*.conf` and
+the reviewed shared endpoint and transports needed by the real carrier profile.
+The managed directory can legitimately be empty at first startup; a mandatory
+`#include` of that empty wildcard aborts Asterisk's PJSIP configuration load.
+Missing managed includes or arbitrary generated paths are refused.
+`extensions.conf` must contain
+`#tryinclude extensions.d/talky-inbound.conf`; this exact managed file is absent
+on first startup and loaded after the guarded reconciler creates it. Other
+generated dialplan directories or wildcards are not accepted by this profile.
+After Redis/Asterisk start, the installer synchronously runs the existing
+`reconcile_asterisk_release.sh` before starting application workers and enabling
+the periodic reconciler. Its candidate digest, writer lock, zero-active-channel
+check, runtime endpoint/dialplan proof and failure restoration remain intact.
+A refusal stops installation before a health-checked receipt; an active timer
+or Asterisk process alone is not acceptance. Desired trunks and routes come
+from the prepared authoritative database and reviewed carrier inventory;
+the installer does not fabricate customer trunks. Controlled calls remain a
+separate acceptance step.
 
 Writable application paths are `/opt/talky/backend/recordings`,
 `audio_files/storage`, `feedback_audio`, `logs`, `tmp`, `uploads`, and
@@ -128,10 +168,15 @@ Prepare the external database first using the separate recovery procedure.
 Preserve source, TLS material, keys and storage required by that environment.
 On the new VM, clone the reviewed repository and check out the full SHA.
 Place protected inputs outside `/opt/talky` and the source checkout. Verify DNS
-and the supplied certificate domain names before running:
+and the supplied certificate domain names before running. Enter the root shell
+with umask `0022` so the service account can read source directories; the
+installer refuses other masks before mutation and stages secrets as mode 0600:
 
 ```bash
-sudo bash install_talklee.sh apply \
+sudo -i
+umask 0022
+cd /path/to/clean/reviewed-checkout
+bash install_talklee.sh apply \
   --config /secure/talky/install.json \
   --source /path/to/clean/reviewed-checkout \
   --confirm-new-host
@@ -145,13 +190,20 @@ auto-start is inhibited until explicit configuration is installed.
 
 The script creates a `talky` system account; application processes run under
 it through systemd drop-ins. Redis binds only to host loopback and preserves
-data in its own Docker volume. Its credential is in a read-only container
+data in its own Docker volume. This fresh-host profile disables Docker's
+automatic bridge and firewall manipulation and runs only Redis with host
+networking, with Redis itself bound to `127.0.0.1`. It therefore does not add
+private bridge routes that could shadow an external database subnet. Existing
+Docker state or `/etc/docker/daemon.json` is refused before installation; this
+is not a reconfiguration path for an existing Docker host. Adding other
+containers needs a separate network/security review. Its credential is in a read-only container
 mount protected by the host's root-only `/etc/talky` directory, not in process
 arguments. PostgreSQL is never installed on this application host.
 
 Before starting application services, the installer connects using the runtime
 DB identity and rejects superuser/BYPASSRLS/CREATEDB/CREATEROLE roles, non-TLS connections and
-schema revisions that do not equal the checkout's Alembic heads. This is a
+role-switched sessions. Connection `options` overrides are refused, and
+`public.alembic_version` must equal the checkout's nonempty Alembic heads. This is a
 preflight, not a substitute for cross-tenant isolation acceptance.
 
 Success records `/var/lib/talky-install/receipt.json`, `apt-installed.tsv` and
@@ -165,26 +217,14 @@ cleanup or unsafe rerun. Correct the input and repeat on another empty VM.
 
 This bootstrap command is never an update command. Preserve the established
 freeze/drain, backup, compatible-schema and exact-commit release procedure.
-The new service-user profile requires gateway publication as `root:talky`
-mode 0750 and retention of `/etc/systemd/system/*.service.d` overrides.
-The existing `deploy_to_server.sh` hardcodes `root:admins`; qualify that
-ownership boundary before using it with this new profile.
-
-The bounded publication commands for an already-built candidate in the
-existing accepted freeze/drain procedure are:
-
-```bash
-# Only after the release's source, migration, backup and zero-call gates.
-# gateway_candidate must be the output of build_voice_gateway_release.sh
-# from the exact reviewed checkout, not an arbitrary old binary.
-sudo install -d -o root -g talky -m 0750 /opt/talky/runtime/bin
-sudo install -o root -g talky -m 0750 "$gateway_candidate" /opt/talky/runtime/bin/.voice_gateway.next
-sudo mv -f /opt/talky/runtime/bin/.voice_gateway.next /opt/talky/runtime/bin/voice_gateway
-```
-
-These commands only publish the compatible binary; they do not authorize or
-replace the remaining release procedure. Do not run the unchanged old deploy
-script on this profile and try to repair ownership after its restart.
+The [fresh-host release guide](FRESH-RELEASE.md) provides the separate
+`fresh_release.py` prepare, activate, recover and resume-schedules commands.
+It binds actual builds to the selected source, preserves the `talky` identity
+and installed overrides, and keeps schema-safe rollback separate from
+post-migration recovery. Its recorded same-schema update/recovery VM acceptance
+passed; actual customer releases still need their own operating evidence.
+The older `deploy_to_server.sh` continues to assume
+the `admins` host profile and must not be used unchanged on this host.
 
 Migrations use a required separate `/etc/talky/migration.env` file that the
 installer intentionally does not create. Before a later reviewed migration,
@@ -208,12 +248,21 @@ bash -n install_talklee.sh
 These checks cover plan isolation, destructive-entry guards, unsafe database
 URLs/roles, leaked migration credentials, dependency pins, network allow-list
 validation, Asterisk lab defaults/path traversal, secret-redacted errors,
-literal environment parsing and both proxy modes. Actual package installation,
-systemd startup, nginx/TLS, Docker volume permissions, Linux frontend builds,
-database access and calls still require the clean Ubuntu acceptance rehearsal.
+literal environment parsing and both proxy modes. The retained
+[blank Ubuntu acceptance](../../docs/sessions/2026-10-28-blank-ubuntu-acceptance.md)
+records actual package installation, Linux frontend builds, systemd startup,
+TLS, service identities, database routing and reboot for its exact source.
+Controlled calls, production recovery and independent operating handover remain
+separate acceptance requirements.
 
 Reference installation behavior was checked against the official
 [Docker Ubuntu installation documentation](https://docs.docker.com/engine/install/ubuntu/)
-and [Node release archive](https://nodejs.org/en/download/archive/v22.22.0).
+and [Node release archive](https://nodejs.org/en/download/archive/v22.23.4).
+The preparation helper now pins Node 22.23.4 for published security fixes.
+See the [runtime security assessment](../../docs/sessions/2026-10-28-node-runtime-security.md);
+the matching Node 22.23.4 frontend builds and actual running dashboard process
+passed the recorded matrix before and after reboot/update/recovery. Old receipts
+retain their original source/version scope; future runtime changes need new
+qualification.
 Ubuntu's `docker.io` / `docker-compose-v2` distribution packages are used here;
 do not mix them with Docker's separate `docker-ce` repository package family.

@@ -111,9 +111,15 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     -v "$PROM_RULES:/etc/prometheus/rules/telephony_ws_k_rules.yml:ro" \
     prom/prometheus:v2.54.1 \
     check rules /etc/prometheus/rules/telephony_ws_k_rules.yml >/dev/null
+  docker run --rm --network none \
+    --entrypoint /bin/promtool \
+    -v "$(dirname "$PROM_CONFIG"):/etc/prometheus:ro" \
+    --workdir /etc/prometheus \
+    prom/prometheus:v2.54.1 \
+    test rules /etc/prometheus/operational_signals_test.yml
   rm -f -- "$metrics_token_file"
   trap - EXIT
-  echo "[OK] promtool config and rules checks passed"
+  echo "[OK] promtool config, rules and operational fault scenarios passed"
 else
   echo "[WARN] Docker is unavailable/inaccessible; skipped promtool validation"
 fi

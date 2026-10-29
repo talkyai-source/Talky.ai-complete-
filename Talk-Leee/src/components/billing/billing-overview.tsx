@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { ErrorState } from "@/components/states/page-states";
 import { isApiClientError } from "@/lib/http-client";
+import { withSupportReference } from "@/lib/support-reference";
 import { formatPurchasedPrice, type BillingSubscription } from "@/lib/billing-purchase";
 import { formatMinorMoney, type BillingInvoice, type BillingUsage, type BillingLedgerEntry } from "@/lib/billing-read";
 import {
@@ -94,9 +95,9 @@ function formatDateRange(start: string | null | undefined, end: string | null | 
 /** The backend's own words where it gave any, never a cause we made up. */
 export function formatBillingError(err: unknown): string {
   if (isApiClientError(err)) {
-    if (err.status === 403) return "You do not have permission to view billing for this account.";
-    if (err.status === 401) return "Your session has expired.";
-    return err.message;
+    if (err.status === 403) return withSupportReference(err, "You do not have permission to view billing for this account.");
+    if (err.status === 401) return withSupportReference(err, "Your session has expired.");
+    return withSupportReference(err, err.message);
   }
   return err instanceof Error ? err.message : "The request did not complete.";
 }

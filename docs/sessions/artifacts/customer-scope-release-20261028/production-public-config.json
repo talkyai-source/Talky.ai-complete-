@@ -1,0 +1,16 @@
+{
+  "checked_at": "2026-10-28T11:31:59.686507+00:00",
+  "expected_source": "80b52743d8073d0b3ed07fb260c82add50088d6e",
+  "read_only": true,
+  "public_api_setting_preserved": true,
+  "public_api_url": "https://api.talkleeai.com/api/v1",
+  "deployments": [
+    {
+      "id": "dpl_3CuQmP8NmyUwEGryhmbJ9kCpsdYR",
+      "state": "READY",
+      "target": "production",
+      "url": "talkleeai-euwmnuw06-allestateestimation-9391s-projects.vercel.app",
+      "source": "80b52743d8073d0b3ed07fb260c82add50088d6e"
+    }
+  ]
+}

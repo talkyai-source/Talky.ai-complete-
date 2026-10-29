@@ -33,8 +33,8 @@ Those are occurrence/risk signals, not full backlog monitoring. The current
 application and checked-in Prometheus topology do **not** export the oldest
 unresolved billing-hold age, oldest stale-reservation age, incomplete recovery
 backlog, general ARI orphan backlog, PostgreSQL/Redis target or saturation
-metrics, application DB-pool pressure, CPU/cgroup memory saturation, or dialer
-queue depth. There are also no PostgreSQL, Redis, node, or cAdvisor exporters in
+metrics, application DB-pool pressure, CPU/cgroup memory saturation, or ready-list
+enqueue age. There are also no PostgreSQL, Redis, node, or cAdvisor exporters in
 the checked-in observability compose file. Rules for those names would be
 dead/aspirational, so they are intentionally absent.
 
@@ -53,6 +53,67 @@ equivalent measured collectors for every missing signal, approves numeric
 thresholds, validates the final Prometheus and Alertmanager configuration with
 the exact deployed binaries, and fires every release-critical alert through a
 real on-call destination.
+
+## Worker, queue and local-backup observations
+
+The authenticated backend `/metrics` additionally emits bounded observations
+from the existing Redis and backup paths. Each request builds fresh metric
+families, so an unavailable read removes the old measurement and emits
+`*_observation_success 0`. No tenant/job identifiers, payloads, archive paths or
+credentials appear in labels. `talky_operational_signal_contract 1` identifies
+this exporter contract; an older reachable target without it fires the missing
+signals rule. These observations do not depend on the canary evidence scope.
+
+- `talky_worker_heartbeat_healthy{worker}` reuses the existing dialer, voice and
+  reminder timestamp reader and 180-second freshness boundary. Missing keys
+  mean unhealthy; invalid/future timestamps and Redis failures mean unavailable.
+  A role heartbeat cannot inventory individual replicas or prove task progress.
+- `talky_queue_jobs{queue,state}` exposes dialer queue depth from actual list
+  lengths, the processing ZSET and scheduled ZSET; when Streams is selected,
+  its consumer group's lag/pending counts are also read. Acknowledged stream
+  history is excluded. List inventory stops at 25 SCAN pages/5,000 keys with a
+  three-second deadline and at most 100 outstanding length reads. Commands
+  are a bounded observation, not a cross-command atomic snapshot.
+- `talky_scheduled_queue_overdue_seconds` measures age past the earliest shared
+  scheduled-ZSET due score, zero for empty/future-only work. It is **not**
+  ready-list enqueue age: job creation timestamps cannot establish queue wait.
+  Deliberate campaign/quota deferral remains possible; inspect actual policy.
+- `talky_backup_*` reads the existing backup job's numeric timestamps and fixed
+  result from `/var/lib/talky/monitoring`. The job publishes outcome and prior
+  success together in one atomic JSON receipt. Failure, including rejected/shrunken archives, leaves the prior
+  successful timestamp intact. A started attempt without completion stays
+  running; interruption can therefore become a stuck-attempt alert. A successful
+  receipt requires the producer's verified archive publication; the legacy
+  Docker job also completes its existing retention step.
+  This proves neither restoration nor off-host durability, and cannot prove a
+  previously written archive has not subsequently been removed.
+
+Run scheduled backups through the existing single-instance systemd oneshot.
+The backup process owns the status directory (0755) and writes nonsecret receipt
+files (0644); archives remain in their existing private 0700 directory. A
+restricted API user needs traversal/read access only, never write access. For
+a different topology, set the same `TALKY_BACKUP_STATUS_DIR` in the backup unit
+and metrics API environment and arrange a trusted local read-only mount. Do
+not point a web process at the dump directory or invent a receipt from a timer
+configuration. Missing/malformed/unreadable receipts emit unavailable, not
+successful backup. No previous archive is automatically adopted as success.
+The existing external-database scheduled wrapper uses a dedicated
+`/var/lib/talklee-backup-monitoring` systemd StateDirectory and the same atomic
+receipt contract. Its API must set `TALKY_BACKUP_STATUS_DIR` to that actual
+producer's directory. See [database scheduling](../../scripts/database/README.md#scheduling-and-health)
+for ownership and the explicit fresh-installer binding; the optional schedule
+is not enabled or falsely marked successful by installation.
+
+Checked-in initial rules use one-minute worker/failure persistence, scheduled
+due age above five minutes for two minutes, daily-backup freshness above 36
+hours, and started-backup age above two hours. These are reviewable operating
+thresholds, **not an accepted SLO**. Confirm them against the designated schedule
+and workload. With the existing 180-second heartbeat threshold, 15-second rule
+evaluation, scrape cadence, one-minute persistence and receiver grouping,
+measure actual worker-death receipt against the proposed five-minute target.
+No delivery timing is claimed from source configuration. A missing receiver,
+stale/absent Prometheus process, muted route, backup mount failure and restart
+still require the existing OP09 controlled-fault acceptance.
 
 ## Security
 
@@ -281,8 +342,11 @@ reload alone may still read the old inode from an existing file bind mount.
   operator acknowledgement and recovery. Measure the worker-death target
   against heartbeat expiry, polling/retries, grouping and actual delivery.
   The existing healthwatch timer only logs/exits; it is not wired to this
-  adapter. Missing worker/provider/queue observations listed above remain
-  explicit acceptance gaps; do not add a second evaluator or imagined metrics.
+  adapter. Prometheus now reads the same role heartbeat keys directly through
+  authenticated `/metrics`; healthwatch remains an independent log signal.
+  Missing per-replica progress, ready-list enqueue age, provider coverage and
+  operating acceptance remain explicit; do not add a second evaluator or
+  imagined metrics.
 
 ## Validation
 

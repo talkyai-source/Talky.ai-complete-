@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 
+from app.domain.models.agent_config import AgentConfig, AgentGoal
 from app.domain.models.conversation import Message, MessageRole
 from app.domain.models.session import CallSession
 from app.domain.services.voice_pipeline_service import VoicePipelineService
@@ -174,8 +175,11 @@ async def provider_for(args, transport, key):
 
 async def run_case(row, args, provider):
     case = row["case"]
-    prompt = compose_prompt("customer_support", "Alex", "Fictional demonstration company", {},
-                            direction="inbound", knowledge_driven=True)
+    identity = AgentConfig(agent_name="Alex", company_name="Fictional demonstration company",
+        business_type="Synthetic customer support", goal=AgentGoal.INFORMATION_GATHERING)
+    direction = "inbound"
+    prompt = compose_prompt("customer_support", identity.agent_name, identity.company_name, {},
+                            direction=direction, knowledge_driven=True)
     history = []
     if case.get("previous_query"):
         history.append(Message(role=MessageRole.USER, content=case["previous_query"]))
@@ -186,8 +190,9 @@ async def run_case(row, args, provider):
     campaign = row["nodes"][0].get("campaign_id", "synthetic-source")
     session = CallSession(call_id="qualification-" + case["id"], tenant_id=tenant,
         campaign_id=campaign, lead_id="synthetic", provider_call_id="text-only", voice_id="synthetic",
-        system_prompt=prompt, knowledge_mode="retrieve", conversation_history=history,
+        system_prompt=prompt, agent_config=identity, knowledge_mode="retrieve", conversation_history=history,
         llm_temperature=args.temperature, llm_max_tokens=args.max_tokens, llm_model=args.model)
+    session._call_direction = direction
     session._voice_action_context_loaded = True
     session._voice_action_capabilities = {}
     session._knowledge_catalog = build_section_catalog(row["nodes"], tenant_id=session.tenant_id,

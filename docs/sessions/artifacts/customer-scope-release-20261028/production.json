@@ -1,0 +1,102 @@
+{
+  "checked_at": "2026-10-28T11:32:36.556742+00:00",
+  "read_only": true,
+  "expected_source": "80b52743d8073d0b3ed07fb260c82add50088d6e",
+  "domain": "talkleeai.com",
+  "project_id": "prj_zl23wGHqj7rhABA8UjP9KlUhZxLa",
+  "deployment_id": "dpl_3CuQmP8NmyUwEGryhmbJ9kCpsdYR",
+  "deployment_url": "talkleeai-euwmnuw06-allestateestimation-9391s-projects.vercel.app",
+  "ready_state": "READY",
+  "target": "production",
+  "git_source": "80b52743d8073d0b3ed07fb260c82add50088d6e",
+  "metadata_source": "80b52743d8073d0b3ed07fb260c82add50088d6e",
+  "alias_source_ready": true,
+  "status": "passed",
+  "http_checks": [
+    {
+      "path": "/",
+      "status": 200,
+      "redirect_host": null,
+      "redirect_path": "",
+      "expected": "public",
+      "passed": true,
+      "body_retained": false
+    },
+    {
+      "path": "/auth/login/",
+      "status": 200,
+      "redirect_host": null,
+      "redirect_path": "",
+      "expected": "public",
+      "passed": true,
+      "body_retained": false
+    },
+    {
+      "path": "/white-label/acme/preview/",
+      "status": 200,
+      "redirect_host": null,
+      "redirect_path": "",
+      "expected": "public",
+      "passed": true,
+      "body_retained": false
+    },
+    {
+      "path": "/white-label/dashboard/",
+      "status": 307,
+      "redirect_host": null,
+      "redirect_path": "/auth/login",
+      "expected": "login",
+      "passed": true,
+      "body_retained": false
+    },
+    {
+      "path": "/white-label/acme/tenants/",
+      "status": 307,
+      "redirect_host": null,
+      "redirect_path": "/auth/login",
+      "expected": "login",
+      "passed": true,
+      "body_retained": false
+    },
+    {
+      "path": "/white-label/acme/billing/",
+      "status": 307,
+      "redirect_host": null,
+      "redirect_path": "/auth/login",
+      "expected": "login",
+      "passed": true,
+      "body_retained": false
+    },
+    {
+      "path": "/white-label/acme/tenants/synthetic-local-id/agent-settings/",
+      "status": 307,
+      "redirect_host": null,
+      "redirect_path": "/auth/login",
+      "expected": "login",
+      "passed": true,
+      "body_retained": false
+    },
+    {
+      "path": "/white-label/acme/dashboard/",
+      "status": 307,
+      "redirect_host": null,
+      "redirect_path": "/auth/login",
+      "expected": "login",
+      "passed": true,
+      "body_retained": false
+    },
+    {
+      "path": "/white-label/acme/analytics/",
+      "status": 307,
+      "redirect_host": null,
+      "redirect_path": "/auth/login",
+      "expected": "login",
+      "passed": true,
+      "body_retained": false
+    }
+  ],
+  "limits": [
+    "Anonymous HTTP gates and source identity only; no owner login or business writes",
+    "No backend, database, deployment, alias or environment mutation"
+  ]
+}

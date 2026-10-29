@@ -30,6 +30,44 @@ under `telephony/`. See [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## Deploying
 
+### Fresh Ubuntu service identities
+
+The fresh-host profile in [INSTALLATION.md](../INSTALLATION.md) installs the API,
+workers, gateway and dashboard as `talky`, with root-owned source and binaries.
+Its migration and Asterisk reconciliation oneshots run as `root`, separate from
+application processes. Migration credentials belong in the operator-created
+`/etc/talky/migration.env`: a root-owned regular file with mode `0600` containing
+only `MIGRATION_DATABASE_URL`. The migration unit checks that identity, file
+metadata and loaded value before Alembic starts. Migrations have no boot
+enablement and must be invoked explicitly after the release gates pass.
+
+The installer enables the long-running `talky-trunk-status.service` and disables
+the retired trunk-status timer. It synchronously completes the guarded Asterisk
+release reconciliation before starting application workers or enabling
+`talky-asterisk-reconcile.timer`. The exact optional managed PJSIP include
+allows an empty generated directory during initial startup.
+Reconciliation still uses the existing database-derived desired-state check,
+writer lock, digest recheck and active-channel refusal before applying changes.
+The healthwatch timer is enabled. Legacy Docker database backup and carrier
+synthetic-call units retain the root operator identity, but their timers are
+not enabled by this installer; retention cleanup is also not enabled. Configure
+those operations separately with their required environment and policy inputs.
+
+Use the separate [fresh-host release guide](../scripts/installation/FRESH-RELEASE.md)
+for the new `talky` profile. It covers staged backend/gateway/frontend builds,
+artifact identity, preserved configuration/data, the existing drain contract,
+backup, migration and rollback boundaries. Candidate
+`54665bdbe1ea074d23ecb3ab48d6f7bbf20b5aa6` passed
+[Ubuntu matrix 40691622408](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40691622408):
+fresh installation/reboot, same-schema update/reboot, deliberate worker-failure
+recovery/reboot and refusal after a migration began and failed. Its exact tested
+merge/base and synthetic limits are recorded in that guide. The combined
+backend is published in PR 26 but not activated in production; no generic
+successful forward migration or off-host recovery is claimed. The deployment script below
+continues to target the older `admins` host layout.
+
+### Existing production host
+
 The **only** supported path. Do not rsync source onto prod — that is what made
 the box silently diverge from git in the past.
 

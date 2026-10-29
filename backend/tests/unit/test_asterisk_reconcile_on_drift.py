@@ -33,7 +33,9 @@ def _find_bash() -> str | None:
 
 
 def _shell_path(path: Path | str) -> str:
-    resolved = str(Path(path).resolve()).replace("\\", "/")
+    # Preserve the venv interpreter symlink; resolving it selects system Python
+    # and drops the installed dotenv parser from this real subprocess fixture.
+    resolved = os.path.abspath(path).replace("\\", "/")
     if os.name == "nt" and len(resolved) >= 3 and resolved[1:3] == ":/":
         return f"/{resolved[0].lower()}{resolved[2:]}"
     return resolved
@@ -43,15 +45,19 @@ def _blocked(error: str) -> str:
     return json.dumps({"mode": "check", "status": "blocked", "error": error})
 
 
-def run(tmp_path: Path, *, check_status: int, check_out: str, apply_status: int = 0, apply_out: str = "{}"):
+def run(tmp_path: Path, *, check_status: int, check_out: str, apply_status: int = 0, apply_out: str = "{}",
+        profile: str = "TALKY_STUB=1\n", expected_url: str = "", expected_literal: str = ""):
     bash = _find_bash()
     if not bash:
         pytest.skip("Bash is required for the reconcile timer script")
-    (tmp_path / ".env").write_text("TALKY_STUB=1\n", encoding="utf-8")
+    (tmp_path / ".env").write_text(profile, encoding="utf-8")
     log = tmp_path / "calls.log"
     check = tmp_path / "check.py"
     check.write_text(
         "import os, sys\n"
+        "if os.environ.get('EXPECTED_URL'):\n"
+        " assert os.environ.get('DATABASE_URL') == os.environ['EXPECTED_URL']\n"
+        " assert os.environ.get('LITERAL_VALUE') == os.environ['EXPECTED_LITERAL']\n"
         "open(os.environ['STUB_LOG'], 'a').write('check\\n')\n"
         "sys.stdout.write(os.environ['STUB_CHECK_OUT'])\n"
         "sys.exit(int(os.environ['STUB_CHECK_STATUS']))\n",
@@ -59,7 +65,9 @@ def run(tmp_path: Path, *, check_status: int, check_out: str, apply_status: int 
     )
     apply = tmp_path / "apply.sh"
     apply.write_text(
-        '#!/bin/bash\necho apply >> "$STUB_LOG"\nprintf \'%s\' "$STUB_APPLY_OUT" >&2\nexit "$STUB_APPLY_STATUS"\n',
+        '#!/bin/bash\nif [ -n "$EXPECTED_URL" ]; then\n'
+        '  [ "$DATABASE_URL" = "$EXPECTED_URL" ] && [ "$LITERAL_VALUE" = "$EXPECTED_LITERAL" ] || exit 97\nfi\n'
+        'echo apply >> "$STUB_LOG"\nprintf \'%s\' "$STUB_APPLY_OUT" >&2\nexit "$STUB_APPLY_STATUS"\n',
         encoding="utf-8", newline="\n",
     )
     env = {
@@ -74,6 +82,8 @@ def run(tmp_path: Path, *, check_status: int, check_out: str, apply_status: int 
         "STUB_CHECK_STATUS": str(check_status),
         "STUB_APPLY_OUT": apply_out,
         "STUB_APPLY_STATUS": str(apply_status),
+        "EXPECTED_URL": expected_url,
+        "EXPECTED_LITERAL": expected_literal,
     }
     result = subprocess.run([bash, _shell_path(SCRIPT)], env=env, capture_output=True, text=True, timeout=60)
     calls = log.read_text(encoding="utf-8").split() if log.exists() else []
@@ -120,6 +130,18 @@ def test_a_failed_apply_fails_loudly(tmp_path):
                         apply_out=json.dumps({"mode": "apply", "status": "blocked", "error": "Asterisk did not accept the candidate"}))
     assert result.returncode == 2 and calls == ["check", "apply"]
     assert "apply FAILED" in result.stderr and "did not accept" in result.stderr
+
+
+def test_tls_url_and_shell_metacharacters_are_literal_in_check_and_apply(tmp_path):
+    marker = tmp_path / 'must-not-execute'
+    literal = "$(touch '" + _shell_path(marker) + "')"
+    url = 'postgresql://fixture:private@db.invalid/db?sslmode=verify-full&sslrootcert=/protected/ca.pem'
+    result, calls = run(tmp_path, check_status=1, check_out=json.dumps(DRIFT),
+                        profile=f'DATABASE_URL={url}\nLITERAL_VALUE={literal}\n',
+                        expected_url=url, expected_literal=literal)
+    assert result.returncode == 0 and calls == ['check', 'apply']
+    assert not marker.exists()
+    assert url not in result.stdout + result.stderr
 
 
 def test_the_timer_runs_the_script_every_minute_and_install_enables_it():
