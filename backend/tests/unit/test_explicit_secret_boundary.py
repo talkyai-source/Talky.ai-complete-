@@ -359,13 +359,28 @@ async def test_scope_exclusions_cannot_retain_large_length_values_or_bracket_pas
     svc, conn = TranscriptService(), _FakeConn()
     turn = svc.accumulate_turn("synthetic", "user", offered + " " + CONTACT, is_final=True)
     assert turn.content == offered.replace(secret, MARKER) + " " + CONTACT
+    # Reproduce the CI collision: the generated clock legitimately contains
+    # "042" while the caller's CVV must be absent from every stored text field.
+    turn.timestamp = "2026-10-29T19:11:27.830420"
     assert await svc.save_transcript("synthetic", db_pool=_FakePool(conn),
         tenant_id="00000000-0000-0000-0000-0000000000b1")
-    writes = [args for sql, args in conn.executed
+    writes = [(sql, args) for sql, args in conn.executed
               if sql.startswith("UPDATE calls SET transcript=") or sql.startswith("UPDATE transcripts")]
     assert len(writes) == 2
-    for args in writes:
-        assert secret not in str(args) and CONTACT in str(args)
+    for sql, args in writes:
+        if sql.startswith("UPDATE calls SET transcript="):
+            plaintext, serialized_turns = args[:2]
+        else:
+            serialized_turns, plaintext = args[:2]
+        turns = json.loads(serialized_turns)
+        assert len(turns) == 1 and turns[0]["content"] == turn.content
+        assert turns[0]["timestamp"] == turn.timestamp
+        # Exclude only the generated timestamp. All other persisted turn data,
+        # including original content, revisions and metadata, stays in scope.
+        turn_payload = json.dumps([{key: value for key, value in item.items()
+                                   if key != "timestamp"} for item in turns])
+        for persisted_text in (plaintext, turn_payload):
+            assert secret not in persisted_text and CONTACT in persisted_text
 
 
 @pytest.mark.parametrize("count", [1, 6, 12, 16, 32, 64])

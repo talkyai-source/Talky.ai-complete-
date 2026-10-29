@@ -1,0 +1,51 @@
+{
+  "run_id": 40937477959,
+  "run_url": "https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40937477959",
+  "requested_head_sha": "523db18b2a7558e03e7470866b9e329f108bd9ef",
+  "tested_checkout_sha": "430415bc7a8471ef49d238922464409dc5435b3d",
+  "tested_checkout_parents": [
+    "0ef59596e9f6e46aea4050fc99e6ff202c6f9da3",
+    "523db18b2a7558e03e7470866b9e329f108bd9ef"
+  ],
+  "tested_tree_sha": "6ed40d05df0232e3afb74c98393ff6863033915e",
+  "requested_head_tree_sha": "6ed40d05df0232e3afb74c98393ff6863033915e",
+  "tree_identity_verified_by_github_git_api_and_local_git": true,
+  "recovery_status": "passed",
+  "grants_status": "passed",
+  "source_worktree_dirty": false,
+  "schema_heads": [
+    "0083_customer_support_contracts"
+  ],
+  "canonical_table_count": 117,
+  "restored_table_count": 117,
+  "record_fingerprints_equal": true,
+  "sequences_equal": true,
+  "parsed_schema_fingerprints_equal": true,
+  "runtime_profile": "canonical-0083",
+  "preserved_profile": "production-0083-preserved-20261029",
+  "production_accessed": false,
+  "owned_resources_removed": true,
+  "native_junit": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "0",
+    "tests": "18",
+    "time": "9.774",
+    "timestamp": "2026-10-29T19:10:10.661529",
+    "hostname": "runnervm48cm3"
+  },
+  "scope_limits": [
+    "not off-host survivability, retention/PITR, RPO/RTO, or alert-delivery acceptance",
+    "no application lifespan, provider, payment, call, or recording/encryption-key recovery",
+    "runtime data-operation checks cover campaigns, leads and calls; grants are fixture-specific",
+    "schema equality compares PostgreSQL-parsed definitions, not byte-identical pre-restore expression rendering"
+  ],
+  "artifact_sha256": {
+    "canonical-runtime-grants.json": "f3137d56670ecb96cda9ae05e92e1faeed04310794c88c1efc0953e51efd8169",
+    "canonical-tls-recovery.json": "664ca08de1ecd082ef95de28e0c5e60f57b2550ea59b55cdc9874caacb5fb035",
+    "customer-support-contracts.xml": "5fd7399dc537fde5a049c8744d70d62f2c6907e4248d11d774b837a773737e1c",
+    "local-customer-support-0083-pg.xml": "08fd5a557aff4aea566990de723c7d18a74d2b4945a7bc08c9e35a8015c48397",
+    "local-customer-support-preserved-pg.xml": "7a7178f25e788473dc64dfb5a4997a63c14696b11c96f2efd2cb872f081a3d6b"
+  }
+}

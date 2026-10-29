@@ -16,7 +16,7 @@ async def test_forgot_password_does_not_claim_email_was_sent(monkeypatch, exists
             'id': '00000000-0000-4000-8000-000000000001',
             'password_hash': 'synthetic-stored-generation',
         } if exists else None))
-    redis = SimpleNamespace(incr=AsyncMock(return_value=1), expire=AsyncMock(), setex=AsyncMock())
+    redis = SimpleNamespace(eval=AsyncMock(return_value=1), setex=AsyncMock())
     sender = SimpleNamespace(send_password_reset_email=AsyncMock(return_value=sent))
     audit = SimpleNamespace(log=AsyncMock())
     monkeypatch.setattr(reset, 'acquire_with_tenant', connection)
@@ -25,9 +25,15 @@ async def test_forgot_password_does_not_claim_email_was_sent(monkeypatch, exists
     monkeypatch.setattr(reset, 'get_client_ip', lambda _: '127.0.0.1')
     monkeypatch.setattr(reset, 'get_user_agent', lambda _: 'synthetic')
     result = await reset.forgot_password(None, reset.ForgotPasswordRequest(email='synthetic@example.com'), SimpleNamespace(pool=None), audit)
+    redis.eval.assert_awaited_once_with(
+        reset._CLAIM_RESET_SEND, 1, reset._reset_rate_limit_key('synthetic@example.com'),
+        reset._RESET_RATE_LIMIT_WINDOW_SECONDS,
+    )
     assert 'has been sent' not in result['message']
     assert 'delivered' not in result['message']
     if exists:
+        sender.send_password_reset_email.assert_awaited_once()
+        audit.log.assert_awaited_once()
         assert 'emailed' not in audit.log.call_args.kwargs['description']
     else:
         sender.send_password_reset_email.assert_not_awaited()

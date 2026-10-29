@@ -79,11 +79,27 @@ audit with pip-audit 2.10.1 found no known vulnerabilities, and all 15 installer
 preparation/provenance checks passed. These results do not replace clean
 runtime compatibility tests or exact-candidate Ubuntu acceptance.
 
+Retained receipts: [package metadata and lock review](artifacts/customer-support-20261029/langgraph-patch-metadata.json),
+[local audited dependency inventory](artifacts/customer-support-20261029/patched-runtime-lock-audit.json),
+and [first-candidate TLS manifest](artifacts/customer-support-20261029/first-candidate-tls-manifest.json).
+The manifest hashes identify original downloaded CI artifacts, before any
+Git text newline conversion; the linked run retains those full artifacts.
+
 The earlier TLS workflow, run 40937477959, retained 18 native PostgreSQL
 acceptance checks with no failures or skips, canonical 117-table recovery,
 and canonical/preserved-inventory restricted-role verification. It used
 synthetic databases on separate TLS containers on one runner. It does not
 qualify off-host production disaster recovery or the patched candidate.
+
+The same candidate's full backend suite reported 15,737 passed, 288 skipped
+and three failed tests. One confidentiality assertion accidentally searched
+generated timestamp digits as if they were user content. Two recovery tests
+used the former non-atomic Redis fake, which correctly caused the new limiter
+to refuse the send. The fixtures were corrected without weakening runtime
+privacy or fail-closed behavior; the complete corrected suite must pass on
+the replacement candidate. The fast voice suite passed separately.
+The corrected secret-boundary, reset-truth and atomic send-limit modules
+passed all 96 focused checks locally before resubmission.
 
 ## Operating acceptance still required
 

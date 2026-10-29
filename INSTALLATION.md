@@ -114,7 +114,7 @@ actually live, and prove recovery after loss of the application server.
    selected commit; historical prose can name an older head. Separate
    migration and runtime roles also need reviewed grants and runtime access
    checks, not just matching revision numbers. For the supported dedicated
-   PostgreSQL 16 canonical-0082 profile, use the reviewed
+   PostgreSQL 16 canonical-0083 profile, use the reviewed
    [runtime grants procedure](scripts/database/RUNTIME_GRANTS.md) and retain
    successful real runtime-login verification before starting services.
 3. Use the preparation helper to copy the matching release's Linux/Python 3.12
