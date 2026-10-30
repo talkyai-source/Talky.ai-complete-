@@ -306,6 +306,11 @@ _RULES: list[tuple[str, IssueAdvice]] = [
         "Another campaign of this account just placed a call; campaigns take turns so only one call originates at a time — no action needed.",
         "info", "pacing",
     )),
+    ("destination_busy", IssueAdvice(
+        "Number already on a call",
+        "This number is on another call from this account (another campaign or attempt). It dials automatically as soon as that call ends — no action needed.",
+        "info", "pacing",
+    )),
     ("call_guard_queued", IssueAdvice(
         "Waiting for a free slot",
         "The call is queued behind the account's rate limiter and will dial automatically when a slot frees up.",

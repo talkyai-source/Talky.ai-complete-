@@ -127,6 +127,19 @@ class FakeConn:
                 "status": "initiated",
                 "provider_call_id": None,
             }
+        if "REGEXP_REPLACE(COALESCE(PHONE_NUMBER" in upper:
+            # The dialer's busy-number check: another live call of this tenant
+            # on the same digits, other than this exact attempt.
+            tenant, _horizon, terminal, digits, job_id, attempt = args
+            for row in self._db.rows:
+                same_attempt = (str(row.get("dialer_job_id")) == str(job_id)
+                                and row.get("dialer_attempt_number") == attempt)
+                row_digits = "".join(ch for ch in str(row.get("phone_number") or "") if ch.isdigit())
+                if (str(row.get("tenant_id")) == str(tenant) and not same_attempt
+                        and str(row.get("status") or "").lower() not in terminal
+                        and row_digits in digits):
+                    return {"id": row["id"]}
+            return None
         raise AssertionError(f"unsupported fetchrow in test double: {q}")
 
 

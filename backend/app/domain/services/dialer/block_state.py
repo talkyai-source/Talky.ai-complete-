@@ -90,6 +90,7 @@ _TITLES: dict[BlockCode, str] = {
     BlockCode.TENANT_GAP: "Taking turns with another campaign",
     BlockCode.CALL_GUARD_THROTTLED: "Call rate limit reached",
     BlockCode.CALL_GUARD_QUEUED: "Queued behind the rate limiter",
+    BlockCode.DESTINATION_BUSY: "Number already on a call",
 }
 
 
