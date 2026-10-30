@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronDown, PhoneCall, Sparkles, Moon, Sun, X, Headphones, BadgeCheck } from "lucide-react";
+import { ChevronDown, Moon, Sun, X } from "lucide-react";
 import { useTheme } from "@/components/providers/theme-provider";
 import { useAuth } from "@/lib/auth-context";
 import { postAuthDashboard } from "@/lib/post-auth-navigation";
 import { industryNavItems } from "@/Industries/industries";
+import { productNavItems, useCaseNavItems } from "@/lib/products-use-cases";
 
 // Mirrors the w-[680px]/w-[345px]/w-[520px] widths on `dropdownWidthClass` below exactly —
 // used only to compute the edge-clamp offset, never applied as an actual width itself.
@@ -128,46 +129,8 @@ export function Navbar() {
   const menuItems = useMemo(() => {
     return [
       { label: "Home", href: "/" },
-      {
-        label: "Products",
-        items: [
-          {
-            label: "AI Voice Dialer",
-            href: "/ai-voice-dialer",
-            description: "Automate calls, emails, and workflows with human-like voice agents.",
-            icon: PhoneCall,
-          },
-          {
-            label: "AI Assist",
-            href: "/ai-assist",
-            description: "Real-time guidance, call insights, and automated follow-ups for teams.",
-            icon: Sparkles,
-          },
-          {
-            label: "AI Voice Agent",
-            href: "/ai-voice-agent",
-            description: "Smarter conversations with natural dialogue and seamless handoffs.",
-            icon: Bot,
-          },
-        ],
-      },
-      {
-        label: "Use Cases",
-        items: [
-          {
-            label: "Customer Services & Support",
-            href: "/use-cases/customer-services-support",
-            description: "Deliver faster resolutions and consistent support with AI-powered conversations.",
-            icon: Headphones,
-          },
-          {
-            label: "Automated Lead Qualification",
-            href: "/use-cases/automated-lead-qualification",
-            description: "Engage, score, and route leads instantly so reps focus on high-intent prospects.",
-            icon: BadgeCheck,
-          },
-        ],
-      },
+      { label: "Products", items: [...productNavItems] },
+      { label: "Use Cases", items: [...useCaseNavItems] },
       { label: "Industries", items: [...industryNavItems] },
       { label: "Pricing", href: "/pricing" },
       { label: "Contact Us", href: "/contact" },

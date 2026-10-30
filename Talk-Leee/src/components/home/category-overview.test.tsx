@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
 import test, { afterEach } from "node:test";
 import React from "react";
 import { cleanup, render } from "@testing-library/react";
@@ -10,6 +8,7 @@ import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.share
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { AuthProvider } from "@/lib/auth-context";
 import { industryNavItems } from "@/Industries/industries";
+import { productNavItems, useCaseNavItems } from "@/lib/products-use-cases";
 import ProductsPage, { metadata as productsMetadata } from "@/app/products/page";
 import UseCasesPage, { metadata as useCasesMetadata } from "@/app/use-cases/page";
 import IndustriesPage, { metadata as industriesMetadata } from "@/app/industries/page";
@@ -38,24 +37,11 @@ function renderPublic(pathname: string, ui: React.ReactElement) {
     );
 }
 
-// The navbar's dropdown definitions are the single source of the Products and
-// Use Cases copy; the pages repeat it because the navbar builds its menu inside
-// a Client Component. Every label, href and description a page renders must
-// equal that source, character for character, in the same order.
-const navbarSource = fs.readFileSync(path.join(process.cwd(), "src/components/home/navbar.tsx"), "utf8");
-
+// The shared modules (Industries/industries.ts, lib/products-use-cases.ts)
+// are the single source of each category's items; the navbar dropdowns and these
+// pages both read from them. Every label, href and description a page renders
+// must equal that source, character for character, in the same order.
 type Expected = { label: string; href: string; description: string };
-
-const navbarItems = (section: "Products" | "Use Cases"): Expected[] => {
-    const start = navbarSource.indexOf(`label: "${section}"`);
-    const end = navbarSource.indexOf("],", start);
-    const block = navbarSource.slice(start, end);
-    return [...block.matchAll(/label: "([^"]+)",\s*href: "([^"]+)",\s*description: "([^"]+)"/g)].map((m) => ({
-        label: m[1],
-        href: m[2],
-        description: m[3],
-    }));
-};
 
 const cases: Array<{
     pathname: string;
@@ -64,8 +50,8 @@ const cases: Array<{
     title: unknown;
     expected: Expected[];
 }> = [
-    { pathname: "/products/", Page: ProductsPage, heading: "Products", title: productsMetadata.title, expected: navbarItems("Products") },
-    { pathname: "/use-cases/", Page: UseCasesPage, heading: "Use Cases", title: useCasesMetadata.title, expected: navbarItems("Use Cases") },
+    { pathname: "/products/", Page: ProductsPage, heading: "Products", title: productsMetadata.title, expected: [...productNavItems] },
+    { pathname: "/use-cases/", Page: UseCasesPage, heading: "Use Cases", title: useCasesMetadata.title, expected: [...useCaseNavItems] },
     { pathname: "/industries/", Page: IndustriesPage, heading: "Industries", title: industriesMetadata.title, expected: [...industryNavItems] },
 ];
 
