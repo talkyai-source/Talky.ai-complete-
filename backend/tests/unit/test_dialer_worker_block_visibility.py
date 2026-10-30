@@ -281,6 +281,8 @@ async def test_override_is_stamped_on_the_call_record(monkeypatch):
 
         async def fetchrow(self, sql, *args):
             executed.append((sql, args))
+            if "regexp_replace" in sql:
+                return None  # no other live call on this number
             if "INSERT INTO calls" in sql:
                 return {
                     "id": args[0],
@@ -339,6 +341,8 @@ async def test_normal_call_record_carries_no_override_marker():
 
         async def fetchrow(self, sql, *args):
             executed.append((sql, args))
+            if "regexp_replace" in sql:
+                return None  # no other live call on this number
             if "INSERT INTO calls" in sql:
                 return {
                     "id": args[0],

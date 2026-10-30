@@ -277,6 +277,7 @@ jobs:
             tests/integration/test_op05_active_job_migration.py \
             tests/integration/test_op05_pre_attempt_holds.py \
             tests/integration/test_op05_pacing_holds.py \
+            tests/integration/test_dialer_destination_busy_pg.py \
             tests/integration/test_dnc_schema_migration.py \
             tests/integration/test_op07_native_dnc.py \
             tests/integration/test_dnc_settlement_truth.py \

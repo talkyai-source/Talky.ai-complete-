@@ -74,6 +74,17 @@ class ComplianceLookupUnavailable(RuntimeError):
     """
 
 
+class DestinationBusy(RuntimeError):
+    """This tenant already has a live call on the job's number (another
+    campaign, or another attempt). Raised before any durable row is written, so
+    the job waits on the same attempt; two campaigns never ring one person at
+    the same time."""
+
+    def __init__(self, call_id: str):
+        super().__init__(f"destination already on live call {call_id}")
+        self.call_id = call_id
+
+
 class AttemptSettledFailed(RuntimeError):
     """A replay found its attempt already settled FAILED without an answer by
     the bridge (provider absence proven, no call-end finalizer involved), so no
@@ -205,6 +216,8 @@ class DialerWorker:
     POLL_INTERVAL = 1.0  # Seconds between queue checks when empty
     # Re-defer delay when a pre-dial compliance lookup fails (never a tight loop).
     COMPLIANCE_LOOKUP_REDEFER_SECONDS = 30
+    # Re-defer delay while the number is on another live call of this tenant.
+    DESTINATION_BUSY_REDEFER_SECONDS = 60
     SCHEDULED_CHECK_INTERVAL = 60  # Seconds between scheduled job checks
     MAX_CONSECUTIVE_ERRORS = 10
 
@@ -1229,6 +1242,23 @@ class DialerWorker:
 
             await finish_critical_handoff(recovery)
             raise
+        except DestinationBusy as exc:
+            # Nothing was written or dialled: give the pacing slot back and
+            # wait on the same attempt until the other call on this number ends.
+            logger.info(
+                "dialer_destination_busy job=%s attempt=%s campaign=%s live_call=%s",
+                job.job_id, job.attempt_number, job.campaign_id, exc.call_id,
+            )
+            await release_tenant_dial_slot(self._redis, job.tenant_id)
+            await self._publish_block(
+                job, "destination_busy", rules=rules,
+                retry_after_seconds=self.DESTINATION_BUSY_REDEFER_SECONDS,
+            )
+            await self._redefer_before_intent_resolution(
+                job, reason="destination_busy",
+                delay_seconds=self.DESTINATION_BUSY_REDEFER_SECONDS,
+            )
+            return
         except ComplianceLookupUnavailable as exc:
             # Fail CLOSED: a compliance gate (calling window, campaign
             # schedule, lead cooldown, daily cap) could not be evaluated, so
@@ -2540,6 +2570,53 @@ class DialerWorker:
             return None
         return self._validated_existing_call_intent(job, existing)
 
+    # A call row this old is no longer live even if a lost callback left it
+    # non-terminal; it must not keep a number blocked for ever.
+    LIVE_CALL_HORIZON_MINUTES = 120
+
+    async def _live_call_on_destination(self, conn, job: DialerJob) -> Optional[str]:
+        """Return the id of this tenant's live call on the job's number, if any.
+
+        Runs inside the intent transaction under a per-(tenant, number)
+        transaction lock, so two workers dialling the same person for two
+        campaigns serialize here: the second sees the first's committed row.
+        The job's own attempt (a crash replay) never counts as busy.
+        """
+        from app.domain.services.call_status import TERMINAL_CALL_STATUSES
+        from app.domain.services.phone_number_normalizer import normalize_e164_digits
+
+        raw = "".join(ch for ch in str(job.phone_number or "") if ch.isdigit())
+        normalized = normalize_e164_digits(str(job.phone_number or "")).lstrip("+")
+        forms = {f for f in (raw, normalized) if f}
+        forms |= {f[1:] for f in forms if len(f) == 11 and f.startswith("1")}
+        if not forms:
+            return None
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            f"dial-destination:{job.tenant_id}:{normalized or raw}",
+        )
+        row = await conn.fetchrow(
+            """
+            SELECT id
+              FROM calls
+             WHERE tenant_id = $1::uuid
+               AND created_at > NOW() - make_interval(mins => $2)
+               AND lower(coalesce(status, '')) <> ALL($3::text[])
+               AND regexp_replace(coalesce(phone_number, ''), '[^0-9]', '', 'g') = ANY($4::text[])
+               AND NOT (dialer_job_id IS NOT DISTINCT FROM $5::uuid
+                        AND dialer_attempt_number IS NOT DISTINCT FROM $6)
+             ORDER BY created_at DESC
+             LIMIT 1
+            """,
+            str(job.tenant_id),
+            self.LIVE_CALL_HORIZON_MINUTES,
+            [*TERMINAL_CALL_STATUSES, "termination_pending"],
+            sorted(forms),
+            str(job.job_id),
+            int(job.attempt_number),
+        )
+        return str(row["id"]) if row is not None else None
+
     async def _create_call_intent(self, job: DialerJob) -> DialerCallIntent:
         """Commit or load the one durable row for this exact dial attempt.
 
@@ -2559,6 +2636,9 @@ class DialerWorker:
             retry_identity["agent_name"] = job.agent_name
         try:
             async with self._acquire_db() as conn:
+                busy_call = await self._live_call_on_destination(conn, job)
+                if busy_call is not None:
+                    raise DestinationBusy(busy_call)
                 inserted = await conn.fetchrow(
                     """
                     INSERT INTO calls (
@@ -2693,6 +2773,8 @@ class DialerWorker:
                 if existing is None:
                     raise RuntimeError("idempotency winner is not tenant-visible")
                 return self._validated_existing_call_intent(job, existing)
+        except DestinationBusy:
+            raise
         except Exception as exc:
             logger.error(
                 "durable_call_intent_failed job=%s attempt=%s err=%s",

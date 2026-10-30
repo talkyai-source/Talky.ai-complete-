@@ -50,7 +50,7 @@ async def get_leads(
     try:
         capped = max(1, min(int(limit or 25), 100))
         query = db_client.table("leads").select(
-            _LEAD_LIST_COLS, count="exact"
+            _LEAD_LIST_COLS + ", campaign_id", count="exact"
         ).eq("tenant_id", tenant_id).neq("status", "deleted")
 
         if campaign_id:
@@ -139,7 +139,7 @@ async def _resolve_leads_by_name(
         try:
             r = (
                 db_client.table("leads")
-                .select(_LEAD_LIST_COLS + ", qualified_call_id")
+                .select(_LEAD_LIST_COLS + ", campaign_id, qualified_call_id")
                 .eq("tenant_id", tenant_id)
                 .neq("status", "deleted")
                 .ilike(col, f"%{name}%")
@@ -169,7 +169,7 @@ async def get_lead_followup(
     so the assistant can ask which one.
     """
     try:
-        select_cols = _LEAD_LIST_COLS + ", qualified_call_id"
+        select_cols = _LEAD_LIST_COLS + ", campaign_id, qualified_call_id"
         if lead_id:
             resp = (
                 db_client.table("leads").select(select_cols)
@@ -198,6 +198,7 @@ async def get_lead_followup(
                         "id": r["id"],
                         "name": _full_name(r),
                         "phone_number": r.get("phone_number"),
+                        "campaign_id": r.get("campaign_id"),
                         "is_lead": r.get("is_lead", False),
                     }
                     for r in rows[:10]

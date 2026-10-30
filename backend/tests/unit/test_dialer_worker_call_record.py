@@ -27,6 +27,8 @@ class _Conn:
         self.queries.append((" ".join(query.split()), args))
         if self.fail:
             raise RuntimeError("db down")
+        if "regexp_replace" in query:
+            return None  # no other live call on this number
         return {
             "id": args[0],
             "talklee_call_id": args[5],

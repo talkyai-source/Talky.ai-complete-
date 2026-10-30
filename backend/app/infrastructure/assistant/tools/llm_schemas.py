@@ -19,11 +19,12 @@ GROQ_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_dashboard_stats",
-            "description": "Get today's call statistics - total calls, success rate, active campaigns",
+            "description": "Call statistics for one day - total calls, success rate, active campaigns. Pass campaign_id when the user asks about one campaign; without it the numbers cover every campaign in the account.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "date": {"type": "string", "description": "Date in YYYY-MM-DD format, defaults to today"}
+                    "date_str": {"type": "string", "description": "Date in YYYY-MM-DD format, defaults to today"},
+                    "campaign_id": {"type": "string", "description": "Only this campaign's calls (id from get_campaigns)"}
                 },
                 "required": []
             }
@@ -171,11 +172,12 @@ GROQ_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_campaigns",
-            "description": "Get all campaigns with status and progress",
+            "description": "Find the account's campaigns with status and progress. Use name to find the campaign the user means and get its campaign_id; list every campaign only when the user asks for a list.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "status": {"type": "string", "description": "Filter by status (draft, running, completed)"}
+                    "status": {"type": "string", "description": "Filter by status (draft, running, completed)"},
+                    "name": {"type": "string", "description": "Part of the campaign name the user said"}
                 },
                 "required": []
             }
@@ -185,12 +187,13 @@ GROQ_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_recent_calls",
-            "description": "Get recent calls with outcomes",
+            "description": "Get recent calls with outcomes; each call names its campaign. Pass campaign_id when the user asks about one campaign.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "today_only": {"type": ["boolean", "string"], "description": "Only show today's calls", "default": True},
-                    "limit": {"type": "integer", "default": 10}
+                    "limit": {"type": "integer", "default": 10},
+                    "campaign_id": {"type": "string", "description": "Only this campaign's calls (id from get_campaigns)"}
                 },
                 "required": []
             }

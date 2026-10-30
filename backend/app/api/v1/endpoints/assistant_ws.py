@@ -414,7 +414,9 @@ async def assistant_chat(
             try:
                 conv_response = db_client.table("assistant_conversations").select(
                     "messages"
-                ).eq("id", conversation_id).eq("tenant_id", tenant_id).single().execute()
+                ).eq("id", conversation_id).eq("tenant_id", tenant_id).eq(
+                    "user_id", user_id
+                ).single().execute()
                 
                 if conv_response.data:
                     current_conversation_id = conversation_id
@@ -445,7 +447,9 @@ async def assistant_chat(
                         "messages": json.dumps(messages_history),
                         "message_count": len(messages_history),
                         "last_message_at": datetime.utcnow().isoformat()
-                    }).eq("id", current_conversation_id).eq("tenant_id", tenant_id).execute()
+                    }).eq("id", current_conversation_id).eq("tenant_id", tenant_id).eq(
+                        "user_id", user_id
+                    ).execute()
                 else:
                     title = (title_hint or "New conversation")[:50]
                     if title_hint and len(title_hint) > 50:
@@ -818,7 +822,7 @@ async def list_conversations(
     response = db_client.table("assistant_conversations").select(
         "id, title, message_count, last_message_at, created_at",
         count="exact"
-    ).eq("tenant_id", current_user.tenant_id).order(
+    ).eq("tenant_id", current_user.tenant_id).eq("user_id", str(current_user.id)).order(
         "last_message_at", desc=True
     ).range(offset, offset + page_size - 1).execute()
 
@@ -844,7 +848,9 @@ async def get_conversation(
     """
     response = db_client.table("assistant_conversations").select(
         "id, title, messages, context, message_count, started_at, last_message_at"
-    ).eq("id", conversation_id).eq("tenant_id", current_user.tenant_id).single().execute()
+    ).eq("id", conversation_id).eq("tenant_id", current_user.tenant_id).eq(
+        "user_id", str(current_user.id)
+    ).single().execute()
 
     if not response.data:
         from fastapi import HTTPException
@@ -867,7 +873,7 @@ async def delete_conversation(
     """
     db_client.table("assistant_conversations").delete().eq(
         "id", conversation_id
-    ).eq("tenant_id", current_user.tenant_id).execute()
+    ).eq("tenant_id", current_user.tenant_id).eq("user_id", str(current_user.id)).execute()
 
     return {"success": True, "message": "Conversation deleted"}
 

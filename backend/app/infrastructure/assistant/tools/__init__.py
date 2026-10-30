@@ -86,7 +86,7 @@ from app.infrastructure.assistant.tools.campaign_ai_options import (
 QUERY_TOOLS = {
     "get_dashboard_stats": {
         "function": get_dashboard_stats,
-        "description": "Get today's call statistics, success rate, and active campaigns",
+        "description": "Call statistics for one day, for the account or one campaign",
         "input_schema": GetDashboardStatsInput
     },
     "get_usage_info": {
@@ -154,12 +154,12 @@ QUERY_TOOLS = {
     },
     "get_campaigns": {
         "function": get_campaigns,
-        "description": "Get all campaigns with their status and progress",
+        "description": "Find campaigns by name, or list them, with status and progress",
         "input_schema": None
     },
     "get_recent_calls": {
         "function": get_recent_calls,
-        "description": "Get recent calls with outcomes and durations",
+        "description": "Get recent calls with outcomes, durations and campaign, optionally for one campaign",
         "input_schema": None
     },
     "get_actions_today": {

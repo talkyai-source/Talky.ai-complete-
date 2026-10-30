@@ -1151,7 +1151,8 @@ async def list_call_issues(
           -- hundreds of "issues" on any healthy paced campaign.
           AND  COALESCE(dj.failure_reason, dj.last_error, '')
                  NOT IN ('call_gap', 'batch_capacity', 'tenant_gap',
-                         'call_guard_throttled', 'call_guard_queued')
+                         'call_guard_throttled', 'call_guard_queued',
+                         'destination_busy')
           AND  NOT EXISTS (
                  SELECT 1 FROM calls c2
                  WHERE c2.lead_id = dj.lead_id

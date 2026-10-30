@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
+from app.infrastructure.assistant.tools.campaigns import campaign_names
 
 logger = logging.getLogger(__name__)
 
@@ -26,16 +27,21 @@ async def get_recent_calls(
     db_client: Client,
     today_only: bool = True,
     outcome: Optional[str] = None,
-    limit: int = 10
+    limit: int = 10,
+    campaign_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Get recent calls for the tenant.
+    Get recent calls for the tenant, optionally for one campaign. Every call
+    carries its campaign_id and campaign_name so answers never blend campaigns.
     """
     try:
         query = db_client.table("calls").select(
-            "id, phone_number, status, outcome, goal_achieved, duration_seconds, created_at",
+            "id, campaign_id, phone_number, status, outcome, goal_achieved, duration_seconds, created_at",
             count="exact"
         ).eq("tenant_id", tenant_id)
+
+        if campaign_id:
+            query = query.eq("campaign_id", campaign_id)
 
         if today_only:
             today = date.today().isoformat()
@@ -45,10 +51,14 @@ async def get_recent_calls(
             query = query.eq("outcome", outcome)
 
         response = query.order("created_at", desc=True).limit(limit).execute()
+        calls = list(response.data or [])
+        names = campaign_names(tenant_id, db_client, (c.get("campaign_id") for c in calls))
+        for call in calls:
+            call["campaign_name"] = names.get(str(call.get("campaign_id")))
 
         return {
             "total_count": response.count,
-            "calls": response.data
+            "calls": calls
         }
     except Exception as e:
         logger.error(f"Error getting calls: {e}")

@@ -352,6 +352,7 @@ async def _run_voice_session_body(*, websocket, session_id, tenant_id, user_id,
                 .select("messages")
                 .eq("id", conversation_id)
                 .eq("tenant_id", tenant_id)
+                .eq("user_id", user_id)
                 .single()
                 .execute()
             )
@@ -375,7 +376,9 @@ async def _run_voice_session_body(*, websocket, session_id, tenant_id, user_id,
                     "messages": json.dumps(messages_history),
                     "message_count": len(messages_history),
                     "last_message_at": datetime.utcnow().isoformat(),
-                }).eq("id", current_conversation_id).eq("tenant_id", tenant_id).execute()
+                }).eq("id", current_conversation_id).eq("tenant_id", tenant_id).eq(
+                    "user_id", user_id
+                ).execute()
             else:
                 title = (title_hint or "Voice conversation")[:50]
                 created = (

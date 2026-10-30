@@ -536,6 +536,8 @@ class _IntentConn:
     async def fetchrow(self, query, *args):
         normalized = " ".join(query.split()).lower()
         self.queries.append((normalized, args))
+        if "regexp_replace" in normalized:
+            return None  # no other live call on this number
         if "insert into calls" in normalized:
             if not self.inserted:
                 return None

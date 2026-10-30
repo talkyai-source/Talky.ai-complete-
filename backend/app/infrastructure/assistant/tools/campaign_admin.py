@@ -167,6 +167,15 @@ async def get_campaign_detail(
         resp = query.execute()
         if not resp.data:
             return {"error": "campaign not found"}
+        if len(resp.data) > 1:
+            return {
+                "ambiguous": True,
+                "candidates": [
+                    {"id": row.get("id"), "name": row.get("name"), "status": row.get("status")}
+                    for row in resp.data[:10]
+                ],
+                "hint": "More than one campaign has this name — ask the user which one and call again with its campaign_id.",
+            }
 
         return {"campaign": resp.data[0]}
     except Exception as exc:

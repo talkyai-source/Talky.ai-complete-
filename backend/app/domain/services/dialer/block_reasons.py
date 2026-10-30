@@ -64,6 +64,7 @@ class BlockCode(str, Enum):
     BATCH_CAPACITY = "batch_capacity"
     CALL_GAP = "call_gap"
     TENANT_GAP = "tenant_gap"
+    DESTINATION_BUSY = "destination_busy"
 
     # Safety
     CALL_GUARD_BLOCKED = "call_guard_blocked"
@@ -109,6 +110,7 @@ SELF_CLEARING_CODES: frozenset[BlockCode] = frozenset({
     BlockCode.TENANT_GAP,
     BlockCode.CALL_GUARD_THROTTLED,
     BlockCode.CALL_GUARD_QUEUED,
+    BlockCode.DESTINATION_BUSY,
 })
 
 
@@ -563,6 +565,16 @@ def classify(
             f"calls{detail}. Calls resume as slots free up — or raise 'max "
             f"concurrent calls' in the calling rules.",
             severity="warning", stage="concurrency",
+            next_eligible_at=_fallback_next(),
+            retry_after_seconds=retry_after_seconds, details=extra,
+        )
+    if "destination_busy" in low:
+        return BlockReason(
+            BlockCode.DESTINATION_BUSY,
+            "This number is already on a call from this account (another "
+            "campaign or attempt). It is tried again as soon as that call ends "
+            "— no action needed.",
+            severity="info", stage="pacing",
             next_eligible_at=_fallback_next(),
             retry_after_seconds=retry_after_seconds, details=extra,
         )

@@ -1,6 +1,9 @@
 """voice-pipeline-2: the assistant chat and voice sockets must only adopt a
 ?conversation_id the caller's tenant owns, and every UPDATE of a conversation
-must carry a tenant_id predicate (the prod DB role has bypassed RLS)."""
+must carry a tenant_id predicate (the prod DB role has bypassed RLS).
+
+30 Oct 2026: a conversation also belongs to the user who started it. A
+teammate in the same tenant must not resume, read, list or delete it."""
 from __future__ import annotations
 
 import asyncio
@@ -17,6 +20,8 @@ from app.domain.models.conversation import TranscriptChunk
 TENANT = "tenant-A"
 FOREIGN = "conv-of-tenant-B"
 OWNED = "conv-of-tenant-A"
+TEAMMATES = "conv-of-teammate-in-tenant-A"
+OWNERS = {OWNED: "u1", TEAMMATES: "u2"}
 
 
 class _Resp:
@@ -53,8 +58,9 @@ class _Table:
     def execute(self):
         f = dict(self.filters)
         if self.mode == "select":
-            # Tenant-scoped lookup: only tenant A's own conversation exists.
-            if f.get("id") == OWNED and f.get("tenant_id") == TENANT:
+            # Tenant A holds u1's conversation and teammate u2's conversation.
+            owner = OWNERS.get(f.get("id"))
+            if owner and f.get("tenant_id") == TENANT and f.get("user_id", owner) == owner:
                 return _Resp({"messages": "[]"})
             return _Resp(None)  # the adapter returns data=None for an empty .single()
         if self.mode == "update":
@@ -149,6 +155,15 @@ async def test_chat_update_of_owned_conversation_carries_tenant_predicate(chat_e
     assert len(chat_env.updates) == 1
     assert chat_env.updates[0].get("id") == OWNED
     assert chat_env.updates[0].get("tenant_id") == TENANT
+    assert chat_env.updates[0].get("user_id") == "u1"
+
+
+@pytest.mark.asyncio
+async def test_chat_does_not_adopt_or_update_a_teammates_conversation(chat_env):
+    ws = _ChatWs()
+    await assistant_ws.assistant_chat(ws, token="t", conversation_id=TEAMMATES)
+    assert chat_env.updates == [], f"wrote to a teammate's conversation: {chat_env.updates}"
+    assert len(chat_env.inserts) == 1 and chat_env.inserts[0]["user_id"] == "u1"
 
 
 # --------------------------------------------------------------- voice socket
@@ -242,3 +257,13 @@ async def test_voice_update_of_owned_conversation_carries_tenant_predicate(voice
     assert len(voice_env.updates) == 1
     assert voice_env.updates[0].get("id") == OWNED
     assert voice_env.updates[0].get("tenant_id") == TENANT
+    assert voice_env.updates[0].get("user_id") == "u1"
+
+
+@pytest.mark.asyncio
+async def test_voice_does_not_adopt_or_update_a_teammates_conversation(voice_env):
+    ws = await _run_voice(voice_env, TEAMMATES)
+    ready = next(m for m in ws.sent if m.get("type") == "ready")
+    assert ready["conversation_id"] == "new"
+    assert voice_env.updates == [], f"wrote to a teammate's conversation: {voice_env.updates}"
+    assert len(voice_env.inserts) == 1 and voice_env.inserts[0]["user_id"] == "u1"

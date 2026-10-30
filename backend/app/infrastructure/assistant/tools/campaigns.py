@@ -34,13 +34,26 @@ def _get_campaign_service(db_client: Client) -> CampaignService:
     return CampaignService(db_client, queue_service=queue_service)
 
 
+def campaign_names(tenant_id: str, db_client: Client, campaign_ids) -> Dict[str, str]:
+    """Map this tenant's campaign ids to names so every row can say which
+    campaign it belongs to. Ids of another tenant's campaigns are never named."""
+    ids = sorted({str(i) for i in campaign_ids if i})
+    if not ids:
+        return {}
+    response = db_client.table("campaigns").select("id, name").eq(
+        "tenant_id", tenant_id
+    ).in_("id", ids).execute()
+    return {str(row["id"]): row.get("name") for row in (response.data or [])}
+
+
 async def get_campaigns(
     tenant_id: str,
     db_client: Client,
-    status: Optional[str] = None
+    status: Optional[str] = None,
+    name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Get campaigns for the tenant.
+    Get campaigns for the tenant, optionally only those whose name contains ``name``.
     """
     try:
         query = db_client.table("campaigns").select(
@@ -50,6 +63,9 @@ async def get_campaigns(
 
         if status:
             query = query.eq("status", status)
+        if name and str(name).strip():
+            escaped = str(name).strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            query = query.ilike("name", f"%{escaped}%")
 
         response = query.order("created_at", desc=True).limit(20).execute()
 
