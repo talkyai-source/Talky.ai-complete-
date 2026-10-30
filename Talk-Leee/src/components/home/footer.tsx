@@ -26,9 +26,9 @@ export function Footer() {
 
   const navLinks = [
     { label: "Home", href: "/" },
-    { label: "Products", href: "/ai-voice-dialer" },
-    { label: "Use Cases", href: "/use-cases/customer-services-support" },
-    { label: "Industries", href: "/industries/healthcare" },
+    { label: "Products", href: "/products" },
+    { label: "Use Cases", href: "/use-cases" },
+    { label: "Industries", href: "/industries" },
     { label: "Pricing", href: "/pricing" },
     { label: "Contact Us", href: "/contact" },
   ];

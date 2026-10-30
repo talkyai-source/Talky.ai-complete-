@@ -28,6 +28,8 @@ export function Navbar() {
   const isUseCasesPage = pathname.startsWith("/use-cases");
   const isIndustriesPage = pathname.startsWith("/industries");
   const isProductsPage =
+    pathname === "/products" ||
+    pathname.startsWith("/products/") ||
     pathname === "/ai-voice-dialer" ||
     pathname.startsWith("/ai-voice-dialer/") ||
     pathname === "/ai-assist" ||

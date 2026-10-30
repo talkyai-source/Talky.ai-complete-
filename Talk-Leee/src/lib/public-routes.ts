@@ -15,6 +15,7 @@ export const PUBLIC_ROUTES = [
   "/ai-voice-dialer",
   "/ai-assist",
   "/ai-voice-agent",
+  "/products",
   "/ai-voices",
   "/contact",
   "/pricing",
@@ -35,6 +36,7 @@ export const PUBLIC_ROUTES = [
   "/docs/workflows",
   "/docs/troubleshooting",
   "/docs/glossary",
+  "/industries",
   "/industries/education",
   "/industries/financial-services",
   "/industries/healthcare",
@@ -45,6 +47,7 @@ export const PUBLIC_ROUTES = [
   "/industries/retail-ecommerce",
   "/industries/software-tech-support",
   "/industries/travel-industry",
+  "/use-cases",
   "/use-cases/automated-lead-qualification",
   "/use-cases/customer-services-support",
 ] as const;

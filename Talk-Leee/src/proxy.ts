@@ -91,6 +91,7 @@ function isPublicPath(pathname: string) {
     if (pathname === "/ai-voice-dialer" || pathname.startsWith("/ai-voice-dialer/")) return true;
     if (pathname === "/ai-assist" || pathname.startsWith("/ai-assist/")) return true;
     if (pathname === "/ai-voice-agent" || pathname.startsWith("/ai-voice-agent/")) return true;
+    if (pathname === "/products" || pathname.startsWith("/products/")) return true;
     if (pathname === "/pricing" || pathname.startsWith("/pricing/")) return true;
     if (pathname === "/docs" || pathname.startsWith("/docs/")) return true;
     if (pathname.startsWith("/use-cases")) return true;

@@ -11,9 +11,9 @@ test("the sitemap publishes exactly the shared public route list, in order", () 
     assert.deepEqual(fromSitemap, [...PUBLIC_ROUTES]);
 });
 
-test("the list holds 36 distinct routes without trailing slashes", () => {
-    assert.equal(PUBLIC_ROUTES.length, 36);
-    assert.equal(new Set(PUBLIC_ROUTES).size, 36);
+test("the list holds 39 distinct routes without trailing slashes", () => {
+    assert.equal(PUBLIC_ROUTES.length, 39);
+    assert.equal(new Set(PUBLIC_ROUTES).size, 39);
     for (const route of PUBLIC_ROUTES) {
         if (route !== "/") assert.doesNotMatch(route, /\/$/, `${route} carries a trailing slash`);
     }
