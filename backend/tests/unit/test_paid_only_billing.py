@@ -170,70 +170,82 @@ async def test_existing_accounts_keep_their_minutes():
     assert (status.state, status.remaining_minutes) == ("known", 30)
 
 
-# ── top-ups add to a paid plan ──────────────────────────────────────────────
+# ── who may buy minutes (paid-only 2026-10-27, pay as you go 2026-10-31) ────
 
 class _Orders:
     def __init__(self):
-        self.created = 0
+        self.created = []
 
-    async def create_order(self, **_kw):
-        self.created += 1
-        raise AssertionError("an order was created for an account without a paid plan")
+    async def create_order(self, **kw):
+        self.created.append(kw)
+        raise AssertionError("an order was created for an account that may not buy minutes")
+
+
+class _Acquire:
+    def __init__(self, row):
+        self.row = row
+
+    async def __aenter__(self):
+        row = self.row
+
+        class Conn:
+            async def fetchrow(self, sql, *args):
+                return row
+
+        return Conn()
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def _checkout_world(monkeypatch, row, orders):
+    monkeypatch.setenv("BILLING_TOPUPS_LIVE_ENABLED", "true")
+    monkeypatch.setattr(bt, "_service", lambda: orders)
+    monkeypatch.setattr(bt, "acquire_with_tenant", lambda pool, tenant: _Acquire(row))
+    monkeypatch.setattr(bt, "get_container", lambda: SimpleNamespace(db_pool=None, is_initialized=True))
+    monkeypatch.setattr(bt, "BillingService", lambda *a, **k: SimpleNamespace(mock_mode=False, billing_mode="test"))
+
+
+async def _checkout(code="usd_125"):
+    return await bt.create_topup_checkout(
+        body=bt.CheckoutIn(package_code=code),
+        request=SimpleNamespace(client=None, headers={}),
+        current_user=CurrentUser(id="u1", email="owner@example.com", tenant_id=TENANT, role="tenant_admin"),
+        db_client=SimpleNamespace(), audit_logger=SimpleNamespace(),
+    )
 
 
 @pytest.mark.parametrize("row", [
     None,
-    {"stripe_subscription_id": None, "subscription_status": "active"},
     {"stripe_subscription_id": "sub_1", "subscription_status": "past_due"},
     {"stripe_subscription_id": "sub_1", "subscription_status": "canceled"},
+    {"stripe_subscription_id": None, "subscription_status": "suspended"},
+    {"stripe_subscription_id": None, "subscription_status": "cancelled"},
 ])
-async def test_top_ups_need_an_active_paid_plan_before_any_order(monkeypatch, row):
+async def test_an_account_that_may_not_buy_minutes_is_refused_before_any_order(monkeypatch, row):
     orders = _Orders()
-
-    class Conn:
-        async def fetchrow(self, sql, *args):
-            return row
-
-    class Acquire:
-        async def __aenter__(self):
-            return Conn()
-
-        async def __aexit__(self, *exc):
-            return False
-
-    monkeypatch.setenv("BILLING_TOPUPS_LIVE_ENABLED", "true")
-    monkeypatch.setattr(bt, "_service", lambda: orders)
-    monkeypatch.setattr(bt, "acquire_with_tenant", lambda pool, tenant: Acquire())
-    monkeypatch.setattr(bt, "get_container", lambda: SimpleNamespace(db_pool=None, is_initialized=True))
-    monkeypatch.setattr(bt, "BillingService", lambda *a, **k: SimpleNamespace(mock_mode=False, billing_mode="test"))
+    _checkout_world(monkeypatch, row, orders)
 
     with pytest.raises(HTTPException) as raised:
-        await bt.create_topup_checkout(
-            body=bt.CheckoutIn(package_code="usd_125"),
-            request=SimpleNamespace(client=None, headers={}),
-            current_user=CurrentUser(id="u1", email="owner@example.com", tenant_id=TENANT, role="tenant_admin"),
-            db_client=SimpleNamespace(), audit_logger=SimpleNamespace(),
-        )
+        await _checkout()
     assert raised.value.status_code == 409
-    assert "plan" in str(raised.value.detail).lower()
-    assert orders.created == 0
+    assert orders.created == []
 
 
-async def test_an_active_subscription_is_a_paid_plan(monkeypatch):
-    class Conn:
-        async def fetchrow(self, sql, *args):
-            return {"stripe_subscription_id": "sub_1", "subscription_status": "active"}
+async def test_an_account_without_a_subscription_orders_pay_as_you_go_minutes(monkeypatch):
+    orders = _Orders()
+    _checkout_world(monkeypatch, {"stripe_subscription_id": None, "subscription_status": "inactive"}, orders)
 
-    class Acquire:
-        async def __aenter__(self):
-            return Conn()
+    with pytest.raises(AssertionError):
+        await _checkout("payg_125")
+    assert [order["audience"] for order in orders.created] == ["payg"]
 
-        async def __aexit__(self, *exc):
-            return False
 
-    monkeypatch.setattr(bt, "acquire_with_tenant", lambda pool, tenant: Acquire())
+async def test_an_active_subscription_buys_subscriber_top_ups(monkeypatch):
+    monkeypatch.setattr(bt, "acquire_with_tenant",
+                        lambda pool, tenant: _Acquire({"stripe_subscription_id": "sub_1", "subscription_status": "active"}))
     monkeypatch.setattr(bt, "get_container", lambda: SimpleNamespace(db_pool=None))
-    assert await bt._has_paid_plan(TENANT) is True
+    assert await bt._purchase_audience(TENANT) == "subscriber"
 
 
 # ── annual prices ───────────────────────────────────────────────────────────

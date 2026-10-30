@@ -249,6 +249,8 @@ jobs:
             tests/integration/test_support_pg.py \
             tests/integration/test_support_articles_pg.py \
             tests/integration/test_support_migration.py \
+            tests/integration/test_payg_pg.py \
+            tests/integration/test_payg_migration.py \
             tests/integration/test_billing_price_options.py \
             tests/integration/test_billing_checkout.py \
             tests/integration/test_billing_state_events.py \

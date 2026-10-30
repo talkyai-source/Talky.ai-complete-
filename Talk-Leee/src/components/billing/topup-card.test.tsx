@@ -13,12 +13,12 @@ const balance = { allocated: 1000, used_minutes: 20, remaining_minutes: 980, unl
 const order: TopupOrder = { id: "00000000-0000-4000-8000-000000000404", package_code: "synthetic", minutes: 250, price_cents: 2500, currency: "gbp", currency_exponent: 2,
   status: "paid", created_at: "2026-10-01T00:00:00Z", paid_at: "2026-10-01T00:00:01Z", provider_payment_id: "pi_synthetic",
   refund_details: { detail_status: "unavailable", captured_at: null, source_event_id: null, refunds: null } };
-function setup(query: string, orders: unknown[] = [], failure?: string) {
+function setup(query: string, orders: unknown[] = [], failure?: string, packages: unknown[] = []) {
   globalThis.fetch = async (input) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const path = new URL(url).pathname;
     const bad = failure && path.endsWith(failure);
-    const data = bad ? { detail: "Synthetic unavailable" } : path.endsWith("/balance") ? balance : path.endsWith("/packages") ? [] : { orders };
+    const data = bad ? { detail: "Synthetic unavailable" } : path.endsWith("/balance") ? balance : path.endsWith("/packages") ? packages : { orders };
     return new Response(JSON.stringify(data), { status: bad ? 503 : 200, headers: { "content-type": "application/json" } });
   };
   const result = renderWithQueryClient(<SearchParamsContext.Provider value={new URLSearchParams(query)}><TopupCard /></SearchParamsContext.Provider>);
@@ -69,4 +69,15 @@ test("failed balance loading does not claim nothing was charged", async () => {
 test("malformed successful history is an error instead of no purchases", async () => {
   setup("", [{ id: "broken" }]); await screen.findByText(/Your recent top-ups did not load/);
   assert.equal(screen.queryByText("No saved top-up orders recorded."), null);
+});
+
+const paygPackage = { code: "payg_125", name: "125 minutes", minutes: 125, price_cents: 5000, currency: "usd", currency_exponent: 2,
+  expires_days: null, price_per_minute_cents: 40, audience: "payg" };
+test("an account without a plan is offered pay as you go, not a top-up to a paid plan", async () => {
+  setup("", [], undefined, [paygPackage]);
+  assert.ok(await screen.findByText("Pay as you go"));
+  assert.ok(screen.getByText(/No monthly fee/));
+  assert.equal(screen.queryByText(/Add minutes to your paid plan/), null);
+  assert.ok(screen.getByText("125"));
+  assert.ok(screen.getByText("$50.00"));
 });

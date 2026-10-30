@@ -179,14 +179,16 @@ async def record_topup_usage(conn: Any, tenant_id: str, close_current: bool = Fa
     month's figure; the unique event id makes a repeat a no-op.
     """
     tenant = await conn.fetchrow(
-        """SELECT t.minutes_allocated, p.minutes AS plan_minutes
+        """SELECT t.minutes_allocated, p.minutes AS plan_minutes, p.billing_model
              FROM tenants t LEFT JOIN plans p ON p.id=t.plan_id
             WHERE t.id=$1::uuid FOR UPDATE OF t""",
         str(tenant_id),
     )
     if tenant is None or type(tenant["minutes_allocated"]) is not int:
         return 0
-    if tenant["minutes_allocated"] == 0 and tenant["plan_minutes"] == 0:
+    from app.domain.services.minutes_quota import minutes_unlimited
+
+    if minutes_unlimited(tenant["minutes_allocated"], tenant["plan_minutes"], tenant.get("billing_model")):
         return 0  # unlimited: top-ups are never credited
     total = 0
     windows = await unrecorded_topup_usage(conn, tenant_id, tenant["minutes_allocated"], close_current=close_current)

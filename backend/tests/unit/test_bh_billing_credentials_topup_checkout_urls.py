@@ -67,7 +67,7 @@ def svc(monkeypatch):
     monkeypatch.setattr(bt, "BillingService", _Billing)
     monkeypatch.setattr(billing_checkout, "get_settings", _settings())
     # Top-ups add to a paid plan (2026-10-27); this account has one.
-    monkeypatch.setattr(bt, "_has_paid_plan", AsyncMock(return_value=True))
+    monkeypatch.setattr(bt, "_purchase_audience", AsyncMock(return_value="subscriber"))
     _Billing.last = {}
     return s
 

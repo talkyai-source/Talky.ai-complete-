@@ -104,11 +104,21 @@ def _status_from(allocated: Any, used_seconds: Any, *, unlimited: bool = False) 
                          False, used_minutes >= allocated)
 
 
+def minutes_unlimited(allocated: Any, plan_minutes: Any, billing_model: Any) -> bool:
+    """Zero included minutes is the unlimited sentinel only on a subscription plan.
+
+    A prepaid plan (pay as you go) also includes zero minutes, but its account
+    may use only the minutes it bought. Rows written before ``billing_model``
+    existed read as subscription.
+    """
+    return allocated == 0 and plan_minutes == 0 and (billing_model or "subscription") != "prepaid"
+
+
 async def _compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
     # An absent/default tenant allocation cannot prove an unlimited product.
     # The existing bound plan must explicitly carry the zero-minute sentinel.
     row = await conn.fetchrow(
-        f"""SELECT t.minutes_allocated,p.minutes AS plan_minutes,
+        f"""SELECT t.minutes_allocated,p.minutes AS plan_minutes,p.billing_model,
                   t.plan_id IS NULL AS no_plan,
                   EXISTS(SELECT 1 FROM billing_ledger b WHERE b.tenant_id=t.id) AS has_ledger,
                   {allowance_window_start_sql('t.allowance_anchor_at', 'NOW()')} AS window_start
@@ -123,7 +133,7 @@ async def _compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
     # only in billing_ledger (topup_service, topup_usage).
     base = allocated = row["minutes_allocated"]
     plan_minutes = row["plan_minutes"]
-    unlimited = base == 0 and plan_minutes == 0
+    unlimited = minutes_unlimited(base, plan_minutes, row.get("billing_model"))
     # No plan bound (new accounts since paid-only billing): zero minutes, a
     # known and exhausted allowance rather than an unknown one.
     if base == 0 and not unlimited and not row.get("no_plan") and (type(plan_minutes) is not int or plan_minutes < 0):

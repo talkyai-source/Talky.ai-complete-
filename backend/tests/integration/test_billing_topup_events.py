@@ -57,6 +57,9 @@ async def topup_db(webhook_db):  # noqa: F811
         await conn.execute(
             f'GRANT SELECT,INSERT,UPDATE ON tenants,tenant_call_limits,topup_orders,billing_ledger TO "{db.role}"'
         )
+        # A credit reads the plan (is the allowance unlimited?) and the bundle's
+        # audience (first pay-as-you-go bundle moves the account to the prepaid plan).
+        await conn.execute(f'GRANT SELECT ON plans,topup_packages TO "{db.role}"')
         sequence = await conn.fetchval("SELECT pg_get_serial_sequence('billing_ledger','id')")
         if sequence:
             await conn.execute(f'GRANT USAGE,SELECT ON SEQUENCE {sequence} TO "{db.role}"')

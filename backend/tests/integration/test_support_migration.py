@@ -41,7 +41,7 @@ async def test_downgrade_then_upgrade_round_trips_and_refuses_with_records():
         if await conn.fetchval("SELECT EXISTS (SELECT 1 FROM support_tickets) OR "
                                "EXISTS (SELECT 1 FROM support_conversations)"):
             pytest.skip("Support records exist in this test database; the round trip needs empty support tables")
-        assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0082_support_system"
+        assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0083_pay_as_you_go"
     finally:
         await conn.close()
 
@@ -76,4 +76,4 @@ def test_repository_has_exactly_one_head():
                             timeout=120, env={**os.environ, "DATABASE_URL": os.getenv("TEST_DATABASE_URL") or
                                               "postgresql://unused@127.0.0.1:1/unused_test"})
     heads = [line for line in result.stdout.splitlines() if line.strip()]
-    assert heads == ["0082_support_system (head)"], result.stdout + result.stderr
+    assert heads == ["0083_pay_as_you_go (head)"], result.stdout + result.stderr

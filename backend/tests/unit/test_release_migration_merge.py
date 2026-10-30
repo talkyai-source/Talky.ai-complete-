@@ -17,7 +17,8 @@ ALLOWANCE = "0072_allowance_anchor"
 SUPPLIER_ALLOWANCE = "0080_supplier_allowance_merge"
 PAYMENT = "0073_payment_test_plan"
 PAYMENT_MERGE = "0081_admin_payment_merge"
-HEAD = "0082_support_system"
+SUPPORT = "0082_support_system"
+HEAD = "0083_pay_as_you_go"
 
 
 def test_release_exposes_one_head_containing_both_existing_histories():
@@ -27,8 +28,10 @@ def test_release_exposes_one_head_containing_both_existing_histories():
     # line soft delete) remain common ancestors. Published paid billing and
     # connector/Admin histories now join through a metadata-only merge.
     assert SCRIPTS.get_heads() == [HEAD]
-    # 0082 (support system) sits on the payment merge, which joins both histories.
-    assert SCRIPTS.get_revision(HEAD).down_revision == PAYMENT_MERGE
+    # 0083 (pay as you go) sits on 0082 (support system), which sits on the
+    # payment merge that joins both histories.
+    assert SCRIPTS.get_revision(HEAD).down_revision == SUPPORT
+    assert SCRIPTS.get_revision(SUPPORT).down_revision == PAYMENT_MERGE
     assert set(SCRIPTS.get_revision(PAYMENT_MERGE).down_revision) == {SUPPLIER_ALLOWANCE, PAYMENT}
     assert set(SCRIPTS.get_revision(SUPPLIER_ALLOWANCE).down_revision) == {SUPPLIER, ALLOWANCE}
     assert SCRIPTS.get_revision(PAYMENT).down_revision == ALLOWANCE
@@ -162,6 +165,6 @@ def test_payment_merge_has_no_business_sql_and_refuses_history_split():
         migration.downgrade()
 
 
-def test_support_system_upgrade_runs_only_its_own_revision_after_the_payment_merge():
+def test_upgrade_after_the_payment_merge_runs_only_support_then_pay_as_you_go():
     revisions = [step.revision.revision for step in SCRIPTS._upgrade_revs("head", PAYMENT_MERGE)]
-    assert revisions == [HEAD]
+    assert revisions == [SUPPORT, HEAD]

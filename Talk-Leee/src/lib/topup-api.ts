@@ -10,6 +10,8 @@ const recordedDate = z.string().datetime({ offset: true }).nullable();
 export const topupPackageSchema = z.object({ code: z.string(), name: z.string(), minutes: z.number().int().positive(),
   price_cents: z.number().int().safe().nonnegative(), currency: currencyCode, currency_exponent: currencyExponent,
   expires_days: z.number().int().positive().nullable(), price_per_minute_cents: z.number().finite().nonnegative(),
+  // "subscriber" top-ups add to a paid plan; "payg" bundles need no plan.
+  audience: z.enum(["subscriber", "payg"]).default("subscriber"),
 });
 export type TopupPackage = z.infer<typeof topupPackageSchema>;
 export const topupBalanceSchema = z.object({ allocated: z.number().finite(), used_minutes: z.number().finite().nonnegative(),

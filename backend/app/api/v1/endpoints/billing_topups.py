@@ -49,7 +49,7 @@ from app.domain.services.billing_checkout import CheckoutError, billing_return_u
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.billing_service import BillingService
 from app.domain.services.minutes_quota import compute_minutes_status
-from app.domain.services.subscription_status import ACTIVE, TRIALING, canonical
+from app.domain.services.payg import PurchaseRefused, tenant_purchase_audience
 from app.domain.services.topup_service import TopupError, TopupService, public_ledger_entry
 from app.domain.services.topup_usage import topup_minutes_left
 
@@ -68,15 +68,15 @@ def _tenant(user) -> str:
     return str(tid)
 
 
-async def _has_paid_plan(tenant_id: str) -> bool:
-    """An active Stripe subscription, the only way to a paid plan."""
+async def _purchase_audience(tenant_id: str) -> str:
+    """Which bundles this account may buy: ``subscriber`` top-ups for a paid
+    plan in good standing, ``payg`` bundles for any other account that may
+    place calls (owner decision 2026-10-31). Refused accounts get a 409."""
     async with acquire_with_tenant(get_container().db_pool, tenant_id) as conn:
-        row = await conn.fetchrow(
-            "SELECT stripe_subscription_id, subscription_status FROM tenants WHERE id=$1::uuid",
-            tenant_id,
-        )
-    return bool(row and row["stripe_subscription_id"]
-                and canonical(row["subscription_status"]) in {ACTIVE, TRIALING})
+        try:
+            return await tenant_purchase_audience(conn, tenant_id)
+        except PurchaseRefused as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message) from exc
 
 
 def _service() -> TopupService:
@@ -110,6 +110,8 @@ class PackageOut(BaseModel):
     currency: str
     currency_exponent: Optional[int] = None
     expires_days: Optional[int] = None
+    # "subscriber" top-ups add to a paid plan; "payg" bundles need no plan.
+    audience: str = "subscriber"
     # Shown so the larger bundle can justify itself. Computed here rather than
     # in the browser so every surface quotes the same number.
     price_per_minute_cents: float
@@ -153,7 +155,13 @@ class BalanceOut(BaseModel):
     dependencies=[Depends(require_permission(Permission.BILLING_READ))],
 )
 async def list_packages(current_user: CurrentUser = Depends(get_current_user)):
-    rows = await _service().packages()
+    try:
+        audience = await _purchase_audience(_tenant(current_user))
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_409_CONFLICT:
+            raise
+        return []  # an account that cannot buy minutes is offered none
+    rows = await _service().packages(audience)
     return [
         PackageOut(
             **r,
@@ -239,13 +247,9 @@ async def create_topup_checkout(
 
     svc = _service()
 
-    # Paid-only billing (owner decision 2026-10-27): top-ups add to a paid
-    # plan, as the pricing page says. Refused before any order or session.
-    if not await _has_paid_plan(tenant_id):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Buy a monthly or yearly plan before adding top-up minutes.",
-        )
+    # Subscribers buy top-ups; any other account that may place calls buys pay
+    # as you go (owner decision 2026-10-31). Refused before any order or session.
+    audience = await _purchase_audience(tenant_id)
 
     # Resolved before the order exists so a missing/invalid destination cannot
     # leave an orphan pending order. Neither the body nor the Origin header can
@@ -262,6 +266,7 @@ async def create_topup_checkout(
             tenant_id=tenant_id,
             user_id=getattr(current_user, "id", None),
             package_code=body.package_code,
+            audience=audience,
         )
     except TopupError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

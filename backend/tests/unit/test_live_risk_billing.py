@@ -128,7 +128,7 @@ _PKG = {"code": "p", "name": "P", "minutes": 100, "price_cents": 1000, "currency
 
 @pytest.mark.asyncio
 async def test_create_order_refuses_unlimited_tenant_before_any_order_row(monkeypatch):
-    svc, conn = _service(make_store(allocated=0, enforced=0, package=_PKG), monkeypatch)
+    svc, conn = _service(make_store(allocated=0, enforced=0, package=_PKG, plan_minutes=0), monkeypatch)
     with pytest.raises(TopupError):
         await svc.create_order(tenant_id=TENANT, user_id=None, package_code="p")
     assert not any("INSERT INTO topup_orders" in q for q in conn.sql)

@@ -4,11 +4,12 @@ import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
 import { BillingPeriod } from "./billing-period";
+import { PayAsYouGoSection } from "./pay-as-you-go";
 
 export const metadata: Metadata = {
   title: "Pricing | Talk-Lee AI",
   description:
-    "Talk-Lee AI plans and pricing: Basic and Business subscriptions, included AI minutes, top-up bundles, voice providers and telephone usage.",
+    "Talk-Lee AI plans and pricing: Basic and Business subscriptions, pay-as-you-go minutes, included AI minutes, top-up bundles, voice providers and telephone usage.",
 };
 
 export default function PricingPage() {
@@ -111,7 +112,7 @@ export default function PricingPage() {
 
   const billingNotes = [
     "Plan limits apply per customer account.",
-    "AI calling requires a paid Basic or Business plan; there is no free minute allowance.",
+    "AI calling requires a paid Basic or Business plan or prepaid pay-as-you-go minutes; there is no free minute allowance.",
     "AI top-ups can be purchased with a paid plan when the included monthly AI-minute allowance is exhausted.",
     "Premium voice usage and telephony usage are billed separately from standard AI minutes.",
     "Custom pricing can be agreed for larger deployments or higher-volume usage.",
@@ -169,6 +170,15 @@ export default function PricingPage() {
           </div>
         </section>
         </BillingPeriod>
+
+        <section className="mt-4" aria-label="Pay as you go">
+          <PayAsYouGoSection
+            className={accentCardClassName}
+            style={accentCardStyle}
+            titleClassName={cardTitleClassName}
+            bodyClassName={cardBodyClassName}
+          />
+        </section>
 
         <section className="mt-14" aria-label="Plan comparison">
           <div className={`${accentCardClassName} md:w-fit md:mx-auto`} style={accentCardStyle}>

@@ -88,6 +88,7 @@ _WEBHOOKS = {
 # Public endpoints — no tenant data exposed.
 _PUBLIC = {
     "GET /api/v1/plans/": "public plan catalog (no per-tenant data)",
+    "GET /api/v1/plans/payg": "public pay-as-you-go prices (no per-tenant data)",
     "GET /api/v1/billing/plans": "billing-module passthrough to the same public plan catalog (no per-tenant data)",
     "POST /api/v1/public/contact-enquiries": (
         "anonymous rate-limited, CSRF-checked enquiry intake; inserts platform-owned "

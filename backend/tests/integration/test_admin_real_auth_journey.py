@@ -148,7 +148,7 @@ async def journey_db(monkeypatch):
     assert not app.dependency_overrides, "Authentication must use normal dependencies"
     owner = await asyncpg.connect(configured, command_timeout=30)
     before = await protected_snapshot(owner)
-    assert before["head"] == "0082_support_system"
+    assert before["head"] == "0083_pay_as_you_go"
     role = "admin_http_" + uuid4().hex
     tenants = [uuid4() for _ in range(3)]
     users = [uuid4() for _ in range(3)]

@@ -43,6 +43,8 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from app.core.db_utils import acquire_with_tenant
+from app.domain.services.minutes_quota import minutes_unlimited
+from app.domain.services.payg import PAYG, PAYG_PLAN_ID, SUBSCRIBER
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +96,16 @@ async def _mutation_connection(pool, conn):
             yield acquired
 
 
+async def _unlimited(conn, tenant_id) -> bool:
+    row = await conn.fetchrow(
+        """SELECT t.minutes_allocated, p.minutes AS plan_minutes, p.billing_model
+             FROM tenants t LEFT JOIN plans p ON p.id = t.plan_id WHERE t.id = $1::uuid""",
+        str(tenant_id),
+    )
+    return row is not None and minutes_unlimited(
+        row.get("minutes_allocated"), row.get("plan_minutes"), row.get("billing_model"))
+
+
 def _rows_affected(tag: str) -> int:
     """asyncpg returns 'UPDATE 3'. Zero is the case worth catching."""
     try:
@@ -108,28 +120,33 @@ class TopupService:
 
     # ── catalogue ───────────────────────────────────────────────────────────
 
-    async def packages(self) -> list[dict]:
-        """The approved list. A client never names a price or a minute count —
-        it names a package CODE and everything else is read from here."""
+    async def packages(self, audience: str = SUBSCRIBER) -> list[dict]:
+        """The approved list for one audience (subscriber top-ups or pay as you
+        go). A client never names a price or a minute count — it names a package
+        CODE and everything else is read from here."""
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT code, name, minutes, price_cents, currency, expires_days
+                SELECT code, name, minutes, price_cents, currency, expires_days, audience
                   FROM topup_packages
-                 WHERE is_active
+                 WHERE is_active AND audience = $1
                  ORDER BY sort_order, minutes
-                """
+                """,
+                audience,
             )
         return [dict(r) for r in rows]
 
-    async def _package(self, conn, code: str) -> dict:
+    async def _package(self, conn, code: str, audience: str = SUBSCRIBER) -> dict:
         row = await conn.fetchrow(
-            "SELECT code, name, minutes, price_cents, currency, expires_days FROM topup_packages "
+            "SELECT code, name, minutes, price_cents, currency, expires_days, audience FROM topup_packages "
             " WHERE code = $1 AND is_active",
             code,
         )
         if not row:
             raise TopupError(f"Unknown or inactive top-up package {code!r}")
+        if (row.get("audience") or SUBSCRIBER) != audience:
+            # Subscribers buy top-ups, everyone else buys pay-as-you-go bundles.
+            raise TopupError(f"Package {code!r} is not offered to this account")
         if row.get("expires_days") is not None:
             # Bought minutes carry over until used; the meter has no expiry.
             raise TopupError(f"Top-up package {code!r} expires, which is not supported")
@@ -143,6 +160,7 @@ class TopupService:
         tenant_id: str,
         user_id: Optional[str],
         package_code: str,
+        audience: str = SUBSCRIBER,
     ) -> dict:
         """Record the intent to buy, BEFORE sending anyone to a payment page.
 
@@ -154,16 +172,12 @@ class TopupService:
         month, this customer is still owed exactly what they were quoted.
         """
         async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
-            pkg = await self._package(conn, package_code)
+            pkg = await self._package(conn, package_code, audience)
 
-            # minutes_allocated <= 0 is the UNLIMITED sentinel; the meter
-            # ignores the ledger there. Selling minutes to such a tenant takes
-            # money for nothing, so refuse before any order or Stripe session.
-            allocated = await conn.fetchval(
-                "SELECT minutes_allocated FROM tenants WHERE id = $1::uuid",
-                str(tenant_id),
-            )
-            if allocated is not None and allocated <= 0:
+            # An unlimited allowance ignores the ledger: selling minutes to such
+            # a tenant takes money for nothing, so refuse before any order or
+            # Stripe session. A prepaid plan's zero is not unlimited.
+            if await _unlimited(conn, tenant_id):
                 raise TopupError(
                     "This account has no capped minute allowance, so a top-up "
                     "would add nothing. No payment was started."
@@ -307,10 +321,7 @@ class TopupService:
 
             # The ledger row IS the credit: the meter adds the ledger balance
             # to the plan's minutes. The allocation is never changed here.
-            allocated = await conn.fetchval(
-                "SELECT minutes_allocated FROM tenants WHERE id = $1", order["tenant_id"],
-            )
-            if allocated is not None and allocated <= 0:
+            if await _unlimited(conn, order["tenant_id"]):
                 logger.warning(
                     "topup_on_unlimited_tenant tenant=%s order=%s minutes=%d — "
                     "money recorded; an unlimited allowance does not use it. This "
@@ -344,6 +355,16 @@ class TopupService:
                 " WHERE tenant_id = $1 AND monthly_minutes_allocated > 0",
                 order["tenant_id"],
                 order["minutes"],
+            )
+
+            # The first paid pay-as-you-go bundle puts an account that has no
+            # plan and no subscription on the prepaid plan, in this transaction.
+            await conn.execute(
+                """UPDATE tenants SET plan_id = $2
+                    WHERE id = $1 AND plan_id IS NULL AND stripe_subscription_id IS NULL
+                      AND EXISTS (SELECT 1 FROM topup_orders o JOIN topup_packages p ON p.code = o.package_code
+                                  WHERE o.id = $3 AND p.audience = $4)""",
+                order["tenant_id"], PAYG_PLAN_ID, order["id"], PAYG,
             )
 
             await conn.execute(

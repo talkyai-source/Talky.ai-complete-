@@ -95,6 +95,10 @@ class FakeConn:
         return "UPDATE 0"
 
     async def fetchrow(self, sql, *args):
+        if "AS plan_minutes" in sql:
+            # The unlimited check: zero allocated AND a zero-minute subscription plan.
+            return {"minutes_allocated": self.store["allocated"],
+                    "plan_minutes": self.store.get("plan_minutes"), "billing_model": None}
         self.sql.append(sql)
         if "FROM topup_packages" in sql:
             return self.store.get("package")
@@ -162,9 +166,10 @@ class FakePool:
         return _CM()
 
 
-def make_store(*, allocated=1000, order=None, package=None, enforced=0):
+def make_store(*, allocated=1000, order=None, package=None, enforced=0, plan_minutes=None):
     return {
         "allocated": allocated,
+        "plan_minutes": plan_minutes,
         # `tenant_call_limits.monthly_minutes_allocated` — a DIFFERENT column in
         # a DIFFERENT table from `tenants.minutes_allocated`, and the one the
         # call guard blocks on. 0 = no ceiling configured (the guard passes).
@@ -365,9 +370,14 @@ async def test_reverse_refuses_a_kind_that_is_not_a_reversal():
 
 def test_credits_and_reversals_never_write_the_plan_allocation():
     """Structural: bought minutes live only in the ledger, so neither path can
-    floor, cap or zero tenants.minutes_allocated (the unlimited sentinel)."""
+    floor, cap or zero tenants.minutes_allocated (the unlimited sentinel). The
+    only tenant column a credit may set is plan_id: the first pay-as-you-go
+    bundle moves an account without a plan to the prepaid plan (2026-10-31)."""
+    import re
+
     for method in (TopupService.credit_paid_order, TopupService.reverse):
-        assert "UPDATE tenants" not in inspect.getsource(method)
+        source = inspect.getsource(method)
+        assert set(re.findall(r"UPDATE tenants SET (\w+)", source)) <= {"plan_id"}
 
 
 # ── what the client is allowed to name ──────────────────────────────────────

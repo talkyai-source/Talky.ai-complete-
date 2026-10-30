@@ -57,6 +57,8 @@ export function TopupCard() {
 
   const balance = balanceQ.data ?? null;
   const packages = packagesQ.data ?? [];
+  // The server offers pay-as-you-go bundles only to accounts without a paid plan.
+  const payAsYouGo = packages.length > 0 && packages.every((pkg) => pkg.audience === "payg");
   const orders = ordersQ.data ?? [];
 
   // A failed balance or catalogue fetch is not an empty catalogue. Before this
@@ -121,11 +123,12 @@ export function TopupCard() {
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <CardTitle className="flex items-center gap-1.5 text-base">
-              <Zap className="h-4 w-4" aria-hidden /> Top up minutes
+              <Zap className="h-4 w-4" aria-hidden /> {payAsYouGo ? "Pay as you go" : "Top up minutes"}
             </CardTitle>
             <CardDescription className="text-xs">
-              Add minutes to your paid plan. They are used after your monthly minutes and carry over
-              until used. Credit follows verified payment.
+              {payAsYouGo
+                ? "No monthly fee. Buy minutes when you need them; they carry over until used. Credit follows verified payment."
+                : "Add minutes to your paid plan. They are used after your monthly minutes and carry over until used. Credit follows verified payment."}
             </CardDescription>
           </div>
           {balance && !unlimited ? (
